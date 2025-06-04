@@ -1,0 +1,12 @@
+useDynLib(fastPLS, .registration=TRUE)
+
+importFrom("Rcpp", "evalCpp")
+  importFrom("stats", "median", "pnorm", "quantile", "var","predict")
+ importFrom("methods", "is")
+import(Matrix)
+
+#exportPattern("^[[:alpha:]]+")
+export(optim.pls.cv,pls.double.cv,pls,predict.fastPLS,transformy,fastcor,ViP)
+
+
+S3method(predict,fastPLS)
