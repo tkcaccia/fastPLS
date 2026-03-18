@@ -6,9 +6,3 @@ PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
 	svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd_wrap.o svd_cuda_rsvd.o
-
-# Optional CUDA build: enable with `FASTPLS_USE_CUDA=1 R CMD INSTALL ...`
-ifeq ($(FASTPLS_USE_CUDA),1)
-PKG_CPPFLAGS += -DFASTPLS_HAS_CUDA -I/usr/local/cuda/targets/x86_64-linux/include
-PKG_LIBS += -L/usr/local/cuda/targets/x86_64-linux/lib -lcublas -lcudart
-endif

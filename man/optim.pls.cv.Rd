@@ -4,7 +4,8 @@
 
 \description{
 Selects the number of latent components by cross-validation for
-\code{method = "simpls"} or \code{method = "plssvd"}.
+\code{method = "simpls"}, \code{method = "plssvd"}, or
+\code{method = "simpls_fast"}.
 }
 
 \usage{
@@ -14,11 +15,17 @@ optim.pls.cv(
   ncomp = 2,
   constrain = NULL,
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
+  method = c("simpls", "plssvd", "simpls_fast"),
   svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   seed = 1L,
+  fast_block = 4L,
+  fast_center_t = FALSE,
+  fast_reorth_v = TRUE,
+  fast_incremental = FALSE,
+  fast_inc_iters = 2L,
+  fast_defl_cache = TRUE,
   kfold = 10
 )
 }
@@ -30,12 +37,17 @@ optim.pls.cv(
 capped to \code{min(nrow(Xdata), ncol(Xdata), ncol(Y_transformed))}.}
 \item{constrain}{Optional grouping vector for constrained fold assignment.}
 \item{scaling}{One of \code{"centering"}, \code{"autoscaling"}, \code{"none"}.}
-\item{method}{One of \code{"simpls"} or \code{"plssvd"}. Note: \code{simpls_fast}
-is currently not supported in this function.}
+\item{method}{One of \code{"simpls"}, \code{"plssvd"}, or \code{"simpls_fast"}.}
 \item{svd.method}{Inner SVD backend used in each fitted fold model.}
 \item{rsvd_oversample}{RSVD oversampling parameter for randomized backends.}
 \item{rsvd_power}{RSVD power iterations for randomized backends.}
 \item{seed}{Seed for randomized backends.}
+\item{fast_block}{\code{simpls_fast} block refresh size.}
+\item{fast_center_t}{\code{simpls_fast} score-centering toggle.}
+\item{fast_reorth_v}{\code{simpls_fast} re-orthogonalization toggle.}
+\item{fast_incremental}{\code{simpls_fast} incremental block-power toggle.}
+\item{fast_inc_iters}{\code{simpls_fast} incremental power iterations.}
+\item{fast_defl_cache}{\code{simpls_fast} cached-deflation toggle.}
 \item{kfold}{Number of folds.}
 }
 

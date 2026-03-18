@@ -44,10 +44,9 @@ Check runtime availability using `has_cuda()` and `svd_methods()`.
 | `simpls` | `irlba` | Legacy truncated branch in selected C++ paths | Iterative Lanczos in selected paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `cuda_rsvd` | Approximate | GPU randomized sampling/power + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls_fast` | `dc`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`dc` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls` only |
+| `simpls_fast` | `dc`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`dc` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls`, `optim.pls.cv`, `pls.double.cv` |
 
 Notes:
-- `simpls_fast` is currently exposed by `pls()` only (not by `optim.pls.cv()` or `pls.double.cv()`).
 - `svd_run()`/`svd_benchmark()` are backend utility wrappers; their `irlba` label currently follows exact dispatch in utility mode.
 
 ## Public API (current)

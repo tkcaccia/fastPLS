@@ -4,7 +4,8 @@
 
 \description{
 Runs nested cross-validation (outer assessment + inner component selection)
-for \code{method = "simpls"} or \code{method = "plssvd"}.
+for \code{method = "simpls"}, \code{method = "plssvd"}, or
+\code{method = "simpls_fast"}.
 }
 
 \usage{
@@ -14,11 +15,17 @@ pls.double.cv(
   ncomp = 2,
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
+  method = c("simpls", "plssvd", "simpls_fast"),
   svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   seed = 1L,
+  fast_block = 4L,
+  fast_center_t = FALSE,
+  fast_reorth_v = TRUE,
+  fast_incremental = FALSE,
+  fast_inc_iters = 2L,
+  fast_defl_cache = TRUE,
   perm.test = FALSE,
   times = 100,
   runn = 10,
@@ -34,12 +41,17 @@ pls.double.cv(
 internally by rank constraints.}
 \item{constrain}{Grouping vector for constrained splitting.}
 \item{scaling}{One of \code{"centering"}, \code{"autoscaling"}, \code{"none"}.}
-\item{method}{One of \code{"simpls"} or \code{"plssvd"}. Note: \code{simpls_fast}
-is currently not supported in this function.}
+\item{method}{One of \code{"simpls"}, \code{"plssvd"}, or \code{"simpls_fast"}.}
 \item{svd.method}{Inner SVD backend used in fold models.}
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
 \item{seed}{Seed for randomized backends.}
+\item{fast_block}{\code{simpls_fast} block refresh size.}
+\item{fast_center_t}{\code{simpls_fast} score-centering toggle.}
+\item{fast_reorth_v}{\code{simpls_fast} re-orthogonalization toggle.}
+\item{fast_incremental}{\code{simpls_fast} incremental block-power toggle.}
+\item{fast_inc_iters}{\code{simpls_fast} incremental power iterations.}
+\item{fast_defl_cache}{\code{simpls_fast} cached-deflation toggle.}
 \item{perm.test}{Run permutation test on median Q2 if \code{TRUE}.}
 \item{times}{Permutation count.}
 \item{runn}{Number of repeated nested-CV runs.}

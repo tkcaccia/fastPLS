@@ -744,6 +744,9 @@ List optim_pls_cv(
     if(method==2){
       model=pls_model2(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
     }
+    if(method==3){
+      model=pls_model2_fast(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
+    }
     List pls=pls_predict(model,Xtest,FALSE);
     arma::cube temp1=pls("Ypred");
     for(int ii=0;ii<w1_size;ii++)  for(int jj=0;jj<length_ncomp;jj++)  for(int kk=0;kk<ncolY;kk++)  Ypred(w1[ii],kk,jj)=temp1(ii,kk,jj);  
@@ -755,6 +758,9 @@ List optim_pls_cv(
   }
   if(method==2){
     model_all=pls_model2(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+  }
+  if(method==3){
+    model_all=pls_model2_fast(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
   }
   arma::vec R2Y=model_all("R2Y");
   arma::vec Q2Y(length_ncomp);
@@ -864,7 +870,10 @@ List double_pls_cv(
     }
     if(method==2){
       model=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
-    }   
+    }
+    if(method==3){
+      model=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
+    }
       
     List pls=pls_predict(model,Xtest,FALSE);
     arma::cube temp1=pls("Ypred");
@@ -877,7 +886,10 @@ List double_pls_cv(
     }
     if(method==2){
       model_all=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
-    }  
+    }
+    if(method==3){
+      model_all=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+    }
     
     
     R2Y(i)=model_all("R2Y");

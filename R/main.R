@@ -951,7 +951,13 @@ pls =  function (Xtrain,
 #' @param Ydata Response (numeric or factor).
 #' @param constrain Optional grouping vector for constrained splitting.
 #' @param kfold Number of folds.
-#' @param method One of `"simpls"` or `"plssvd"` (no `simpls_fast` support).
+#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
+#' @param fast_block `simpls_fast` block refresh size.
+#' @param fast_center_t `simpls_fast` score centering toggle.
+#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
+#' @param fast_incremental `simpls_fast` incremental block-power toggle.
+#' @param fast_inc_iters `simpls_fast` incremental power iterations.
+#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
 #' @return List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
 #' @export
 optim.pls.cv =  function (Xdata,
@@ -959,15 +965,21 @@ optim.pls.cv =  function (Xdata,
                           ncomp=2, 
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
-                          method = c("simpls", "plssvd"),
+                          method = c("simpls", "plssvd", "simpls_fast"),
                           svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           seed = 1L,
+                          fast_block = 4L,
+                          fast_center_t = FALSE,
+                          fast_reorth_v = TRUE,
+                          fast_incremental = FALSE,
+                          fast_inc_iters = 2L,
+                          fast_defl_cache = TRUE,
                           kfold=10) 
 {
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
-  meth = pmatch(method, c("plssvd", "simpls"))[1]
+  meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
   
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
@@ -990,19 +1002,43 @@ optim.pls.cv =  function (Xdata,
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), ncol(Ydata), warn = TRUE)
     ncomp <- cap$ncomp
   }
-  res=optim_pls_cv(
-    Xdata=Xdata,
-    Ydata=Ydata,
-    constrain=constrain,
-    ncomp=ncomp,
-    scaling=scal,
-    kfold=kfold,
-    method=meth,
-    svd_method=svdmeth,
-    rsvd_oversample=rsvd_oversample,
-    rsvd_power=rsvd_power,
-    seed=seed
-  ) 
+  if (meth == 3L) {
+    res <- .with_fastpls_fast_options(
+      optim_pls_cv(
+        Xdata=Xdata,
+        Ydata=Ydata,
+        constrain=constrain,
+        ncomp=ncomp,
+        scaling=scal,
+        kfold=kfold,
+        method=meth,
+        svd_method=svdmeth,
+        rsvd_oversample=rsvd_oversample,
+        rsvd_power=rsvd_power,
+        seed=seed
+      ),
+      fast_block = fast_block,
+      fast_center_t = fast_center_t,
+      fast_reorth_v = fast_reorth_v,
+      fast_incremental = fast_incremental,
+      fast_inc_iters = fast_inc_iters,
+      fast_defl_cache = fast_defl_cache
+    )
+  } else {
+    res=optim_pls_cv(
+      Xdata=Xdata,
+      Ydata=Ydata,
+      constrain=constrain,
+      ncomp=ncomp,
+      scaling=scal,
+      kfold=kfold,
+      method=meth,
+      svd_method=svdmeth,
+      rsvd_oversample=rsvd_oversample,
+      rsvd_power=rsvd_power,
+      seed=seed
+    )
+  }
   res
 }
 
@@ -1022,7 +1058,13 @@ optim.pls.cv =  function (Xdata,
 #' @param runn Number of repeated runs.
 #' @param kfold_inner Inner-fold count.
 #' @param kfold_outer Outer-fold count.
-#' @param method One of `"simpls"` or `"plssvd"` (no `simpls_fast` support).
+#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
+#' @param fast_block `simpls_fast` block refresh size.
+#' @param fast_center_t `simpls_fast` score centering toggle.
+#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
+#' @param fast_incremental `simpls_fast` incremental block-power toggle.
+#' @param fast_inc_iters `simpls_fast` incremental power iterations.
+#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
 #' @return List of nested CV outputs and summaries.
 #' @export
 pls.double.cv = function(Xdata,
@@ -1030,11 +1072,17 @@ pls.double.cv = function(Xdata,
                          ncomp=2,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"), 
-                         method = c("simpls", "plssvd"),
+                         method = c("simpls", "plssvd", "simpls_fast"),
                          svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          seed = 1L,
+                         fast_block = 4L,
+                         fast_center_t = FALSE,
+                         fast_reorth_v = TRUE,
+                         fast_incremental = FALSE,
+                         fast_inc_iters = 2L,
+                         fast_defl_cache = TRUE,
                          perm.test=FALSE,
                          times=100,
                          runn=10,
@@ -1045,7 +1093,7 @@ pls.double.cv = function(Xdata,
     stop("Missing values are present")
   } 
   scal=pmatch(scaling,c("centering","autoscaling","none"))[1]
-  meth = pmatch(method, c("plssvd", "simpls"))[1]
+  meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
   
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
@@ -1084,20 +1132,45 @@ pls.double.cv = function(Xdata,
   for(j in 1:runn){
     
     
-    o=double_pls_cv(
-      Xdata,
-      Ydata,
-      ncomp,
-      constrain,
-      scal,
-      kfold_inner,
-      kfold_outer,
-      meth,
-      svd_method=svdmeth,
-      rsvd_oversample=rsvd_oversample,
-      rsvd_power=rsvd_power,
-      seed=seed
-    )
+    if (meth == 3L) {
+      o <- .with_fastpls_fast_options(
+        double_pls_cv(
+          Xdata,
+          Ydata,
+          ncomp,
+          constrain,
+          scal,
+          kfold_inner,
+          kfold_outer,
+          meth,
+          svd_method=svdmeth,
+          rsvd_oversample=rsvd_oversample,
+          rsvd_power=rsvd_power,
+          seed=seed
+        ),
+        fast_block = fast_block,
+        fast_center_t = fast_center_t,
+        fast_reorth_v = fast_reorth_v,
+        fast_incremental = fast_incremental,
+        fast_inc_iters = fast_inc_iters,
+        fast_defl_cache = fast_defl_cache
+      )
+    } else {
+      o=double_pls_cv(
+        Xdata,
+        Ydata,
+        ncomp,
+        constrain,
+        scal,
+        kfold_inner,
+        kfold_outer,
+        meth,
+        svd_method=svdmeth,
+        rsvd_oversample=rsvd_oversample,
+        rsvd_power=rsvd_power,
+        seed=seed
+      )
+    }
     Ypred_tot=Ypred_tot+o$Ypred
     if(classification){
       t = apply(o$Ypred, 1, which.max)
@@ -1158,20 +1231,45 @@ pls.double.cv = function(Xdata,
         ss=sample(1:nrow(Xdata))
         w=NULL
         for(ii in 1:runn)
-          w[ii]=double_pls_cv(
-            Xdata[ss,],
-            Ydata,
-            ncomp,
-            constrain,
-            scal,
-            kfold_inner,
-            kfold_outer,
-            meth,
-            svd_method=svdmeth,
-            rsvd_oversample=rsvd_oversample,
-            rsvd_power=rsvd_power,
-            seed=seed
-          )$Q2Y
+          if (meth == 3L) {
+            w[ii] <- .with_fastpls_fast_options(
+              double_pls_cv(
+                Xdata[ss,],
+                Ydata,
+                ncomp,
+                constrain,
+                scal,
+                kfold_inner,
+                kfold_outer,
+                meth,
+                svd_method=svdmeth,
+                rsvd_oversample=rsvd_oversample,
+                rsvd_power=rsvd_power,
+                seed=seed
+              ),
+              fast_block = fast_block,
+              fast_center_t = fast_center_t,
+              fast_reorth_v = fast_reorth_v,
+              fast_incremental = fast_incremental,
+              fast_inc_iters = fast_inc_iters,
+              fast_defl_cache = fast_defl_cache
+            )$Q2Y
+          } else {
+            w[ii]=double_pls_cv(
+              Xdata[ss,],
+              Ydata,
+              ncomp,
+              constrain,
+              scal,
+              kfold_inner,
+              kfold_outer,
+              meth,
+              svd_method=svdmeth,
+              rsvd_oversample=rsvd_oversample,
+              rsvd_power=rsvd_power,
+              seed=seed
+            )$Q2Y
+          }
         
         v[i]=median(w)
       }
