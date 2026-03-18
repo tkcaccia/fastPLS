@@ -39,9 +39,8 @@ labels=iris[,5]
 ss=sample(150,15)
 ncomponent=3
 
-z=pls(data[-ss,], labels[-ss],  ncomp=ncomponent) 
-predict(z,data[ss,],FALSE)
+z=pls(as.matrix(data[-ss,]), labels[-ss], ncomp=ncomponent)
+predict(z, as.matrix(data[ss,]), Ytest = labels[ss], proj = FALSE)
 
 
 }
-

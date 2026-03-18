@@ -10,11 +10,14 @@
 
 pls.double.cv (Xdata,
                Ydata,
-               ncomp=min(5,c(ncol(Xdata),nrow(Xdata))),
+               ncomp=2,
                constrain=1:nrow(Xdata),
                scaling = c("centering", "autoscaling","none"), 
-               method = c("plssvd", "simpls"),
-              svd.method = c("irlba", "dc"),
+               method = c("simpls", "plssvd"),
+              svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+               rsvd_oversample = 10L,
+               rsvd_power = 1L,
+               seed = 1L,
                perm.test=FALSE,
                times=100,
                runn=10,
@@ -26,13 +29,22 @@ pls.double.cv (Xdata,
 \arguments{
   \item{Xdata}{a matrix.}
   \item{Ydata}{the responses. If Ydata is a numeric vector, a regression analysis will be performed. If Ydata is factor, a classification analysis will be performed. }
-  \item{ncomp}{the number of latent components to be used for classification.}
+  \item{ncomp}{the number of latent components to evaluate. For \code{method = "plssvd"}, the effective maximum is \code{min(nrow(Xdata), ncol(Xdata), ncol(Ydata))}; higher requested values are capped internally with a warning.}
   \item{constrain}{a vector of \code{nrow(data)} elements. Sample with the same identifying constrain will be split in the training set or in the test set of cross-validation together.}
   \item{scaling}{the scaling method to be used. Choices are "\code{centering}", "\code{autoscaling}", or "\code{none}" (by default = "\code{centering}"). A partial string sufficient to uniquely identify the choice is permitted.}
-  \item{method}{the algorithm to be used to perform the PLS. Choices are "\code{plssvd}" or "\code{simpls}" (by default = "\code{plssvd}"). A partial string sufficient to uniquely identify the choice is permitted.}
-  \item{svd.method}{the SVD method to be used to perform the PLS. Choices are "\code{irlba}" or "\code{dc}" (by default = "\code{irlba}"). A partial string sufficient to uniquely identify the choice is permitted.}
-  \item{perm.test}{a classification vector.}
-  \item{times}{number of cross-validations with permutated samples}
+  \item{method}{the algorithm to be used to perform the PLS. Choices are "\code{simpls}" or "\code{plssvd}" (by default = "\code{simpls}"). A partial string sufficient to uniquely identify the choice is permitted.}
+  \item{svd.method}{SVD backend used inside each PLS fit of the inner and outer CV loops.
+  Available options are:
+  \code{"irlba"} (legacy truncated IRLBA path, default),
+  \code{"dc"} (CPU exact divide-and-conquer SVD via Armadillo \code{svd_econ()}),
+  \code{"cpu_rsvd"} (CPU randomized SVD with \code{rsvd_oversample}, \code{rsvd_power}, and \code{seed}),
+  and \code{"cuda_rsvd"} (CUDA randomized SVD; requires \code{\link{has_cuda}()} to be \code{TRUE}).
+  \code{"dc"} is deterministic exact CPU SVD; RSVD methods are approximate but reproducible with fixed seed.}
+  \item{rsvd_oversample}{extra random directions used by RSVD beyond the requested rank \code{k} (effective subspace size is approximately \code{k + rsvd_oversample}). Larger values usually improve accuracy but increase compute time and memory. Typical range: 5--30; default \code{10}.}
+  \item{rsvd_power}{number of power-iteration refinement steps in RSVD. Higher values improve separation of close singular values (better accuracy) but increase runtime; \code{0} is fastest, \code{1} is a common tradeoff (default), and \code{2} is for harder problems.}
+  \item{seed}{deterministic seed used by RSVD methods (\code{cpu_rsvd}, \code{cuda_rsvd}).}
+  \item{perm.test}{logical; if \code{TRUE}, run permutation testing.}
+  \item{times}{number of permutations for permutation testing.}
   \item{runn}{number of cross-validations loops.}
   \item{kfold_inner}{if perform the optmization of the number of components.}
   \item{kfold_outer}{if perform the optmization of the number of components.}

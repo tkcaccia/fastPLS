@@ -1,0 +1,15 @@
+.DS_Store
+*.o
+*.so
+*.dylib
+*.dll
+*.a
+*.out
+*.tar.gz
+*.RData
+*.Rhistory
+*.Rproj.user/
+fastPLS.Rcheck/
+src/symbols.rds
+*_results/
+nvidia_*_results/

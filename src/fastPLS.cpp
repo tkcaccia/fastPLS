@@ -4,6 +4,7 @@
 #include <R_ext/Rdynload.h>
 
 #include "fastPLS.h"
+#include "svd_iface.h"
 
 extern "C" {
 #include "irlba.h"
@@ -12,6 +13,33 @@ extern "C" {
 // [[Rcpp::depends(RcppArmadillo)]]
 using namespace Rcpp;
 using namespace arma;
+
+namespace {
+
+fastpls_svd::SVDResult compute_truncated_svd_dispatch(
+  const arma::mat& S,
+  int k,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  unsigned int seed,
+  bool left_only,
+  bool use_full_svd
+) {
+  fastpls_svd::SVDOptions opt = fastpls_svd::options_from_method_id(
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    seed,
+    left_only,
+    use_full_svd
+  );
+
+  const fastpls_svd::Backend backend = fastpls_svd::backend_from_method_id(svd_method);
+  return fastpls_svd::truncated_svd(S, k, opt, backend);
+}
+
+} // namespace
 
 
 // [[Rcpp::export]]
@@ -149,7 +177,50 @@ arma::mat transformy(arma::ivec y){
 }
 
 // [[Rcpp::export]]
-List pls_model2(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,bool fit,int svd_method) {
+bool has_cuda() {
+  return fastpls_svd::has_cuda_backend();
+}
+
+// [[Rcpp::export]]
+Rcpp::List truncated_svd_debug(
+  arma::mat A,
+  int k,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed,
+  bool left_only
+) {
+  fastpls_svd::SVDResult res = compute_truncated_svd_dispatch(
+    A,
+    k,
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    static_cast<unsigned int>(seed),
+    left_only,
+    true
+  );
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = res.U,
+    Rcpp::Named("d") = res.s,
+    Rcpp::Named("vt") = res.Vt
+  );
+}
+
+// [[Rcpp::export]]
+List pls_model2(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
 
   // n <-dim(Xtrain)[1]
   int n = Xtrain.n_rows;
@@ -226,9 +297,6 @@ List pls_model2(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
   
   arma::mat qq;
   arma::mat pp;
-  arma::mat svd_U;
-  arma::vec svd_s;
-  arma::mat svd_V;
   arma::mat rr;
   arma::mat tt;
   arma::mat vv;
@@ -240,16 +308,22 @@ List pls_model2(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
     //qq<-svd(S)$v[,1]
     //rr <- S%*%qq
 //    if(S.n_rows<=16 || S.n_cols<=16){
-  if(S.n_rows>5  && S.n_cols>5 && svd_method==1){
+  if(S.n_rows>5  && S.n_cols>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
       List temp0=IRLB(S, 1, 10, 2000, 1e-6, 1e-9, 1e-6); //nu=1, work=10, maxit=1000, tol=1e-6, eps=1e-9, svtol=1e-6
       arma::mat u_irlba=temp0[1];
       rr=u_irlba.col(0);
     }else{ 
-      arma::mat svd_U;
-      arma::vec svd_s;
-      arma::mat svd_V;
-      svd_econ(svd_U,svd_s,svd_V,S,"left"); 
-      rr=svd_U.col( 0 );
+      fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+        S,
+        1,
+        svd_method,
+        rsvd_oversample,
+        rsvd_power,
+        static_cast<unsigned int>(seed),
+        true,
+        false
+      );
+      rr=svd_res.U.col(0);
     }
   
     // tt<-scale(X%*%rr,scale=FALSE)
@@ -312,6 +386,203 @@ List pls_model2(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
     Named("P")       = PP,
     Named("Q")       = QQ,
     Named("Ttrain")  = TT,
+    Named("R")       = RR,
+    Named("mX")      = mX,
+    Named("vX")      = vX,
+    Named("mY")      = mY,
+    Named("p")       = p,
+    Named("m")       = m,
+    Named("ncomp")   = ncomp,
+    Named("Yfit")    = Yfit,
+    Named("R2Y")     = R2Y
+  );
+}
+
+// [[Rcpp::export]]
+List pls_model2_fast(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
+  auto env_int_or = [](const char* key, int fallback, int lo, int hi) {
+    const char* raw = std::getenv(key);
+    if (raw == nullptr) return fallback;
+    char* endptr = nullptr;
+    long v = std::strtol(raw, &endptr, 10);
+    if (endptr == raw) return fallback;
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    return static_cast<int>(v);
+  };
+
+  const int n = Xtrain.n_rows;
+  const int p = Xtrain.n_cols;
+  const int m = Ytrain.n_cols;
+
+  if (ncomp.n_elem < 1) {
+    stop("ncomp must contain at least one value");
+  }
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) < 1) {
+      ncomp(i) = 1;
+    }
+  }
+
+  const int max_ncomp = max(ncomp);
+  const int length_ncomp = ncomp.n_elem;
+
+  arma::mat mX(1, p, fill::zeros);
+  if (scaling < 3) {
+    mX = mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+
+  arma::mat vX(1, p, fill::ones);
+  if (scaling == 2) {
+    vX = variance(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+
+  arma::mat mY = mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  const arma::mat Xt = Xtrain.t();
+  const arma::mat Yt = Ytrain.t();
+  arma::mat S = Xt * Ytrain;
+
+  arma::mat RR(p, max_ncomp, fill::zeros);
+  arma::mat QQ(m, max_ncomp, fill::zeros);
+  arma::mat VV(p, max_ncomp, fill::zeros);
+  arma::cube B(p, m, length_ncomp, fill::zeros);
+
+  arma::cube Yfit;
+  arma::vec R2Y(length_ncomp, fill::zeros);
+  if (fit) {
+    Yfit.set_size(n, m, length_ncomp);
+  }
+
+  arma::mat Bcur(p, m, fill::zeros);
+  int i_out = 0;
+
+  // Inspired by block-Krylov randomized SVD literature (e.g. arXiv:1504.05477):
+  // refresh a small block of singular vectors to reduce per-component SVD overhead.
+  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 4, 1, 16);
+  const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
+  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 1, 0, 1);
+  const int incremental_svd = env_int_or("FASTPLS_FAST_INCREMENTAL", 0, 0, 1);
+  const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
+  const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
+  arma::vec rr_prev;
+  bool has_rr_prev = false;
+  int a = 0;
+  while (a < max_ncomp) {
+    const int k_block = std::min(refresh_block, max_ncomp - a);
+    arma::mat Ublock;
+    const bool can_incremental = (incremental_svd == 1) && (S.n_rows > 5) && (S.n_cols > 1);
+    if (can_incremental) {
+      arma::mat Omega(S.n_rows, k_block, fill::randn);
+      if (has_rr_prev) {
+        Omega.col(0) = rr_prev;
+      }
+      arma::mat Y = Omega;
+      for (int it = 0; it < inc_power_iters; ++it) {
+        // Incremental block power iteration: Y <- (S S^T) Y
+        Y = S * (S.t() * Y);
+      }
+      arma::mat Rtmp;
+      arma::qr_econ(Ublock, Rtmp, Y);
+    } else if (S.n_rows > 5 && S.n_cols > 5 && fastpls_svd::method_is_legacy_irlba(svd_method)) {
+      List temp0 = IRLB(S, k_block, 10 + k_block, 2000, 1e-6, 1e-9, 1e-6);
+      Ublock = as<arma::mat>(temp0("u"));
+    } else {
+      fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+        S,
+        k_block,
+        svd_method,
+        rsvd_oversample,
+        rsvd_power,
+        static_cast<unsigned int>(seed + a),
+        true,
+        false
+      );
+      Ublock = svd_res.U;
+    }
+    if (Ublock.n_cols < 1) {
+      break;
+    }
+
+    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
+    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
+      arma::vec rr = Ublock.col(j);
+
+      arma::vec tt = Xtrain * rr;
+      if (center_t == 1) {
+        tt -= arma::mean(tt);
+      }
+      const double tnorm = arma::norm(tt, 2);
+      if (!std::isfinite(tnorm) || tnorm <= 0.0) {
+        a = max_ncomp;
+        break;
+      }
+      tt /= tnorm;
+      rr /= tnorm;
+      rr_prev = rr;
+      has_rr_prev = true;
+
+      arma::vec pp = Xt * tt;
+      arma::vec qq = Yt * tt;
+
+      arma::vec vv = pp;
+      if (a > 0) {
+        auto Vprev = VV.cols(0, a - 1);
+        vv -= Vprev * (Vprev.t() * pp);
+        if (reorth_v == 1) {
+          vv -= Vprev * (Vprev.t() * vv);
+        }
+      }
+      const double vnorm = arma::norm(vv, 2);
+      if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+        a = max_ncomp;
+        break;
+      }
+      vv /= vnorm;
+
+      if (defl_cache == 1) {
+        arma::rowvec vS = vv.t() * S;
+        S -= vv * vS;
+      } else {
+        S -= vv * (vv.t() * S);
+      }
+
+      RR.col(a) = rr;
+      QQ.col(a) = qq;
+      VV.col(a) = vv;
+      Bcur += rr * qq.t();
+
+      while (i_out < length_ncomp && a == (ncomp(i_out) - 1)) {
+        B.slice(i_out) = Bcur;
+        if (fit) {
+          arma::mat yf = Xtrain * Bcur;
+          R2Y(i_out) = RQ(Ytrain, yf);
+          yf.each_row() += mY;
+          Yfit.slice(i_out) = yf;
+        }
+        ++i_out;
+      }
+    }
+  }
+
+  return List::create(
+    Named("B")       = B,
+    Named("P")       = arma::mat(),
+    Named("Q")       = QQ,
+    Named("Ttrain")  = arma::mat(),
     Named("R")       = RR,
     Named("mX")      = mX,
     Named("vX")      = vX,
@@ -396,7 +667,31 @@ IntegerVector samplewithoutreplace(IntegerVector yy,int size){
 
 
 // [[Rcpp::export]]
-List optim_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec constrain,arma::ivec ncomp, int scaling, int kfold, int method, int svd_method) {
+List optim_pls_cv(
+  arma::mat Xdata,
+  arma::mat Ydata,
+  arma::ivec constrain,
+  arma::ivec ncomp,
+  int scaling,
+  int kfold,
+  int method,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
+  if (method == 1) {
+    const int max_plssvd_rank = std::min(static_cast<int>(Xdata.n_rows),
+      std::min(static_cast<int>(Xdata.n_cols), static_cast<int>(Ydata.n_cols)));
+    for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+      if (ncomp(i) > max_plssvd_rank) {
+        ncomp(i) = max_plssvd_rank;
+      }
+      if (ncomp(i) < 1) {
+        ncomp(i) = 1;
+      }
+    }
+  }
   
   int length_ncomp=ncomp.n_elem;
   
@@ -444,10 +739,10 @@ List optim_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec constrain,arma::ive
     Ytrain=Ydata.rows(w9);
     List model;
     if(method==1){
-      model=pls_model1(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method);
+      model=pls_model1(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
     }
     if(method==2){
-      model=pls_model2(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method);
+      model=pls_model2(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
     }
     List pls=pls_predict(model,Xtest,FALSE);
     arma::cube temp1=pls("Ypred");
@@ -456,10 +751,10 @@ List optim_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec constrain,arma::ive
   }  
   List model_all;
   if(method==1){
-    model_all=pls_model1(Xdata,Ydata,ncomp,scaling,TRUE,svd_method);
+    model_all=pls_model1(Xdata,Ydata,ncomp,scaling,TRUE,svd_method,rsvd_oversample,rsvd_power,seed);
   }
   if(method==2){
-    model_all=pls_model2(Xdata,Ydata,ncomp,scaling,TRUE, svd_method);
+    model_all=pls_model2(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
   }
   arma::vec R2Y=model_all("R2Y");
   arma::vec Q2Y(length_ncomp);
@@ -485,7 +780,20 @@ List optim_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec constrain,arma::ive
 
 
 // [[Rcpp::export]]
-List double_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec ncomp,arma::ivec constrain, int scaling, int kfold_inner, int kfold_outer, int method,int svd_method) {
+List double_pls_cv(
+  arma::mat Xdata,
+  arma::mat Ydata,
+  arma::ivec ncomp,
+  arma::ivec constrain,
+  int scaling,
+  int kfold_inner,
+  int kfold_outer,
+  int method,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
   
   int nsamples=Xdata.n_rows;
   
@@ -536,14 +844,26 @@ List double_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec ncomp,arma::ivec c
     Ytrain=Ydata.rows(w9);
     arma::ivec constrain_train=constrain.elem(w9);
     
-    List opt=optim_pls_cv(Xtrain, Ytrain, constrain_train, ncomp, scaling, kfold_inner, method, svd_method);
+    List opt=optim_pls_cv(
+      Xtrain,
+      Ytrain,
+      constrain_train,
+      ncomp,
+      scaling,
+      kfold_inner,
+      method,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      seed
+    );
       
     List model;
     if(method==1){
-      model=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method);
+      model=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
     }
     if(method==2){
-      model=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method);
+      model=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
     }   
       
     List pls=pls_predict(model,Xtest,FALSE);
@@ -553,10 +873,10 @@ List double_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec ncomp,arma::ivec c
     // Calculation of R2Y
     List model_all;
     if(method==1){
-      model_all=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method);
+      model_all=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
     }
     if(method==2){
-      model_all=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method);
+      model_all=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
     }  
     
     
@@ -582,7 +902,17 @@ List double_pls_cv(arma::mat Xdata,arma::mat Ydata,arma::ivec ncomp,arma::ivec c
 
 
 // [[Rcpp::export]]
-List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,bool fit,int svd_method) {
+List pls_model1(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
   
   // n <-dim(Xtrain)[1]
   int n = Xtrain.n_rows;
@@ -592,8 +922,21 @@ List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
   
   // m <- dim(Y)[2]
   int m = Ytrain.n_cols;
-  int max_ncomp=max(ncomp);
+  int max_plssvd_rank = std::min(n, std::min(p, m));
   int length_ncomp=ncomp.n_elem;
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > max_plssvd_rank) {
+      ncomp(i) = max_plssvd_rank;
+    }
+    if (ncomp(i) < 1) {
+      ncomp(i) = 1;
+    }
+  }
+  int max_ncomp=max(ncomp);
+  int max_ncomp_eff = std::min(max_ncomp, max_plssvd_rank);
+  if (max_ncomp_eff < 1) {
+    stop("plssvd effective rank is < 1");
+  }
   
   // Xtrain <- scale(Xtrain,center=TRUE,scale=FALSE)
   // Xtest <-scale(Xtest,center=mX)
@@ -623,13 +966,25 @@ List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
   
   int Snr=S.n_rows;
   int Snc=S.n_cols;
-  if(Snr>5  && Snc>5 && svd_method==1){
+  if(Snr>5  && Snc>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
 
-    List temp0=IRLB(S, max_ncomp, 10+max_ncomp, 2000, 1e-6, 1e-9, 1e-6); //nu=1, work=10, maxit=1000, tol=1e-6, eps=1e-9, svtol=1e-6
+    List temp0=IRLB(S, max_ncomp_eff, 10+max_ncomp_eff, 2000, 1e-6, 1e-9, 1e-6); //nu=1, work=10, maxit=1000, tol=1e-6, eps=1e-9, svtol=1e-6
     svd_u=as<arma::mat>(temp0("u"));   //u
     svd_v=as<arma::mat>(temp0("v"));   //v
   }else{ 
-    svd(svd_u,svd_s,svd_v,S);   //svd_econ
+    fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+      S,
+      max_ncomp_eff,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      static_cast<unsigned int>(seed),
+      false,
+      true
+    );
+    svd_u = svd_res.U;
+    svd_s = svd_res.s;
+    svd_v = svd_res.Vt.t();
   }
   
   //  B<-matrix(0,ncol=m,nrow=p)
@@ -643,33 +998,44 @@ List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
   
   
   
-  svd_u = svd_u.cols(0,max_ncomp-1);
-  if(svd_v.n_cols>max_ncomp){
-    svd_v = svd_v.cols(0,max_ncomp-1);
+  max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_u.n_cols));
+  if(svd_v.n_cols > 0){
+    max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_v.n_cols));
   }
+  if (max_ncomp_eff < 1) {
+    stop("plssvd effective rank is < 1 after SVD");
+  }
+  svd_u = svd_u.cols(0,max_ncomp_eff-1);
+  if(svd_v.n_cols>max_ncomp_eff){
+    svd_v = svd_v.cols(0,max_ncomp_eff-1);
+  }
+  arma::mat svd_u_eff = svd_u;
+  arma::mat svd_v_eff = svd_v;
+  arma::mat T_eff = Xtrain*svd_u_eff;
   
   // TT <- Xtrain %*% R
   // U <- Ytrain %*% Q
   
-  arma::mat T=Xtrain*svd_u;
+  arma::mat T = T_eff;
   
   arma::vec R2Y(length_ncomp);
   
   
   for (int a=0; a<length_ncomp; a++) {
     int mc=ncomp(a);
+    int mc_eff = std::min(mc, max_ncomp_eff);
     
 
-    arma::mat svd_u_mc = svd_u.cols(0,mc-1);
+    arma::mat svd_u_mc = svd_u_eff.cols(0,mc_eff-1);
     
     arma::mat svd_v_mc;
-    if(svd_v.n_cols>max_ncomp){
-      svd_v_mc = svd_v.cols(0,mc-1);
+    if(svd_v_eff.n_cols>max_ncomp_eff){
+      svd_v_mc = svd_v_eff.cols(0,mc_eff-1);
     }else{
-      svd_v_mc = svd_v;
+      svd_v_mc = svd_v_eff;
     }
     
-    arma::mat T_a=T.cols(0,mc-1);
+    arma::mat T_a=T_eff.cols(0,mc_eff-1);
     arma::mat T_at=T_a.t();
     
     
@@ -692,9 +1058,9 @@ List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
 
   return List::create(
     Named("B")       = B,
-    Named("Q")       = svd_v,
+    Named("Q")       = svd_v_eff,
     Named("Ttrain")  = T,
-    Named("R")       = svd_u,
+    Named("R")       = svd_u_eff,
     Named("mX")      = mX,
     Named("vX")      = vX,
     Named("mY")      = mY,
@@ -705,10 +1071,3 @@ List pls_model1(arma::mat Xtrain,arma::mat Ytrain,arma::ivec ncomp,int scaling,b
     Named("R2Y")     = R2Y
   );
 }
-
-
-
-
-
-
-
