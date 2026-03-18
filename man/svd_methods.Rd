@@ -1,29 +1,42 @@
 \name{svd_methods}
 \alias{svd_methods}
-\title{List Available SVD Implementations}
+\title{List SVD Backends Exposed by fastPLS}
+
 \description{
-Returns the SVD implementations wired into \code{fastPLS} and whether each
-method is currently enabled.
+Report the SVD backend names accepted by high-level fastPLS APIs and whether
+they are currently usable in the running session.
 }
-\details{
-Method names returned by \code{svd_methods()}:
-\itemize{
-\item \code{irlba}: legacy truncated IRLBA path used by fastPLS.
-\item \code{dc}: deterministic exact CPU SVD via Armadillo \code{svd_econ()}.
-\item \code{cpu_rsvd}: CPU randomized SVD.
-\item \code{cuda_rsvd}: CUDA randomized SVD (enabled only when CUDA build/runtime are available).
-}
-}
+
 \usage{
 svd_methods()
 }
+
+\details{
+The returned table reflects \code{R/main.R} dispatch identifiers:
+\itemize{
+\item \code{irlba}: legacy label. In PLS model code paths this can trigger the IRLB branch
+for sufficiently large cross-covariance matrices; in generic SVD utility wrappers it maps to
+exact CPU SVD dispatch.
+\item \code{dc}: exact CPU SVD dispatch via Armadillo \code{svd_econ()}.
+\item \code{cpu_rsvd}: CPU randomized SVD.
+\item \code{cuda_rsvd}: CUDA randomized SVD; enabled only when
+\code{\link{has_cuda}()} returns \code{TRUE}.
+}
+
+The string \code{"dc"} is a compatibility/backend label in this package API;
+the implementation path is the exact CPU SVD wrapper in \code{src/svd_cpu_exact.cpp}.
+}
+
 \value{
 A data frame with columns:
 \itemize{
-\item \code{method}: method name.
-\item \code{enabled}: logical flag indicating availability in the current session.
+\item \code{method}: backend name.
+\item \code{enabled}: logical availability flag.
 }
 }
+
+\seealso{\code{\link{svd_run}}, \code{\link{has_cuda}}, \code{\link{pls}}}
+
 \examples{
 svd_methods()
 }

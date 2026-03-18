@@ -1,46 +1,55 @@
 \name{predict.fastPLS}
-
 \alias{predict.fastPLS}
-\title{Prediction Partial Least Squares regression.}
+\title{Predict From a fastPLS Model}
 
-\description{Partial Least Squares (PLS) regression for test set from training set.}
+\description{
+Generate predictions from a fitted \code{fastPLS} object.
+}
 
 \usage{
-\method{predict}{fastPLS}(object, newdata, Ytest=NULL, proj=FALSE, ...) 
-
+\method{predict}{fastPLS}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 
 \arguments{
-  \item{object}{a matrix of training set cases.}
-  \item{newdata}{a matrix of predictor variables X for the test set.}
-  \item{Ytest}{a vector of the response variable Y from Xtest.}
-  \item{proj}{projection of the test set.}
-  \item{...}{further arguments. Currently not used.}
+\item{object}{A model returned by \code{\link{pls}} or \code{\link{pls_r}}.}
+\item{newdata}{Numeric test matrix \eqn{X_{test}}.}
+\item{Ytest}{Optional test response used to compute \code{Q2Y}.}
+\item{proj}{Logical; if \code{TRUE}, return projected scores \code{Ttest}.}
+\item{...}{Unused.}
+}
 
+\details{
+Prediction always applies stored preprocessing from training data:
+\itemize{
+\item subtract \code{mX},
+\item divide by \code{vX} (if autoscaling was used),
+\item multiply by stored coefficient slices \code{B[,,i]},
+\item add \code{mY} back.
+}
+
+For classification models (factor \code{Ytrain}), predicted class labels are
+obtained by \code{argmax} over predicted response columns at each component.
 }
 
 \value{
-A list with the following components:
+A list with:
+\itemize{
+\item \code{Ypred}: regression: array \eqn{n_{test} \times m \times n_{comp}};
+classification: data frame of predicted class labels per component.
+\item \code{Q2Y}: returned only when \code{Ytest} is provided.
+\item \code{Ttest}: projected test scores when \code{proj = TRUE}; otherwise empty matrix.
+}
+}
 
-  \item{Ypred}{the (ntest x m x length(ncomp)) containing the predicted values of the response variables for the observations from Xtest. The third dimension of the matrix Ypred corresponds to the number of PLS components used to compute the regression coefficients.}
-  \item{Q2Y}{predictive power of model}
-  \item{Ttest}{the (ntrain x max(ncomp)) matrix containing the X-scores (latent components)}
-
-  }
-
-\author{Dupe Ojo, Alessia Vignoli, Stefano Cacciatore, Leonardo Tenori}
-
-\seealso{\code{\link{optim.pls.cv}},\code{\link{pls.double.cv}}}
+\seealso{\code{\link{pls}}, \code{\link{pls_r}}}
 
 \examples{
+set.seed(1)
 data(iris)
-data=iris[,-5]
-labels=iris[,5]
-ss=sample(150,15)
-ncomponent=3
+X <- as.matrix(iris[, -5])
+y <- iris[, 5]
+ss <- sample(seq_len(nrow(X)), 30)
 
-z=pls(as.matrix(data[-ss,]), labels[-ss], ncomp=ncomponent)
-predict(z, as.matrix(data[ss,]), Ytest = labels[ss], proj = FALSE)
-
-
+fit <- pls(X[-ss, ], y[-ss], ncomp = 3)
+predict(fit, X[ss, ], Ytest = y[ss], proj = FALSE)
 }

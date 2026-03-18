@@ -1,42 +1,49 @@
 \name{ViP}
-
 \alias{ViP}
+\title{Variable Importance in Projection (VIP) Scores}
 
-\title{Variable Importance in the Projection.}
-
-\description{Variable Importance in the Projection (VIP) is a score that measures how important a variable is in a Partial Least Squares (PLS) model. VIP scores are used to identify which variables are most important in a model and are often used for variable selection. }
+\description{
+Compute VIP trajectories across components from a fitted \code{fastPLS} model.
+}
 
 \usage{
-ViP (model) 
-
+ViP(model)
 }
 
 \arguments{
-  \item{model}{a object returning from the pls function.}
+\item{model}{A fitted model from \code{\link{pls}} or \code{\link{pls_r}}.}
+}
 
+\details{
+This implementation uses model components \code{Q}, \code{Ttrain}, and \code{R}
+through an internal helper \code{Vip()}.
+
+For multi-response models, the function returns one VIP matrix per response.
+For single-response models, it returns a numeric matrix of VIP values across
+components.
 }
 
 \value{
-A list with the following components:
-  \item{B}{the (p x m x length(ncomp)) matrix containing the regression coefficients. Each row corresponds to a predictor variable and each column to a response variable. The third dimension of the matrix B corresponds to the number of PLS components used to compute the regression coefficients. If ncomp has length 1, B is just a (p x m) matrix.}
-  \item{Ypred}{the (ntest x m x length(ncomp)) containing the predicted values of the response variables for the observations from Xtest. The third dimension of the matrix Ypred corresponds to the number of PLS components used to compute the regression coefficients.}
-  \item{P}{the (p x max(ncomp)) matrix containing the X-loadings.}
-  \item{Q}{the (m x max(ncomp)) matrix containing the Y-loadings.}
-  \item{T}{the (ntrain x max(ncomp)) matrix containing the X-scores (latent components)}
-  \item{R}{the (p x max(ncomp)) matrix containing the weights used to construct the latent components.}
-
-  }
-
-\author{Dupe Ojo, Alessia Vignoli, Stefano Cacciatore, Leonardo Tenori}
-
-\seealso{\code{\link{optim.pls.cv}},\code{\link{pls.double.cv}}}
-
-\examples{
-data(iris)
-data=as.matrix(iris[,-5])
-labels=iris[,5]
-pp=pls(data,labels,ncomp = 2)
-ViP(pp)
-
+VIP values by predictor and component:
+\itemize{
+\item single-response: numeric matrix.
+\item multi-response: list of numeric matrices (one per response column).
+}
 }
 
+\references{
+Wold, S., Johansson, E., and Cocchi, M. (1993).
+PLS --- partial least-squares projections to latent structures.
+In \emph{3D QSAR in Drug Design}. ESCOM.
+}
+
+\seealso{\code{\link{pls}}}
+
+\examples{
+set.seed(1)
+data(iris)
+X <- as.matrix(iris[, -5])
+y <- iris[, 5]
+fit <- pls(X, y, ncomp = 3)
+ViP(fit)
+}
