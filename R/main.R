@@ -170,6 +170,19 @@ pls.model2.fast =
   }
 
 
+#' Predict from a fitted fastPLS object
+#'
+#' Applies stored preprocessing (`mX`, `vX`) and coefficient slices (`B`) to
+#' produce test predictions. For classification models, one-hot predictions are
+#' converted to labels by argmax over response columns.
+#'
+#' @param object A fitted `fastPLS` object.
+#' @param newdata Numeric predictor matrix.
+#' @param Ytest Optional observed response used to compute `Q2Y`.
+#' @param proj Logical; return projected `Ttest` when `TRUE`.
+#' @param ... Unused.
+#' @return A list containing `Ypred`, optional `Q2Y`, and optional `Ttest`.
+#' @export
 predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
   if (!is(object, "fastPLS")) {
     stop("object is not a fastPLS object")
@@ -221,6 +234,13 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
   )
 }
 
+#' List available SVD backends
+#'
+#' Reports backend labels accepted by high-level APIs and whether each backend
+#' is currently available.
+#'
+#' @return Data frame with columns `method` and `enabled`.
+#' @export
 svd_methods <- function() {
   methods <- .svd_methods_all
   enabled <- rep(TRUE, length(methods))
@@ -233,6 +253,19 @@ svd_methods <- function() {
   )
 }
 
+#' Run a single truncated SVD through fastPLS dispatch
+#'
+#' Utility wrapper around the internal truncated SVD dispatcher used by fastPLS.
+#'
+#' @param A Numeric matrix.
+#' @param k Requested truncated rank.
+#' @param method Backend label.
+#' @param rsvd_oversample RSVD oversampling.
+#' @param rsvd_power RSVD power iterations.
+#' @param seed RSVD seed.
+#' @param left_only Return left singular vectors only.
+#' @return List with `U`, `s`, `Vt`, `method`, and elapsed time.
+#' @export
 svd_run <- function(A,
                     k,
                     method = c("dc", "cpu_rsvd", "irlba", "cuda_rsvd"),
@@ -270,6 +303,20 @@ svd_run <- function(A,
   out_norm
 }
 
+#' Benchmark truncated SVD backends
+#'
+#' Repeats truncated SVD calls for selected backend labels.
+#'
+#' @param A Numeric matrix.
+#' @param k Requested truncated rank.
+#' @param methods Backend labels to test.
+#' @param reps Repetitions per method.
+#' @param rsvd_oversample RSVD oversampling.
+#' @param rsvd_power RSVD power iterations.
+#' @param seed RSVD seed.
+#' @param left_only Return left singular vectors only.
+#' @return Data frame with `method`, `rep`, `elapsed`, and `status`.
+#' @export
 svd_benchmark <- function(A,
                           k,
                           methods = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
@@ -565,6 +612,15 @@ svd_benchmark <- function(A,
   out
 }
 
+#' Pure-R PLS reference implementation
+#'
+#' Pure-R implementation of `plssvd` and `simpls` with CPU-only SVD choices.
+#'
+#' @inheritParams pls
+#' @param method One of `"simpls"` or `"plssvd"`.
+#' @param svd.method One of `"irlba"`, `"dc"`, `"cpu_rsvd"`.
+#' @return A `fastPLS` object.
+#' @export
 pls_r = function (Xtrain,
                   Ytrain,
                   Xtest = NULL,
@@ -653,6 +709,34 @@ pls_r = function (Xtrain,
 
 
 
+#' Partial Least Squares with selectable outer algorithm and SVD backend
+#'
+#' Outer algorithm (`method`) and inner linear algebra backend (`svd.method`) are
+#' configurable independently.
+#'
+#' @param Xtrain Numeric training predictor matrix.
+#' @param Ytrain Training response (numeric or factor).
+#' @param Xtest Optional test predictor matrix.
+#' @param Ytest Optional test response for `Q2Y`.
+#' @param ncomp Number of components (scalar or vector).
+#' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
+#' @param method One of `"simpls"`, `"plssvd"`, `"simpls_fast"`.
+#' @param svd.method One of `"irlba"`, `"dc"`, `"cpu_rsvd"`, `"cuda_rsvd"`.
+#' @param rsvd_oversample RSVD oversampling.
+#' @param rsvd_power RSVD power iterations.
+#' @param seed RSVD seed.
+#' @param fast_block `simpls_fast` block refresh size.
+#' @param fast_center_t `simpls_fast` score centering toggle.
+#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
+#' @param fast_incremental `simpls_fast` incremental block-power toggle.
+#' @param fast_inc_iters `simpls_fast` incremental power iterations.
+#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
+#' @param fit Return fitted values and `R2Y` when `TRUE`.
+#' @param proj Return projected `Ttest` when `TRUE`.
+#' @param perm.test Run permutation test.
+#' @param times Number of permutations.
+#' @return A `fastPLS` object.
+#' @export
 pls =  function (Xtrain, 
                  Ytrain, 
                  Xtest = NULL, 
@@ -858,6 +942,18 @@ pls =  function (Xtrain,
 
 
 
+#' Cross-validation component optimization for PLS
+#'
+#' Performs k-fold CV over candidate component counts for `simpls` or `plssvd`.
+#'
+#' @inheritParams pls
+#' @param Xdata Predictor matrix.
+#' @param Ydata Response (numeric or factor).
+#' @param constrain Optional grouping vector for constrained splitting.
+#' @param kfold Number of folds.
+#' @param method One of `"simpls"` or `"plssvd"` (no `simpls_fast` support).
+#' @return List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
+#' @export
 optim.pls.cv =  function (Xdata,
                           Ydata, 
                           ncomp=2, 
@@ -915,6 +1011,20 @@ optim.pls.cv =  function (Xdata,
 
 
 
+#' Nested cross-validation for PLS
+#'
+#' Runs outer/inner CV loops for performance estimation and component selection.
+#'
+#' @inheritParams pls
+#' @param Xdata Predictor matrix.
+#' @param Ydata Response (numeric or factor).
+#' @param constrain Grouping vector for constrained splitting.
+#' @param runn Number of repeated runs.
+#' @param kfold_inner Inner-fold count.
+#' @param kfold_outer Outer-fold count.
+#' @param method One of `"simpls"` or `"plssvd"` (no `simpls_fast` support).
+#' @return List of nested CV outputs and summaries.
+#' @export
 pls.double.cv = function(Xdata,
                          Ydata,
                          ncomp=2,
@@ -1095,6 +1205,13 @@ Vip <- function(object) {
 }
 
 
+#' Variable importance in projection (VIP)
+#'
+#' Computes VIP trajectories from fitted model components.
+#'
+#' @param model Fitted `fastPLS` model.
+#' @return Numeric matrix (single response) or list of matrices (multi-response).
+#' @export
 ViP <- function(model) {
   
   u <- nrow(model$Q)

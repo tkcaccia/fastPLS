@@ -1,0 +1,6 @@
+^README_DEV[.]md$
+^API_AUDIT_NOTE[.]md$
+^benchmark_metref_all_options_with_R_svd_ncomp_custom[.]R$
+^cifar100_bench_overnight_progress[.]R$
+^metref_benchmark_plots_ncomp_custom[.]R$
+^fastPLS[.]Rcheck$

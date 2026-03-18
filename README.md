@@ -32,6 +32,24 @@ with interchangeable SVD backends.
 
 Check runtime availability using `has_cuda()` and `svd_methods()`.
 
+## Method/Backend Summary
+
+| Outer algorithm | Inner backend | Exact/approximate | Iterative/direct (inner) | CPU/GPU | Supported functions |
+|---|---|---|---|---|---|
+| `plssvd` | `dc` | Exact | Direct SVD (`svd_econ`) | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | `irlba` | Typically exact fallback for small matrices; legacy IRLB branch for larger `S` in PLS C++ loops | Iterative Lanczos branch in selected PLS paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | `cuda_rsvd` | Approximate | Iterative randomized sampling/power GEMM on GPU + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `dc` | Exact | Direct SVD (`svd_econ`) per component on deflated `S` | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `irlba` | Legacy truncated branch in selected C++ paths | Iterative Lanczos in selected paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `cuda_rsvd` | Approximate | GPU randomized sampling/power + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls_fast` | `dc`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`dc` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls` only |
+
+Notes:
+- `simpls_fast` is currently exposed by `pls()` only (not by `optim.pls.cv()` or `pls.double.cv()`).
+- `svd_run()`/`svd_benchmark()` are backend utility wrappers; their `irlba` label currently follows exact dispatch in utility mode.
+
 ## Public API (current)
 
 Main modeling functions:
