@@ -13,6 +13,7 @@ SVDOptions options_from_method_id(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   unsigned int seed,
   bool left_only,
   bool use_full_svd
@@ -20,6 +21,7 @@ SVDOptions options_from_method_id(
   SVDOptions opt;
   opt.oversample = std::max(rsvd_oversample, 0);
   opt.power_iters = std::max(rsvd_power, 0);
+  opt.svds_tol = std::max(svds_tol, 0.0);
   opt.seed = seed;
   opt.left_only = left_only;
   opt.use_full_svd = use_full_svd;

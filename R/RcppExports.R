@@ -28,16 +28,16 @@ has_cuda <- function() {
     .Call(`_fastPLS_has_cuda`)
 }
 
-truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, seed, left_only) {
-    .Call(`_fastPLS_truncated_svd_debug`, A, k, svd_method, rsvd_oversample, rsvd_power, seed, left_only)
+truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only) {
+    .Call(`_fastPLS_truncated_svd_debug`, A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only)
 }
 
-pls_model2 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed) {
-    .Call(`_fastPLS_pls_model2`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed)
+pls_model2 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model2`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
-pls_model2_fast <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed) {
-    .Call(`_fastPLS_pls_model2_fast`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed)
+pls_model2_fast <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model2_fast`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
 pls_predict <- function(model, Xtest, proj) {
@@ -48,15 +48,15 @@ unic <- function(x) {
     .Call(`_fastPLS_unic`, x)
 }
 
-optim_pls_cv <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, seed) {
-    .Call(`_fastPLS_optim_pls_cv`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, seed)
+optim_pls_cv <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_optim_pls_cv`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
-double_pls_cv <- function(Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, seed) {
-    .Call(`_fastPLS_double_pls_cv`, Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, seed)
+double_pls_cv <- function(Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_double_pls_cv`, Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
-pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed) {
-    .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed)
+pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 

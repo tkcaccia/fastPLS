@@ -93,8 +93,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // truncated_svd_debug
-Rcpp::List truncated_svd_debug(arma::mat A, int k, int svd_method, int rsvd_oversample, int rsvd_power, int seed, bool left_only);
-RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
+Rcpp::List truncated_svd_debug(arma::mat A, int k, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool left_only);
+RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -103,15 +103,16 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
-    rcpp_result_gen = Rcpp::wrap(truncated_svd_debug(A, k, svd_method, rsvd_oversample, rsvd_power, seed, left_only));
+    rcpp_result_gen = Rcpp::wrap(truncated_svd_debug(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model2
-List pls_model2(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_pls_model2(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+List pls_model2(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -123,14 +124,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model2(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model2_fast
-List pls_model2_fast(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_pls_model2_fast(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+List pls_model2_fast(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2_fast(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -142,8 +144,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2_fast(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -172,8 +175,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // optim_pls_cv
-List optim_pls_cv(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_optim_pls_cv(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+List optim_pls_cv(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_optim_pls_cv(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -187,14 +190,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_pls_cv(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, seed));
+    rcpp_result_gen = Rcpp::wrap(optim_pls_cv(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
 // double_pls_cv
-List double_pls_cv(arma::mat Xdata, arma::mat Ydata, arma::ivec ncomp, arma::ivec constrain, int scaling, int kfold_inner, int kfold_outer, int method, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_double_pls_cv(SEXP XdataSEXP, SEXP YdataSEXP, SEXP ncompSEXP, SEXP constrainSEXP, SEXP scalingSEXP, SEXP kfold_innerSEXP, SEXP kfold_outerSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+List double_pls_cv(arma::mat Xdata, arma::mat Ydata, arma::ivec ncomp, arma::ivec constrain, int scaling, int kfold_inner, int kfold_outer, int method, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_double_pls_cv(SEXP XdataSEXP, SEXP YdataSEXP, SEXP ncompSEXP, SEXP constrainSEXP, SEXP scalingSEXP, SEXP kfold_innerSEXP, SEXP kfold_outerSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -209,14 +213,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(double_pls_cv(Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, seed));
+    rcpp_result_gen = Rcpp::wrap(double_pls_cv(Xdata, Ydata, ncomp, constrain, scaling, kfold_inner, kfold_outer, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model1
-List pls_model1(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_pls_model1(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+List pls_model1(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model1(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -228,8 +233,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model1(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model1(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -241,14 +247,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_IRLB", (DL_FUNC) &_fastPLS_IRLB, 7},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
-    {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 7},
-    {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 9},
-    {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 9},
+    {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
+    {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
+    {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_unic", (DL_FUNC) &_fastPLS_unic, 1},
-    {"_fastPLS_optim_pls_cv", (DL_FUNC) &_fastPLS_optim_pls_cv, 11},
-    {"_fastPLS_double_pls_cv", (DL_FUNC) &_fastPLS_double_pls_cv, 12},
-    {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 9},
+    {"_fastPLS_optim_pls_cv", (DL_FUNC) &_fastPLS_optim_pls_cv, 12},
+    {"_fastPLS_double_pls_cv", (DL_FUNC) &_fastPLS_double_pls_cv, 13},
+    {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
     {NULL, NULL, 0}
 };
 

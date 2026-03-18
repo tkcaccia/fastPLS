@@ -8,6 +8,7 @@ test_that("cpu_rsvd approximates arpack on dense matrices", {
     svd_method = 2L,
     rsvd_oversample = 10L,
     rsvd_power = 1L,
+    svds_tol = 0,
     seed = 7L,
     left_only = FALSE
   )
@@ -17,6 +18,7 @@ test_that("cpu_rsvd approximates arpack on dense matrices", {
     svd_method = 4L,
     rsvd_oversample = 12L,
     rsvd_power = 2L,
+    svds_tol = 0,
     seed = 7L,
     left_only = FALSE
   )

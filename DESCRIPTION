@@ -1,14 +1,15 @@
 Package: fastPLS
 Type: Package
 Title: A Fast Implementation of Partial Least Square
-Version: 0.6.0
+Version: 0.7.0
 Date: 2026-03-18
-Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "trl", "cre"),email = "stefano.cacciatore@icgeb.org", comment = c(ORCID = "0000-0001-7052-7156")),
+Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "cre"),email = "stefano.cacciatore@icgeb.org", comment = c(ORCID = "0000-0001-7052-7156")),
              person("Dupe", "Ojo", role = "aut",email = "dupe.ojo@icgeb.org", comment = c(ORCID = "0000-0002-5301-8592")),
              person("Leonardo", "Tenori", role = "aut",email = "tenori@cerm.unifi.it", comment = c(ORCID = "0000-0001-6438-059X")),
              person("Alessia", "Vignoli", role = "aut",email = "vignoli@cerm.unifi.it", comment = c(ORCID = "0000-0003-4038-6596")))
 Description: An implementation in 'Rcpp' / 'RcppArmadillo' of Partial Least Square algorithms. This package includes other functions to perform the double cross-validation and a fast correlation.
 License: GPL-3
+Author: Stefano Cacciatore, Dupe Ojo, Leonardo Tenori, Alessia Vignoli
 Depends: R (>= 2.10.0), Matrix
 Imports: Rcpp (>= 0.12.17), methods
 LinkingTo: Rcpp, RcppArmadillo, Matrix

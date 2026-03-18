@@ -21,6 +21,7 @@ pls(
   svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
+  svds_tol = 0,
   seed = 1L,
   fast_block = 4L,
   fast_center_t = FALSE,
@@ -81,6 +82,10 @@ cross-covariance matrix is larger than \code{5 x 5}; otherwise falls back to exa
 Effective sampled subspace size is approximately \code{k + rsvd_oversample}.}
 
 \item{rsvd_power}{Number of randomized power iterations for RSVD backends.}
+
+\item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
+\code{svd.method = "arpack"}. Larger values can reduce runtime but may loosen
+convergence precision. Ignored by non-ARPACK backends.}
 
 \item{seed}{Random seed used by randomized SVD backends.}
 

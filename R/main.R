@@ -91,6 +91,7 @@ pls.model1 =
             svd.method = 1,
             rsvd_oversample = 10L,
             rsvd_power = 1L,
+            svds_tol = 0,
             seed = 1L)
   {
     Xtrain <- as.matrix(Xtrain)
@@ -105,6 +106,7 @@ pls.model1 =
       svd.method,
       rsvd_oversample,
       rsvd_power,
+      svds_tol,
       seed
     )
     class(model) = "fastPLS"
@@ -120,6 +122,7 @@ pls.model2 =
             svd.method = 1,
             rsvd_oversample = 10L,
             rsvd_power = 1L,
+            svds_tol = 0,
             seed = 1L)
   {
     model = pls_model2(
@@ -131,6 +134,7 @@ pls.model2 =
       svd.method,
       rsvd_oversample,
       rsvd_power,
+      svds_tol,
       seed
     )
     class(model) = "fastPLS"
@@ -146,6 +150,7 @@ pls.model2.fast =
             svd.method = 1,
             rsvd_oversample = 10L,
             rsvd_power = 1L,
+            svds_tol = 0,
             seed = 1L,
             fast_block = 4L,
             fast_center_t = FALSE,
@@ -164,6 +169,7 @@ pls.model2.fast =
         svd.method,
         rsvd_oversample,
         rsvd_power,
+        svds_tol,
         seed
       ),
       fast_block = fast_block,
@@ -275,6 +281,9 @@ svd_methods <- function() {
 #' @param method Backend label.
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
+#' @param svds_tol Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.
+#'   Larger values can reduce runtime but may reduce numerical precision. Ignored by
+#'   non-ARPACK backends.
 #' @param seed RSVD seed.
 #' @param left_only Return left singular vectors only.
 #' @return List with `U`, `s`, `Vt`, `method`, and elapsed time.
@@ -284,6 +293,7 @@ svd_run <- function(A,
                     method = c("arpack", "cpu_rsvd", "irlba", "cuda_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
+                    svds_tol = 0,
                     seed = 1L,
                     left_only = FALSE) {
   method <- .normalize_svd_method(method)
@@ -303,6 +313,7 @@ svd_run <- function(A,
       svd_method = as.integer(svdmeth),
       rsvd_oversample = as.integer(rsvd_oversample),
       rsvd_power = as.integer(rsvd_power),
+      svds_tol = as.numeric(svds_tol),
       seed = as.integer(seed),
       left_only = isTRUE(left_only)
     )
@@ -327,6 +338,7 @@ svd_run <- function(A,
 #' @param reps Repetitions per method.
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
+#' @param svds_tol Tolerance passed to ARPACK `svds()` when applicable.
 #' @param seed RSVD seed.
 #' @param left_only Return left singular vectors only.
 #' @return Data frame with `method`, `rep`, `elapsed`, and `status`.
@@ -337,6 +349,7 @@ svd_benchmark <- function(A,
                           reps = 3L,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
+                          svds_tol = 0,
                           seed = 1L,
                           left_only = FALSE) {
   A <- as.matrix(A)
@@ -377,6 +390,7 @@ svd_benchmark <- function(A,
             svd_method = as.integer(svdmeth),
             rsvd_oversample = as.integer(rsvd_oversample),
             rsvd_power = as.integer(rsvd_power),
+            svds_tol = as.numeric(svds_tol),
             seed = as.integer(seed + r - 1L),
             left_only = isTRUE(left_only)
           )
@@ -406,6 +420,7 @@ svd_benchmark <- function(A,
                              svd.method = c("irlba", "arpack", "cpu_rsvd"),
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
+                             svds_tol = 0,
                              seed = 1L) {
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
@@ -464,6 +479,7 @@ svd_benchmark <- function(A,
                           svd.method,
                           rsvd_oversample,
                           rsvd_power,
+                          svds_tol,
                           seed) {
   n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
   ncomp <- as.integer(ncomp)
@@ -488,7 +504,7 @@ svd_benchmark <- function(A,
   Ytrain <- sweep(Ytrain, 2, mY[1, ], "-")
 
   S <- crossprod(Xtrain, Ytrain)
-  s <- .truncated_svd_r(S, max_ncomp_eff, svd.method, rsvd_oversample, rsvd_power, seed)
+  s <- .truncated_svd_r(S, max_ncomp_eff, svd.method, rsvd_oversample, rsvd_power, svds_tol, seed)
   max_ncomp_eff <- min(max_ncomp_eff, ncol(s$u), ncol(s$v))
   R <- s$u[, seq_len(max_ncomp_eff), drop = FALSE]
   Q <- s$v[, seq_len(max_ncomp_eff), drop = FALSE]
@@ -538,6 +554,7 @@ svd_benchmark <- function(A,
                           svd.method,
                           rsvd_oversample,
                           rsvd_power,
+                          svds_tol,
                           seed) {
   n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
   ncomp <- as.integer(ncomp)
@@ -572,7 +589,7 @@ svd_benchmark <- function(A,
 
   i_out <- 1L
   for (a in seq_len(max_ncomp)) {
-    rr <- .truncated_svd_r(S, 1L, svd.method, rsvd_oversample, rsvd_power, seed + a - 1L)$u[, 1, drop = FALSE]
+    rr <- .truncated_svd_r(S, 1L, svd.method, rsvd_oversample, rsvd_power, svds_tol, seed + a - 1L)$u[, 1, drop = FALSE]
     tt <- X %*% rr
     tt <- sweep(tt, 2, colMeans(tt), "-")
     tnorm <- sqrt(sum(tt * tt))
@@ -646,6 +663,7 @@ pls_r = function (Xtrain,
                   svd.method = c("irlba", "arpack", "cpu_rsvd"),
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
+                  svds_tol = 0,
                   seed = 1L,
                   fit = FALSE,
                   proj = FALSE,
@@ -673,12 +691,12 @@ pls_r = function (Xtrain,
     ncomp <- cap$ncomp
     model <- .pls_model1_r(
       Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, seed
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
     )
   } else {
     model <- .pls_model2_r(
       Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, seed
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
     )
   }
   model$classification <- classification
@@ -695,10 +713,10 @@ pls_r = function (Xtrain,
         Xperm <- Xtrain[ss, , drop = FALSE]
         if (meth == 1L) {
           mperm <- .pls_model1_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, seed + i)
+                                 rsvd_oversample, rsvd_power, svds_tol, seed + i)
         } else {
           mperm <- .pls_model2_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, seed + i)
+                                 rsvd_oversample, rsvd_power, svds_tol, seed + i)
         }
         mperm$classification <- classification
         mperm$lev <- lev
@@ -740,6 +758,8 @@ pls_r = function (Xtrain,
 #' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"`, `"cuda_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
+#' @param svds_tol Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.
+#'   Larger values can improve speed at the cost of looser convergence.
 #' @param seed RSVD seed.
 #' @param fast_block `simpls_fast` block refresh size.
 #' @param fast_center_t `simpls_fast` score centering toggle.
@@ -763,6 +783,7 @@ pls =  function (Xtrain,
                  svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
+                 svds_tol = 0,
                  seed = 1L,
                  fast_block = 4L,
                  fast_center_t = FALSE,
@@ -820,6 +841,7 @@ pls =  function (Xtrain,
       svd.method=svdmeth,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
+      svds_tol=svds_tol,
       seed=seed
     )
   }
@@ -833,6 +855,7 @@ pls =  function (Xtrain,
       svd.method=svdmeth,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
+      svds_tol=svds_tol,
       seed=seed
     )
   }
@@ -846,6 +869,7 @@ pls =  function (Xtrain,
       svd.method=svdmeth,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
+      svds_tol=svds_tol,
       seed=seed,
       fast_block=fast_block,
       fast_center_t=fast_center_t,
@@ -887,6 +911,7 @@ pls =  function (Xtrain,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
+              svds_tol=svds_tol,
               seed=seed
             )
           }
@@ -899,6 +924,7 @@ pls =  function (Xtrain,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
+              svds_tol=svds_tol,
               seed=seed
             )
           }
@@ -911,6 +937,7 @@ pls =  function (Xtrain,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
+              svds_tol=svds_tol,
               seed=seed,
               fast_block=fast_block,
               fast_center_t=fast_center_t,
@@ -986,6 +1013,7 @@ optim.pls.cv =  function (Xdata,
                           svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
+                          svds_tol = 0,
                           seed = 1L,
                           fast_block = 4L,
                           fast_center_t = FALSE,
@@ -1033,6 +1061,7 @@ optim.pls.cv =  function (Xdata,
         svd_method=svdmeth,
         rsvd_oversample=rsvd_oversample,
         rsvd_power=rsvd_power,
+        svds_tol=svds_tol,
         seed=seed
       ),
       fast_block = fast_block,
@@ -1054,6 +1083,7 @@ optim.pls.cv =  function (Xdata,
       svd_method=svdmeth,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
+      svds_tol=svds_tol,
       seed=seed
     )
   }
@@ -1094,6 +1124,7 @@ pls.double.cv = function(Xdata,
                          svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
+                         svds_tol = 0,
                          seed = 1L,
                          fast_block = 4L,
                          fast_center_t = FALSE,
@@ -1165,6 +1196,7 @@ pls.double.cv = function(Xdata,
           svd_method=svdmeth,
           rsvd_oversample=rsvd_oversample,
           rsvd_power=rsvd_power,
+          svds_tol=svds_tol,
           seed=seed
         ),
         fast_block = fast_block,
@@ -1187,6 +1219,7 @@ pls.double.cv = function(Xdata,
         svd_method=svdmeth,
         rsvd_oversample=rsvd_oversample,
         rsvd_power=rsvd_power,
+        svds_tol=svds_tol,
         seed=seed
       )
     }
@@ -1264,6 +1297,7 @@ pls.double.cv = function(Xdata,
                 svd_method=svdmeth,
                 rsvd_oversample=rsvd_oversample,
                 rsvd_power=rsvd_power,
+                svds_tol=svds_tol,
                 seed=seed
               ),
               fast_block = fast_block,
@@ -1286,6 +1320,7 @@ pls.double.cv = function(Xdata,
               svd_method=svdmeth,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
+              svds_tol=svds_tol,
               seed=seed
             )$Q2Y
           }

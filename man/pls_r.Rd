@@ -20,6 +20,7 @@ pls_r(
   svd.method = c("irlba", "arpack", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
+  svds_tol = 0,
   seed = 1L,
   fit = FALSE,
   proj = FALSE,
@@ -43,6 +44,9 @@ optional power iterations, reduced exact SVD).
 
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
+\item{svds_tol}{Included for API compatibility with \code{\link{pls}}. In the
+current pure-R implementation, \code{"arpack"} and \code{"irlba"} paths use base
+\code{svd()} and do not consume this tolerance directly.}
 \item{seed}{RSVD seed.}
 }
 

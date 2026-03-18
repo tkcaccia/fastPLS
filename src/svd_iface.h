@@ -30,6 +30,7 @@ struct SVDOptions {
   int oversample = 10;
   int power_iters = 1;
   unsigned int seed = 1;
+  double svds_tol = 0.0;
   bool left_only = false;
   bool use_full_svd = false;
 };
@@ -47,6 +48,7 @@ SVDOptions options_from_method_id(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   unsigned int seed,
   bool left_only,
   bool use_full_svd

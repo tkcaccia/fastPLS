@@ -26,7 +26,7 @@ SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt) {
   bool ok = false;
 #if defined(ARMA_USE_ARPACK)
   if (rank < max_rank) {
-    ok = arma::svds(U, s, V, A, rank);
+    ok = arma::svds(U, s, V, A, rank, opt.svds_tol);
   }
 #endif
   if (!ok) {

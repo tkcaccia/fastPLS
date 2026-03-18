@@ -25,6 +25,7 @@ Rcpp::List truncated_svd_debug(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed,
   bool left_only
 );
@@ -37,6 +38,7 @@ List pls_model1(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 );
 List pls_model2(
@@ -48,6 +50,7 @@ List pls_model2(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 );
 List pls_model2_fast(
@@ -59,6 +62,7 @@ List pls_model2_fast(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 );
 List pls_predict(List& model, arma::mat Xtest, bool proj);
@@ -75,6 +79,7 @@ List optim_pls_cv(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 );
 List double_pls_cv(
@@ -89,6 +94,7 @@ List double_pls_cv(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 );
 

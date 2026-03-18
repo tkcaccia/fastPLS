@@ -19,6 +19,7 @@ optim.pls.cv(
   svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
+  svds_tol = 0,
   seed = 1L,
   fast_block = 4L,
   fast_center_t = FALSE,
@@ -41,6 +42,8 @@ capped to \code{min(nrow(Xdata), ncol(Xdata), ncol(Y_transformed))}.}
 \item{svd.method}{Inner SVD backend used in each fitted fold model.}
 \item{rsvd_oversample}{RSVD oversampling parameter for randomized backends.}
 \item{rsvd_power}{RSVD power iterations for randomized backends.}
+\item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
+\code{svd.method = "arpack"}.}
 \item{seed}{Seed for randomized backends.}
 \item{fast_block}{\code{simpls_fast} block refresh size.}
 \item{fast_center_t}{\code{simpls_fast} score-centering toggle.}

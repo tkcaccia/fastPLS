@@ -1,5 +1,8 @@
-^README_DEV[.]md$
-^API_AUDIT_NOTE[.]md$
-^benchmark$
 ^(bench|benchmark|metref_bench|metref_benchmark|nmr_bench|cifar100_bench).*[.]R$
+^API_AUDIT_NOTE[.]md$
+^README_DEV[.]md$
+^\.DS_Store$
+^\.\.Rcheck$
+^\.gitignore$
+^benchmark$
 ^fastPLS[.]Rcheck$

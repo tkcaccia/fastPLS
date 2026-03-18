@@ -22,6 +22,7 @@ fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   unsigned int seed,
   bool left_only,
   bool use_full_svd
@@ -30,6 +31,7 @@ fastpls_svd::SVDResult compute_truncated_svd_dispatch(
     svd_method,
     rsvd_oversample,
     rsvd_power,
+    svds_tol,
     seed,
     left_only,
     use_full_svd
@@ -188,6 +190,7 @@ Rcpp::List truncated_svd_debug(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed,
   bool left_only
 ) {
@@ -197,6 +200,7 @@ Rcpp::List truncated_svd_debug(
     svd_method,
     rsvd_oversample,
     rsvd_power,
+    svds_tol,
     static_cast<unsigned int>(seed),
     left_only,
     true
@@ -219,6 +223,7 @@ List pls_model2(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 ) {
 
@@ -319,6 +324,7 @@ List pls_model2(
         svd_method,
         rsvd_oversample,
         rsvd_power,
+        svds_tol,
         static_cast<unsigned int>(seed),
         true,
         false
@@ -408,6 +414,7 @@ List pls_model2_fast(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 ) {
   auto env_int_or = [](const char* key, int fallback, int lo, int hi) {
@@ -507,6 +514,7 @@ List pls_model2_fast(
         svd_method,
         rsvd_oversample,
         rsvd_power,
+        svds_tol,
         static_cast<unsigned int>(seed + a),
         true,
         false
@@ -678,6 +686,7 @@ List optim_pls_cv(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 ) {
   if (method == 1) {
@@ -739,13 +748,13 @@ List optim_pls_cv(
     Ytrain=Ydata.rows(w9);
     List model;
     if(method==1){
-      model=pls_model1(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model1(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==2){
-      model=pls_model2(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model2(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==3){
-      model=pls_model2_fast(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model2_fast(Xtrain,Ytrain,ncomp,scaling,FALSE,svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     List pls=pls_predict(model,Xtest,FALSE);
     arma::cube temp1=pls("Ypred");
@@ -754,13 +763,13 @@ List optim_pls_cv(
   }  
   List model_all;
   if(method==1){
-    model_all=pls_model1(Xdata,Ydata,ncomp,scaling,TRUE,svd_method,rsvd_oversample,rsvd_power,seed);
+    model_all=pls_model1(Xdata,Ydata,ncomp,scaling,TRUE,svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
   }
   if(method==2){
-    model_all=pls_model2(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+    model_all=pls_model2(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
   }
   if(method==3){
-    model_all=pls_model2_fast(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+    model_all=pls_model2_fast(Xdata,Ydata,ncomp,scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
   }
   arma::vec R2Y=model_all("R2Y");
   arma::vec Q2Y(length_ncomp);
@@ -798,6 +807,7 @@ List double_pls_cv(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 ) {
   
@@ -861,18 +871,19 @@ List double_pls_cv(
       svd_method,
       rsvd_oversample,
       rsvd_power,
+      svds_tol,
       seed
     );
       
     List model;
     if(method==1){
-      model=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==2){
-      model=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==3){
-      model=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,FALSE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
       
     List pls=pls_predict(model,Xtest,FALSE);
@@ -882,13 +893,13 @@ List double_pls_cv(
     // Calculation of R2Y
     List model_all;
     if(method==1){
-      model_all=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model_all=pls_model1(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==2){
-      model_all=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model_all=pls_model2(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     if(method==3){
-      model_all=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,seed);
+      model_all=pls_model2_fast(Xtrain,Ytrain,opt("optim_comp"),scaling,TRUE, svd_method,rsvd_oversample,rsvd_power,svds_tol,seed);
     }
     
     
@@ -923,6 +934,7 @@ List pls_model1(
   int svd_method,
   int rsvd_oversample,
   int rsvd_power,
+  double svds_tol,
   int seed
 ) {
   
@@ -990,6 +1002,7 @@ List pls_model1(
       svd_method,
       rsvd_oversample,
       rsvd_power,
+      svds_tol,
       static_cast<unsigned int>(seed),
       false,
       true
