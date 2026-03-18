@@ -22,6 +22,11 @@ pls(
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
+  irlba_work = 0L,
+  irlba_maxit = 2000L,
+  irlba_tol = 1e-06,
+  irlba_eps = 1e-09,
+  irlba_svtol = 1e-06,
   seed = 1L,
   fast_block = 4L,
   fast_center_t = FALSE,
@@ -86,6 +91,17 @@ Effective sampled subspace size is approximately \code{k + rsvd_oversample}.}
 \item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
 \code{svd.method = "arpack"}. Larger values can reduce runtime but may loosen
 convergence precision. Ignored by non-ARPACK backends.}
+
+\item{irlba_work}{IRLBA working subspace size. Used when legacy \code{"irlba"}
+path is active in C++ PLS loops. \code{0} keeps the internal default.}
+
+\item{irlba_maxit}{IRLBA maximum iterations.}
+
+\item{irlba_tol}{IRLBA convergence tolerance.}
+
+\item{irlba_eps}{IRLBA invariant subspace detection tolerance.}
+
+\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
 
 \item{seed}{Random seed used by randomized SVD backends.}
 

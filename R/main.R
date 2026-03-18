@@ -74,6 +74,39 @@
   force(expr)
 }
 
+.with_irlba_options <- function(expr,
+                                irlba_work = 0L,
+                                irlba_maxit = 2000L,
+                                irlba_tol = 1e-6,
+                                irlba_eps = 1e-9,
+                                irlba_svtol = 1e-6) {
+  old <- c(
+    FASTPLS_IRLBA_WORK = Sys.getenv("FASTPLS_IRLBA_WORK", unset = NA_character_),
+    FASTPLS_IRLBA_MAXIT = Sys.getenv("FASTPLS_IRLBA_MAXIT", unset = NA_character_),
+    FASTPLS_IRLBA_TOL = Sys.getenv("FASTPLS_IRLBA_TOL", unset = NA_character_),
+    FASTPLS_IRLBA_EPS = Sys.getenv("FASTPLS_IRLBA_EPS", unset = NA_character_),
+    FASTPLS_IRLBA_SVTOL = Sys.getenv("FASTPLS_IRLBA_SVTOL", unset = NA_character_)
+  )
+  on.exit({
+    for (nm in names(old)) {
+      val <- old[[nm]]
+      if (is.na(val)) {
+        Sys.unsetenv(nm)
+      } else {
+        Sys.setenv(structure(val, names = nm))
+      }
+    }
+  }, add = TRUE)
+  Sys.setenv(
+    FASTPLS_IRLBA_WORK = as.character(as.integer(irlba_work)),
+    FASTPLS_IRLBA_MAXIT = as.character(as.integer(irlba_maxit)),
+    FASTPLS_IRLBA_TOL = as.character(as.numeric(irlba_tol)),
+    FASTPLS_IRLBA_EPS = as.character(as.numeric(irlba_eps)),
+    FASTPLS_IRLBA_SVTOL = as.character(as.numeric(irlba_svtol))
+  )
+  force(expr)
+}
+
 .normalize_svd_method <- function(method) {
   if (length(method) == 1L && !is.na(method) && identical(as.character(method), "dc")) {
     warning("svd.method='dc' is deprecated; use 'arpack' instead.", call. = FALSE)
@@ -92,22 +125,34 @@ pls.model1 =
             rsvd_oversample = 10L,
             rsvd_power = 1L,
             svds_tol = 0,
+            irlba_work = 0L,
+            irlba_maxit = 2000L,
+            irlba_tol = 1e-6,
+            irlba_eps = 1e-9,
+            irlba_svtol = 1e-6,
             seed = 1L)
   {
     Xtrain <- as.matrix(Xtrain)
     Ytrain <- as.matrix(Ytrain)
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
-    model = pls_model1(
-      Xtrain,
-      Ytrain,
-      cap$ncomp,
-      scaling,
-      fit,
-      svd.method,
-      rsvd_oversample,
-      rsvd_power,
-      svds_tol,
-      seed
+    model <- .with_irlba_options(
+      pls_model1(
+        Xtrain,
+        Ytrain,
+        cap$ncomp,
+        scaling,
+        fit,
+        svd.method,
+        rsvd_oversample,
+        rsvd_power,
+        svds_tol,
+        seed
+      ),
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
     )
     class(model) = "fastPLS"
     model
@@ -123,19 +168,31 @@ pls.model2 =
             rsvd_oversample = 10L,
             rsvd_power = 1L,
             svds_tol = 0,
+            irlba_work = 0L,
+            irlba_maxit = 2000L,
+            irlba_tol = 1e-6,
+            irlba_eps = 1e-9,
+            irlba_svtol = 1e-6,
             seed = 1L)
   {
-    model = pls_model2(
-      Xtrain,
-      Ytrain,
-      ncomp,
-      scaling,
-      fit,
-      svd.method,
-      rsvd_oversample,
-      rsvd_power,
-      svds_tol,
-      seed
+    model <- .with_irlba_options(
+      pls_model2(
+        Xtrain,
+        Ytrain,
+        ncomp,
+        scaling,
+        fit,
+        svd.method,
+        rsvd_oversample,
+        rsvd_power,
+        svds_tol,
+        seed
+      ),
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
     )
     class(model) = "fastPLS"
     model
@@ -151,6 +208,11 @@ pls.model2.fast =
             rsvd_oversample = 10L,
             rsvd_power = 1L,
             svds_tol = 0,
+            irlba_work = 0L,
+            irlba_maxit = 2000L,
+            irlba_tol = 1e-6,
+            irlba_eps = 1e-9,
+            irlba_svtol = 1e-6,
             seed = 1L,
             fast_block = 4L,
             fast_center_t = FALSE,
@@ -159,25 +221,32 @@ pls.model2.fast =
             fast_inc_iters = 2L,
             fast_defl_cache = TRUE)
   {
-    model <- .with_fastpls_fast_options(
-      pls_model2_fast(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        scaling,
-        fit,
-        svd.method,
-        rsvd_oversample,
-        rsvd_power,
-        svds_tol,
-        seed
+    model <- .with_irlba_options(
+      .with_fastpls_fast_options(
+        pls_model2_fast(
+          Xtrain,
+          Ytrain,
+          ncomp,
+          scaling,
+          fit,
+          svd.method,
+          rsvd_oversample,
+          rsvd_power,
+          svds_tol,
+          seed
+        ),
+        fast_block = fast_block,
+        fast_center_t = fast_center_t,
+        fast_reorth_v = fast_reorth_v,
+        fast_incremental = fast_incremental,
+        fast_inc_iters = fast_inc_iters,
+        fast_defl_cache = fast_defl_cache
       ),
-      fast_block = fast_block,
-      fast_center_t = fast_center_t,
-      fast_reorth_v = fast_reorth_v,
-      fast_incremental = fast_incremental,
-      fast_inc_iters = fast_inc_iters,
-      fast_defl_cache = fast_defl_cache
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
     )
     class(model) = "fastPLS"
     model
@@ -664,6 +733,11 @@ pls_r = function (Xtrain,
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
                   svds_tol = 0,
+                  irlba_work = 0L,
+                  irlba_maxit = 2000L,
+                  irlba_tol = 1e-6,
+                  irlba_eps = 1e-9,
+                  irlba_svtol = 1e-6,
                   seed = 1L,
                   fit = FALSE,
                   proj = FALSE,
@@ -784,6 +858,11 @@ pls =  function (Xtrain,
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
                  svds_tol = 0,
+                 irlba_work = 0L,
+                 irlba_maxit = 2000L,
+                 irlba_tol = 1e-6,
+                 irlba_eps = 1e-9,
+                 irlba_svtol = 1e-6,
                  seed = 1L,
                  fast_block = 4L,
                  fast_center_t = FALSE,
@@ -842,6 +921,11 @@ pls =  function (Xtrain,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
       svds_tol=svds_tol,
+      irlba_work=irlba_work,
+      irlba_maxit=irlba_maxit,
+      irlba_tol=irlba_tol,
+      irlba_eps=irlba_eps,
+      irlba_svtol=irlba_svtol,
       seed=seed
     )
   }
@@ -856,6 +940,11 @@ pls =  function (Xtrain,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
       svds_tol=svds_tol,
+      irlba_work=irlba_work,
+      irlba_maxit=irlba_maxit,
+      irlba_tol=irlba_tol,
+      irlba_eps=irlba_eps,
+      irlba_svtol=irlba_svtol,
       seed=seed
     )
   }
@@ -870,6 +959,11 @@ pls =  function (Xtrain,
       rsvd_oversample=rsvd_oversample,
       rsvd_power=rsvd_power,
       svds_tol=svds_tol,
+      irlba_work=irlba_work,
+      irlba_maxit=irlba_maxit,
+      irlba_tol=irlba_tol,
+      irlba_eps=irlba_eps,
+      irlba_svtol=irlba_svtol,
       seed=seed,
       fast_block=fast_block,
       fast_center_t=fast_center_t,
@@ -912,6 +1006,11 @@ pls =  function (Xtrain,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
               svds_tol=svds_tol,
+              irlba_work=irlba_work,
+              irlba_maxit=irlba_maxit,
+              irlba_tol=irlba_tol,
+              irlba_eps=irlba_eps,
+              irlba_svtol=irlba_svtol,
               seed=seed
             )
           }
@@ -925,6 +1024,11 @@ pls =  function (Xtrain,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
               svds_tol=svds_tol,
+              irlba_work=irlba_work,
+              irlba_maxit=irlba_maxit,
+              irlba_tol=irlba_tol,
+              irlba_eps=irlba_eps,
+              irlba_svtol=irlba_svtol,
               seed=seed
             )
           }
@@ -938,6 +1042,11 @@ pls =  function (Xtrain,
               rsvd_oversample=rsvd_oversample,
               rsvd_power=rsvd_power,
               svds_tol=svds_tol,
+              irlba_work=irlba_work,
+              irlba_maxit=irlba_maxit,
+              irlba_tol=irlba_tol,
+              irlba_eps=irlba_eps,
+              irlba_svtol=irlba_svtol,
               seed=seed,
               fast_block=fast_block,
               fast_center_t=fast_center_t,
@@ -1014,6 +1123,11 @@ optim.pls.cv =  function (Xdata,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           svds_tol = 0,
+                          irlba_work = 0L,
+                          irlba_maxit = 2000L,
+                          irlba_tol = 1e-6,
+                          irlba_eps = 1e-9,
+                          irlba_svtol = 1e-6,
                           seed = 1L,
                           fast_block = 4L,
                           fast_center_t = FALSE,
@@ -1049,7 +1163,37 @@ optim.pls.cv =  function (Xdata,
     ncomp <- cap$ncomp
   }
   if (meth == 3L) {
-    res <- .with_fastpls_fast_options(
+    res <- .with_irlba_options(
+      .with_fastpls_fast_options(
+        optim_pls_cv(
+          Xdata=Xdata,
+          Ydata=Ydata,
+          constrain=constrain,
+          ncomp=ncomp,
+          scaling=scal,
+          kfold=kfold,
+          method=meth,
+          svd_method=svdmeth,
+          rsvd_oversample=rsvd_oversample,
+          rsvd_power=rsvd_power,
+          svds_tol=svds_tol,
+          seed=seed
+        ),
+        fast_block = fast_block,
+        fast_center_t = fast_center_t,
+        fast_reorth_v = fast_reorth_v,
+        fast_incremental = fast_incremental,
+        fast_inc_iters = fast_inc_iters,
+        fast_defl_cache = fast_defl_cache
+      ),
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
+    )
+  } else {
+    res <- .with_irlba_options(
       optim_pls_cv(
         Xdata=Xdata,
         Ydata=Ydata,
@@ -1064,27 +1208,11 @@ optim.pls.cv =  function (Xdata,
         svds_tol=svds_tol,
         seed=seed
       ),
-      fast_block = fast_block,
-      fast_center_t = fast_center_t,
-      fast_reorth_v = fast_reorth_v,
-      fast_incremental = fast_incremental,
-      fast_inc_iters = fast_inc_iters,
-      fast_defl_cache = fast_defl_cache
-    )
-  } else {
-    res=optim_pls_cv(
-      Xdata=Xdata,
-      Ydata=Ydata,
-      constrain=constrain,
-      ncomp=ncomp,
-      scaling=scal,
-      kfold=kfold,
-      method=meth,
-      svd_method=svdmeth,
-      rsvd_oversample=rsvd_oversample,
-      rsvd_power=rsvd_power,
-      svds_tol=svds_tol,
-      seed=seed
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
     )
   }
   res
@@ -1125,6 +1253,11 @@ pls.double.cv = function(Xdata,
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,
+                         irlba_work = 0L,
+                         irlba_maxit = 2000L,
+                         irlba_tol = 1e-6,
+                         irlba_eps = 1e-9,
+                         irlba_svtol = 1e-6,
                          seed = 1L,
                          fast_block = 4L,
                          fast_center_t = FALSE,
@@ -1183,7 +1316,38 @@ pls.double.cv = function(Xdata,
     
     
     if (meth == 3L) {
-      o <- .with_fastpls_fast_options(
+      o <- .with_irlba_options(
+        .with_fastpls_fast_options(
+          double_pls_cv(
+            Xdata,
+            Ydata,
+            ncomp,
+            constrain,
+            scal,
+            kfold_inner,
+            kfold_outer,
+            meth,
+            svd_method=svdmeth,
+            rsvd_oversample=rsvd_oversample,
+            rsvd_power=rsvd_power,
+            svds_tol=svds_tol,
+            seed=seed
+          ),
+          fast_block = fast_block,
+          fast_center_t = fast_center_t,
+          fast_reorth_v = fast_reorth_v,
+          fast_incremental = fast_incremental,
+          fast_inc_iters = fast_inc_iters,
+          fast_defl_cache = fast_defl_cache
+        ),
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol
+      )
+    } else {
+      o <- .with_irlba_options(
         double_pls_cv(
           Xdata,
           Ydata,
@@ -1199,28 +1363,11 @@ pls.double.cv = function(Xdata,
           svds_tol=svds_tol,
           seed=seed
         ),
-        fast_block = fast_block,
-        fast_center_t = fast_center_t,
-        fast_reorth_v = fast_reorth_v,
-        fast_incremental = fast_incremental,
-        fast_inc_iters = fast_inc_iters,
-        fast_defl_cache = fast_defl_cache
-      )
-    } else {
-      o=double_pls_cv(
-        Xdata,
-        Ydata,
-        ncomp,
-        constrain,
-        scal,
-        kfold_inner,
-        kfold_outer,
-        meth,
-        svd_method=svdmeth,
-        rsvd_oversample=rsvd_oversample,
-        rsvd_power=rsvd_power,
-        svds_tol=svds_tol,
-        seed=seed
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol
       )
     }
     Ypred_tot=Ypred_tot+o$Ypred
@@ -1284,7 +1431,38 @@ pls.double.cv = function(Xdata,
         w=NULL
         for(ii in 1:runn)
           if (meth == 3L) {
-            w[ii] <- .with_fastpls_fast_options(
+            w[ii] <- .with_irlba_options(
+              .with_fastpls_fast_options(
+                double_pls_cv(
+                  Xdata[ss,],
+                  Ydata,
+                  ncomp,
+                  constrain,
+                  scal,
+                  kfold_inner,
+                  kfold_outer,
+                  meth,
+                  svd_method=svdmeth,
+                  rsvd_oversample=rsvd_oversample,
+                  rsvd_power=rsvd_power,
+                  svds_tol=svds_tol,
+                  seed=seed
+                ),
+                fast_block = fast_block,
+                fast_center_t = fast_center_t,
+                fast_reorth_v = fast_reorth_v,
+                fast_incremental = fast_incremental,
+                fast_inc_iters = fast_inc_iters,
+                fast_defl_cache = fast_defl_cache
+              ),
+              irlba_work = irlba_work,
+              irlba_maxit = irlba_maxit,
+              irlba_tol = irlba_tol,
+              irlba_eps = irlba_eps,
+              irlba_svtol = irlba_svtol
+            )$Q2Y
+          } else {
+            w[ii] <- .with_irlba_options(
               double_pls_cv(
                 Xdata[ss,],
                 Ydata,
@@ -1300,28 +1478,11 @@ pls.double.cv = function(Xdata,
                 svds_tol=svds_tol,
                 seed=seed
               ),
-              fast_block = fast_block,
-              fast_center_t = fast_center_t,
-              fast_reorth_v = fast_reorth_v,
-              fast_incremental = fast_incremental,
-              fast_inc_iters = fast_inc_iters,
-              fast_defl_cache = fast_defl_cache
-            )$Q2Y
-          } else {
-            w[ii]=double_pls_cv(
-              Xdata[ss,],
-              Ydata,
-              ncomp,
-              constrain,
-              scal,
-              kfold_inner,
-              kfold_outer,
-              meth,
-              svd_method=svdmeth,
-              rsvd_oversample=rsvd_oversample,
-              rsvd_power=rsvd_power,
-              svds_tol=svds_tol,
-              seed=seed
+              irlba_work = irlba_work,
+              irlba_maxit = irlba_maxit,
+              irlba_tol = irlba_tol,
+              irlba_eps = irlba_eps,
+              irlba_svtol = irlba_svtol
             )$Q2Y
           }
         

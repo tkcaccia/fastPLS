@@ -20,6 +20,11 @@ optim.pls.cv(
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
+  irlba_work = 0L,
+  irlba_maxit = 2000L,
+  irlba_tol = 1e-06,
+  irlba_eps = 1e-09,
+  irlba_svtol = 1e-06,
   seed = 1L,
   fast_block = 4L,
   fast_center_t = FALSE,
@@ -44,6 +49,11 @@ capped to \code{min(nrow(Xdata), ncol(Xdata), ncol(Y_transformed))}.}
 \item{rsvd_power}{RSVD power iterations for randomized backends.}
 \item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
 \code{svd.method = "arpack"}.}
+\item{irlba_work}{IRLBA working subspace size. \code{0} keeps internal default.}
+\item{irlba_maxit}{IRLBA maximum iterations.}
+\item{irlba_tol}{IRLBA convergence tolerance.}
+\item{irlba_eps}{IRLBA invariant subspace detection tolerance.}
+\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
 \item{seed}{Seed for randomized backends.}
 \item{fast_block}{\code{simpls_fast} block refresh size.}
 \item{fast_center_t}{\code{simpls_fast} score-centering toggle.}

@@ -21,6 +21,11 @@ pls_r(
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
+  irlba_work = 0L,
+  irlba_maxit = 2000L,
+  irlba_tol = 1e-06,
+  irlba_eps = 1e-09,
+  irlba_svtol = 1e-06,
   seed = 1L,
   fit = FALSE,
   proj = FALSE,
@@ -47,6 +52,9 @@ optional power iterations, reduced exact SVD).
 \item{svds_tol}{Included for API compatibility with \code{\link{pls}}. In the
 current pure-R implementation, \code{"arpack"} and \code{"irlba"} paths use base
 \code{svd()} and do not consume this tolerance directly.}
+\item{irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol}{Included for API
+compatibility with \code{\link{pls}}. These IRLBA controls are used in C++ paths,
+not in current pure-R computations.}
 \item{seed}{RSVD seed.}
 }
 

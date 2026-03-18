@@ -2,6 +2,7 @@
 
 #include <RcppArmadillo.h>
 #include <R_ext/Rdynload.h>
+#include <limits>
 
 #include "fastPLS.h"
 #include "svd_iface.h"
@@ -15,6 +16,28 @@ using namespace Rcpp;
 using namespace arma;
 
 namespace {
+
+int env_int_or(const char* key, int fallback, int lo, int hi) {
+  const char* raw = std::getenv(key);
+  if (raw == nullptr) return fallback;
+  char* endptr = nullptr;
+  long v = std::strtol(raw, &endptr, 10);
+  if (endptr == raw) return fallback;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return static_cast<int>(v);
+}
+
+double env_double_or(const char* key, double fallback, double lo, double hi) {
+  const char* raw = std::getenv(key);
+  if (raw == nullptr) return fallback;
+  char* endptr = nullptr;
+  double v = std::strtod(raw, &endptr);
+  if (endptr == raw || !std::isfinite(v)) return fallback;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return v;
+}
 
 fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   const arma::mat& S,
@@ -314,7 +337,12 @@ List pls_model2(
     //rr <- S%*%qq
 //    if(S.n_rows<=16 || S.n_cols<=16){
   if(S.n_rows>5  && S.n_cols>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
-      List temp0=IRLB(S, 1, 10, 2000, 1e-6, 1e-9, 1e-6); //nu=1, work=10, maxit=1000, tol=1e-6, eps=1e-9, svtol=1e-6
+      const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", 10, 2, std::numeric_limits<int>::max()/4);
+      const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
+      const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
+      const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
+      const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
+      List temp0=IRLB(S, 1, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
       arma::mat u_irlba=temp0[1];
       rr=u_irlba.col(0);
     }else{ 
@@ -417,17 +445,6 @@ List pls_model2_fast(
   double svds_tol,
   int seed
 ) {
-  auto env_int_or = [](const char* key, int fallback, int lo, int hi) {
-    const char* raw = std::getenv(key);
-    if (raw == nullptr) return fallback;
-    char* endptr = nullptr;
-    long v = std::strtol(raw, &endptr, 10);
-    if (endptr == raw) return fallback;
-    if (v < lo) v = lo;
-    if (v > hi) v = hi;
-    return static_cast<int>(v);
-  };
-
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -505,7 +522,13 @@ List pls_model2_fast(
       arma::mat Rtmp;
       arma::qr_econ(Ublock, Rtmp, Y);
     } else if (S.n_rows > 5 && S.n_cols > 5 && fastpls_svd::method_is_legacy_irlba(svd_method)) {
-      List temp0 = IRLB(S, k_block, 10 + k_block, 2000, 1e-6, 1e-9, 1e-6);
+      const int ir_work_def = 10 + k_block;
+      const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", ir_work_def, k_block + 1, std::numeric_limits<int>::max()/4);
+      const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
+      const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
+      const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
+      const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
+      List temp0 = IRLB(S, k_block, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
       Ublock = as<arma::mat>(temp0("u"));
     } else {
       fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
@@ -992,7 +1015,13 @@ List pls_model1(
   int Snc=S.n_cols;
   if(Snr>5  && Snc>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
 
-    List temp0=IRLB(S, max_ncomp_eff, 10+max_ncomp_eff, 2000, 1e-6, 1e-9, 1e-6); //nu=1, work=10, maxit=1000, tol=1e-6, eps=1e-9, svtol=1e-6
+    const int ir_work_def = 10 + max_ncomp_eff;
+    const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", ir_work_def, max_ncomp_eff + 1, std::numeric_limits<int>::max()/4);
+    const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
+    const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
+    const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
+    const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
+    List temp0=IRLB(S, max_ncomp_eff, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
     svd_u=as<arma::mat>(temp0("u"));   //u
     svd_v=as<arma::mat>(temp0("v"));   //v
   }else{ 

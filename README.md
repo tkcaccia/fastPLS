@@ -74,6 +74,8 @@ SVD utilities:
   `rsvd_oversample`, and `rsvd_power` explicitly.
 - For `arpack`, `svds_tol` controls ARPACK convergence tolerance in C++ paths.
   Higher values can improve speed at the cost of looser convergence.
+- For legacy `irlba` paths, tune `irlba_work`, `irlba_maxit`, `irlba_tol`,
+  `irlba_eps`, and `irlba_svtol` from the R API.
 - For `simpls_fast`, tuning knobs are exposed as high-level arguments and are
   propagated to C++ via environment variables:
   `fast_block`, `fast_center_t`, `fast_reorth_v`, `fast_incremental`,
