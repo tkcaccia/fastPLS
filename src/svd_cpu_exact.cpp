@@ -21,23 +21,31 @@ SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt) {
   arma::vec s;
   arma::mat V;
 
-  if (opt.left_only) {
-    arma::svd_econ(U, s, V, A, "left");
-    out.U = U.cols(0, rank - 1);
-    out.s = s.subvec(0, rank - 1);
-    out.Vt.reset();
-    return out;
+  // Truncated SVD path via ARPACK-based svds when rank is strict-truncated.
+  // Armadillo svds requires rank < min(n_rows, n_cols); fall back otherwise.
+  bool ok = false;
+#if defined(ARMA_USE_ARPACK)
+  if (rank < max_rank) {
+    ok = arma::svds(U, s, V, A, rank);
   }
-
-  if (opt.use_full_svd) {
-    arma::svd(U, s, V, A);
-  } else {
-    arma::svd_econ(U, s, V, A, "both");
+#endif
+  if (!ok) {
+    if (opt.left_only) {
+      arma::svd_econ(U, s, V, A, "left");
+    } else if (opt.use_full_svd) {
+      arma::svd(U, s, V, A);
+    } else {
+      arma::svd_econ(U, s, V, A, "both");
+    }
   }
 
   out.U = U.cols(0, rank - 1);
   out.s = s.subvec(0, rank - 1);
-  out.Vt = V.cols(0, rank - 1).t();
+  if (opt.left_only) {
+    out.Vt.reset();
+  } else {
+    out.Vt = V.cols(0, rank - 1).t();
+  }
   return out;
 }
 

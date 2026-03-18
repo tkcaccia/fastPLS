@@ -21,8 +21,8 @@ with interchangeable SVD backends.
   legacy label; in `pls_model1/2`, IRLB is used only for sufficiently large
   cross-covariance matrices. In `svd_run`/`svd_benchmark`, this label currently
   follows exact CPU dispatch.
-- `dc`:
-  exact CPU SVD path through Armadillo `svd_econ()`.
+- `arpack`:
+  ARPACK-truncated SVD path through Armadillo `svds()`. 
 - `cpu_rsvd`:
   randomized SVD on CPU (Gaussian sketch + optional power iterations + reduced
   exact SVD).
@@ -36,15 +36,15 @@ Check runtime availability using `has_cuda()` and `svd_methods()`.
 
 | Outer algorithm | Inner backend | Exact/approximate | Iterative/direct (inner) | CPU/GPU | Supported functions |
 |---|---|---|---|---|---|
-| `plssvd` | `dc` | Exact | Direct SVD (`svd_econ`) | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `irlba` | Typically exact fallback for small matrices; legacy IRLB branch for larger `S` in PLS C++ loops | Iterative Lanczos branch in selected PLS paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `cuda_rsvd` | Approximate | Iterative randomized sampling/power GEMM on GPU + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `dc` | Exact | Direct SVD (`svd_econ`) per component on deflated `S` | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) per component on deflated `S` | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `irlba` | Legacy truncated branch in selected C++ paths | Iterative Lanczos in selected paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `cuda_rsvd` | Approximate | GPU randomized sampling/power + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls_fast` | `dc`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`dc` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls_fast` | `arpack`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`arpack` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls`, `optim.pls.cv`, `pls.double.cv` |
 
 Notes:
 - `svd_run()`/`svd_benchmark()` are backend utility wrappers; their `irlba` label currently follows exact dispatch in utility mode.

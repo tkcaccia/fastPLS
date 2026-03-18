@@ -17,7 +17,7 @@ pls_r(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "dc", "cpu_rsvd"),
+  svd.method = c("irlba", "arpack", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   seed = 1L,
@@ -36,7 +36,7 @@ Same semantics as in \code{\link{pls}}, restricted to the pure-R code path.}
 \itemize{
 \item \code{"cpu_rsvd"}: randomized SVD implemented in R (Gaussian range finder,
 optional power iterations, reduced exact SVD).
-\item \code{"irlba"}, \code{"dc"}: both currently map to exact base \code{svd()} in
+\item \code{"irlba"}, \code{"arpack"}: both currently map to exact base \code{svd()} in
 \code{pls_r}; they are retained for interface compatibility with \code{pls()}.
 }
 }

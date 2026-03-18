@@ -47,7 +47,7 @@ test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
 
   back <- as.character(svd_methods()$method[svd_methods()$enabled])
   back <- setdiff(back, "cuda_rsvd")
-  if (!length(back)) back <- "dc"
+  if (!length(back)) back <- "arpack"
 
   for (s in back) {
     for (m in c("plssvd", "simpls", "simpls_fast")) {

@@ -42,13 +42,13 @@ methods <- rbindlist(list(
   data.table(
     engine = "Rcpp",
     algorithm = rep(c("simpls", "plssvd"), each = 4),
-    svd_method = rep(c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"), 2),
+    svd_method = rep(c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"), 2),
     fast_profile = "none"
   ),
   data.table(
     engine = "R",
     algorithm = rep(c("simpls", "plssvd"), each = 3),
-    svd_method = rep(c("irlba", "dc", "cpu_rsvd"), 2),
+    svd_method = rep(c("irlba", "arpack", "cpu_rsvd"), 2),
     fast_profile = "none"
   ),
   data.table(

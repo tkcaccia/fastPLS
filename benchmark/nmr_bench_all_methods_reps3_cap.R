@@ -36,13 +36,13 @@ methods <- rbind(
   data.frame(
     engine = "Rcpp",
     algorithm = rep(c("simpls", "plssvd"), each = 5),
-    svd_method = rep(c("irlba", "dc", "cpu_exact", "cpu_rsvd", "cuda_rsvd"), 2),
+    svd_method = rep(c("irlba", "arpack", "cpu_exact", "cpu_rsvd", "cuda_rsvd"), 2),
     stringsAsFactors = FALSE
   ),
   data.frame(
     engine = "R",
     algorithm = rep(c("simpls", "plssvd"), each = 4),
-    svd_method = rep(c("irlba", "dc", "cpu_exact", "cpu_rsvd"), 2),
+    svd_method = rep(c("irlba", "arpack", "cpu_exact", "cpu_rsvd"), 2),
     stringsAsFactors = FALSE
   )
 )

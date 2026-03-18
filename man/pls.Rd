@@ -18,7 +18,7 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+  svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   seed = 1L,
@@ -70,7 +70,7 @@ block direction refresh and optional incremental/block-power updates.
 \itemize{
 \item \code{"irlba"}: in \code{pls_model1/2}, uses legacy IRLB path only when the
 cross-covariance matrix is larger than \code{5 x 5}; otherwise falls back to exact CPU SVD.
-\item \code{"dc"}: exact CPU SVD path (Armadillo \code{svd_econ}).
+\item \code{"arpack"}: ARPACK-truncated SVD path (Armadillo \code{svds}).
 \item \code{"cpu_rsvd"}: approximate randomized SVD on CPU.
 \item \code{"cuda_rsvd"}: approximate randomized SVD with GPU GEMM sampling
 (available only if \code{\link{has_cuda}()} is TRUE).
@@ -143,7 +143,7 @@ similar structure and outputs.
 
 \strong{Exact vs approximate backends}
 \itemize{
-\item \code{dc}: exact CPU SVD path.
+\item \code{arpack}: ARPACK-truncated SVD path.
 \item \code{cpu_rsvd}, \code{cuda_rsvd}: approximate RSVD paths (seeded and reproducible
 for fixed seed/parameters).
 \item \code{irlba}: legacy IRLB branch used only in specific PLS code paths and matrix sizes
@@ -205,6 +205,6 @@ X <- as.matrix(iris[, -5])
 y <- iris[, 5]
 ss <- sample(seq_len(nrow(X)), 30)
 
-fit <- pls(X[-ss, ], y[-ss], ncomp = c(2, 3), method = "simpls", svd.method = "dc")
+fit <- pls(X[-ss, ], y[-ss], ncomp = c(2, 3), method = "simpls", svd.method = "arpack")
 pred <- predict(fit, X[ss, ], Ytest = y[ss])
 }

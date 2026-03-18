@@ -3,8 +3,8 @@ test_that("pls_r runs both plssvd and simpls with base SVD", {
   X <- matrix(rnorm(120 * 15), nrow = 120, ncol = 15)
   Y <- matrix(rnorm(120 * 4), nrow = 120, ncol = 4)
 
-  m1 <- pls_r(X, Y, ncomp = 1:3, fit = TRUE, method = "plssvd", svd.method = "dc")
-  m2 <- pls_r(X, Y, ncomp = 1:3, fit = TRUE, method = "simpls", svd.method = "dc")
+  m1 <- pls_r(X, Y, ncomp = 1:3, fit = TRUE, method = "plssvd", svd.method = "arpack")
+  m2 <- pls_r(X, Y, ncomp = 1:3, fit = TRUE, method = "simpls", svd.method = "arpack")
 
   expect_s3_class(m1, "fastPLS")
   expect_s3_class(m2, "fastPLS")
@@ -43,7 +43,7 @@ test_that("pls_r plssvd handles ncomp above rank by capping internally", {
   idx <- sample(seq_len(160), 30)
 
   expect_warning({
-    fit <- pls_r(X[-idx, ], y[-idx], X[idx, ], ncomp = 50, method = "plssvd", svd.method = "dc")
+    fit <- pls_r(X[-idx, ], y[-idx], X[idx, ], ncomp = 50, method = "plssvd", svd.method = "arpack")
     expect_s3_class(fit, "fastPLS")
     expect_true(is.data.frame(fit$Ypred))
   }, "rank is limited")

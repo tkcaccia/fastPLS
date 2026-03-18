@@ -12,7 +12,7 @@ infrastructure used by the package.
 svd_run(
   A,
   k,
-  method = c("dc", "cpu_rsvd", "irlba", "cuda_rsvd"),
+  method = c("arpack", "cpu_rsvd", "irlba", "cuda_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   seed = 1L,
@@ -22,7 +22,7 @@ svd_run(
 svd_benchmark(
   A,
   k,
-  methods = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+  methods = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
   reps = 3L,
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -46,7 +46,7 @@ svd_benchmark(
 \details{
 \strong{Backend behavior in current implementation}
 \itemize{
-\item \code{dc}: exact CPU SVD (Armadillo \code{svd_econ} path).
+\item \code{arpack}: ARPACK-truncated CPU SVD (Armadillo \code{svds} path).
 \item \code{cpu_rsvd}: randomized SVD on CPU (Gaussian sketch + optional power iterations +
 small exact SVD).
 \item \code{cuda_rsvd}: GPU-accelerated randomized sampling (cuBLAS GEMM) followed by CPU QR
@@ -83,6 +83,6 @@ Musco, C. and Musco, C. (2015). \emph{arXiv:1504.05477}.
 set.seed(1)
 A <- matrix(rnorm(200 * 40), 200, 40)
 
-svd_run(A, k = 5, method = "dc")
-svd_benchmark(A, k = 5, methods = c("dc", "cpu_rsvd"), reps = 2)
+svd_run(A, k = 5, method = "arpack")
+svd_benchmark(A, k = 5, methods = c("arpack", "cpu_rsvd"), reps = 2)
 }

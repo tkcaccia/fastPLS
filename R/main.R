@@ -74,6 +74,14 @@
   force(expr)
 }
 
+.normalize_svd_method <- function(method) {
+  if (length(method) == 1L && !is.na(method) && identical(as.character(method), "dc")) {
+    warning("svd.method='dc' is deprecated; use 'arpack' instead.", call. = FALSE)
+    return("arpack")
+  }
+  method
+}
+
 pls.model1 =
   function (Xtrain,
             Ytrain,
@@ -220,14 +228,19 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
   res
 }
 
-.svd_methods_all <- c("irlba", "dc", "cpu_rsvd", "cuda_rsvd")
-.svd_methods_cpu <- c("irlba", "dc", "cpu_rsvd")
+.svd_methods_all <- c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd", "dc")
+.svd_methods_cpu <- c("irlba", "arpack", "cpu_rsvd", "dc")
 
 .svd_method_id <- function(method) {
   method <- match.arg(method, .svd_methods_all)
+  if (identical(method, "dc")) {
+    warning("svd.method='dc' is deprecated; use 'arpack' instead.", call. = FALSE)
+    method <- "arpack"
+  }
   switch(
     method,
     irlba = 1L,
+    arpack = 2L,
     dc = 2L,
     cpu_rsvd = 4L,
     cuda_rsvd = 5L
@@ -242,7 +255,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
 #' @return Data frame with columns `method` and `enabled`.
 #' @export
 svd_methods <- function() {
-  methods <- .svd_methods_all
+  methods <- setdiff(.svd_methods_all, "dc")
   enabled <- rep(TRUE, length(methods))
   names(enabled) <- methods
   enabled["cuda_rsvd"] <- has_cuda()
@@ -268,11 +281,12 @@ svd_methods <- function() {
 #' @export
 svd_run <- function(A,
                     k,
-                    method = c("dc", "cpu_rsvd", "irlba", "cuda_rsvd"),
+                    method = c("arpack", "cpu_rsvd", "irlba", "cuda_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     seed = 1L,
                     left_only = FALSE) {
+  method <- .normalize_svd_method(method)
   method <- match.arg(method)
   svdmeth <- .svd_method_id(method)
   if (is.na(svdmeth)) {
@@ -319,7 +333,7 @@ svd_run <- function(A,
 #' @export
 svd_benchmark <- function(A,
                           k,
-                          methods = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+                          methods = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                           reps = 3L,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
@@ -389,10 +403,11 @@ svd_benchmark <- function(A,
 
 .truncated_svd_r <- function(A,
                              k,
-                             svd.method = c("irlba", "dc", "cpu_rsvd"),
+                             svd.method = c("irlba", "arpack", "cpu_rsvd"),
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              seed = 1L) {
+  svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   A <- as.matrix(A)
   k <- as.integer(k)
@@ -618,7 +633,7 @@ svd_benchmark <- function(A,
 #'
 #' @inheritParams pls
 #' @param method One of `"simpls"` or `"plssvd"`.
-#' @param svd.method One of `"irlba"`, `"dc"`, `"cpu_rsvd"`.
+#' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
 #' @return A `fastPLS` object.
 #' @export
 pls_r = function (Xtrain,
@@ -628,7 +643,7 @@ pls_r = function (Xtrain,
                   ncomp=2,
                   scaling = c("centering", "autoscaling","none"),
                   method = c("simpls", "plssvd"),
-                  svd.method = c("irlba", "dc", "cpu_rsvd"),
+                  svd.method = c("irlba", "arpack", "cpu_rsvd"),
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
                   seed = 1L,
@@ -638,7 +653,8 @@ pls_r = function (Xtrain,
                   times = 100) {
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   meth <- pmatch(method, c("plssvd", "simpls"))[1]
-  svdmeth <- match.arg(svd.method)
+  svdmeth <- .normalize_svd_method(svd.method)
+  svdmeth <- match.arg(svdmeth, c("irlba", "arpack", "cpu_rsvd"))
   Xtrain <- as.matrix(Xtrain)
 
   if (is.factor(Ytrain)) {
@@ -721,7 +737,7 @@ pls_r = function (Xtrain,
 #' @param ncomp Number of components (scalar or vector).
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
 #' @param method One of `"simpls"`, `"plssvd"`, `"simpls_fast"`.
-#' @param svd.method One of `"irlba"`, `"dc"`, `"cpu_rsvd"`, `"cuda_rsvd"`.
+#' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"`, `"cuda_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
 #' @param seed RSVD seed.
@@ -744,7 +760,7 @@ pls =  function (Xtrain,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"), 
                  method = c("simpls", "plssvd", "simpls_fast"),
-                 svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+                 svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
                  seed = 1L,
@@ -762,6 +778,7 @@ pls =  function (Xtrain,
 
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
   meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
+  svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
   if (svd.method == "cuda_rsvd" && !has_cuda()) {
@@ -966,7 +983,7 @@ optim.pls.cv =  function (Xdata,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
                           method = c("simpls", "plssvd", "simpls_fast"),
-                          svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+                          svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           seed = 1L,
@@ -981,6 +998,7 @@ optim.pls.cv =  function (Xdata,
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
   meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
   
+  svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
   if (svd.method == "cuda_rsvd" && !has_cuda()) {
@@ -1073,7 +1091,7 @@ pls.double.cv = function(Xdata,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"), 
                          method = c("simpls", "plssvd", "simpls_fast"),
-                         svd.method = c("irlba", "dc", "cpu_rsvd", "cuda_rsvd"),
+                         svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          seed = 1L,
@@ -1095,6 +1113,7 @@ pls.double.cv = function(Xdata,
   scal=pmatch(scaling,c("centering","autoscaling","none"))[1]
   meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
   
+  svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
   if (svd.method == "cuda_rsvd" && !has_cuda()) {

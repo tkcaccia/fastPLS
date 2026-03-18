@@ -45,7 +45,7 @@ methods <- data.table(
     "Rcpp_plssvd_cuda_rsvd"
   ),
   algorithm = c(rep("simpls", 5), rep("plssvd", 5)),
-  svd_method = rep(c("irlba", "dc", "cpu_exact", "cpu_rsvd", "cuda_rsvd"), 2)
+  svd_method = rep(c("irlba", "arpack", "cpu_exact", "cpu_rsvd", "cuda_rsvd"), 2)
 )
 
 cuda_ok <- has_cuda()

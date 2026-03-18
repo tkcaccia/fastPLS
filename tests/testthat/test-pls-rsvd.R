@@ -11,7 +11,7 @@ test_that("default svd.method behavior remains unchanged", {
   expect_equal(m_default$Q, m_explicit$Q)
 })
 
-test_that("cpu_rsvd tracks dc on PLS outputs", {
+test_that("cpu_rsvd tracks arpack on PLS outputs", {
   set.seed(99)
   X <- matrix(rnorm(80 * 24), nrow = 80, ncol = 24)
   Y <- matrix(rnorm(80 * 6), nrow = 80, ncol = 6)
@@ -21,7 +21,7 @@ test_that("cpu_rsvd tracks dc on PLS outputs", {
     Y,
     ncomp = 1:4,
     fit = TRUE,
-    svd.method = "dc"
+    svd.method = "arpack"
   )
 
   rsvd <- pls(
@@ -107,7 +107,7 @@ test_that("simpls path uses the SVD backend selector", {
     ncomp = 1:5,
     fit = TRUE,
     method = "simpls",
-    svd.method = "dc"
+    svd.method = "arpack"
   )
 
   rsvd <- pls(
@@ -149,7 +149,7 @@ test_that("Rcpp plssvd handles ncomp above rank by capping internally", {
   idx <- sample(seq_len(180), 40)
 
   expect_warning({
-    fit <- pls(X[-idx, ], y[-idx], X[idx, ], ncomp = 60, method = "plssvd", svd.method = "dc")
+    fit <- pls(X[-idx, ], y[-idx], X[idx, ], ncomp = 60, method = "plssvd", svd.method = "arpack")
     expect_s3_class(fit, "fastPLS")
     expect_true(is.data.frame(fit$Ypred))
   }, "rank is limited")
