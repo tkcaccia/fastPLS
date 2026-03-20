@@ -38,6 +38,17 @@
   list(ncomp = ncomp, max_rank = max_plssvd_rank, capped = isTRUE(over))
 }
 
+.restore_env_scalar <- function(name, value) {
+  stopifnot(length(name) == 1L, nzchar(name))
+  if (length(value) != 1L || is.na(value)) {
+    Sys.unsetenv(name)
+  } else {
+    val <- list(as.character(value))
+    names(val) <- name
+    do.call(Sys.setenv, val)
+  }
+}
+
 .with_fastpls_fast_options <- function(expr,
                                        fast_block = 4L,
                                        fast_center_t = FALSE,
@@ -56,11 +67,7 @@
   on.exit({
     for (nm in names(old)) {
       val <- old[[nm]]
-      if (is.na(val)) {
-        Sys.unsetenv(nm)
-      } else {
-        Sys.setenv(structure(val, names = nm))
-      }
+      .restore_env_scalar(nm, val)
     }
   }, add = TRUE)
   Sys.setenv(
@@ -90,11 +97,7 @@
   on.exit({
     for (nm in names(old)) {
       val <- old[[nm]]
-      if (is.na(val)) {
-        Sys.unsetenv(nm)
-      } else {
-        Sys.setenv(structure(val, names = nm))
-      }
+      .restore_env_scalar(nm, val)
     }
   }, add = TRUE)
   Sys.setenv(

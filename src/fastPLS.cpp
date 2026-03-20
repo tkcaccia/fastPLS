@@ -336,29 +336,18 @@ List pls_model2(
     //qq<-svd(S)$v[,1]
     //rr <- S%*%qq
 //    if(S.n_rows<=16 || S.n_cols<=16){
-  if(S.n_rows>5  && S.n_cols>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
-      const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", 10, 2, std::numeric_limits<int>::max()/4);
-      const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
-      const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
-      const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
-      const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
-      List temp0=IRLB(S, 1, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
-      arma::mat u_irlba=temp0[1];
-      rr=u_irlba.col(0);
-    }else{ 
-      fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
-        S,
-        1,
-        svd_method,
-        rsvd_oversample,
-        rsvd_power,
-        svds_tol,
-        static_cast<unsigned int>(seed),
-        true,
-        false
-      );
-      rr=svd_res.U.col(0);
-    }
+    fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+      S,
+      1,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      svds_tol,
+      static_cast<unsigned int>(seed + a),
+      true,
+      false
+    );
+    rr = svd_res.U.col(0);
   
     // tt<-scale(X%*%rr,scale=FALSE)
     tt=X*rr; 
@@ -521,15 +510,20 @@ List pls_model2_fast(
       }
       arma::mat Rtmp;
       arma::qr_econ(Ublock, Rtmp, Y);
-    } else if (S.n_rows > 5 && S.n_cols > 5 && fastpls_svd::method_is_legacy_irlba(svd_method)) {
-      const int ir_work_def = 10 + k_block;
-      const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", ir_work_def, k_block + 1, std::numeric_limits<int>::max()/4);
-      const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
-      const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
-      const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
-      const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
-      List temp0 = IRLB(S, k_block, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
-      Ublock = as<arma::mat>(temp0("u"));
+
+      // Refine the orthonormal basis with a small projected SVD so the block
+      // directions track the dominant left singular subspace, not just an
+      // arbitrary basis of the sampled range.
+      arma::mat Bsmall = Ublock.t() * S;
+      arma::mat Uhat;
+      arma::vec shat;
+      arma::mat Vhat;
+      if (Bsmall.n_rows > 0 && Bsmall.n_cols > 0) {
+        arma::svd_econ(Uhat, shat, Vhat, Bsmall, "left");
+        if (Uhat.n_cols > 0) {
+          Ublock = Ublock * Uhat;
+        }
+      }
     } else {
       fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
         S,
@@ -738,7 +732,7 @@ List optim_pls_cv(
   arma::ivec constrain2=constrain;
   
 
-  for (int j = 0; j < indices.size(); j++) {
+  for (arma::uword j = 0; j < indices.size(); ++j) {
     arma::uvec ind = arma::find(constrain == indices(j));
     
     constrain2.elem(ind).fill(j + 1);
@@ -844,7 +838,7 @@ List double_pls_cv(
   arma::ivec constrain2=constrain;
   
 
-  for (int j = 0; j < indices.size(); j++) {
+  for (arma::uword j = 0; j < indices.size(); ++j) {
     arma::uvec ind = arma::find(constrain == indices(j));
     
     constrain2.elem(ind).fill(j + 1);
@@ -1011,35 +1005,20 @@ List pls_model1(
   arma::vec svd_s;
   arma::mat svd_v;
   
-  int Snr=S.n_rows;
-  int Snc=S.n_cols;
-  if(Snr>5  && Snc>5 && fastpls_svd::method_is_legacy_irlba(svd_method)){
-
-    const int ir_work_def = 10 + max_ncomp_eff;
-    const int ir_work = env_int_or("FASTPLS_IRLBA_WORK", ir_work_def, max_ncomp_eff + 1, std::numeric_limits<int>::max()/4);
-    const int ir_maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 2000, 1, std::numeric_limits<int>::max()/4);
-    const double ir_tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-6, 0.0, 1e6);
-    const double ir_eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1e6);
-    const double ir_svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-6, 0.0, 1e6);
-    List temp0=IRLB(S, max_ncomp_eff, ir_work, ir_maxit, ir_tol, ir_eps, ir_svtol);
-    svd_u=as<arma::mat>(temp0("u"));   //u
-    svd_v=as<arma::mat>(temp0("v"));   //v
-  }else{ 
-    fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
-      S,
-      max_ncomp_eff,
-      svd_method,
-      rsvd_oversample,
-      rsvd_power,
-      svds_tol,
-      static_cast<unsigned int>(seed),
-      false,
-      true
-    );
-    svd_u = svd_res.U;
-    svd_s = svd_res.s;
-    svd_v = svd_res.Vt.t();
-  }
+  fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+    S,
+    max_ncomp_eff,
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    static_cast<unsigned int>(seed),
+    false,
+    true
+  );
+  svd_u = svd_res.U;
+  svd_s = svd_res.s;
+  svd_v = svd_res.Vt.t();
   
   //  B<-matrix(0,ncol=m,nrow=p)
   arma::cube B(p,m,length_ncomp);
@@ -1060,7 +1039,7 @@ List pls_model1(
     stop("plssvd effective rank is < 1 after SVD");
   }
   svd_u = svd_u.cols(0,max_ncomp_eff-1);
-  if(svd_v.n_cols>max_ncomp_eff){
+  if (svd_v.n_cols > static_cast<arma::uword>(max_ncomp_eff)) {
     svd_v = svd_v.cols(0,max_ncomp_eff-1);
   }
   arma::mat svd_u_eff = svd_u;
@@ -1083,7 +1062,7 @@ List pls_model1(
     arma::mat svd_u_mc = svd_u_eff.cols(0,mc_eff-1);
     
     arma::mat svd_v_mc;
-    if(svd_v_eff.n_cols>max_ncomp_eff){
+    if (svd_v_eff.n_cols > static_cast<arma::uword>(max_ncomp_eff)) {
       svd_v_mc = svd_v_eff.cols(0,mc_eff-1);
     }else{
       svd_v_mc = svd_v_eff;
