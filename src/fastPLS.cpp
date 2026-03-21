@@ -1153,10 +1153,7 @@ List pls_model1(
   if(fit){
     Yfit.resize(n,m,length_ncomp);
   }
-  
-  
-  
-  
+
   max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_u.n_cols));
   if(svd_v.n_cols > 0){
     max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_v.n_cols));
@@ -1171,45 +1168,63 @@ List pls_model1(
   arma::mat svd_u_eff = svd_u;
   arma::mat svd_v_eff = svd_v;
   arma::mat T_eff = Xtrain*svd_u_eff;
-  
-  // TT <- Xtrain %*% R
-  // U <- Ytrain %*% Q
-  
   arma::mat T = T_eff;
-  
+
   arma::vec R2Y(length_ncomp);
-  
-  
+  const int plssvd_optimized = env_int_or("FASTPLS_PLSSVD_OPTIMIZED", 1, 0, 1);
+  arma::mat G_full;
+  if (plssvd_optimized == 1) {
+    G_full = T_eff.t() * T_eff;
+  }
+
   for (int a=0; a<length_ncomp; a++) {
     int mc=ncomp(a);
     int mc_eff = std::min(mc, max_ncomp_eff);
-    
-
     arma::mat svd_u_mc = svd_u_eff.cols(0,mc_eff-1);
-    
-    arma::mat svd_v_mc;
-    if (svd_v_eff.n_cols > static_cast<arma::uword>(max_ncomp_eff)) {
-      svd_v_mc = svd_v_eff.cols(0,mc_eff-1);
-    }else{
-      svd_v_mc = svd_v_eff;
-    }
-    
-    arma::mat T_a=T_eff.cols(0,mc_eff-1);
-    arma::mat T_at=T_a.t();
-    
-    
-    // TT <- Xtrain %*% R
-    // U <- Ytrain %*% Q
+    arma::mat svd_v_mc = svd_v_eff.cols(0,mc_eff-1);
+    arma::mat T_a = T_eff.cols(0,mc_eff-1);
 
-    arma::mat U=Ytrain*svd_v_mc;
-    
-    //B <- R %*% ( tcrossprod(solve(crossprod(TT)), TT)%*%U ) %*% t(Q)
-    B.slice(a)= svd_u_mc * (arma::inv(T_at * T_a) * T_at * U) * svd_v_mc.t();
-    if(fit){
-      arma::mat temp1=Xtrain*B.slice(a);
-      R2Y(a)=RQ(Ytrain,temp1);
-      temp1.each_row()+=mY;
-      Yfit.slice(a)=temp1;
+    if (plssvd_optimized == 1) {
+      arma::mat G_a = G_full.submat(0, 0, mc_eff - 1, mc_eff - 1);
+      arma::mat D_a(mc_eff, mc_eff, fill::zeros);
+      D_a.diag() = svd_s.subvec(0, mc_eff - 1);
+
+      arma::mat coeff_latent;
+      bool solved = arma::solve(coeff_latent, G_a, D_a, arma::solve_opts::likely_sympd);
+      if (!solved) {
+        solved = arma::solve(coeff_latent, G_a, D_a);
+      }
+      if (!solved) {
+        stop("plssvd latent solve failed");
+      }
+
+      B.slice(a) = svd_u_mc * coeff_latent * svd_v_mc.t();
+      if(fit){
+        arma::mat temp1 = T_a * coeff_latent * svd_v_mc.t();
+        R2Y(a)=RQ(Ytrain,temp1);
+        temp1.each_row()+=mY;
+        Yfit.slice(a)=temp1;
+      }
+    } else {
+      arma::mat U = Ytrain * svd_v_mc;
+      arma::mat T_at = T_a.t();
+      arma::mat gram = T_at * T_a;
+      arma::mat rhs = T_at * U;
+      arma::mat coeff_latent;
+      bool solved = arma::solve(coeff_latent, gram, rhs, arma::solve_opts::likely_sympd);
+      if (!solved) {
+        solved = arma::solve(coeff_latent, gram, rhs);
+      }
+      if (!solved) {
+        stop("plssvd legacy latent solve failed");
+      }
+      B.slice(a)= svd_u_mc * coeff_latent * svd_v_mc.t();
+      if(fit){
+        arma::mat temp1=Xtrain*B.slice(a);
+        R2Y(a)=RQ(Ytrain,temp1);
+        temp1.each_row()+=mY;
+        Yfit.slice(a)=temp1;
+      }
     }
   }
 

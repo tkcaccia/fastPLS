@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
 Title: A Fast Implementation of Partial Least Square
-Version: 0.9.0
-Date: 2026-03-20
+Version: 1.0.0
+Date: 2026-03-21
 Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "cre"),email = "stefano.cacciatore@icgeb.org", comment = c(ORCID = "0000-0001-7052-7156")),
              person("Dupe", "Ojo", role = "aut",email = "dupe.ojo@icgeb.org", comment = c(ORCID = "0000-0002-5301-8592")),
              person("Leonardo", "Tenori", role = "aut",email = "tenori@cerm.unifi.it", comment = c(ORCID = "0000-0001-6438-059X")),
