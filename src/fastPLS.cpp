@@ -3,6 +3,7 @@
 #include <RcppArmadillo.h>
 #include <R_ext/Rdynload.h>
 #include <limits>
+#include <random>
 
 #include "fastPLS.h"
 #include "svd_iface.h"
@@ -28,15 +29,73 @@ int env_int_or(const char* key, int fallback, int lo, int hi) {
   return static_cast<int>(v);
 }
 
-double env_double_or(const char* key, double fallback, double lo, double hi) {
-  const char* raw = std::getenv(key);
-  if (raw == nullptr) return fallback;
-  char* endptr = nullptr;
-  double v = std::strtod(raw, &endptr);
-  if (endptr == raw || !std::isfinite(v)) return fallback;
-  if (v < lo) v = lo;
-  if (v > hi) v = hi;
-  return v;
+bool is_rsvd_backend_method(const int svd_method) {
+  return (
+    svd_method == fastpls_svd::SVD_METHOD_CPU_RSVD ||
+    svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD
+  );
+}
+
+arma::mat gaussian_matrix_local(
+  const arma::uword n_rows,
+  const arma::uword n_cols,
+  const unsigned int seed
+) {
+  std::mt19937 rng(seed);
+  std::normal_distribution<double> norm(0.0, 1.0);
+
+  arma::mat out(n_rows, n_cols, arma::fill::zeros);
+  for (arma::uword j = 0; j < n_cols; ++j) {
+    for (arma::uword i = 0; i < n_rows; ++i) {
+      out(i, j) = norm(rng);
+    }
+  }
+
+  return out;
+}
+
+arma::vec top1_rsvd_left_vector(
+  const arma::mat& S,
+  const arma::vec* warm_start,
+  const int oversample,
+  const int power_iters,
+  const unsigned int seed
+) {
+  if (S.n_rows < 1 || S.n_cols < 1) {
+    return arma::vec();
+  }
+
+  arma::vec u;
+  if (warm_start != nullptr && warm_start->n_elem == S.n_rows) {
+    u = *warm_start;
+  } else {
+    arma::mat omega = gaussian_matrix_local(S.n_cols, 1, seed + static_cast<unsigned int>(std::max(oversample, 0)));
+    u = S * omega.col(0);
+  }
+
+  double unorm = arma::norm(u, 2);
+  if (!std::isfinite(unorm) || unorm <= 0.0) {
+    return arma::vec();
+  }
+  u /= unorm;
+
+  arma::vec v(S.n_cols, arma::fill::zeros);
+  for (int it = 0; it < std::max(power_iters, 0); ++it) {
+    v = S.t() * u;
+    const double vnorm = arma::norm(v, 2);
+    if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+      return arma::vec();
+    }
+    v /= vnorm;
+    u = S * v;
+    unorm = arma::norm(u, 2);
+    if (!std::isfinite(unorm) || unorm <= 0.0) {
+      return arma::vec();
+    }
+    u /= unorm;
+  }
+
+  return u;
 }
 
 fastpls_svd::SVDResult compute_truncated_svd_dispatch(
@@ -468,6 +527,8 @@ List pls_model2_fast(
   const arma::mat Xt = Xtrain.t();
   const arma::mat Yt = Ytrain.t();
   arma::mat S = Xt * Ytrain;
+  arma::mat XtX_cache;
+  arma::mat Sxy_cache;
 
   arma::mat RR(p, max_ncomp, fill::zeros);
   arma::mat QQ(m, max_ncomp, fill::zeros);
@@ -491,114 +552,179 @@ List pls_model2_fast(
   const int incremental_svd = env_int_or("FASTPLS_FAST_INCREMENTAL", 0, 0, 1);
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
   const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
+  const int fast_optimized = env_int_or("FASTPLS_FAST_OPTIMIZED", 1, 0, 1);
+  const int fast_top1_rsvd = env_int_or("FASTPLS_FAST_RSVD_TOP1", 0, 0, 1);
+  const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
+  const int top1_rsvd_oversample = env_int_or(
+    "FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE",
+    std::min(std::max(rsvd_oversample, 0), 2),
+    0,
+    8
+  );
+  const int top1_rsvd_power = env_int_or(
+    "FASTPLS_FAST_RSVD_TOP1_POWER",
+    std::min(std::max(rsvd_power, 0) + 1, 2),
+    0,
+    4
+  );
   arma::vec rr_prev;
   bool has_rr_prev = false;
-  int a = 0;
-  while (a < max_ncomp) {
-    const int k_block = std::min(refresh_block, max_ncomp - a);
-    arma::mat Ublock;
-    const bool can_incremental = (incremental_svd == 1) && (S.n_rows > 5) && (S.n_cols > 1);
-    if (can_incremental) {
-      arma::mat Omega(S.n_rows, k_block, fill::randn);
-      if (has_rr_prev) {
-        Omega.col(0) = rr_prev;
+  const bool use_crossprod_cache =
+    (fast_optimized == 1) &&
+    (center_t == 0) &&
+    (max_ncomp >= fast_crossprod_min_ncomp);
+  if (use_crossprod_cache) {
+    XtX_cache = Xt * Xtrain;
+    Sxy_cache = S;
+  }
+  auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
+    arma::vec pp;
+    arma::vec qq;
+    if (use_crossprod_cache) {
+      pp = XtX_cache * rr;
+      const double tnorm_sq = arma::dot(rr, pp);
+      if (!std::isfinite(tnorm_sq) || tnorm_sq <= 0.0) {
+        return false;
       }
-      arma::mat Y = Omega;
-      for (int it = 0; it < inc_power_iters; ++it) {
-        // Incremental block power iteration: Y <- (S S^T) Y
-        Y = S * (S.t() * Y);
-      }
-      arma::mat Rtmp;
-      arma::qr_econ(Ublock, Rtmp, Y);
-
-      // Refine the orthonormal basis with a small projected SVD so the block
-      // directions track the dominant left singular subspace, not just an
-      // arbitrary basis of the sampled range.
-      arma::mat Bsmall = Ublock.t() * S;
-      arma::mat Uhat;
-      arma::vec shat;
-      arma::mat Vhat;
-      if (Bsmall.n_rows > 0 && Bsmall.n_cols > 0) {
-        arma::svd_econ(Uhat, shat, Vhat, Bsmall, "left");
-        if (Uhat.n_cols > 0) {
-          Ublock = Ublock * Uhat;
-        }
-      }
+      const double tnorm = std::sqrt(tnorm_sq);
+      rr /= tnorm;
+      pp /= tnorm;
+      qq = Sxy_cache.t() * rr;
     } else {
-      fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
-        S,
-        k_block,
-        svd_method,
-        rsvd_oversample,
-        rsvd_power,
-        svds_tol,
-        static_cast<unsigned int>(seed + a),
-        true,
-        false
-      );
-      Ublock = svd_res.U;
-    }
-    if (Ublock.n_cols < 1) {
-      break;
-    }
-
-    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
-    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
-      arma::vec rr = Ublock.col(j);
-
       arma::vec tt = Xtrain * rr;
       if (center_t == 1) {
         tt -= arma::mean(tt);
       }
       const double tnorm = arma::norm(tt, 2);
       if (!std::isfinite(tnorm) || tnorm <= 0.0) {
-        a = max_ncomp;
-        break;
+        return false;
       }
       tt /= tnorm;
       rr /= tnorm;
-      rr_prev = rr;
-      has_rr_prev = true;
+      pp = Xt * tt;
+      qq = Yt * tt;
+    }
+    rr_prev = rr;
+    has_rr_prev = true;
 
-      arma::vec pp = Xt * tt;
-      arma::vec qq = Yt * tt;
-
-      arma::vec vv = pp;
-      if (a > 0) {
-        auto Vprev = VV.cols(0, a - 1);
-        vv -= Vprev * (Vprev.t() * pp);
-        if (reorth_v == 1) {
-          vv -= Vprev * (Vprev.t() * vv);
-        }
+    arma::vec vv = pp;
+    if (a_idx > 0) {
+      auto Vprev = VV.cols(0, a_idx - 1);
+      vv -= Vprev * (Vprev.t() * pp);
+      if (reorth_v == 1) {
+        vv -= Vprev * (Vprev.t() * vv);
       }
-      const double vnorm = arma::norm(vv, 2);
-      if (!std::isfinite(vnorm) || vnorm <= 0.0) {
-        a = max_ncomp;
+    }
+    const double vnorm = arma::norm(vv, 2);
+    if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+      return false;
+    }
+    vv /= vnorm;
+
+    if (defl_cache == 1) {
+      arma::rowvec vS = vv.t() * S;
+      S -= vv * vS;
+    } else {
+      S -= vv * (vv.t() * S);
+    }
+
+    RR.col(a_idx) = rr;
+    QQ.col(a_idx) = qq;
+    VV.col(a_idx) = vv;
+    Bcur += rr * qq.t();
+
+    while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
+      B.slice(i_out) = Bcur;
+      if (fit) {
+        arma::mat yf = Xtrain * Bcur;
+        R2Y(i_out) = RQ(Ytrain, yf);
+        yf.each_row() += mY;
+        Yfit.slice(i_out) = yf;
+      }
+      ++i_out;
+    }
+    return true;
+  };
+
+  const bool can_incremental = (incremental_svd == 1) && (S.n_rows > 5) && (S.n_cols > 1);
+  const bool use_optimized_top1_rsvd =
+    (fast_optimized == 1) &&
+    (fast_top1_rsvd == 1) &&
+    can_incremental &&
+    is_rsvd_backend_method(svd_method);
+
+  if (use_optimized_top1_rsvd) {
+    for (int a = 0; a < max_ncomp; ++a) {
+      arma::vec rr = top1_rsvd_left_vector(
+        S,
+        has_rr_prev ? &rr_prev : nullptr,
+        top1_rsvd_oversample,
+        top1_rsvd_power,
+        static_cast<unsigned int>(seed + a)
+      );
+      if (rr.n_elem != S.n_rows || !append_component(rr, a)) {
         break;
       }
-      vv /= vnorm;
+    }
+  } else {
+    int a = 0;
+    while (a < max_ncomp) {
+      const int k_block = std::min(refresh_block, max_ncomp - a);
+      arma::mat Ublock;
+      if (can_incremental) {
+        arma::mat Omega = gaussian_matrix_local(
+          S.n_rows,
+          static_cast<arma::uword>(k_block),
+          static_cast<unsigned int>(seed + a)
+        );
+        if (has_rr_prev) {
+          Omega.col(0) = rr_prev;
+        }
+        arma::mat Y = Omega;
+        for (int it = 0; it < inc_power_iters; ++it) {
+          Y = S * (S.t() * Y);
+        }
+        arma::mat Rtmp;
+        arma::qr_econ(Ublock, Rtmp, Y);
 
-      if (defl_cache == 1) {
-        arma::rowvec vS = vv.t() * S;
-        S -= vv * vS;
+        arma::mat Bsmall = Ublock.t() * S;
+        arma::mat Uhat;
+        arma::vec shat;
+        arma::mat Vhat;
+        if (Bsmall.n_rows > 0 && Bsmall.n_cols > 0) {
+          arma::svd_econ(Uhat, shat, Vhat, Bsmall, "left");
+          if (Uhat.n_cols > 0) {
+            Ublock = Ublock * Uhat;
+          }
+        }
       } else {
-        S -= vv * (vv.t() * S);
+        fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+          S,
+          k_block,
+          svd_method,
+          rsvd_oversample,
+          rsvd_power,
+          svds_tol,
+          static_cast<unsigned int>(seed + a),
+          true,
+          false
+        );
+        Ublock = svd_res.U;
+      }
+      if (Ublock.n_cols < 1) {
+        break;
       }
 
-      RR.col(a) = rr;
-      QQ.col(a) = qq;
-      VV.col(a) = vv;
-      Bcur += rr * qq.t();
-
-      while (i_out < length_ncomp && a == (ncomp(i_out) - 1)) {
-        B.slice(i_out) = Bcur;
-        if (fit) {
-          arma::mat yf = Xtrain * Bcur;
-          R2Y(i_out) = RQ(Ytrain, yf);
-          yf.each_row() += mY;
-          Yfit.slice(i_out) = yf;
+      const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
+      bool stop_now = false;
+      for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
+        if (!append_component(Ublock.col(j), a)) {
+          stop_now = true;
+          break;
         }
-        ++i_out;
+      }
+      if (stop_now) {
+        break;
       }
     }
   }
