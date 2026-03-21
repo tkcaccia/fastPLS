@@ -314,51 +314,55 @@ subset_yvars <- function(ds, frac) {
 
 method_grid <- function(cuda_ok, include_r = FALSE) {
   svd <- c("irlba", "arpack", "cpu_rsvd", if (cuda_ok) "cuda_rsvd")
-  dt <- CJ(engine = "Rcpp", algorithm = c("simpls", "plssvd", "simpls_fast"), svd_method = svd, fast_profile = "default", unique = TRUE)
-  if (isTRUE(include_simpls_fast_incremental)) {
-    dt <- rbind(
-      dt,
-      CJ(engine = "Rcpp", algorithm = "simpls_fast", svd_method = svd, fast_profile = "incdefl", unique = TRUE),
-      fill = TRUE
+  dt <- CJ(
+    engine = "Rcpp",
+    algorithm = c("simpls", "plssvd", "simpls_fast"),
+    svd_method = svd,
+    fast_profile = c("default", "default", "incdefl"),
+    unique = TRUE
+  )
+  dt <- dt[
+    (algorithm %in% c("simpls", "plssvd") & fast_profile == "default") |
+    (algorithm == "simpls_fast" & fast_profile == "incdefl")
+  ]
+  if (isTRUE(include_r)) {
+    svd_r <- c("irlba", "arpack", "cpu_rsvd")
+    dt_r <- CJ(
+      engine = "R",
+      algorithm = c("simpls", "plssvd", "simpls_fast"),
+      svd_method = svd_r,
+      fast_profile = c("default", "default", "incdefl"),
+      unique = TRUE
     )
+    dt_r <- dt_r[
+      (algorithm %in% c("simpls", "plssvd") & fast_profile == "default") |
+      (algorithm == "simpls_fast" & fast_profile == "incdefl")
+    ]
+    dt <- rbind(dt, dt_r, fill = TRUE)
   }
-  if (include_r) {
-    dt <- rbind(
-      dt,
-      CJ(engine = "R", algorithm = c("simpls", "plssvd", "simpls_fast"), svd_method = c("irlba", "arpack", "cpu_rsvd"), fast_profile = "default", unique = TRUE),
-      fill = TRUE
-    )
-  }
-  dt <- dt[!(algorithm == "simpls" & svd_method == "arpack")]
   dt[, method_id := paste(engine, algorithm, svd_method, fast_profile, sep = "_")]
   dt[]
 }
 
 methods_for_dataset <- function(dname, methods_all) {
   m <- copy(methods_all)
-  if (tolower(dname) != "metref") {
-    m <- m[!(engine %in% c("R", "pls_pkg"))]
-  }
   if (tolower(dname) == "metref") {
-    if (isTRUE(metref_include_r) && !any(m$engine == "R")) {
+    keep_engines <- "Rcpp"
+    if (isTRUE(metref_include_r)) keep_engines <- c(keep_engines, "R")
+    m <- m[engine %in% keep_engines]
+    if (isTRUE(metref_include_pls_pkg)) {
       m <- rbind(
         m,
-        CJ(engine = "R", algorithm = c("simpls", "plssvd", "simpls_fast"), svd_method = c("irlba", "arpack", "cpu_rsvd"), fast_profile = "default", unique = TRUE),
+        data.table(engine = "pls_pkg", algorithm = "simpls", svd_method = "pls_pkg", fast_profile = "pls_pkg"),
         fill = TRUE
       )
     }
-    if (isTRUE(metref_include_pls_pkg) && requireNamespace("pls", quietly = TRUE)) {
-      m <- rbind(
-        m,
-        data.table(engine = "pls_pkg", algorithm = "simpls", svd_method = "none", fast_profile = "default"),
-        fill = TRUE
-      )
-    }
-    # The pure-R simpls_fast path is currently unstable on MetRef classification.
-    # Keep R baselines (simpls/plssvd) and pls package baseline, but drop only R_simpls_fast.
-    m <- m[!(engine == "R" & algorithm == "simpls_fast")]
-    m <- m[!(algorithm == "simpls" & svd_method == "arpack")]
     m[, method_id := paste(engine, algorithm, svd_method, fast_profile, sep = "_")]
+  } else {
+    m <- m[engine == "Rcpp"]
+  }
+  if (tolower(dname) %in% c("nmr", "imagenet")) {
+    m <- m[!(algorithm == "simpls" & svd_method == "arpack")]
   }
   if (tolower(dname) == "nmr") {
     if (skip_arpack_on_nmr) {
@@ -580,7 +584,7 @@ if (!append_mode || !file.exists(out_log)) {
 
 cuda_ok <- tryCatch(isTRUE(has_cuda()), error = function(e) FALSE)
 if (!include_cuda) cuda_ok <- FALSE
-methods <- method_grid(cuda_ok = cuda_ok, include_r = include_r_impl)
+methods <- method_grid(cuda_ok = cuda_ok, include_r = (include_r_impl || metref_include_r))
 
 header <- data.table(
   dataset = character(), analysis = character(), analysis_value = character(), rep = integer(),

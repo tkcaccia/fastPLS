@@ -5,7 +5,7 @@
 \description{
 Fit PLS models for regression or classification using C++ implementations of
 PLS-SVD (\code{method = "plssvd"}), SIMPLS-style deflation
-(\code{method = "simpls"}), or an experimental SIMPLS-accelerated variant
+(\code{method = "simpls"}), or the optimized accelerated SIMPLS variant
 (\code{method = "simpls_fast"}).
 }
 
@@ -28,10 +28,10 @@ pls(
   irlba_eps = 1e-09,
   irlba_svtol = 1e-06,
   seed = 1L,
-  fast_block = 4L,
+  fast_block = 8L,
   fast_center_t = FALSE,
-  fast_reorth_v = TRUE,
-  fast_incremental = FALSE,
+  fast_reorth_v = FALSE,
+  fast_incremental = TRUE,
   fast_inc_iters = 2L,
   fast_defl_cache = TRUE,
   fit = FALSE,
@@ -67,8 +67,8 @@ For factor responses, the code converts labels to one-hot columns via
 \eqn{S = X^T Y}, then component-wise reconstruction of regression coefficients.
 \item \code{"simpls"}: iterative SIMPLS-like deflation of \eqn{S} with one
 leading direction extracted per component.
-\item \code{"simpls_fast"}: experimental accelerated SIMPLS-like deflation with
-block direction refresh and optional incremental/block-power updates.
+\item \code{"simpls_fast"}: accelerated SIMPLS-like deflation using the fixed
+optimized incremental-deflation profile.
 }
 }
 
@@ -105,23 +105,23 @@ path is active in C++ PLS loops. \code{0} keeps the internal default.}
 
 \item{seed}{Random seed used by randomized SVD backends.}
 
-\item{fast_block}{\code{simpls_fast} only. Block size for direction refresh cycles.
-Mapped to environment variable \code{FASTPLS_FAST_BLOCK}.}
+\item{fast_block}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
-\item{fast_center_t}{\code{simpls_fast} only. Whether to mean-center component scores
-before normalization. Mapped to \code{FASTPLS_FAST_CENTER_T}.}
+\item{fast_center_t}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
-\item{fast_reorth_v}{\code{simpls_fast} only. Whether to apply extra re-orthogonalization
-for deflation vectors. Mapped to \code{FASTPLS_FAST_REORTH_V}.}
+\item{fast_reorth_v}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
-\item{fast_incremental}{\code{simpls_fast} only. Enable incremental block-power update
-mode (warm-started randomized block). Mapped to \code{FASTPLS_FAST_INCREMENTAL}.}
+\item{fast_incremental}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
-\item{fast_inc_iters}{\code{simpls_fast} only. Iterations for incremental block-power mode.
-Mapped to \code{FASTPLS_FAST_INC_ITERS}.}
+\item{fast_inc_iters}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
-\item{fast_defl_cache}{\code{simpls_fast} only. Use cached deflation update
-\eqn{v^T S} before rank-1 subtraction. Mapped to \code{FASTPLS_FAST_DEFLCACHE}.}
+\item{fast_defl_cache}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 
 \item{fit}{If \code{TRUE}, return in-sample fitted values and \code{R2Y}.}
 
@@ -156,10 +156,11 @@ component-wise coefficient tensors \eqn{B(:,:,a)}.
 \strong{SIMPLS fast (\code{simpls_fast}):}
 \itemize{
 \item Preserves SIMPLS-like deflation and cumulative \eqn{B} updates.
-\item Refreshes directions in blocks (\code{fast_block}).
-\item Optional incremental randomized block-power update for direction proposals.
-\item Experimental; numerical trajectories can differ from \code{simpls} while keeping
-similar structure and outputs.
+\item Uses the fixed optimized incremental-deflation profile that was previously
+benchmarked as the incdefl variant.
+\item Keeps the same user-facing method name while removing low-level profile selection.
+\item Numerical trajectories can differ from \code{simpls} while keeping similar
+structure and outputs.
 }
 
 \strong{Exact vs approximate backends}

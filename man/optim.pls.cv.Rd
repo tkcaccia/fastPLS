@@ -26,10 +26,10 @@ optim.pls.cv(
   irlba_eps = 1e-09,
   irlba_svtol = 1e-06,
   seed = 1L,
-  fast_block = 4L,
+  fast_block = 8L,
   fast_center_t = FALSE,
-  fast_reorth_v = TRUE,
-  fast_incremental = FALSE,
+  fast_reorth_v = FALSE,
+  fast_incremental = TRUE,
   fast_inc_iters = 2L,
   fast_defl_cache = TRUE,
   kfold = 10
@@ -55,12 +55,18 @@ capped to \code{min(nrow(Xdata), ncol(Xdata), ncol(Y_transformed))}.}
 \item{irlba_eps}{IRLBA invariant subspace detection tolerance.}
 \item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
 \item{seed}{Seed for randomized backends.}
-\item{fast_block}{\code{simpls_fast} block refresh size.}
-\item{fast_center_t}{\code{simpls_fast} score-centering toggle.}
-\item{fast_reorth_v}{\code{simpls_fast} re-orthogonalization toggle.}
-\item{fast_incremental}{\code{simpls_fast} incremental block-power toggle.}
-\item{fast_inc_iters}{\code{simpls_fast} incremental power iterations.}
-\item{fast_defl_cache}{\code{simpls_fast} cached-deflation toggle.}
+\item{fast_block}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
+\item{fast_center_t}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
+\item{fast_reorth_v}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
+\item{fast_incremental}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
+\item{fast_inc_iters}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
+\item{fast_defl_cache}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+the optimized former incremental-deflation profile.}
 \item{kfold}{Number of folds.}
 }
 

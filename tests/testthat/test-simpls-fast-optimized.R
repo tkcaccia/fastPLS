@@ -11,7 +11,7 @@ with_fastpls_fast_optimized <- function(value, code) {
   force(code)
 }
 
-test_that("optimized simpls_fast icdefl returns valid fit structure", {
+test_that("simpls_fast returns valid fit structure", {
   set.seed(20260321)
   X <- matrix(rnorm(96 * 18), nrow = 96, ncol = 18)
   y <- factor(sample(c("A", "B", "C"), 96, replace = TRUE))
@@ -26,13 +26,7 @@ test_that("optimized simpls_fast icdefl returns valid fit structure", {
     method = "simpls_fast",
     svd.method = "cpu_rsvd",
     fit = TRUE,
-    seed = 77L,
-    fast_incremental = TRUE,
-    fast_inc_iters = 2L,
-    fast_defl_cache = TRUE,
-    fast_center_t = FALSE,
-    fast_reorth_v = FALSE,
-    fast_block = 8L
+    seed = 77L
   ))
 
   expect_s3_class(fit, "fastPLS")
@@ -43,7 +37,7 @@ test_that("optimized simpls_fast icdefl returns valid fit structure", {
   expect_equal(ncol(fit$Ypred), 4L)
 })
 
-test_that("optimized simpls_fast icdefl stays close to legacy baseline on a controlled regression task", {
+test_that("simpls_fast stays close to legacy baseline on a controlled regression task", {
   set.seed(20260321)
   n <- 120
   z1 <- rnorm(n)
@@ -67,13 +61,7 @@ test_that("optimized simpls_fast icdefl stays close to legacy baseline on a cont
     method = "simpls_fast",
     svd.method = "cpu_rsvd",
     fit = FALSE,
-    seed = 123L,
-    fast_incremental = TRUE,
-    fast_inc_iters = 2L,
-    fast_defl_cache = TRUE,
-    fast_center_t = FALSE,
-    fast_reorth_v = FALSE,
-    fast_block = 8L
+    seed = 123L
   )
 
   baseline <- with_fastpls_fast_optimized(0, do.call(fastPLS::pls, fit_args))

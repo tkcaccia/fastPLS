@@ -101,3 +101,41 @@ test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
     }
   }
 })
+
+test_that("pls_r supports simpls_fast for regression and classification", {
+  set.seed(20260321)
+  X <- matrix(rnorm(60 * 9), nrow = 60, ncol = 9)
+  y_reg <- matrix(rnorm(60 * 2), ncol = 2)
+  y_cls <- factor(sample(c("A", "B", "C"), 60, replace = TRUE))
+  idx <- sample(seq_len(60), 15)
+
+  for (s in c("arpack", "cpu_rsvd")) {
+    fit_reg <- pls_r(
+      X[-idx, , drop = FALSE],
+      y_reg[-idx, , drop = FALSE],
+      X[idx, , drop = FALSE],
+      y_reg[idx, , drop = FALSE],
+      ncomp = 1:3,
+      method = "simpls_fast",
+      svd.method = s,
+      fit = TRUE
+    )
+    expect_s3_class(fit_reg, "fastPLS")
+    expect_true("Ypred" %in% names(fit_reg))
+    expect_equal(dim(fit_reg$B), c(ncol(X), ncol(y_reg), 3L))
+
+    fit_cls <- pls_r(
+      X[-idx, , drop = FALSE],
+      y_cls[-idx],
+      X[idx, , drop = FALSE],
+      y_cls[idx],
+      ncomp = 1:2,
+      method = "simpls_fast",
+      svd.method = s,
+      fit = TRUE
+    )
+    expect_s3_class(fit_cls, "fastPLS")
+    expect_true(is.data.frame(fit_cls$Ypred))
+    expect_equal(ncol(fit_cls$Ypred), 2L)
+  }
+})

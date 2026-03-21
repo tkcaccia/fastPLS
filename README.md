@@ -76,10 +76,9 @@ SVD utilities:
   Higher values can improve speed at the cost of looser convergence.
 - For legacy `irlba` paths, tune `irlba_work`, `irlba_maxit`, `irlba_tol`,
   `irlba_eps`, and `irlba_svtol` from the R API.
-- For `simpls_fast`, tuning knobs are exposed as high-level arguments and are
-  propagated to C++ via environment variables:
-  `fast_block`, `fast_center_t`, `fast_reorth_v`, `fast_incremental`,
-  `fast_inc_iters`, `fast_defl_cache`.
+- `simpls_fast` now permanently uses the former incremental-deflation
+  configuration. Legacy `fast_*` tuning arguments are accepted for backward
+  compatibility but are deprecated and ignored.
 
 ## References
 

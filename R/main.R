@@ -49,11 +49,51 @@
   }
 }
 
+.simpls_fast_profile_notice <- function(context = "simpls_fast") {
+  sprintf(
+    "%s now permanently uses the former incdefl profile; low-level fast_* tuning arguments are deprecated and ignored.",
+    context
+  )
+}
+
+.resolve_simpls_fast_profile <- function(fast_block,
+                                         fast_center_t,
+                                         fast_reorth_v,
+                                         fast_incremental,
+                                         fast_inc_iters,
+                                         fast_defl_cache,
+                                         missing_fast_block,
+                                         missing_fast_center_t,
+                                         missing_fast_reorth_v,
+                                         missing_fast_incremental,
+                                         missing_fast_inc_iters,
+                                         missing_fast_defl_cache,
+                                         context = "simpls_fast") {
+  warn <- FALSE
+  if (!missing_fast_block && !identical(as.integer(fast_block), 8L)) warn <- TRUE
+  if (!missing_fast_center_t && !identical(isTRUE(fast_center_t), FALSE)) warn <- TRUE
+  if (!missing_fast_reorth_v && !identical(isTRUE(fast_reorth_v), FALSE)) warn <- TRUE
+  if (!missing_fast_incremental && !identical(isTRUE(fast_incremental), TRUE)) warn <- TRUE
+  if (!missing_fast_inc_iters && !identical(as.integer(fast_inc_iters), 2L)) warn <- TRUE
+  if (!missing_fast_defl_cache && !identical(isTRUE(fast_defl_cache), TRUE)) warn <- TRUE
+  if (warn) {
+    warning(.simpls_fast_profile_notice(context), call. = FALSE)
+  }
+  list(
+    fast_block = 8L,
+    fast_center_t = FALSE,
+    fast_reorth_v = FALSE,
+    fast_incremental = TRUE,
+    fast_inc_iters = 2L,
+    fast_defl_cache = TRUE
+  )
+}
+
 .with_fastpls_fast_options <- function(expr,
-                                       fast_block = 4L,
+                                       fast_block = 8L,
                                        fast_center_t = FALSE,
-                                       fast_reorth_v = TRUE,
-                                       fast_incremental = FALSE,
+                                       fast_reorth_v = FALSE,
+                                       fast_incremental = TRUE,
                                        fast_inc_iters = 2L,
                                        fast_defl_cache = TRUE) {
   old <- c(
@@ -74,7 +114,7 @@
     FASTPLS_FAST_BLOCK = as.character(as.integer(fast_block)),
     FASTPLS_FAST_CENTER_T = if (isTRUE(fast_center_t)) "1" else "0",
     FASTPLS_FAST_REORTH_V = if (isTRUE(fast_reorth_v)) "1" else "0",
-    FASTPLS_FAST_INCREMENTAL = if (isTRUE(fast_incremental)) "1" else "0",
+    FASTPLS_FAST_INCREMENTAL = "1",
     FASTPLS_FAST_INC_ITERS = as.character(as.integer(fast_inc_iters)),
     FASTPLS_FAST_DEFLCACHE = if (isTRUE(fast_defl_cache)) "1" else "0"
   )
@@ -217,13 +257,28 @@ pls.model2.fast =
             irlba_eps = 1e-9,
             irlba_svtol = 1e-6,
             seed = 1L,
-            fast_block = 4L,
+            fast_block = 8L,
             fast_center_t = FALSE,
-            fast_reorth_v = TRUE,
-            fast_incremental = FALSE,
+            fast_reorth_v = FALSE,
+            fast_incremental = TRUE,
             fast_inc_iters = 2L,
             fast_defl_cache = TRUE)
   {
+    profile <- .resolve_simpls_fast_profile(
+      fast_block = fast_block,
+      fast_center_t = fast_center_t,
+      fast_reorth_v = fast_reorth_v,
+      fast_incremental = fast_incremental,
+      fast_inc_iters = fast_inc_iters,
+      fast_defl_cache = fast_defl_cache,
+      missing_fast_block = missing(fast_block),
+      missing_fast_center_t = missing(fast_center_t),
+      missing_fast_reorth_v = missing(fast_reorth_v),
+      missing_fast_incremental = missing(fast_incremental),
+      missing_fast_inc_iters = missing(fast_inc_iters),
+      missing_fast_defl_cache = missing(fast_defl_cache),
+      context = "pls.model2.fast"
+    )
     model <- .with_irlba_options(
       .with_fastpls_fast_options(
         pls_model2_fast(
@@ -238,12 +293,12 @@ pls.model2.fast =
           svds_tol,
           seed
         ),
-        fast_block = fast_block,
-        fast_center_t = fast_center_t,
-        fast_reorth_v = fast_reorth_v,
-        fast_incremental = fast_incremental,
-        fast_inc_iters = fast_inc_iters,
-        fast_defl_cache = fast_defl_cache
+        fast_block = profile$fast_block,
+        fast_center_t = profile$fast_center_t,
+        fast_reorth_v = profile$fast_reorth_v,
+        fast_incremental = profile$fast_incremental,
+        fast_inc_iters = profile$fast_inc_iters,
+        fast_defl_cache = profile$fast_defl_cache
       ),
       irlba_work = irlba_work,
       irlba_maxit = irlba_maxit,
@@ -716,12 +771,142 @@ svd_benchmark <- function(A,
   out
 }
 
+.pls_model2_fast_r <- function(Xtrain,
+                               Ytrain,
+                               ncomp,
+                               scaling,
+                               fit,
+                               svd.method,
+                               rsvd_oversample,
+                               rsvd_power,
+                               svds_tol,
+                               seed,
+                               fast_block = 8L) {
+  n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
+  ncomp <- sort(unique(as.integer(ncomp)))
+  max_ncomp <- max(ncomp)
+  length_ncomp <- length(ncomp)
+
+  mX <- matrix(0, nrow = 1, ncol = p)
+  if (scaling < 3L) {
+    mX <- matrix(colMeans(Xtrain), nrow = 1)
+    Xtrain <- sweep(Xtrain, 2, mX[1, ], "-")
+  }
+  vX <- matrix(1, nrow = 1, ncol = p)
+  if (scaling == 2L) {
+    vX <- matrix(apply(Xtrain, 2, sd), nrow = 1)
+    vX[!is.finite(vX) | vX == 0] <- 1
+    Xtrain <- sweep(Xtrain, 2, vX[1, ], "/")
+  }
+
+  X <- Xtrain
+  Xt <- t(Xtrain)
+  mY <- matrix(colMeans(Ytrain), nrow = 1)
+  Y <- sweep(Ytrain, 2, mY[1, ], "-")
+  S <- crossprod(X, Y)
+
+  RR <- matrix(0, nrow = p, ncol = max_ncomp)
+  QQ <- matrix(0, nrow = m, ncol = max_ncomp)
+  VV <- matrix(0, nrow = p, ncol = max_ncomp)
+  B <- array(0, dim = c(p, m, length_ncomp))
+  Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
+  R2Y <- rep(NA_real_, length_ncomp)
+
+  Bcur <- matrix(0, nrow = p, ncol = m)
+  i_out <- 1L
+  a <- 1L
+  refresh_block <- max(1L, as.integer(fast_block))
+
+  while (a <= max_ncomp) {
+    k_block <- min(refresh_block, max_ncomp - a + 1L)
+    Ublock <- .truncated_svd_r(
+      S,
+      k = k_block,
+      svd.method = svd.method,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = svds_tol,
+      seed = seed + a - 1L
+    )$u
+    if (!is.matrix(Ublock)) {
+      Ublock <- matrix(Ublock, ncol = 1L)
+    }
+    if (!ncol(Ublock)) break
+
+    use_cols <- min(ncol(Ublock), k_block)
+    stop_now <- FALSE
+    for (j in seq_len(use_cols)) {
+      rr <- Ublock[, j, drop = FALSE]
+      pp <- crossprod(X, X %*% rr)
+      tnorm_sq <- drop(crossprod(rr, pp))
+      if (!is.finite(tnorm_sq) || tnorm_sq <= 0) {
+        stop_now <- TRUE
+        break
+      }
+      tnorm <- sqrt(tnorm_sq)
+      rr <- rr / tnorm
+      pp <- pp / tnorm
+      qq <- crossprod(Y, X %*% rr)
+
+      vv <- pp
+      if (a > 1L) {
+        Vprev <- VV[, seq_len(a - 1L), drop = FALSE]
+        vv <- vv - Vprev %*% crossprod(Vprev, pp)
+      }
+      vnorm <- sqrt(sum(vv * vv))
+      if (!is.finite(vnorm) || vnorm <= 0) {
+        stop_now <- TRUE
+        break
+      }
+      vv <- vv / vnorm
+      S <- S - vv %*% crossprod(vv, S)
+
+      RR[, a] <- rr[, 1]
+      QQ[, a] <- qq[, 1]
+      VV[, a] <- vv[, 1]
+      Bcur <- Bcur + rr %*% t(qq)
+
+      while (i_out <= length_ncomp && a == ncomp[i_out]) {
+        B[, , i_out] <- Bcur
+        if (fit) {
+          yf <- Xtrain %*% Bcur
+          Yfit[, , i_out] <- sweep(yf, 2, mY[1, ], "+")
+          R2Y[i_out] <- RQ(Ytrain, Yfit[, , i_out])
+        }
+        i_out <- i_out + 1L
+      }
+
+      a <- a + 1L
+      if (a > max_ncomp) break
+    }
+    if (stop_now) break
+  }
+
+  out <- list(
+    B = B,
+    P = matrix(0, nrow = 0, ncol = 0),
+    Q = QQ,
+    Ttrain = matrix(0, nrow = 0, ncol = 0),
+    R = RR,
+    mX = mX,
+    vX = vX,
+    mY = mY,
+    p = p,
+    m = m,
+    ncomp = ncomp,
+    Yfit = Yfit,
+    R2Y = R2Y
+  )
+  class(out) <- "fastPLS"
+  out
+}
+
 #' Pure-R PLS reference implementation
 #'
-#' Pure-R implementation of `plssvd` and `simpls` with CPU-only SVD choices.
+#' Pure-R implementation of `plssvd`, `simpls`, and `simpls_fast` with CPU-only SVD choices.
 #'
 #' @inheritParams pls
-#' @param method One of `"simpls"` or `"plssvd"`.
+#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
 #' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
 #' @return A `fastPLS` object.
 #' @export
@@ -731,7 +916,7 @@ pls_r = function (Xtrain,
                   Ytest = NULL,
                   ncomp=2,
                   scaling = c("centering", "autoscaling","none"),
-                  method = c("simpls", "plssvd"),
+                  method = c("simpls", "plssvd", "simpls_fast"),
                   svd.method = c("irlba", "arpack", "cpu_rsvd"),
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
@@ -747,7 +932,7 @@ pls_r = function (Xtrain,
                   perm.test = FALSE,
                   times = 100) {
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-  meth <- pmatch(method, c("plssvd", "simpls"))[1]
+  meth <- pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
   svdmeth <- .normalize_svd_method(svd.method)
   svdmeth <- match.arg(svdmeth, c("irlba", "arpack", "cpu_rsvd"))
   Xtrain <- as.matrix(Xtrain)
@@ -770,8 +955,13 @@ pls_r = function (Xtrain,
       Xtrain, Ytrain, ncomp, scal, fit,
       svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
     )
-  } else {
+  } else if (meth == 2L) {
     model <- .pls_model2_r(
+      Xtrain, Ytrain, ncomp, scal, fit,
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
+    )
+  } else {
+    model <- .pls_model2_fast_r(
       Xtrain, Ytrain, ncomp, scal, fit,
       svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
     )
@@ -791,9 +981,12 @@ pls_r = function (Xtrain,
         if (meth == 1L) {
           mperm <- .pls_model1_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
                                  rsvd_oversample, rsvd_power, svds_tol, seed + i)
-        } else {
+        } else if (meth == 2L) {
           mperm <- .pls_model2_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
                                  rsvd_oversample, rsvd_power, svds_tol, seed + i)
+        } else {
+          mperm <- .pls_model2_fast_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
+                                      rsvd_oversample, rsvd_power, svds_tol, seed + i)
         }
         mperm$classification <- classification
         mperm$lev <- lev
@@ -838,12 +1031,18 @@ pls_r = function (Xtrain,
 #' @param svds_tol Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.
 #'   Larger values can improve speed at the cost of looser convergence.
 #' @param seed RSVD seed.
-#' @param fast_block `simpls_fast` block refresh size.
-#' @param fast_center_t `simpls_fast` score centering toggle.
-#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
-#' @param fast_incremental `simpls_fast` incremental block-power toggle.
-#' @param fast_inc_iters `simpls_fast` incremental power iterations.
-#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
+#' @param fast_block Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param perm.test Run permutation test.
@@ -867,10 +1066,10 @@ pls =  function (Xtrain,
                  irlba_eps = 1e-9,
                  irlba_svtol = 1e-6,
                  seed = 1L,
-                 fast_block = 4L,
+                 fast_block = 8L,
                  fast_center_t = FALSE,
-                 fast_reorth_v = TRUE,
-                 fast_incremental = FALSE,
+                 fast_reorth_v = FALSE,
+                 fast_incremental = TRUE,
                  fast_inc_iters = 2L,
                  fast_defl_cache = TRUE,
                  fit = FALSE,
@@ -888,17 +1087,34 @@ pls =  function (Xtrain,
     stop("svd.method='cuda_rsvd' requested, but CUDA backend is not available")
   }
 
-  # Tuned CUDA fast profile discovered by cycle benchmarking.
-  # Apply only for SIMPLS fast + CUDA when caller did not explicitly set values.
+  if (meth == 3L) {
+    profile <- .resolve_simpls_fast_profile(
+      fast_block = fast_block,
+      fast_center_t = fast_center_t,
+      fast_reorth_v = fast_reorth_v,
+      fast_incremental = fast_incremental,
+      fast_inc_iters = fast_inc_iters,
+      fast_defl_cache = fast_defl_cache,
+      missing_fast_block = missing(fast_block),
+      missing_fast_center_t = missing(fast_center_t),
+      missing_fast_reorth_v = missing(fast_reorth_v),
+      missing_fast_incremental = missing(fast_incremental),
+      missing_fast_inc_iters = missing(fast_inc_iters),
+      missing_fast_defl_cache = missing(fast_defl_cache),
+      context = "simpls_fast"
+    )
+    fast_block <- profile$fast_block
+    fast_center_t <- profile$fast_center_t
+    fast_reorth_v <- profile$fast_reorth_v
+    fast_incremental <- profile$fast_incremental
+    fast_inc_iters <- profile$fast_inc_iters
+    fast_defl_cache <- profile$fast_defl_cache
+  }
+
+  # Tuned CUDA RSVD settings discovered by cycle benchmarking.
   if (meth == 3L && svd.method == "cuda_rsvd") {
     if (missing(rsvd_oversample)) rsvd_oversample <- 8L
     if (missing(rsvd_power)) rsvd_power <- 0L
-    if (missing(fast_block)) fast_block <- 8L
-    if (missing(fast_center_t)) fast_center_t <- FALSE
-    if (missing(fast_reorth_v)) fast_reorth_v <- FALSE
-    if (missing(fast_incremental)) fast_incremental <- TRUE
-    if (missing(fast_inc_iters)) fast_inc_iters <- 2L
-    if (missing(fast_defl_cache)) fast_defl_cache <- TRUE
   }
   
   Xtrain = as.matrix(Xtrain)
@@ -1108,12 +1324,18 @@ pls =  function (Xtrain,
 #' @param constrain Optional grouping vector for constrained splitting.
 #' @param kfold Number of folds.
 #' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
-#' @param fast_block `simpls_fast` block refresh size.
-#' @param fast_center_t `simpls_fast` score centering toggle.
-#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
-#' @param fast_incremental `simpls_fast` incremental block-power toggle.
-#' @param fast_inc_iters `simpls_fast` incremental power iterations.
-#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
+#' @param fast_block Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
 #' @return List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
 #' @export
 optim.pls.cv =  function (Xdata,
@@ -1132,10 +1354,10 @@ optim.pls.cv =  function (Xdata,
                           irlba_eps = 1e-9,
                           irlba_svtol = 1e-6,
                           seed = 1L,
-                          fast_block = 4L,
+                          fast_block = 8L,
                           fast_center_t = FALSE,
-                          fast_reorth_v = TRUE,
-                          fast_incremental = FALSE,
+                          fast_reorth_v = FALSE,
+                          fast_incremental = TRUE,
                           fast_inc_iters = 2L,
                           fast_defl_cache = TRUE,
                           kfold=10) 
@@ -1166,6 +1388,21 @@ optim.pls.cv =  function (Xdata,
     ncomp <- cap$ncomp
   }
   if (meth == 3L) {
+    profile <- .resolve_simpls_fast_profile(
+      fast_block = fast_block,
+      fast_center_t = fast_center_t,
+      fast_reorth_v = fast_reorth_v,
+      fast_incremental = fast_incremental,
+      fast_inc_iters = fast_inc_iters,
+      fast_defl_cache = fast_defl_cache,
+      missing_fast_block = missing(fast_block),
+      missing_fast_center_t = missing(fast_center_t),
+      missing_fast_reorth_v = missing(fast_reorth_v),
+      missing_fast_incremental = missing(fast_incremental),
+      missing_fast_inc_iters = missing(fast_inc_iters),
+      missing_fast_defl_cache = missing(fast_defl_cache),
+      context = "simpls_fast"
+    )
     res <- .with_irlba_options(
       .with_fastpls_fast_options(
         optim_pls_cv(
@@ -1182,12 +1419,12 @@ optim.pls.cv =  function (Xdata,
           svds_tol=svds_tol,
           seed=seed
         ),
-        fast_block = fast_block,
-        fast_center_t = fast_center_t,
-        fast_reorth_v = fast_reorth_v,
-        fast_incremental = fast_incremental,
-        fast_inc_iters = fast_inc_iters,
-        fast_defl_cache = fast_defl_cache
+        fast_block = profile$fast_block,
+        fast_center_t = profile$fast_center_t,
+        fast_reorth_v = profile$fast_reorth_v,
+        fast_incremental = profile$fast_incremental,
+        fast_inc_iters = profile$fast_inc_iters,
+        fast_defl_cache = profile$fast_defl_cache
       ),
       irlba_work = irlba_work,
       irlba_maxit = irlba_maxit,
@@ -1238,12 +1475,18 @@ optim.pls.cv =  function (Xdata,
 #' @param kfold_inner Inner-fold count.
 #' @param kfold_outer Outer-fold count.
 #' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
-#' @param fast_block `simpls_fast` block refresh size.
-#' @param fast_center_t `simpls_fast` score centering toggle.
-#' @param fast_reorth_v `simpls_fast` re-orthogonalization toggle.
-#' @param fast_incremental `simpls_fast` incremental block-power toggle.
-#' @param fast_inc_iters `simpls_fast` incremental power iterations.
-#' @param fast_defl_cache `simpls_fast` cached deflation toggle.
+#' @param fast_block Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
+#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#'   the former incdefl profile.
 #' @return List of nested CV outputs and summaries.
 #' @export
 pls.double.cv = function(Xdata,
@@ -1262,10 +1505,10 @@ pls.double.cv = function(Xdata,
                          irlba_eps = 1e-9,
                          irlba_svtol = 1e-6,
                          seed = 1L,
-                         fast_block = 4L,
+                         fast_block = 8L,
                          fast_center_t = FALSE,
-                         fast_reorth_v = TRUE,
-                         fast_incremental = FALSE,
+                         fast_reorth_v = FALSE,
+                         fast_incremental = TRUE,
                          fast_inc_iters = 2L,
                          fast_defl_cache = TRUE,
                          perm.test=FALSE,
@@ -1319,6 +1562,21 @@ pls.double.cv = function(Xdata,
     
     
     if (meth == 3L) {
+      profile <- .resolve_simpls_fast_profile(
+        fast_block = fast_block,
+        fast_center_t = fast_center_t,
+        fast_reorth_v = fast_reorth_v,
+        fast_incremental = fast_incremental,
+        fast_inc_iters = fast_inc_iters,
+        fast_defl_cache = fast_defl_cache,
+        missing_fast_block = missing(fast_block),
+        missing_fast_center_t = missing(fast_center_t),
+        missing_fast_reorth_v = missing(fast_reorth_v),
+        missing_fast_incremental = missing(fast_incremental),
+        missing_fast_inc_iters = missing(fast_inc_iters),
+        missing_fast_defl_cache = missing(fast_defl_cache),
+        context = "simpls_fast"
+      )
       o <- .with_irlba_options(
         .with_fastpls_fast_options(
           double_pls_cv(
@@ -1336,12 +1594,12 @@ pls.double.cv = function(Xdata,
             svds_tol=svds_tol,
             seed=seed
           ),
-          fast_block = fast_block,
-          fast_center_t = fast_center_t,
-          fast_reorth_v = fast_reorth_v,
-          fast_incremental = fast_incremental,
-          fast_inc_iters = fast_inc_iters,
-          fast_defl_cache = fast_defl_cache
+          fast_block = profile$fast_block,
+          fast_center_t = profile$fast_center_t,
+          fast_reorth_v = profile$fast_reorth_v,
+          fast_incremental = profile$fast_incremental,
+          fast_inc_iters = profile$fast_inc_iters,
+          fast_defl_cache = profile$fast_defl_cache
         ),
         irlba_work = irlba_work,
         irlba_maxit = irlba_maxit,

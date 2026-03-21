@@ -3,9 +3,9 @@
 \title{Pure-R Reference Implementation of fastPLS Algorithms}
 
 \description{
-Pure-R implementation of \code{plssvd} and \code{simpls} paths used for
-validation and CPU-only reference runs. This function intentionally excludes
-\code{simpls_fast} and CUDA backends.
+Pure-R implementation of \code{plssvd}, \code{simpls}, and \code{simpls_fast}
+paths used for validation and CPU-only reference runs. This function still
+excludes CUDA backends.
 }
 
 \usage{
@@ -16,7 +16,7 @@ pls_r(
   Ytest = NULL,
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
+  method = c("simpls", "plssvd", "simpls_fast"),
   svd.method = c("irlba", "arpack", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -64,7 +64,9 @@ not in current pure-R computations.}
 \code{pls_r} reproduces the same high-level model structure returned by
 \code{pls()} but uses R matrix operations and a pure-R truncated SVD helper.
 It is suitable for correctness checks, method comparison, and environments
-where the C++ path is not desired.
+where the C++ path is not desired. The \code{simpls_fast} pure-R path mirrors
+the fixed optimized incremental-deflation profile now used by the compiled
+\code{simpls_fast} implementation.
 }
 
 \value{

@@ -546,10 +546,10 @@ List pls_model2_fast(
 
   // Inspired by block-Krylov randomized SVD literature (e.g. arXiv:1504.05477):
   // refresh a small block of singular vectors to reduce per-component SVD overhead.
-  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 4, 1, 16);
+  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 8, 1, 16);
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
-  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 1, 0, 1);
-  const int incremental_svd = env_int_or("FASTPLS_FAST_INCREMENTAL", 0, 0, 1);
+  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
+  const int incremental_svd = 1;
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
   const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
   const int fast_optimized = env_int_or("FASTPLS_FAST_OPTIMIZED", 1, 0, 1);
