@@ -93,7 +93,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // truncated_svd_debug
-Rcpp::List truncated_svd_debug(arma::mat A, int k, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool left_only);
+Rcpp::List truncated_svd_debug(const arma::mat& A, int k, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool left_only);
 RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;

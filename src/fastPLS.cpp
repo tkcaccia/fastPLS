@@ -44,11 +44,11 @@ arma::mat gaussian_matrix_local(
   std::mt19937 rng(seed);
   std::normal_distribution<double> norm(0.0, 1.0);
 
-  arma::mat out(n_rows, n_cols, arma::fill::zeros);
-  for (arma::uword j = 0; j < n_cols; ++j) {
-    for (arma::uword i = 0; i < n_rows; ++i) {
-      out(i, j) = norm(rng);
-    }
+  arma::mat out(n_rows, n_cols);
+  double* ptr = out.memptr();
+  const arma::uword n_elem = out.n_elem;
+  for (arma::uword i = 0; i < n_elem; ++i) {
+    ptr[i] = norm(rng);
   }
 
   return out;
@@ -267,7 +267,7 @@ bool has_cuda() {
 
 // [[Rcpp::export]]
 Rcpp::List truncated_svd_debug(
-  arma::mat A,
+  const arma::mat& A,
   int k,
   int svd_method,
   int rsvd_oversample,

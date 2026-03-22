@@ -13,3 +13,5 @@ fastPLS.Rcheck/
 src/symbols.rds
 *_results/
 nvidia_*_results/
+.bench-lib*/
+benchmark/results/

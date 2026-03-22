@@ -5,4 +5,6 @@
 ^\.\.Rcheck$
 ^\.gitignore$
 ^benchmark$
+^scripts$
 ^fastPLS[.]Rcheck$
+^\.bench-lib.*$

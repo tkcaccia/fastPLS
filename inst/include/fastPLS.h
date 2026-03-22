@@ -20,7 +20,7 @@ arma::mat variance(arma::mat x);
 arma::mat transformy(arma::ivec y);
 bool has_cuda();
 Rcpp::List truncated_svd_debug(
-  arma::mat A,
+  const arma::mat& A,
   int k,
   int svd_method,
   int rsvd_oversample,

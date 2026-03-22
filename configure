@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+set -eu
+
+use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
+openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
+
+pkg_cppflags=""
+pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
+
+if [ "${use_openblas}" = "1" ]; then
+  pkg_cppflags="-I${openblas_root}/include"
+  pkg_libs="-L${openblas_root}/lib -lopenblas"
+fi
+
+sed \
+  -e "s|@FASTPLS_PKG_CPPFLAGS@|${pkg_cppflags}|g" \
+  -e "s|@FASTPLS_PKG_LIBS@|${pkg_libs}|g" \
+  src/Makevars.in > src/Makevars
