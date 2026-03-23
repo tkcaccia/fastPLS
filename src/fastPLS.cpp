@@ -760,24 +760,22 @@ List pls_predict(List& model, arma::mat Xtest, bool proj) {
   int w = Xtest.n_rows;
   
   arma::ivec ncomp=model("ncomp");
-  int length_ncomp=ncomp.n_elem;
+  arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
   
   //scaling factors
-  arma::mat mX=model("mX");
+  arma::rowvec mX = model("mX");
   Xtest.each_row()-=mX;
-  arma::mat vX=model("vX");
-  Xtest.each_row()/=vX;  
-  arma::mat mY=model("mY"); 
+  arma::rowvec vX = model("vX");
+  Xtest.each_row()/=vX;
+  arma::rowvec mY = model("mY");
   arma::cube B=model("B");
   arma::mat RR=model("R");
   
   arma::cube Ypred(w,m,length_ncomp);
-  Ypred.zeros();  
-  for (int a=0; a<length_ncomp; a++) {
-    Ypred.slice(a)=Xtest*B.slice(a);
-    arma::mat temp1=Ypred.slice(a);
-    temp1.each_row()+=mY;
-    Ypred.slice(a)=temp1;
+  for (arma::uword a = 0; a < length_ncomp; ++a) {
+    arma::mat pred = Xtest * B.slice(a);
+    pred.each_row() += mY;
+    Ypred.slice(a) = std::move(pred);
   }  
   arma::mat T_Xtest;
   if(proj){ 
