@@ -555,6 +555,7 @@ List pls_model2_fast(
   const int fast_optimized = env_int_or("FASTPLS_FAST_OPTIMIZED", 1, 0, 1);
   const int fast_top1_rsvd = env_int_or("FASTPLS_FAST_RSVD_TOP1", 0, 0, 1);
   const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
+  const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
   const int top1_rsvd_oversample = env_int_or(
     "FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE",
     std::min(std::max(rsvd_oversample, 0), 2),
@@ -572,7 +573,9 @@ List pls_model2_fast(
   const bool use_crossprod_cache =
     (fast_optimized == 1) &&
     (center_t == 0) &&
-    (max_ncomp >= fast_crossprod_min_ncomp);
+    (max_ncomp >= fast_crossprod_min_ncomp) &&
+    (p <= n) &&
+    (p <= fast_crossprod_max_p);
   if (use_crossprod_cache) {
     XtX_cache = Xt * Xtrain;
     Sxy_cache = S;
