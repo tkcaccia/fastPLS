@@ -11,4 +11,4 @@ PKG_CPPFLAGS += -DFASTPLS_HAS_CUDA -I/usr/local/cuda/include
 endif
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
-	svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd_wrap.o svd_cuda_rsvd.o
+	svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd.o

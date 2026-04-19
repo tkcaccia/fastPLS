@@ -65,40 +65,102 @@ ok_sum <- ok[, .(
   metric_mean = mean(metric_value, na.rm = TRUE),
   model_size_mb_median = median(model_size_mb, na.rm = TRUE),
   n_ok = .N
-), by = .(dataset, analysis, analysis_value, ncomp, metric_name, method_id, engine, algorithm, svd_method, param_set)]
+), by = .(dataset, analysis, analysis_value, ncomp, metric_name, method_id, engine, algorithm, svd_method, fast_profile, param_set)]
 
 ok_sum[, analysis_value_num := suppressWarnings(as.numeric(analysis_value))]
+ok_sum[, algorithm_panel := fifelse(
+  algorithm == "simpls_fast" & fast_profile %in% c("incdefl", "gpu_native"),
+  "simpls_fast (incdefl)",
+  algorithm
+)]
+ok_sum[, algorithm_panel := factor(
+  algorithm_panel,
+  levels = c("plssvd", "simpls", "simpls_fast (incdefl)")
+)]
+ok_sum[, svd_family := fifelse(
+  grepl("rsvd", svd_method, ignore.case = TRUE),
+  "rsvd",
+  fifelse(grepl("gpu", svd_method, ignore.case = TRUE),
+          "gpu",
+          fifelse(grepl("irlba", svd_method, ignore.case = TRUE),
+                  "irlba",
+                  fifelse(grepl("arpack|svds|dc|exact", svd_method, ignore.case = TRUE),
+                          "arpack",
+                          tolower(svd_method))))
+)]
+ok_sum[, engine_shape := fifelse(
+  engine == "pls_pkg",
+  "pls_pkg",
+  fifelse(engine == "R", "R", fifelse(engine == "Rcpp", "Rcpp", fifelse(engine == "GPU", "GPU", engine)))
+)]
+
+svd_levels <- c("irlba", "rsvd", "gpu", "arpack", sort(setdiff(unique(ok_sum$svd_family), c("irlba", "rsvd", "gpu", "arpack"))))
+svd_levels <- svd_levels[svd_levels %in% unique(ok_sum$svd_family)]
+svd_palette <- c(
+  irlba = "#1b9e77",
+  rsvd = "#d95f02",
+  gpu = "#e7298a",
+  arpack = "#7570b3"
+)
+if (length(setdiff(svd_levels, names(svd_palette)))) {
+  extra_levels <- setdiff(svd_levels, names(svd_palette))
+  extra_cols <- grDevices::hcl.colors(length(extra_levels), palette = "Dark 3")
+  names(extra_cols) <- extra_levels
+  svd_palette <- c(svd_palette, extra_cols)
+}
+svd_palette <- svd_palette[svd_levels]
+
+shape_levels <- c("pls_pkg", "R", "Rcpp", "GPU", sort(setdiff(unique(ok_sum$engine_shape), c("pls_pkg", "R", "Rcpp", "GPU"))))
+shape_levels <- shape_levels[shape_levels %in% unique(ok_sum$engine_shape)]
+shape_values <- c(
+  pls_pkg = 15,
+  R = 17,
+  Rcpp = 16,
+  GPU = 18
+)
+if (length(setdiff(shape_levels, names(shape_values)))) {
+  extra_shapes <- c(0, 1, 2, 5, 6, 7, 8)
+  names(extra_shapes) <- setdiff(shape_levels, names(shape_values))
+  shape_values <- c(shape_values, extra_shapes)
+}
+shape_values <- shape_values[shape_levels]
 
 analysis_levels <- unique(ok_sum$analysis)
 
 plot_time <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   xvar <- if (use_ncomp_x) "ncomp" else if (all(is.finite(dt$analysis_value_num))) "analysis_value_num" else "analysis_value"
-  p <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "method_id", group = "method_id")) +
+  p <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.8, alpha = 0.9) +
     geom_point(size = 1.8) +
-    facet_wrap(~dataset, scales = "free") +
+    scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
+    scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
+    facet_wrap(~dataset, scales = "free_y") +
     theme_minimal(base_size = 11) +
     labs(
       title = paste0("Train Time - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
       y = "Median train time (ms)",
-      color = "method"
+      color = "svd",
+      shape = "implementation"
     )
   ggsave(file.path(plot_dir, paste0("time_", analysis_name, "_", plot_scope, ".png")), p, width = 13, height = 8, dpi = 150)
 }
 
 plot_metric <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   xvar <- if (use_ncomp_x) "ncomp" else if (all(is.finite(dt$analysis_value_num))) "analysis_value_num" else "analysis_value"
-  p <- ggplot(dt, aes_string(x = xvar, y = "metric_median", color = "method_id", group = "method_id")) +
+  p <- ggplot(dt, aes_string(x = xvar, y = "metric_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.8, alpha = 0.9) +
     geom_point(size = 1.8) +
-    facet_grid(metric_name ~ dataset, scales = "free") +
+    scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
+    scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
+    facet_grid(metric_name ~ dataset, scales = "free_y") +
     theme_minimal(base_size = 11) +
     labs(
       title = paste0("Performance Metric - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
       y = "Median metric (accuracy or rmsd)",
-      color = "method"
+      color = "svd",
+      shape = "implementation"
     )
   ggsave(file.path(plot_dir, paste0("metric_", analysis_name, "_", plot_scope, ".png")), p, width = 14, height = 9, dpi = 150)
 }
@@ -106,29 +168,35 @@ plot_metric <- function(dt, analysis_name, use_ncomp_x = FALSE) {
 plot_subanalysis <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   xvar <- if (use_ncomp_x) "ncomp" else if (all(is.finite(dt$analysis_value_num))) "analysis_value_num" else "analysis_value"
 
-  p1 <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "svd_method", group = "svd_method")) +
+  p1 <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.7) +
     geom_point(size = 1.4) +
-    facet_grid(dataset ~ algorithm, scales = "free") +
+    scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
+    scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
+    facet_grid(dataset ~ algorithm_panel, scales = "free_y") +
     theme_minimal(base_size = 10) +
     labs(
       title = paste0("Subanalysis Train Time - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
       y = "Median train time (ms)",
-      color = "svd"
+      color = "svd",
+      shape = "implementation"
     )
   ggsave(file.path(plot_dir, paste0("sub_time_", analysis_name, "_dataset_algorithm_", plot_scope, ".png")), p1, width = 15, height = 10, dpi = 150)
 
-  p2 <- ggplot(dt, aes_string(x = xvar, y = "metric_median", color = "svd_method", group = "svd_method")) +
+  p2 <- ggplot(dt, aes_string(x = xvar, y = "metric_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.7) +
     geom_point(size = 1.4) +
-    facet_grid(metric_name + dataset ~ algorithm, scales = "free") +
+    scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
+    scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
+    facet_grid(metric_name + dataset ~ algorithm_panel, scales = "free_y") +
     theme_minimal(base_size = 10) +
     labs(
       title = paste0("Subanalysis Metric - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
       y = "Median metric (accuracy/rmsd)",
-      color = "svd"
+      color = "svd",
+      shape = "implementation"
     )
   ggsave(file.path(plot_dir, paste0("sub_metric_", analysis_name, "_dataset_algorithm_", plot_scope, ".png")), p2, width = 15, height = 11, dpi = 150)
 }
@@ -143,7 +211,6 @@ for (an in analysis_levels) {
   plot_subanalysis(dt, an, use_ncomp_x = use_ncomp)
 }
 
-# Save compact table used for plotting
 fwrite(ok_sum, file.path(out_dir, paste0("multianalysis_plot_summary_", plot_scope, ".csv")))
 
 cat("Plots generated in:", plot_dir, "\n")

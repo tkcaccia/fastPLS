@@ -303,6 +303,7 @@ struct SimplsFastRefreshWorkspace {
     }
     Uhat.reset();
     Y.set_size(static_cast<arma::uword>(s_rows), static_cast<arma::uword>(k_block));
+    shat.set_size(static_cast<arma::uword>(k_block));
     fastpls_svd::cuda_rsvd_refresh_left_block_u_resident(
       s_rows,
       s_cols,
@@ -311,7 +312,8 @@ struct SimplsFastRefreshWorkspace {
       k_block,
       seed,
       std::max(power_iters, 0),
-      Y.memptr()
+      Y.memptr(),
+      shat.memptr()
     );
   }
 
@@ -387,6 +389,63 @@ struct SimplsFastRefreshWorkspace {
       Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
     }
     return (Ublock.n_cols > 0);
+  }
+};
+
+struct AdaptiveRefreshPolicy {
+  bool enabled = false;
+  int base_block = 8;
+  int base_power = 2;
+  int min_block = 2;
+  int max_block = 16;
+  int min_power = 1;
+  int max_power = 4;
+  double flat_ratio = 0.55;
+  double steep_ratio = 0.12;
+  int current_block = 8;
+  int current_power = 2;
+
+  static AdaptiveRefreshPolicy from_env(int base_block_in, int base_power_in) {
+    AdaptiveRefreshPolicy out;
+    out.enabled = (env_int_or("FASTPLS_FAST_ADAPTIVE_RSVD", 0, 0, 1) == 1);
+    out.base_block = base_block_in;
+    out.base_power = base_power_in;
+    out.min_block = env_int_or("FASTPLS_FAST_ADAPTIVE_MIN_BLOCK", std::min(4, std::max(1, base_block_in)), 1, 64);
+    out.max_block = env_int_or("FASTPLS_FAST_ADAPTIVE_MAX_BLOCK", std::max(base_block_in, 16), 1, 128);
+    out.min_power = env_int_or("FASTPLS_FAST_ADAPTIVE_MIN_POWER", std::min(base_power_in, 1), 0, 8);
+    out.max_power = env_int_or("FASTPLS_FAST_ADAPTIVE_MAX_POWER", std::max(base_power_in, 4), 0, 12);
+    out.flat_ratio = std::max(0.0, std::min(0.99, std::atof(std::getenv("FASTPLS_FAST_ADAPTIVE_FLAT_RATIO") ? std::getenv("FASTPLS_FAST_ADAPTIVE_FLAT_RATIO") : "0.55")));
+    out.steep_ratio = std::max(0.0, std::min(out.flat_ratio, std::atof(std::getenv("FASTPLS_FAST_ADAPTIVE_STEEP_RATIO") ? std::getenv("FASTPLS_FAST_ADAPTIVE_STEEP_RATIO") : "0.12")));
+    out.current_block = std::min(std::max(out.base_block, out.min_block), out.max_block);
+    out.current_power = std::min(std::max(out.base_power, out.min_power), out.max_power);
+    return out;
+  }
+
+  std::pair<int,int> current(int remaining) const {
+    return std::make_pair(
+      std::max(1, std::min(current_block, remaining)),
+      std::max(0, current_power)
+    );
+  }
+
+  void update_from_spectrum(const arma::vec& shat_in, int remaining_after) {
+    if (!enabled || shat_in.n_elem < 2) {
+      return;
+    }
+    const double head = std::max(shat_in(0), std::numeric_limits<double>::epsilon());
+    const arma::uword tail_idx = std::min<arma::uword>(shat_in.n_elem - 1, 1);
+    const double tail = std::max(shat_in(tail_idx), 0.0);
+    const double ratio = tail / head;
+
+    if (ratio >= flat_ratio) {
+      current_block = std::min(max_block, std::max(current_block + 2, current_block * 2));
+      current_power = std::min(max_power, current_power + 1);
+    } else if (ratio <= steep_ratio) {
+      current_block = std::max(min_block, current_block / 2);
+      current_power = std::max(min_power, current_power - 1);
+    }
+
+    current_block = std::max(1, std::min(current_block, remaining_after));
   }
 };
 
@@ -958,6 +1017,7 @@ List pls_model2_fast(
     );
   SimplsFastRefreshWorkspace refresh_ws;
   refresh_ws.gpu_refresh_enabled = use_gpu_refresh;
+  AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
   gpu_deflation_enabled = use_gpu_refresh;
   if (use_gpu_refresh) {
     fastpls_svd::cuda_rsvd_set_resident_matrix(
@@ -983,7 +1043,10 @@ List pls_model2_fast(
   } else {
     int a = 0;
     while (a < max_ncomp) {
-      const int k_block = std::min(refresh_block, max_ncomp - a);
+      const int remaining = max_ncomp - a;
+      const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
+      const int k_block = std::min(refresh_cfg.first, remaining);
+      const int power_iters_block = refresh_cfg.second;
       arma::mat Ublock;
       if (can_incremental) {
         const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
@@ -991,12 +1054,13 @@ List pls_model2_fast(
               S,
               warm_start,
               k_block,
-              inc_power_iters,
+              power_iters_block,
               static_cast<unsigned int>(seed + a),
               Ublock
             )) {
           break;
         }
+        adaptive_policy.update_from_spectrum(refresh_ws.shat, max_ncomp - (a + k_block));
       } else {
         fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
           S,
@@ -1116,6 +1180,8 @@ List pls_model2_fast_gpu(
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
   const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
   (void)defl_cache;
+  const bool use_device_state = (env_int_or("FASTPLS_GPU_DEVICE_STATE", 0, 0, 1) == 1);
+  AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
   if (center_t == 1) {
     stop("pls_model2_fast_gpu does not support FASTPLS_FAST_CENTER_T=1");
   }
@@ -1128,117 +1194,180 @@ List pls_model2_fast_gpu(
     m,
     fit
   );
+  if (use_device_state) {
+    fastpls_svd::cuda_simpls_fast_begin_device_loop(n, p, m, max_ncomp, fit);
+    bool has_rr_prev = false;
+    int a = 0;
+    while (a < max_ncomp) {
+      const int remaining = max_ncomp - a;
+      const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
+      const int k_block = std::min(refresh_cfg.first, remaining);
+      const int power_iters_block = refresh_cfg.second;
+      arma::vec shat_block(k_block, arma::fill::zeros);
+      fastpls_svd::cuda_simpls_fast_refresh_block_resident(
+        p,
+        m,
+        k_block,
+        k_block,
+        has_rr_prev,
+        static_cast<unsigned int>(seed + a),
+        power_iters_block,
+        shat_block.memptr()
+      );
+      adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
 
-  arma::mat S_shape(p, m, arma::fill::zeros);
-  SimplsFastRefreshWorkspace refresh_ws;
-  refresh_ws.gpu_refresh_enabled = true;
-  arma::vec rr_prev;
-  bool has_rr_prev = false;
+      bool stop_now = false;
+      for (int j = 0; j < k_block && a < max_ncomp; ++j, ++a) {
+        if (!fastpls_svd::cuda_simpls_fast_append_component_from_block(
+              n,
+              p,
+              m,
+              a,
+              j,
+              a,
+              (reorth_v == 1),
+              fit
+            )) {
+          stop_now = true;
+          break;
+        }
+        has_rr_prev = true;
 
-  auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
-    arma::vec tt(n, arma::fill::zeros);
-    arma::vec pp(p, arma::fill::zeros);
-    arma::vec qq(m, arma::fill::zeros);
-    double tnorm = 0.0;
-    fastpls_svd::cuda_simpls_fast_component_stats(
-      rr.memptr(),
-      n,
-      p,
-      m,
-      tt.memptr(),
-      pp.memptr(),
-      qq.memptr(),
-      &tnorm
-    );
-    if (!std::isfinite(tnorm) || tnorm <= 0.0) {
-      return false;
-    }
-    rr /= tnorm;
-    rr_prev = rr;
-    has_rr_prev = true;
-
-    arma::vec vv = pp;
-    if (a_idx > 0) {
-      auto Vprev = VV.cols(0, a_idx - 1);
-      vv -= Vprev * (Vprev.t() * pp);
-      if (reorth_v == 1) {
-        vv -= Vprev * (Vprev.t() * vv);
+        while (i_out < length_ncomp && a == (ncomp(i_out) - 1)) {
+          fastpls_svd::cuda_simpls_fast_copy_bcur(B.slice(i_out).memptr(), p, m);
+          if (fit) {
+            fastpls_svd::cuda_simpls_fast_copy_yfit(Yfit_cur.memptr(), n, m);
+            R2Y(i_out) = RQ(Ytrain, Yfit_cur);
+            arma::mat yf = Yfit_cur;
+            yf.each_row() += mY;
+            Yfit.slice(i_out) = yf;
+          }
+          ++i_out;
+        }
       }
-    }
-    const double vnorm = arma::norm(vv, 2);
-    if (!std::isfinite(vnorm) || vnorm <= 0.0) {
-      return false;
-    }
-    vv /= vnorm;
-
-    arma::vec vS(m, arma::fill::zeros);
-    fastpls_svd::cuda_rsvd_project_left_row(
-      vv.memptr(),
-      p,
-      m,
-      vS.memptr()
-    );
-    fastpls_svd::cuda_rsvd_deflate_left_rank1(
-      vv.memptr(),
-      vS.memptr(),
-      p,
-      m
-    );
-
-    RR.col(a_idx) = rr;
-    QQ.col(a_idx) = qq;
-    VV.col(a_idx) = vv;
-    Bcur += rr * qq.t();
-
-    while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
-      B.slice(i_out) = Bcur;
-      if (fit) {
-        fastpls_svd::cuda_simpls_fast_rank1_fit_update(
-          tt.memptr(),
-          n,
-          qq.memptr(),
-          m,
-          Yfit_cur.memptr()
-        );
-        R2Y(i_out) = RQ(Ytrain, Yfit_cur);
-        arma::mat yf = Yfit_cur;
-        yf.each_row() += mY;
-        Yfit.slice(i_out) = yf;
-      }
-      ++i_out;
-    }
-    return true;
-  };
-
-  int a = 0;
-  while (a < max_ncomp) {
-    const int k_block = std::min(refresh_block, max_ncomp - a);
-    arma::mat Ublock;
-    const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
-    if (!refresh_ws.refresh(
-          S_shape,
-          warm_start,
-          k_block,
-          inc_power_iters,
-          static_cast<unsigned int>(seed + a),
-          Ublock
-        )) {
-      break;
-    }
-    if (Ublock.n_cols < 1) {
-      break;
-    }
-
-    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
-    bool stop_now = false;
-    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
-      if (!append_component(Ublock.col(j), a)) {
-        stop_now = true;
+      if (stop_now) {
         break;
       }
     }
-    if (stop_now) {
-      break;
+
+    fastpls_svd::cuda_simpls_fast_copy_rr(RR.memptr(), p, max_ncomp);
+    fastpls_svd::cuda_simpls_fast_copy_qq(QQ.memptr(), m, max_ncomp);
+  } else {
+    arma::mat S_shape(p, m, arma::fill::zeros);
+    SimplsFastRefreshWorkspace refresh_ws;
+    refresh_ws.gpu_refresh_enabled = true;
+    arma::vec rr_prev;
+    bool has_rr_prev = false;
+
+    auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
+      arma::vec tt(n, arma::fill::zeros);
+      arma::vec pp(p, arma::fill::zeros);
+      arma::vec qq(m, arma::fill::zeros);
+      double tnorm = 0.0;
+      fastpls_svd::cuda_simpls_fast_component_stats(
+        rr.memptr(),
+        n,
+        p,
+        m,
+        tt.memptr(),
+        pp.memptr(),
+        qq.memptr(),
+        &tnorm
+      );
+      if (!std::isfinite(tnorm) || tnorm <= 0.0) {
+        return false;
+      }
+      rr /= tnorm;
+      rr_prev = rr;
+      has_rr_prev = true;
+
+      arma::vec vv = pp;
+      if (a_idx > 0) {
+        auto Vprev = VV.cols(0, a_idx - 1);
+        vv -= Vprev * (Vprev.t() * pp);
+        if (reorth_v == 1) {
+          vv -= Vprev * (Vprev.t() * vv);
+        }
+      }
+      const double vnorm = arma::norm(vv, 2);
+      if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+        return false;
+      }
+      vv /= vnorm;
+
+      arma::vec vS(m, arma::fill::zeros);
+      fastpls_svd::cuda_rsvd_project_left_row(
+        vv.memptr(),
+        p,
+        m,
+        vS.memptr()
+      );
+      fastpls_svd::cuda_rsvd_deflate_left_rank1(
+        vv.memptr(),
+        vS.memptr(),
+        p,
+        m
+      );
+
+      RR.col(a_idx) = rr;
+      QQ.col(a_idx) = qq;
+      VV.col(a_idx) = vv;
+      Bcur += rr * qq.t();
+
+      while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
+        B.slice(i_out) = Bcur;
+        if (fit) {
+          fastpls_svd::cuda_simpls_fast_rank1_fit_update(
+            tt.memptr(),
+            n,
+            qq.memptr(),
+            m,
+            Yfit_cur.memptr()
+          );
+          R2Y(i_out) = RQ(Ytrain, Yfit_cur);
+          arma::mat yf = Yfit_cur;
+          yf.each_row() += mY;
+          Yfit.slice(i_out) = yf;
+        }
+        ++i_out;
+      }
+      return true;
+    };
+
+    int a = 0;
+    while (a < max_ncomp) {
+      const int remaining = max_ncomp - a;
+      const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
+      const int k_block = std::min(refresh_cfg.first, remaining);
+      const int power_iters_block = refresh_cfg.second;
+      arma::mat Ublock;
+      const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
+      if (!refresh_ws.refresh(
+            S_shape,
+            warm_start,
+            k_block,
+            power_iters_block,
+            static_cast<unsigned int>(seed + a),
+            Ublock
+          )) {
+        break;
+      }
+      adaptive_policy.update_from_spectrum(refresh_ws.shat, max_ncomp - (a + k_block));
+      if (Ublock.n_cols < 1) {
+        break;
+      }
+
+      const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
+      bool stop_now = false;
+      for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
+        if (!append_component(Ublock.col(j), a)) {
+          stop_now = true;
+          break;
+        }
+      }
+      if (stop_now) {
+        break;
+      }
     }
   }
 
@@ -1754,5 +1883,94 @@ List pls_model1(
     Named("ncomp")   = ncomp,
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y
+  );
+}
+
+// [[Rcpp::export]]
+List pls_model1_gpu(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed
+) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    stop("pls_model1_gpu requires CUDA support");
+  }
+
+  const int n = Xtrain.n_rows;
+  const int p = Xtrain.n_cols;
+  const int m = Ytrain.n_cols;
+  const int max_plssvd_rank = std::min(n, std::min(p, m));
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > max_plssvd_rank) {
+      ncomp(i) = max_plssvd_rank;
+    }
+    if (ncomp(i) < 1) {
+      ncomp(i) = 1;
+    }
+  }
+  const int max_ncomp = max(ncomp);
+  const int max_ncomp_eff = std::min(max_ncomp, max_plssvd_rank);
+  if (max_ncomp_eff < 1) {
+    stop("plssvd effective rank is < 1");
+  }
+
+  arma::mat mX(1, p, fill::zeros);
+  if (scaling < 3) {
+    mX = mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+
+  arma::mat vX(1, p, fill::ones);
+  if (scaling == 2) {
+    vX = variance(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+
+  arma::mat mY = mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  fastpls_svd::SVDOptions opt;
+  opt.method = fastpls_svd::Method::RSVD;
+  opt.oversample = std::max(rsvd_oversample, 0);
+  opt.power_iters = std::max(rsvd_power, 0);
+  opt.svds_tol = std::max(svds_tol, 0.0);
+  opt.seed = static_cast<unsigned int>(seed);
+  opt.left_only = false;
+  opt.use_full_svd = false;
+
+  fastpls_svd::PLSSVDGPUResult gpu = fastpls_svd::cuda_plssvd_fit(
+    Xtrain,
+    Ytrain,
+    ncomp,
+    fit,
+    opt
+  );
+
+  arma::cube Yfit = gpu.Yfit;
+  if (fit && Yfit.n_elem > 0) {
+    for (arma::uword i = 0; i < Yfit.n_slices; ++i) {
+      Yfit.slice(i).each_row() += mY;
+    }
+  }
+
+  return List::create(
+    Named("B")       = gpu.B,
+    Named("Q")       = gpu.Q,
+    Named("Ttrain")  = gpu.Ttrain,
+    Named("R")       = gpu.R,
+    Named("mX")      = mX,
+    Named("vX")      = vX,
+    Named("mY")      = mY,
+    Named("p")       = p,
+    Named("m")       = m,
+    Named("ncomp")   = ncomp,
+    Named("Yfit")    = Yfit,
+    Named("R2Y")     = gpu.R2Y
   );
 }

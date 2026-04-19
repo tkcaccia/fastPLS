@@ -159,7 +159,8 @@ test_that("SVD utilities and helper functions are usable in practice", {
   sm <- svd_methods()
   expect_true(is.data.frame(sm))
   expect_equal(colnames(sm), c("method", "enabled"))
-  expect_true(all(c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd") %in% sm$method))
+  expect_true(all(c("irlba", "arpack", "cpu_rsvd") %in% sm$method))
+  expect_false("cuda_rsvd" %in% sm$method)
 
   sr <- svd_run(A, k = 4, method = "arpack")
   expect_true(is.list(sr))

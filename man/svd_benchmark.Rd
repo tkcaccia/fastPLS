@@ -7,7 +7,7 @@
 svd_benchmark(
   A,
   k,
-  methods = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+  methods = c("irlba", "arpack", "cpu_rsvd"),
   reps = 3L,
   rsvd_oversample = 10L,
   rsvd_power = 1L,

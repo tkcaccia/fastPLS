@@ -64,3 +64,7 @@ pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_ove
     .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
+pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model1_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
+}
+

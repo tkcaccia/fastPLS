@@ -19,12 +19,14 @@ for sufficiently large cross-covariance matrices; in generic SVD utility wrapper
 exact CPU SVD dispatch.
 \item \code{arpack}: ARPACK-truncated CPU SVD dispatch via Armadillo \code{svds()}.
 \item \code{cpu_rsvd}: CPU randomized SVD.
-\item \code{cuda_rsvd}: CUDA randomized SVD; enabled only when
-\code{\link{has_cuda}()} returns \code{TRUE}.
 }
 
 The string \code{"arpack"} is a compatibility/backend label in this package API;
 the implementation path is the exact CPU SVD wrapper in \code{src/svd_cpu_exact.cpp}.
+
+GPU-native fits are exposed separately through \code{\link{pls_gpu}} and
+\code{\link{plssvd_gpu}}. The former mixed CPU/GPU route through
+\code{svd.method = "cuda_rsvd"} is no longer part of the public CPU-side SVD API.
 }
 
 \value{
@@ -35,7 +37,8 @@ A data frame with columns:
 }
 }
 
-\seealso{\code{\link{svd_run}}, \code{\link{has_cuda}}, \code{\link{pls}}}
+\seealso{\code{\link{svd_run}}, \code{\link{has_cuda}}, \code{\link{pls_gpu}},
+\code{\link{plssvd_gpu}}, \code{\link{pls}}}
 
 \examples{
 svd_methods()

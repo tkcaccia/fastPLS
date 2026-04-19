@@ -164,7 +164,7 @@
       identical(as.character(svd.method), "cuda_rsvd")) {
     stop(
       sprintf(
-        "The hybrid CUDA path via svd.method='cuda_rsvd' has been removed from %s; use pls_gpu() for the experimental GPU-native fit instead.",
+        "The hybrid CUDA path via svd.method='cuda_rsvd' has been removed from %s; use pls_gpu() or plssvd_gpu() for GPU-native fits instead.",
         context
       ),
       call. = FALSE
@@ -270,6 +270,38 @@ pls.model1 =
       irlba_tol = irlba_tol,
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol
+    )
+    class(model) = "fastPLS"
+    model
+  }
+
+pls.model1.gpu =
+  function (Xtrain,
+            Ytrain,
+            ncomp,
+            fit = FALSE,
+            scaling = 1,
+            rsvd_oversample = 10L,
+            rsvd_power = 1L,
+            svds_tol = 0,
+            seed = 1L)
+  {
+    if (!has_cuda()) {
+      stop("pls.model1.gpu requires CUDA support")
+    }
+    Xtrain <- as.matrix(Xtrain)
+    Ytrain <- as.matrix(Ytrain)
+    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
+    model <- pls_model1_gpu(
+      Xtrain,
+      Ytrain,
+      cap$ncomp,
+      scaling,
+      fit,
+      rsvd_oversample,
+      rsvd_power,
+      svds_tol,
+      seed
     )
     class(model) = "fastPLS"
     model
@@ -584,11 +616,94 @@ pls_gpu = function(Xtrain,
   model
 }
 
-.svd_methods_all <- c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd", "dc")
+#' Experimental GPU-native PLSSVD fit
+#'
+#' Uses a dedicated CUDA PLSSVD engine that keeps the cross-covariance SVD and
+#' latent linear algebra on device, returning the standard `fastPLS` object
+#' structure for prediction and plotting.
+#'
+#' @param Xtrain Numeric training predictor matrix.
+#' @param Ytrain Training response (numeric or factor).
+#' @param Xtest Optional test predictor matrix.
+#' @param Ytest Optional observed response used to compute `Q2Y`.
+#' @param ncomp Number of components (scalar or vector).
+#' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
+#' @param rsvd_oversample RSVD oversampling.
+#' @param rsvd_power RSVD power iterations.
+#' @param svds_tol Tolerance placeholder passed through to the backend.
+#' @param seed Random seed.
+#' @param fit Return fitted values and `R2Y` when `TRUE`.
+#' @param proj Return projected `Ttest` when `TRUE`.
+#' @return A `fastPLS` object fitted with GPU PLSSVD.
+#' @export
+plssvd_gpu = function(Xtrain,
+                      Ytrain,
+                      Xtest = NULL,
+                      Ytest = NULL,
+                      ncomp = 2,
+                      scaling = c("centering", "autoscaling", "none"),
+                      rsvd_oversample = 10L,
+                      rsvd_power = 1L,
+                      svds_tol = 0,
+                      seed = 1L,
+                      fit = FALSE,
+                      proj = FALSE) {
+  if (!has_cuda()) {
+    stop("plssvd_gpu requires a CUDA-enabled fastPLS build")
+  }
+
+  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
+  Xtrain <- as.matrix(Xtrain)
+  if (is.factor(Ytrain)) {
+    classification <- TRUE
+    lev <- levels(Ytrain)
+    Ytrain <- transformy(Ytrain)
+  } else {
+    classification <- FALSE
+    lev <- NULL
+    Ytrain <- as.matrix(Ytrain)
+  }
+
+  model <- pls.model1.gpu(
+    Xtrain = Xtrain,
+    Ytrain = Ytrain,
+    ncomp = as.integer(ncomp),
+    fit = fit,
+    scaling = scal,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    svds_tol = svds_tol,
+    seed = seed
+  )
+  model$classification <- classification
+  model$lev <- lev
+
+  if (!is.null(Xtest)) {
+    Xtest <- as.matrix(Xtest)
+    res <- predict.fastPLS(model, Xtest, Ytest = Ytest, proj = proj)
+    model <- c(model, res)
+  }
+
+  if (classification && fit && !is.null(model$Yfit)) {
+    Yfitlab <- as.data.frame(matrix(nrow = nrow(Xtrain), ncol = length(ncomp)))
+    colnames(Yfitlab) <- paste("ncomp=", ncomp, sep = "")
+    for (i in seq_along(ncomp)) {
+      tt <- apply(model$Yfit[, , i], 1, which.max)
+      Yfitlab[, i] <- factor(lev[tt], levels = lev)
+    }
+    model$Yfit <- Yfitlab
+  }
+
+  class(model) <- "fastPLS"
+  model
+}
+
+.svd_methods_internal <- c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd", "dc")
+.svd_methods_public <- c("irlba", "arpack", "cpu_rsvd", "dc")
 .svd_methods_cpu <- c("irlba", "arpack", "cpu_rsvd", "dc")
 
 .svd_method_id <- function(method) {
-  method <- match.arg(method, .svd_methods_all)
+  method <- match.arg(method, .svd_methods_internal)
   if (identical(method, "dc")) {
     warning("svd.method='dc' is deprecated; use 'arpack' instead.", call. = FALSE)
     method <- "arpack"
@@ -611,10 +726,9 @@ pls_gpu = function(Xtrain,
 #' @return Data frame with columns `method` and `enabled`.
 #' @export
 svd_methods <- function() {
-  methods <- setdiff(.svd_methods_all, "dc")
+  methods <- setdiff(.svd_methods_public, "dc")
   enabled <- rep(TRUE, length(methods))
   names(enabled) <- methods
-  enabled["cuda_rsvd"] <- has_cuda()
   data.frame(
     method = methods,
     enabled = as.logical(enabled),
@@ -640,7 +754,7 @@ svd_methods <- function() {
 #' @export
 svd_run <- function(A,
                     k,
-                    method = c("arpack", "cpu_rsvd", "irlba", "cuda_rsvd"),
+                    method = c("arpack", "cpu_rsvd", "irlba"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -651,9 +765,6 @@ svd_run <- function(A,
   svdmeth <- .svd_method_id(method)
   if (is.na(svdmeth)) {
     stop("Unknown method")
-  }
-  if (method == "cuda_rsvd" && !has_cuda()) {
-    stop("svd.method='cuda_rsvd' requested, but CUDA backend is not available")
   }
   A <- as.matrix(A)
   t_elapsed <- system.time({
@@ -695,7 +806,7 @@ svd_run <- function(A,
 #' @export
 svd_benchmark <- function(A,
                           k,
-                          methods = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+                          methods = c("irlba", "arpack", "cpu_rsvd"),
                           reps = 3L,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
@@ -717,16 +828,6 @@ svd_benchmark <- function(A,
     svdmeth <- .svd_method_id(method)
     if (is.na(svdmeth)) {
       stop(paste0("Unknown method: ", method))
-    }
-    if (method == "cuda_rsvd" && !has_cuda()) {
-      out[[i]] <- data.frame(
-        method = method,
-        rep = NA_integer_,
-        elapsed = NA_real_,
-        status = "unavailable",
-        stringsAsFactors = FALSE
-      )
-      next
     }
 
     elapsed <- numeric(reps)

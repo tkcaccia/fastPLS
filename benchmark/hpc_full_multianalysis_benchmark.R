@@ -94,10 +94,14 @@ rsvd_tol <- as.numeric(Sys.getenv("FASTPLS_RSVD_TOL", "0"))
 if (!is.finite(rsvd_tol) || is.na(rsvd_tol) || rsvd_tol < 0) rsvd_tol <- 0
 
 include_r_impl <- tolower(Sys.getenv("FASTPLS_INCLUDE_R_IMPL", "false")) %in% c("1", "true", "yes", "y")
+include_pls_pkg_all <- tolower(Sys.getenv("FASTPLS_INCLUDE_PLS_PKG", "false")) %in% c("1", "true", "yes", "y")
 include_cuda <- tolower(Sys.getenv("FASTPLS_INCLUDE_CUDA", "true")) %in% c("1", "true", "yes", "y")
 include_simpls_fast_incremental <- tolower(Sys.getenv("FASTPLS_INCLUDE_SIMPLS_FAST_INCREMENTAL", "true")) %in% c("1", "true", "yes", "y")
+only_ncomp <- tolower(Sys.getenv("FASTPLS_ONLY_NCOMP", "false")) %in% c("1", "true", "yes", "y")
 metref_include_r <- tolower(Sys.getenv("FASTPLS_METREF_INCLUDE_R", "true")) %in% c("1", "true", "yes", "y")
 metref_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_METREF_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
+public_include_r <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_R", "true")) %in% c("1", "true", "yes", "y")
+public_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
 skip_arpack_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_ARPACK_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 skip_plssvd_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_PLSSVD_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 dataset_filter <- tolower(trimws(Sys.getenv("FASTPLS_DATASETS", "metref,cifar100,nmr,singlecell,imagenet")))
@@ -105,12 +109,124 @@ dataset_filter <- unlist(strsplit(dataset_filter, ",", fixed = TRUE), use.names 
 dataset_filter <- dataset_filter[nzchar(dataset_filter)]
 if (!length(dataset_filter)) dataset_filter <- c("metref", "cifar100", "nmr", "singlecell", "imagenet")
 
+public_benchmark_datasets <- c("gtex", "gtex_v8", "tcga_pan_cancer", "tcga_brca", "tcga_hnsc_methylation", "ccle", "covertype", "susy", "yearpredictionmsd")
+ncomp_public_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_PUBLIC_NCOMP_LIST", "2,5,10,20,50,100"), ",", fixed = TRUE)[[1]])
+ncomp_public_vec <- sort(unique(ncomp_public_vec[is.finite(ncomp_public_vec) & ncomp_public_vec >= 1L]))
+if (!length(ncomp_public_vec)) ncomp_public_vec <- c(2L, 5L, 10L, 20L, 50L, 100L)
+public_default_ncomp <- as.integer(Sys.getenv("FASTPLS_PUBLIC_DEFAULT_NCOMP", "50"))
+if (!is.finite(public_default_ncomp) || is.na(public_default_ncomp) || public_default_ncomp < 1L) public_default_ncomp <- 50L
+
 stamp <- function() format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 log_msg <- function(...) {
   msg <- paste0("[", stamp(), "] ", paste(..., collapse = ""))
   cat(msg, "\n")
   cat(msg, "\n", file = out_log, append = TRUE)
   flush.console()
+}
+
+gpu_warmup_done <- new.env(parent = emptyenv())
+gpu_warmup_done$done <- FALSE
+gpu_dataset_warmup_done <- new.env(parent = emptyenv())
+gpu_config_warmup_done <- new.env(parent = emptyenv())
+
+gpu_fit_dispatch <- function(Xtrain,
+                             Ytrain,
+                             algorithm,
+                             ncomp,
+                             Xtest = NULL,
+                             Ytest = NULL,
+                             rsvd_oversample = 10L,
+                             rsvd_power = 1L,
+                             svds_tol = 0,
+                             seed = 123L,
+                             fit = FALSE,
+                             proj = FALSE) {
+  if (identical(algorithm, "plssvd")) {
+    return(fastPLS::plssvd_gpu(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      ncomp = as.integer(ncomp),
+      scaling = "centering",
+      rsvd_oversample = as.integer(rsvd_oversample),
+      rsvd_power = as.integer(rsvd_power),
+      svds_tol = as.numeric(svds_tol),
+      seed = as.integer(seed),
+      fit = isTRUE(fit),
+      proj = isTRUE(proj)
+    ))
+  }
+
+  if (!identical(algorithm, "simpls_fast")) {
+    stop("Unsupported GPU algorithm: ", algorithm)
+  }
+
+  fastPLS::pls_gpu(
+    Xtrain = Xtrain,
+    Ytrain = Ytrain,
+    Xtest = Xtest,
+    Ytest = Ytest,
+    ncomp = as.integer(ncomp),
+    scaling = "centering",
+    rsvd_oversample = as.integer(rsvd_oversample),
+    rsvd_power = as.integer(rsvd_power),
+    svds_tol = as.numeric(svds_tol),
+    seed = as.integer(seed),
+    fit = isTRUE(fit),
+    proj = isTRUE(proj)
+  )
+}
+
+warmup_gpu_once <- function() {
+  if (!isTRUE(has_cuda()) || isTRUE(gpu_warmup_done$done)) return(invisible(FALSE))
+  Xw <- matrix(rnorm(64 * 16), nrow = 64, ncol = 16)
+  Yw <- factor(rep(c("a", "b"), each = 32))
+  invisible(gpu_fit_dispatch(
+    Xtrain = Xw,
+    Ytrain = Yw,
+    algorithm = "simpls_fast",
+    ncomp = 1L,
+    fit = FALSE,
+    seed = 123L
+  ))
+  gpu_warmup_done$done <- TRUE
+  invisible(TRUE)
+}
+
+warmup_gpu_dataset_once <- function(dataset_id, task) {
+  if (!isTRUE(has_cuda()) || isTRUE(gpu_dataset_warmup_done[[dataset_id]])) return(invisible(FALSE))
+  invisible(gpu_fit_dispatch(
+    Xtrain = task$Xtrain,
+    Ytrain = task$Ytrain,
+    algorithm = "simpls_fast",
+    Xtest = task$Xtest,
+    Ytest = task$Ytest,
+    ncomp = 2L,
+    fit = FALSE,
+    seed = 123L
+  ))
+  gpu_dataset_warmup_done[[dataset_id]] <- TRUE
+  invisible(TRUE)
+}
+
+warmup_gpu_config_once <- function(dataset_id, analysis, analysis_value, cfg, ds, ncomp_run) {
+  if (!isTRUE(has_cuda()) || !identical(cfg$engine, "GPU")) return(invisible(FALSE))
+  key <- paste(dataset_id, analysis, analysis_value, cfg$method_id, ncomp_run, sep = "::")
+  if (isTRUE(gpu_config_warmup_done[[key]])) return(invisible(FALSE))
+  invisible(gpu_fit_dispatch(
+    Xtrain = ds$Xtrain,
+    Ytrain = ds$Ytrain,
+    algorithm = cfg$algorithm,
+    Xtest = ds$Xtest,
+    Ytest = ds$Ytest,
+    ncomp = as.integer(ncomp_run),
+    fit = FALSE,
+    proj = FALSE,
+    seed = 123L
+  ))
+  gpu_config_warmup_done[[key]] <- TRUE
+  invisible(TRUE)
 }
 
 filter_call_args <- function(fun, args) {
@@ -191,6 +307,59 @@ fixed_train_split <- function(n, train_n) {
 
 load_dataset <- function(name) {
   name <- tolower(name)
+  load_standard_task <- function(path, alias_name = name) {
+    e <- new.env(parent = emptyenv())
+    objs <- load(path, envir = e)
+    if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% objs)) {
+      ytr <- get("Ytrain", envir = e)
+      yte <- get("Ytest", envir = e)
+      return(list(
+        name = alias_name,
+        Xtrain = as.matrix(get("Xtrain", envir = e)),
+        Ytrain = if (is.factor(ytr)) droplevels(ytr) else as.matrix(ytr),
+        Xtest = as.matrix(get("Xtest", envir = e)),
+        Ytest = if (is.factor(yte)) factor(yte, levels = levels(ytr)) else as.matrix(yte)
+      ))
+    }
+    if ("out" %in% objs && is.list(get("out", envir = e))) {
+      obj <- get("out", envir = e)
+      if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% names(obj))) {
+        return(list(
+          name = alias_name,
+          Xtrain = as.matrix(obj$Xtrain),
+          Ytrain = if (is.factor(obj$Ytrain)) droplevels(obj$Ytrain) else as.matrix(obj$Ytrain),
+          Xtest = as.matrix(obj$Xtest),
+          Ytest = if (is.factor(obj$Ytest)) factor(obj$Ytest, levels = levels(obj$Ytrain)) else as.matrix(obj$Ytest)
+        ))
+      }
+    }
+    if ("r" %in% objs && is.data.frame(e$r) && "label_idx" %in% colnames(e$r)) {
+      feat_cols <- grep("^feat_", colnames(e$r), value = TRUE)
+      if (!length(feat_cols)) {
+        feat_cols <- setdiff(colnames(e$r), c("image_path", "split", "label_idx", "label_name"))
+      }
+      X <- as.matrix(e$r[, ..feat_cols])
+      storage.mode(X) <- "double"
+      y <- safe_factor(e$r[, "label_idx"])
+      split_col <- if ("split" %in% colnames(e$r)) trimws(tolower(as.character(e$r[, "split"]))) else rep("train", nrow(X))
+      train_idx <- which(split_col == "train")
+      test_idx <- which(split_col == "test")
+      if (!length(train_idx) || !length(test_idx)) {
+        sp <- half_split_idx(nrow(X))
+        train_idx <- sp$train
+        test_idx <- sp$test
+      }
+      return(list(name = alias_name, Xtrain = X[train_idx, , drop = FALSE], Ytrain = y[train_idx], Xtest = X[test_idx, , drop = FALSE], Ytest = factor(y[test_idx], levels = levels(y[train_idx]))))
+    }
+    if (all(c("data", "labels") %in% objs)) {
+      X <- as.matrix(e$data)
+      y <- safe_factor(e$labels)
+      sp <- stratified_half_split(y)
+      return(list(name = alias_name, Xtrain = X[sp$train, , drop = FALSE], Ytrain = y[sp$train], Xtest = X[sp$test, , drop = FALSE], Ytest = factor(y[sp$test], levels = levels(y[sp$train]))))
+    }
+    stop("Unsupported standard task format: ", path)
+  }
+
   if (name == "cifar100") {
     p <- file.path(base_dir, "CIFAR100.RData")
     e <- new.env(parent = emptyenv())
@@ -270,6 +439,21 @@ load_dataset <- function(name) {
     return(list(name = name, Xtrain = as.matrix(X[-ss, , drop = FALSE]), Ytrain = y[-ss], Xtest = as.matrix(X[ss, , drop = FALSE]), Ytest = y[ss]))
   }
 
+  public_file_map <- c(
+    gtex = "gtex.RData",
+    gtex_v8 = "gtex.RData",
+    tcga_pan_cancer = "tcga_pan_cancer.RData",
+    tcga_brca = "tcga_brca.RData",
+    tcga_hnsc_methylation = "tcga_hnsc_methylation.RData",
+    ccle = "ccle.RData",
+    covertype = "covertype.RData",
+    susy = "susy.RData",
+    yearpredictionmsd = "yearpredictionmsd.RData"
+  )
+  if (name %in% names(public_file_map)) {
+    return(load_standard_task(file.path(base_dir, public_file_map[[name]]), alias_name = name))
+  }
+
   stop("Unknown dataset: ", name)
 }
 
@@ -313,7 +497,7 @@ subset_yvars <- function(ds, frac) {
 }
 
 method_grid <- function(cuda_ok, include_r = FALSE) {
-  svd <- c("irlba", "arpack", "cpu_rsvd", if (cuda_ok) "cuda_rsvd")
+  svd <- c("irlba", "arpack", "cpu_rsvd")
   dt <- CJ(
     engine = "Rcpp",
     algorithm = c("simpls", "plssvd", "simpls_fast"),
@@ -340,17 +524,29 @@ method_grid <- function(cuda_ok, include_r = FALSE) {
     ]
     dt <- rbind(dt, dt_r, fill = TRUE)
   }
+  if (isTRUE(cuda_ok)) {
+    dt_gpu <- data.table(
+      engine = "GPU",
+      algorithm = c("plssvd", "simpls_fast"),
+      svd_method = "gpu_native",
+      fast_profile = "gpu_native"
+    )
+    dt <- rbind(dt, dt_gpu, fill = TRUE)
+  }
   dt[, method_id := paste(engine, algorithm, svd_method, fast_profile, sep = "_")]
   dt[]
 }
 
 methods_for_dataset <- function(dname, methods_all) {
   m <- copy(methods_all)
-  if (tolower(dname) == "metref") {
-    keep_engines <- "Rcpp"
-    if (isTRUE(metref_include_r)) keep_engines <- c(keep_engines, "R")
+  dname_lc <- tolower(dname)
+  if (dname_lc == "metref" || dname_lc %in% public_benchmark_datasets || isTRUE(include_r_impl) || isTRUE(include_pls_pkg_all)) {
+    keep_engines <- c("Rcpp", "GPU")
+    include_r_here <- if (isTRUE(include_r_impl)) TRUE else if (dname_lc == "metref") metref_include_r else if (dname_lc %in% public_benchmark_datasets) public_include_r else FALSE
+    include_pls_here <- if (isTRUE(include_pls_pkg_all)) TRUE else if (dname_lc == "metref") metref_include_pls_pkg else if (dname_lc %in% public_benchmark_datasets) public_include_pls_pkg else FALSE
+    if (isTRUE(include_r_here)) keep_engines <- c(keep_engines, "R")
     m <- m[engine %in% keep_engines]
-    if (isTRUE(metref_include_pls_pkg)) {
+    if (isTRUE(include_pls_here)) {
       m <- rbind(
         m,
         data.table(engine = "pls_pkg", algorithm = "simpls", svd_method = "pls_pkg", fast_profile = "pls_pkg"),
@@ -359,7 +555,7 @@ methods_for_dataset <- function(dname, methods_all) {
     }
     m[, method_id := paste(engine, algorithm, svd_method, fast_profile, sep = "_")]
   } else {
-    m <- m[engine == "Rcpp"]
+    m <- m[engine %in% c("Rcpp", "GPU")]
   }
   if (tolower(dname) %in% c("nmr", "imagenet")) {
     m <- m[!(algorithm == "simpls" & svd_method == "arpack")]
@@ -455,6 +651,29 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
     ))
   }
 
+  if (identical(cfg$engine, "GPU")) {
+    t0 <- proc.time()[3]
+    model <- gpu_fit_dispatch(
+      Xtrain = ds$Xtrain,
+      Ytrain = ds$Ytrain,
+      algorithm = cfg$algorithm,
+      ncomp = as.integer(ncomp),
+      Xtest = NULL,
+      Ytest = NULL,
+      rsvd_oversample = as.integer(param_cfg$rsvd_oversample),
+      rsvd_power = as.integer(param_cfg$rsvd_power),
+      svds_tol = as.numeric(param_cfg$svds_tol),
+      seed = 123L,
+      fit = FALSE,
+      proj = FALSE
+    )
+    train_ms <- (proc.time()[3] - t0) * 1000
+
+    pred <- predict(model, newdata = ds$Xtest, Ytest = ds$Ytest, proj = FALSE)
+    m <- metric_from_pred(ds$Ytest, pred)
+    return(list(train_ms = as.numeric(train_ms), metric_name = m$metric_name, metric_value = as.numeric(m$metric_value), model_size_mb = as.numeric(object.size(model)) / (1024^2)))
+  }
+
   if (identical(cfg$engine, "Rcpp")) {
     fn <- fastPLS::pls
   } else if (identical(cfg$engine, "R")) {
@@ -505,6 +724,7 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
         xtrain_nrow <- nrow(ds$Xtrain)
         xtrain_ncol <- ncol(ds$Xtrain)
         ytrain_ncol <- if (is.factor(ds$Ytrain)) 1L else ncol(as.matrix(ds$Ytrain))
+        ytrain_display_dim <- if (is.factor(ds$Ytrain)) nlevels(ds$Ytrain) else ncol(as.matrix(ds$Ytrain))
 
         if (cfg$algorithm == "plssvd") {
           ycap <- if (is.factor(ds$Ytrain)) nlevels(ds$Ytrain) else ncol(as.matrix(ds$Ytrain))
@@ -515,7 +735,7 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
               dataset = dname, analysis = analysis, analysis_value = analysis_value,
               rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
               method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
-              xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol,
+              xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
               train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
               model_size_mb = NA_real_, status = "skipped_plssvd_cap", msg = ""
             )
@@ -529,11 +749,27 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             dataset = dname, analysis = analysis, analysis_value = analysis_value,
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
               method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
-            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol,
+            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
             train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
             model_size_mb = NA_real_, status = "skipped_cuda_disabled", msg = ""
           )
           next
+        }
+
+        if (identical(cfg$engine, "GPU")) {
+          tryCatch(
+            warmup_gpu_config_once(dname, analysis, analysis_value, cfg, ds, ncomp_run),
+            error = function(e) {
+              log_msg(
+                "[WARN] GPU config warm-up failed on dataset=", dname,
+                " analysis=", analysis,
+                " value=", analysis_value,
+                " method=", cfg$method_id,
+                " ncomp=", ncomp_run,
+                " msg=", conditionMessage(e)
+              )
+            }
+          )
         }
 
         res <- tryCatch(
@@ -555,7 +791,7 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             dataset = dname, analysis = analysis, analysis_value = analysis_value,
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
-            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol,
+            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
             train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
             model_size_mb = NA_real_, status = "error", msg = msg_txt
           )
@@ -564,7 +800,7 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             dataset = dname, analysis = analysis, analysis_value = analysis_value,
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
-            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol,
+            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
             train_ms = res$train_ms, metric_name = res$metric_name, metric_value = res$metric_value,
             model_size_mb = res$model_size_mb, status = "ok", msg = ""
           )
@@ -585,11 +821,17 @@ if (!append_mode || !file.exists(out_log)) {
 cuda_ok <- tryCatch(isTRUE(has_cuda()), error = function(e) FALSE)
 if (!include_cuda) cuda_ok <- FALSE
 methods <- method_grid(cuda_ok = cuda_ok, include_r = (include_r_impl || metref_include_r))
+if (cuda_ok) {
+  log_msg("Running one-time GPU warm-up before timed benchmark fits")
+  tryCatch(warmup_gpu_once(), error = function(e) {
+    log_msg("GPU warm-up failed: ", conditionMessage(e))
+  })
+}
 
 header <- data.table(
   dataset = character(), analysis = character(), analysis_value = character(), rep = integer(),
   engine = character(), algorithm = character(), svd_method = character(), fast_profile = character(), method_id = character(),
-  param_set = character(), ncomp = integer(), xtrain_nrow = integer(), xtrain_ncol = integer(), ytrain_ncol = integer(),
+  param_set = character(), ncomp = integer(), xtrain_nrow = integer(), xtrain_ncol = integer(), ytrain_ncol = integer(), ytrain_display_dim = integer(),
   train_ms = numeric(), metric_name = character(), metric_value = numeric(),
   model_size_mb = numeric(), status = character(), msg = character()
 )
@@ -599,14 +841,17 @@ if (!append_mode || !file.exists(out_csv)) {
 
 log_msg("Multianalysis benchmark started")
 log_msg("datasets=", paste(dataset_filter, collapse = ","), "; reps=", reps, "; cuda=", cuda_ok, "; include_r_impl=", include_r_impl)
+log_msg("include_pls_pkg_all=", include_pls_pkg_all)
 log_msg("include_simpls_fast_incremental=", include_simpls_fast_incremental)
+log_msg("only_ncomp=", only_ncomp)
 log_msg("metref_include_r=", metref_include_r, "; metref_include_pls_pkg=", metref_include_pls_pkg)
+log_msg("public_include_r=", public_include_r, "; public_include_pls_pkg=", public_include_pls_pkg)
 log_msg("threads=", threads)
 log_msg("svd tuning: irlba_svtol=", irlba_svtol, "; rsvd_tol=", rsvd_tol)
 log_msg("replicate policy: default reps=", reps, "; nmr_reps=", nmr_reps)
 log_msg("replicate policy (dataset overrides): metref_reps=", metref_reps, "; singlecell_reps=", singlecell_reps, "; cifar100_reps=", cifar100_reps)
 log_msg("NMR safety filters: skip_arpack_on_nmr=", skip_arpack_on_nmr, "; skip_plssvd_on_nmr=", skip_plssvd_on_nmr)
-log_msg("ncomp(default datasets)=", paste(ncomp_vec, collapse = ","), "; ncomp(NMR)=", paste(ncomp_nmr_vec, collapse = ","), "; ncomp(SingleCell)=", paste(ncomp_singlecell_vec, collapse = ","), "; default_ncomp(non-ncomp analyses)=", default_ncomp, "; metref_default_ncomp=", metref_default_ncomp, "; singlecell_default_ncomp=", singlecell_default_ncomp, "; cifar100_default_ncomp=", cifar100_default_ncomp)
+log_msg("ncomp(default datasets)=", paste(ncomp_vec, collapse = ","), "; ncomp(NMR)=", paste(ncomp_nmr_vec, collapse = ","), "; ncomp(SingleCell)=", paste(ncomp_singlecell_vec, collapse = ","), "; ncomp(public datasets)=", paste(ncomp_public_vec, collapse = ","), "; default_ncomp(non-ncomp analyses)=", default_ncomp, "; metref_default_ncomp=", metref_default_ncomp, "; singlecell_default_ncomp=", singlecell_default_ncomp, "; cifar100_default_ncomp=", cifar100_default_ncomp, "; public_default_ncomp=", public_default_ncomp)
 log_msg("sample_fracs=", paste(sample_fracs, collapse = ","), "; xvar_fracs=", paste(xvar_fracs, collapse = ","), "; yvar_fracs=", paste(yvar_fracs, collapse = ","))
 
 all_rows <- list(); ai <- 0L
@@ -624,34 +869,44 @@ for (dname in dataset_filter) {
   if (tolower(dname) == "cifar100") reps_ds <- cifar100_reps
   ncomp_ds <- if (tolower(dname) == "nmr") ncomp_nmr_vec else ncomp_vec
   if (tolower(dname) == "singlecell") ncomp_ds <- ncomp_singlecell_vec
+  if (tolower(dname) %in% public_benchmark_datasets) ncomp_ds <- ncomp_public_vec
   default_ncomp_ds <- if (tolower(dname) == "metref") metref_default_ncomp else default_ncomp
   if (tolower(dname) == "singlecell") default_ncomp_ds <- singlecell_default_ncomp
   if (tolower(dname) == "cifar100") default_ncomp_ds <- cifar100_default_ncomp
+  if (tolower(dname) %in% public_benchmark_datasets) default_ncomp_ds <- public_default_ncomp
   log_msg("Methods for ", dname, ": ", nrow(methods_ds), " configs")
   log_msg("Replicates for ", dname, ": ", reps_ds)
   log_msg("ncomp grid for ", dname, ": ", paste(ncomp_ds, collapse = ","))
   log_msg("default ncomp for non-ncomp analyses on ", dname, ": ", default_ncomp_ds)
+  if (cuda_ok && any(methods_ds$engine == "GPU")) {
+    log_msg("Running untimed dataset-specific GPU warm-up on ", dname)
+    tryCatch(warmup_gpu_dataset_once(dname, ds), error = function(e) {
+      log_msg("Dataset-specific GPU warm-up failed on ", dname, ": ", conditionMessage(e))
+    })
+  }
 
   log_msg("Running ncomp benchmark on ", dname)
   dt1 <- run_analysis(dname, ds, methods_ds, "ncomp", ncomp_ds, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
   fwrite(dt1, out_csv, append = TRUE)
   ai <- ai + 1L; all_rows[[ai]] <- dt1
 
-  log_msg("Running sample fraction benchmark on ", dname)
-  dt2 <- run_analysis(dname, ds, methods_ds, "sample_fraction", sample_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
-  fwrite(dt2, out_csv, append = TRUE)
-  ai <- ai + 1L; all_rows[[ai]] <- dt2
+  if (!only_ncomp) {
+    log_msg("Running sample fraction benchmark on ", dname)
+    dt2 <- run_analysis(dname, ds, methods_ds, "sample_fraction", sample_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
+    fwrite(dt2, out_csv, append = TRUE)
+    ai <- ai + 1L; all_rows[[ai]] <- dt2
 
-  log_msg("Running X-variable fraction benchmark on ", dname)
-  dt3 <- run_analysis(dname, ds, methods_ds, "xvar_fraction", xvar_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
-  fwrite(dt3, out_csv, append = TRUE)
-  ai <- ai + 1L; all_rows[[ai]] <- dt3
+    log_msg("Running X-variable fraction benchmark on ", dname)
+    dt3 <- run_analysis(dname, ds, methods_ds, "xvar_fraction", xvar_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
+    fwrite(dt3, out_csv, append = TRUE)
+    ai <- ai + 1L; all_rows[[ai]] <- dt3
 
-  if (tolower(dname) == "nmr") {
-    log_msg("Running Y-variable fraction benchmark on NMR")
-    dt4 <- run_analysis(dname, ds, methods_ds, "yvar_fraction", yvar_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
-    fwrite(dt4, out_csv, append = TRUE)
-    ai <- ai + 1L; all_rows[[ai]] <- dt4
+    if (tolower(dname) == "nmr") {
+      log_msg("Running Y-variable fraction benchmark on NMR")
+      dt4 <- run_analysis(dname, ds, methods_ds, "yvar_fraction", yvar_fracs, ncomp_fixed = default_ncomp_ds, reps_run = reps_ds)
+      fwrite(dt4, out_csv, append = TRUE)
+      ai <- ai + 1L; all_rows[[ai]] <- dt4
+    }
   }
 
 }

@@ -5,7 +5,24 @@
 
 namespace fastpls_svd {
 
+struct PLSSVDGPUResult {
+  Mat R;
+  Mat Q;
+  Mat Ttrain;
+  arma::cube B;
+  arma::cube Yfit;
+  Vec R2Y;
+};
+
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt);
+SVDResult cuda_rsvd_resident_svd(const Mat& A, int k, const SVDOptions& opt);
+PLSSVDGPUResult cuda_plssvd_fit(
+  const Mat& Xtrain,
+  const Mat& Ytrain,
+  const arma::ivec& ncomp,
+  bool fit,
+  const SVDOptions& opt
+);
 bool cuda_runtime_available();
 void cuda_rsvd_sample_y(
   const double* hA,
@@ -39,7 +56,8 @@ void cuda_rsvd_refresh_left_block_u(
   int l,
   int k,
   int power_iters,
-  double* hUblock
+  double* hUblock,
+  double* hSvals = nullptr
 );
 void cuda_rsvd_refresh_left_block_u_resident(
   int m,
@@ -49,7 +67,8 @@ void cuda_rsvd_refresh_left_block_u_resident(
   int k,
   unsigned int seed,
   int power_iters,
-  double* hUblock
+  double* hUblock,
+  double* hSvals = nullptr
 );
 void cuda_rsvd_project_left_row(
   const double* hV,
@@ -70,6 +89,53 @@ void cuda_simpls_fast_set_training_matrices(
   const double* hY,
   int m,
   bool fit
+);
+void cuda_simpls_fast_begin_device_loop(
+  int n,
+  int p,
+  int m,
+  int max_ncomp,
+  bool fit
+);
+void cuda_simpls_fast_refresh_block_resident(
+  int p,
+  int m,
+  int l,
+  int k,
+  bool use_rr_warm_start,
+  unsigned int seed,
+  int power_iters,
+  double* hSvals = nullptr
+);
+bool cuda_simpls_fast_append_component_from_block(
+  int n,
+  int p,
+  int m,
+  int a_idx,
+  int col_idx,
+  int prev_v_cols,
+  bool reorth_v,
+  bool fit
+);
+void cuda_simpls_fast_copy_rr(
+  double* hRR,
+  int p,
+  int max_ncomp
+);
+void cuda_simpls_fast_copy_qq(
+  double* hQQ,
+  int m,
+  int max_ncomp
+);
+void cuda_simpls_fast_copy_bcur(
+  double* hB,
+  int p,
+  int m
+);
+void cuda_simpls_fast_copy_yfit(
+  double* hYfit,
+  int n,
+  int m
 );
 void cuda_simpls_fast_component_stats(
   const double* hR,

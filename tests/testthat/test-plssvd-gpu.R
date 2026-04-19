@@ -1,0 +1,42 @@
+test_that("plssvd_gpu requires CUDA or returns fastPLS output", {
+  set.seed(20260419)
+  X <- matrix(rnorm(90 * 16), nrow = 90, ncol = 16)
+  y <- factor(sample(letters[1:6], 90, replace = TRUE))
+  idx <- sample(seq_len(90), 20)
+
+  if (!has_cuda()) {
+    expect_error(
+      plssvd_gpu(X[-idx, , drop = FALSE], y[-idx], X[idx, , drop = FALSE], y[idx], ncomp = 1:3),
+      "CUDA-enabled"
+    )
+  } else {
+    gpu_fit <- plssvd_gpu(
+      X[-idx, , drop = FALSE],
+      y[-idx],
+      X[idx, , drop = FALSE],
+      y[idx],
+      ncomp = 1:3,
+      fit = TRUE,
+      seed = 77L
+    )
+    cpu_fit <- pls(
+      X[-idx, , drop = FALSE],
+      y[-idx],
+      X[idx, , drop = FALSE],
+      y[idx],
+      ncomp = 1:3,
+      method = "plssvd",
+      svd.method = "cpu_rsvd",
+      fit = TRUE,
+      seed = 77L
+    )
+
+    expect_s3_class(gpu_fit, "fastPLS")
+    expect_equal(dim(gpu_fit$B), dim(cpu_fit$B))
+    expect_equal(dim(gpu_fit$R), dim(cpu_fit$R))
+    expect_true(all(is.finite(gpu_fit$B)))
+    expect_true(all(is.finite(gpu_fit$R)))
+    expect_true(is.data.frame(gpu_fit$Ypred))
+    expect_equal(mean(gpu_fit$Ypred[[3]] == y[idx]), mean(cpu_fit$Ypred[[3]] == y[idx]), tolerance = 0.1)
+  }
+})

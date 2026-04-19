@@ -98,7 +98,7 @@ RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_me
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type A(ASEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
     Rcpp::traits::input_parameter< int >::type k(kSEXP);
     Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
@@ -259,6 +259,25 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_model1_gpu
+List pls_model1_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model1_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model1_gpu(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_light", (DL_FUNC) &_fastPLS_pls_light, 4},
@@ -276,6 +295,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_optim_pls_cv", (DL_FUNC) &_fastPLS_optim_pls_cv, 12},
     {"_fastPLS_double_pls_cv", (DL_FUNC) &_fastPLS_double_pls_cv, 13},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
+    {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 9},
     {NULL, NULL, 0}
 };
 

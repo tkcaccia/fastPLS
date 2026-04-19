@@ -6,7 +6,7 @@ importFrom("Rcpp", "evalCpp")
 import(Matrix)
 
 #exportPattern("^[[:alpha:]]+")
-export(optim.pls.cv,pls.double.cv,pls,pls_r,pls_gpu,predict.fastPLS,transformy,fastcor,ViP,has_cuda,svd_methods,svd_run,svd_benchmark)
+export(optim.pls.cv,pls.double.cv,pls,pls_r,pls_gpu,plssvd_gpu,predict.fastPLS,transformy,fastcor,ViP,has_cuda,svd_methods,svd_run,svd_benchmark)
 
 
 S3method(predict,fastPLS)

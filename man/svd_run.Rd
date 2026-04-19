@@ -7,7 +7,7 @@
 svd_run(
   A,
   k,
-  method = c("arpack", "cpu_rsvd", "irlba", "cuda_rsvd"),
+  method = c("arpack", "cpu_rsvd", "irlba"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
