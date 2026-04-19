@@ -150,6 +150,26 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_model2_fast_gpu
+List pls_model2_fast_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2_fast_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_gpu(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // pls_predict
 List pls_predict(List& model, arma::mat Xtest, bool proj);
 RcppExport SEXP _fastPLS_pls_predict(SEXP modelSEXP, SEXP XtestSEXP, SEXP projSEXP) {
@@ -250,6 +270,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
+    {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_unic", (DL_FUNC) &_fastPLS_unic, 1},
     {"_fastPLS_optim_pls_cv", (DL_FUNC) &_fastPLS_optim_pls_cv, 12},

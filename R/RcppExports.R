@@ -40,6 +40,10 @@ pls_model2_fast <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsv
     .Call(`_fastPLS_pls_model2_fast`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
+pls_model2_fast_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model2_fast_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
+}
+
 pls_predict <- function(model, Xtest, proj) {
     .Call(`_fastPLS_pls_predict`, model, Xtest, proj)
 }

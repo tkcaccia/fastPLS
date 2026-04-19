@@ -62,32 +62,4 @@ SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
 
 } // namespace fastpls_svd
 
-#else
-
-#include <stdexcept>
-
-namespace fastpls_svd {
-
-SVDResult truncated_svd_cuda_rsvd(const Mat&, int, const SVDOptions&) {
-  throw std::runtime_error("CUDA backend not compiled");
-}
-
-bool cuda_runtime_available() {
-  return false;
-}
-
-void cuda_rsvd_sample_y(
-  const double*,
-  int,
-  int,
-  const double*,
-  int,
-  int,
-  double*
-) {
-  throw std::runtime_error("CUDA backend not compiled");
-}
-
-} // namespace fastpls_svd
-
 #endif

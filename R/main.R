@@ -158,6 +158,80 @@
   method
 }
 
+.guard_removed_hybrid_cuda <- function(svd.method, context = "pls()") {
+  if (length(svd.method) == 1L &&
+      !is.na(svd.method) &&
+      identical(as.character(svd.method), "cuda_rsvd")) {
+    stop(
+      sprintf(
+        "The hybrid CUDA path via svd.method='cuda_rsvd' has been removed from %s; use pls_gpu() for the experimental GPU-native fit instead.",
+        context
+      ),
+      call. = FALSE
+    )
+  }
+}
+
+.normalize_pls_method <- function(method) {
+  method <- match.arg(method, c("simpls", "plssvd", "simpls_fast"))
+  switch(
+    method,
+    plssvd = 1L,
+    simpls = 2L,
+    simpls_fast = 3L
+  )
+}
+
+.resolve_simpls_fast_rsvd_tuning <- function(n, p, q, svd.method) {
+  stopifnot(length(n) == 1L, length(p) == 1L, length(q) == 1L, length(svd.method) == 1L)
+  n <- as.integer(n)
+  p <- as.integer(p)
+  q <- as.integer(q)
+
+  if (identical(svd.method, "cpu_rsvd")) {
+    if (p >= 700L && n >= 20000L) {
+      return(list(rsvd_oversample = 16L, rsvd_power = 0L))
+    }
+    if (p <= 128L && n >= 10000L) {
+      return(list(rsvd_oversample = 8L, rsvd_power = 0L))
+    }
+    if (p >= 900L && n <= 5000L) {
+      return(list(rsvd_oversample = 4L, rsvd_power = 2L))
+    }
+    if (p > n) {
+      return(list(rsvd_oversample = 10L, rsvd_power = 2L))
+    }
+    if (p >= 512L) {
+      return(list(rsvd_oversample = 10L, rsvd_power = 1L))
+    }
+    return(list(rsvd_oversample = 8L, rsvd_power = 1L))
+  }
+
+  if (identical(svd.method, "cuda_rsvd")) {
+    if (p >= 700L && n >= 20000L) {
+      return(list(rsvd_oversample = 4L, rsvd_power = 2L))
+    }
+    if (p <= 128L && n >= 10000L) {
+      return(list(rsvd_oversample = 16L, rsvd_power = 1L))
+    }
+    if (p >= 900L && n <= 5000L) {
+      return(list(rsvd_oversample = 16L, rsvd_power = 2L))
+    }
+    if (p > n) {
+      return(list(rsvd_oversample = 8L, rsvd_power = 1L))
+    }
+    if (p >= 512L) {
+      return(list(rsvd_oversample = 10L, rsvd_power = 2L))
+    }
+    return(list(rsvd_oversample = 4L, rsvd_power = 2L))
+  }
+
+  list(
+    rsvd_oversample = as.integer(10L),
+    rsvd_power = as.integer(1L)
+  )
+}
+
 pls.model1 =
   function (Xtrain,
             Ytrain,
@@ -310,6 +384,65 @@ pls.model2.fast =
     model
   }
 
+pls.model2.fast.gpu =
+  function (Xtrain,
+            Ytrain,
+            ncomp,
+            fit = FALSE,
+            scaling = 1,
+            rsvd_oversample = 10L,
+            rsvd_power = 1L,
+            svds_tol = 0,
+            seed = 1L,
+            fast_block = 8L,
+            fast_center_t = FALSE,
+            fast_reorth_v = FALSE,
+            fast_incremental = TRUE,
+            fast_inc_iters = 2L,
+            fast_defl_cache = TRUE)
+  {
+    if (!has_cuda()) {
+      stop("pls.model2.fast.gpu requires CUDA support")
+    }
+    profile <- .resolve_simpls_fast_profile(
+      fast_block = fast_block,
+      fast_center_t = fast_center_t,
+      fast_reorth_v = fast_reorth_v,
+      fast_incremental = fast_incremental,
+      fast_inc_iters = fast_inc_iters,
+      fast_defl_cache = fast_defl_cache,
+      missing_fast_block = missing(fast_block),
+      missing_fast_center_t = missing(fast_center_t),
+      missing_fast_reorth_v = missing(fast_reorth_v),
+      missing_fast_incremental = missing(fast_incremental),
+      missing_fast_inc_iters = missing(fast_inc_iters),
+      missing_fast_defl_cache = missing(fast_defl_cache),
+      context = "pls.model2.fast.gpu"
+    )
+    model <- .with_fastpls_fast_options(
+      pls_model2_fast_gpu(
+        Xtrain,
+        Ytrain,
+        ncomp,
+        scaling,
+        fit,
+        .svd_method_id("cuda_rsvd"),
+        rsvd_oversample,
+        rsvd_power,
+        svds_tol,
+        seed
+      ),
+      fast_block = profile$fast_block,
+      fast_center_t = profile$fast_center_t,
+      fast_reorth_v = profile$fast_reorth_v,
+      fast_incremental = profile$fast_incremental,
+      fast_inc_iters = profile$fast_inc_iters,
+      fast_defl_cache = profile$fast_defl_cache
+    )
+    class(model) = "fastPLS"
+    model
+  }
+
 
 #' Predict from a fitted fastPLS object
 #'
@@ -359,6 +492,96 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
 
   }
   res
+}
+
+#' Experimental GPU-native PLS fit
+#'
+#' Uses a separate CUDA-oriented `simpls_fast` engine that keeps the training
+#' matrices and deflated cross-covariance resident on device throughout the fit.
+#'
+#' @param Xtrain Numeric training predictor matrix.
+#' @param Ytrain Training response (numeric or factor).
+#' @param Xtest Optional test predictor matrix.
+#' @param Ytest Optional observed response used to compute `Q2Y`.
+#' @param ncomp Number of components (scalar or vector).
+#' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
+#' @param rsvd_oversample RSVD oversampling.
+#' @param rsvd_power RSVD power iterations.
+#' @param svds_tol Tolerance placeholder passed through to the backend.
+#' @param seed Random seed.
+#' @param fit Return fitted values and `R2Y` when `TRUE`.
+#' @param proj Return projected `Ttest` when `TRUE`.
+#' @return A `fastPLS` object.
+#' @export
+pls_gpu = function(Xtrain,
+                   Ytrain,
+                   Xtest = NULL,
+                   Ytest = NULL,
+                   ncomp = 2,
+                   scaling = c("centering", "autoscaling", "none"),
+                   rsvd_oversample = 10L,
+                   rsvd_power = 1L,
+                   svds_tol = 0,
+                   seed = 1L,
+                   fit = FALSE,
+                   proj = FALSE) {
+  if (!has_cuda()) {
+    stop("pls_gpu requires a CUDA-enabled fastPLS build")
+  }
+
+  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
+  Xtrain <- as.matrix(Xtrain)
+  if (is.factor(Ytrain)) {
+    classification <- TRUE
+    lev <- levels(Ytrain)
+    Ytrain <- transformy(Ytrain)
+  } else {
+    classification <- FALSE
+    lev <- NULL
+    Ytrain <- as.matrix(Ytrain)
+  }
+
+  tuned <- .resolve_simpls_fast_rsvd_tuning(
+    n = nrow(Xtrain),
+    p = ncol(Xtrain),
+    q = ncol(Ytrain),
+    svd.method = "cuda_rsvd"
+  )
+  if (missing(rsvd_oversample)) rsvd_oversample <- tuned$rsvd_oversample
+  if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
+
+  model <- pls.model2.fast.gpu(
+    Xtrain = Xtrain,
+    Ytrain = Ytrain,
+    ncomp = as.integer(ncomp),
+    fit = fit,
+    scaling = scal,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    svds_tol = svds_tol,
+    seed = seed
+  )
+  model$classification <- classification
+  model$lev <- lev
+
+  if (!is.null(Xtest)) {
+    Xtest <- as.matrix(Xtest)
+    res <- predict.fastPLS(model, Xtest, Ytest = Ytest, proj = proj)
+    model <- c(model, res)
+  }
+
+  if (classification && fit && !is.null(model$Yfit)) {
+    Yfitlab <- as.data.frame(matrix(nrow = nrow(Xtrain), ncol = length(ncomp)))
+    colnames(Yfitlab) <- paste("ncomp=", ncomp, sep = "")
+    for (i in seq_along(ncomp)) {
+      tt <- apply(model$Yfit[, , i], 1, which.max)
+      Yfitlab[, i] <- factor(lev[tt], levels = lev)
+    }
+    model$Yfit <- Yfitlab
+  }
+
+  class(model) <- "fastPLS"
+  model
 }
 
 .svd_methods_all <- c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd", "dc")
@@ -932,7 +1155,7 @@ pls_r = function (Xtrain,
                   perm.test = FALSE,
                   times = 100) {
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-  meth <- pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
+  meth <- .normalize_pls_method(method)
   svdmeth <- .normalize_svd_method(svd.method)
   svdmeth <- match.arg(svdmeth, c("irlba", "arpack", "cpu_rsvd"))
   Xtrain <- as.matrix(Xtrain)
@@ -1025,7 +1248,9 @@ pls_r = function (Xtrain,
 #' @param ncomp Number of components (scalar or vector).
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
 #' @param method One of `"simpls"`, `"plssvd"`, `"simpls_fast"`.
-#' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"`, `"cuda_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
+#' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
+#'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
+#'   from `pls()`; use [pls_gpu()] for the experimental GPU-native fit.
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
 #' @param svds_tol Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.
@@ -1056,7 +1281,7 @@ pls =  function (Xtrain,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"), 
                  method = c("simpls", "plssvd", "simpls_fast"),
-                 svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+                 svd.method = c("irlba", "arpack", "cpu_rsvd"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
                  svds_tol = 0,
@@ -1079,13 +1304,11 @@ pls =  function (Xtrain,
 {
 
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
-  meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
+  meth = .normalize_pls_method(method)
+  .guard_removed_hybrid_cuda(svd.method, "pls()")
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
-  if (svd.method == "cuda_rsvd" && !has_cuda()) {
-    stop("svd.method='cuda_rsvd' requested, but CUDA backend is not available")
-  }
 
   if (meth == 3L) {
     profile <- .resolve_simpls_fast_profile(
@@ -1111,12 +1334,6 @@ pls =  function (Xtrain,
     fast_defl_cache <- profile$fast_defl_cache
   }
 
-  # Tuned CUDA RSVD settings discovered by cycle benchmarking.
-  if (meth == 3L && svd.method == "cuda_rsvd") {
-    if (missing(rsvd_oversample)) rsvd_oversample <- 8L
-    if (missing(rsvd_power)) rsvd_power <- 0L
-  }
-  
   Xtrain = as.matrix(Xtrain)
   if (is.factor(Ytrain)){
     classification=TRUE # classification
@@ -1127,6 +1344,18 @@ pls =  function (Xtrain,
     classification=FALSE   # regression
     lev=NULL
   }
+
+  if (meth == 3L && svd.method %in% c("cpu_rsvd", "cuda_rsvd")) {
+    tuned <- .resolve_simpls_fast_rsvd_tuning(
+      n = nrow(Xtrain),
+      p = ncol(Xtrain),
+      q = ncol(Ytrain),
+      svd.method = svd.method
+    )
+    if (missing(rsvd_oversample)) rsvd_oversample <- tuned$rsvd_oversample
+    if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
+  }
+
   if(meth==1){
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
     ncomp <- cap$ncomp
@@ -1344,7 +1573,7 @@ optim.pls.cv =  function (Xdata,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
                           method = c("simpls", "plssvd", "simpls_fast"),
-                          svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+                          svd.method = c("irlba", "arpack", "cpu_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           svds_tol = 0,
@@ -1363,14 +1592,12 @@ optim.pls.cv =  function (Xdata,
                           kfold=10) 
 {
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
-  meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
+  meth = .normalize_pls_method(method)
   
+  .guard_removed_hybrid_cuda(svd.method, "optim.pls.cv()")
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
-  if (svd.method == "cuda_rsvd" && !has_cuda()) {
-    stop("svd.method='cuda_rsvd' requested, but CUDA backend is not available")
-  }
   if(is.null(constrain))
     constrain=1:nrow(Xdata)
   Xdata=as.matrix(Xdata)
@@ -1495,7 +1722,7 @@ pls.double.cv = function(Xdata,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"), 
                          method = c("simpls", "plssvd", "simpls_fast"),
-                         svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+                         svd.method = c("irlba", "arpack", "cpu_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,
@@ -1521,14 +1748,12 @@ pls.double.cv = function(Xdata,
     stop("Missing values are present")
   } 
   scal=pmatch(scaling,c("centering","autoscaling","none"))[1]
-  meth = pmatch(method, c("plssvd", "simpls", "simpls_fast"))[1]
+  meth = .normalize_pls_method(method)
   
+  .guard_removed_hybrid_cuda(svd.method, "pls.double.cv()")
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
-  if (svd.method == "cuda_rsvd" && !has_cuda()) {
-    stop("svd.method='cuda_rsvd' requested, but CUDA backend is not available")
-  }
   
   if (is.factor(Ydata)){
     classification=TRUE # classification

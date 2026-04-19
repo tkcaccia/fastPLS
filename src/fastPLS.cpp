@@ -7,6 +7,7 @@
 
 #include "fastPLS.h"
 #include "svd_iface.h"
+#include "svd_cuda_rsvd.h"
 
 extern "C" {
 #include "irlba.h"
@@ -17,6 +18,18 @@ using namespace Rcpp;
 using namespace arma;
 
 namespace {
+
+fastpls_svd::SVDResult compute_truncated_svd_dispatch(
+  const arma::mat& S,
+  int k,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  unsigned int seed,
+  bool left_only,
+  bool use_full_svd
+);
 
 int env_int_or(const char* key, int fallback, int lo, int hi) {
   const char* raw = std::getenv(key);
@@ -98,6 +111,138 @@ arma::vec top1_rsvd_left_vector(
   return u;
 }
 
+arma::vec leading_left_vec_dispatch(
+  const arma::mat& S,
+  const int svd_method,
+  const int rsvd_oversample,
+  const int rsvd_power,
+  const double svds_tol,
+  const unsigned int seed,
+  const arma::vec* warm_start
+) {
+  if (S.n_rows < 1 || S.n_cols < 1) {
+    return arma::vec();
+  }
+
+  if (svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD && fastpls_svd::has_cuda_backend()) {
+    arma::mat Y0(S.n_rows, 1, arma::fill::zeros);
+    if (warm_start != nullptr && warm_start->n_elem == S.n_rows) {
+      Y0.col(0) = *warm_start;
+    } else {
+      Y0 = gaussian_matrix_local(S.n_rows, 1, seed);
+    }
+    const double init_norm = arma::norm(Y0.col(0), 2);
+    if (!std::isfinite(init_norm) || init_norm <= 0.0) {
+      return arma::vec();
+    }
+    Y0.col(0) /= init_norm;
+
+    arma::mat Y(S.n_rows, 1, arma::fill::zeros);
+    fastpls_svd::cuda_rsvd_refresh_left_block(
+      S.memptr(),
+      static_cast<int>(S.n_rows),
+      static_cast<int>(S.n_cols),
+      Y0.memptr(),
+      1,
+      std::max(rsvd_power, 0),
+      Y.memptr()
+    );
+    arma::vec u = Y.col(0);
+    const double unorm = arma::norm(u, 2);
+    if (!std::isfinite(unorm) || unorm <= 0.0) {
+      return arma::vec();
+    }
+    return u / unorm;
+  }
+
+  if (is_rsvd_backend_method(svd_method)) {
+    const int max_iters = env_int_or("FASTPLS_LEADING_LEFT_MAX_ITERS", std::max(rsvd_power + 2, 4), 1, 64);
+    const double tol = std::max(svds_tol, 1e-8);
+    arma::vec u;
+    if (warm_start != nullptr && warm_start->n_elem == S.n_rows) {
+      u = *warm_start;
+    } else {
+      arma::mat omega = gaussian_matrix_local(S.n_cols, 1, seed + static_cast<unsigned int>(std::max(rsvd_oversample, 0)));
+      u = S * omega.col(0);
+    }
+
+    double unorm = arma::norm(u, 2);
+    if (!std::isfinite(unorm) || unorm <= 0.0) {
+      return arma::vec();
+    }
+    u /= unorm;
+
+    arma::vec v(S.n_cols, arma::fill::zeros);
+    for (int it = 0; it < max_iters; ++it) {
+      v = S.t() * u;
+      const double vnorm = arma::norm(v, 2);
+      if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+        return arma::vec();
+      }
+      v /= vnorm;
+
+      arma::vec u_next = S * v;
+      const double u_next_norm = arma::norm(u_next, 2);
+      if (!std::isfinite(u_next_norm) || u_next_norm <= 0.0) {
+        return arma::vec();
+      }
+      u_next /= u_next_norm;
+
+      const double resid = arma::norm(u_next - u, 2);
+      u = std::move(u_next);
+      if (resid <= tol) {
+        break;
+      }
+    }
+    return u;
+  }
+
+  fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+    S,
+    1,
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    seed,
+    true,
+    false
+  );
+  if (svd_res.U.n_cols < 1) {
+    return arma::vec();
+  }
+  return svd_res.U.col(0);
+}
+
+bool finalize_left_block_from_bsmall(
+  const arma::mat& Bsmall,
+  arma::mat& Uhat,
+  arma::vec& shat,
+  arma::mat& Vhat
+) {
+  if (Bsmall.n_rows < 1 || Bsmall.n_cols < 1) {
+    return false;
+  }
+
+  const int eig_threshold = env_int_or("FASTPLS_GPU_FINALIZE_THRESHOLD", 4, 1, 256);
+  if (static_cast<int>(Bsmall.n_rows) >= eig_threshold) {
+    arma::mat gram = Bsmall * Bsmall.t();
+    arma::vec evals;
+    arma::mat evecs;
+    const bool ok = arma::eig_sym(evals, evecs, gram);
+    if (ok && evals.n_elem > 0) {
+      arma::uvec ord = arma::sort_index(evals, "descend");
+      Uhat = evecs.cols(ord);
+      shat = arma::sqrt(arma::clamp(evals(ord), 0.0, std::numeric_limits<double>::infinity()));
+      Vhat.reset();
+      return true;
+    }
+  }
+
+  arma::svd_econ(Uhat, shat, Vhat, Bsmall, "left");
+  return Uhat.n_cols > 0;
+}
+
 fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   const arma::mat& S,
   int k,
@@ -122,6 +267,128 @@ fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   const fastpls_svd::Backend backend = fastpls_svd::backend_from_method_id(svd_method);
   return fastpls_svd::truncated_svd(S, k, opt, backend);
 }
+
+struct SimplsFastRefreshWorkspace {
+  arma::mat Omega;
+  arma::mat Y;
+  arma::mat Z;
+  arma::mat Q;
+  arma::mat R;
+  arma::mat Bsmall;
+  arma::mat Uhat;
+  arma::vec shat;
+  arma::mat Vhat;
+  bool gpu_refresh_enabled = false;
+
+  void prepare_gpu_refresh(
+    const int s_rows,
+    const int s_cols,
+    const arma::vec* warm_start,
+    const int k_block,
+    const int power_iters,
+    const unsigned int seed
+  ) {
+    const bool has_warm_start =
+      (warm_start != nullptr && warm_start->n_elem == static_cast<arma::uword>(s_rows));
+    if (has_warm_start) {
+      Omega.set_size(static_cast<arma::uword>(s_rows), static_cast<arma::uword>(k_block));
+      Omega = gaussian_matrix_local(
+        static_cast<arma::uword>(s_rows),
+        static_cast<arma::uword>(k_block),
+        seed
+      );
+      Omega.col(0) = *warm_start;
+    } else {
+      Omega.reset();
+    }
+    Uhat.reset();
+    Y.set_size(static_cast<arma::uword>(s_rows), static_cast<arma::uword>(k_block));
+    fastpls_svd::cuda_rsvd_refresh_left_block_u_resident(
+      s_rows,
+      s_cols,
+      has_warm_start ? Omega.memptr() : nullptr,
+      k_block,
+      k_block,
+      seed,
+      std::max(power_iters, 0),
+      Y.memptr()
+    );
+  }
+
+  void prepare_cpu_refresh(
+    const arma::mat& S,
+    const arma::vec* warm_start,
+    const int k_block,
+    const int power_iters,
+    const unsigned int seed
+  ) {
+    Omega = gaussian_matrix_local(
+      S.n_rows,
+      static_cast<arma::uword>(k_block),
+      seed
+    );
+    if (warm_start != nullptr && warm_start->n_elem == S.n_rows) {
+      Omega.col(0) = *warm_start;
+    }
+
+    Y = Omega;
+    for (int it = 0; it < power_iters; ++it) {
+      Z = S.t() * Y;
+      Y = S * Z;
+    }
+  }
+
+  bool refresh(
+    const arma::mat& S,
+    const arma::vec* warm_start,
+    const int k_block,
+    const int power_iters,
+    const unsigned int seed,
+    arma::mat& Ublock
+  ) {
+    if (S.n_rows < 1 || S.n_cols < 1 || k_block < 1) {
+      return false;
+    }
+
+    if (gpu_refresh_enabled) {
+      prepare_gpu_refresh(
+        static_cast<int>(S.n_rows),
+        static_cast<int>(S.n_cols),
+        warm_start,
+        k_block,
+        power_iters,
+        seed
+      );
+      Ublock = Y;
+      if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
+        Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
+      }
+      return (Ublock.n_cols > 0);
+    } else {
+      prepare_cpu_refresh(S, warm_start, k_block, power_iters, seed);
+    }
+
+    arma::qr_econ(Q, R, Y);
+    if (Q.n_cols < 1) {
+      return false;
+    }
+
+    Bsmall = Q.t() * S;
+    if (Bsmall.n_rows < 1 || Bsmall.n_cols < 1) {
+      return false;
+    }
+
+    if (!finalize_left_block_from_bsmall(Bsmall, Uhat, shat, Vhat) || Uhat.n_cols < 1) {
+      return false;
+    }
+
+    Ublock = Q * Uhat;
+    if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
+      Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
+    }
+    return (Ublock.n_cols > 0);
+  }
+};
 
 } // namespace
 
@@ -395,18 +662,18 @@ List pls_model2(
     //qq<-svd(S)$v[,1]
     //rr <- S%*%qq
 //    if(S.n_rows<=16 || S.n_cols<=16){
-    fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+    rr = leading_left_vec_dispatch(
       S,
-      1,
       svd_method,
       rsvd_oversample,
       rsvd_power,
       svds_tol,
       static_cast<unsigned int>(seed + a),
-      true,
-      false
+      nullptr
     );
-    rr = svd_res.U.col(0);
+    if (rr.n_elem != static_cast<arma::uword>(S.n_rows)) {
+      break;
+    }
   
     // tt<-scale(X%*%rr,scale=FALSE)
     tt=X*rr; 
@@ -537,8 +804,10 @@ List pls_model2_fast(
 
   arma::cube Yfit;
   arma::vec R2Y(length_ncomp, fill::zeros);
+  arma::mat Yfit_cur;
   if (fit) {
     Yfit.set_size(n, m, length_ncomp);
+    Yfit_cur.zeros(n, m);
   }
 
   arma::mat Bcur(p, m, fill::zeros);
@@ -556,6 +825,7 @@ List pls_model2_fast(
   const int fast_top1_rsvd = env_int_or("FASTPLS_FAST_RSVD_TOP1", 0, 0, 1);
   const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
   const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
+  const int fast_crossprod_min_n_to_p_ratio = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024);
   const int top1_rsvd_oversample = env_int_or(
     "FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE",
     std::min(std::max(rsvd_oversample, 0), 2),
@@ -575,14 +845,17 @@ List pls_model2_fast(
     (center_t == 0) &&
     (max_ncomp >= fast_crossprod_min_ncomp) &&
     (p <= n) &&
+    (n >= p * fast_crossprod_min_n_to_p_ratio) &&
     (p <= fast_crossprod_max_p);
   if (use_crossprod_cache) {
     XtX_cache = Xt * Xtrain;
     Sxy_cache = S;
   }
+  bool gpu_deflation_enabled = false;
   auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
     arma::vec pp;
     arma::vec qq;
+    arma::vec tt;
     if (use_crossprod_cache) {
       pp = XtX_cache * rr;
       const double tnorm_sq = arma::dot(rr, pp);
@@ -593,8 +866,11 @@ List pls_model2_fast(
       rr /= tnorm;
       pp /= tnorm;
       qq = Sxy_cache.t() * rr;
+      if (fit) {
+        tt = Xtrain * rr;
+      }
     } else {
-      arma::vec tt = Xtrain * rr;
+      tt = Xtrain * rr;
       if (center_t == 1) {
         tt -= arma::mean(tt);
       }
@@ -624,7 +900,21 @@ List pls_model2_fast(
     }
     vv /= vnorm;
 
-    if (defl_cache == 1) {
+    if (gpu_deflation_enabled) {
+      arma::vec vS(S.n_cols, arma::fill::zeros);
+      fastpls_svd::cuda_rsvd_project_left_row(
+        vv.memptr(),
+        static_cast<int>(S.n_rows),
+        static_cast<int>(S.n_cols),
+        vS.memptr()
+      );
+      fastpls_svd::cuda_rsvd_deflate_left_rank1(
+        vv.memptr(),
+        vS.memptr(),
+        static_cast<int>(S.n_rows),
+        static_cast<int>(S.n_cols)
+      );
+    } else if (defl_cache == 1) {
       arma::rowvec vS = vv.t() * S;
       S -= vv * vS;
     } else {
@@ -639,8 +929,9 @@ List pls_model2_fast(
     while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
       B.slice(i_out) = Bcur;
       if (fit) {
-        arma::mat yf = Xtrain * Bcur;
-        R2Y(i_out) = RQ(Ytrain, yf);
+        Yfit_cur += tt * qq.t();
+        R2Y(i_out) = RQ(Ytrain, Yfit_cur);
+        arma::mat yf = Yfit_cur;
         yf.each_row() += mY;
         Yfit.slice(i_out) = yf;
       }
@@ -655,6 +946,26 @@ List pls_model2_fast(
     (fast_top1_rsvd == 1) &&
     can_incremental &&
     is_rsvd_backend_method(svd_method);
+  const bool use_gpu_refresh =
+    (fast_optimized == 1) &&
+    can_incremental &&
+    (svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD) &&
+    fastpls_svd::cuda_rsvd_prefer_block_gpu(
+      static_cast<int>(S.n_rows),
+      static_cast<int>(S.n_cols),
+      std::min(refresh_block, max_ncomp),
+      inc_power_iters
+    );
+  SimplsFastRefreshWorkspace refresh_ws;
+  refresh_ws.gpu_refresh_enabled = use_gpu_refresh;
+  gpu_deflation_enabled = use_gpu_refresh;
+  if (use_gpu_refresh) {
+    fastpls_svd::cuda_rsvd_set_resident_matrix(
+      S.memptr(),
+      static_cast<int>(S.n_rows),
+      static_cast<int>(S.n_cols)
+    );
+  }
 
   if (use_optimized_top1_rsvd) {
     for (int a = 0; a < max_ncomp; ++a) {
@@ -675,30 +986,16 @@ List pls_model2_fast(
       const int k_block = std::min(refresh_block, max_ncomp - a);
       arma::mat Ublock;
       if (can_incremental) {
-        arma::mat Omega = gaussian_matrix_local(
-          S.n_rows,
-          static_cast<arma::uword>(k_block),
-          static_cast<unsigned int>(seed + a)
-        );
-        if (has_rr_prev) {
-          Omega.col(0) = rr_prev;
-        }
-        arma::mat Y = Omega;
-        for (int it = 0; it < inc_power_iters; ++it) {
-          Y = S * (S.t() * Y);
-        }
-        arma::mat Rtmp;
-        arma::qr_econ(Ublock, Rtmp, Y);
-
-        arma::mat Bsmall = Ublock.t() * S;
-        arma::mat Uhat;
-        arma::vec shat;
-        arma::mat Vhat;
-        if (Bsmall.n_rows > 0 && Bsmall.n_cols > 0) {
-          arma::svd_econ(Uhat, shat, Vhat, Bsmall, "left");
-          if (Uhat.n_cols > 0) {
-            Ublock = Ublock * Uhat;
-          }
+        const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
+        if (!refresh_ws.refresh(
+              S,
+              warm_start,
+              k_block,
+              inc_power_iters,
+              static_cast<unsigned int>(seed + a),
+              Ublock
+            )) {
+          break;
         }
       } else {
         fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
@@ -729,6 +1026,219 @@ List pls_model2_fast(
       if (stop_now) {
         break;
       }
+    }
+  }
+
+  return List::create(
+    Named("B")       = B,
+    Named("P")       = arma::mat(),
+    Named("Q")       = QQ,
+    Named("Ttrain")  = arma::mat(),
+    Named("R")       = RR,
+    Named("mX")      = mX,
+    Named("vX")      = vX,
+    Named("mY")      = mY,
+    Named("p")       = p,
+    Named("m")       = m,
+    Named("ncomp")   = ncomp,
+    Named("Yfit")    = Yfit,
+    Named("R2Y")     = R2Y
+  );
+}
+
+// [[Rcpp::export]]
+List pls_model2_fast_gpu(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed
+) {
+  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD || !fastpls_svd::has_cuda_backend()) {
+    stop("pls_model2_fast_gpu requires svd.method='cuda_rsvd' with CUDA available");
+  }
+
+  const int n = Xtrain.n_rows;
+  const int p = Xtrain.n_cols;
+  const int m = Ytrain.n_cols;
+
+  if (ncomp.n_elem < 1) {
+    stop("ncomp must contain at least one value");
+  }
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) < 1) {
+      ncomp(i) = 1;
+    }
+  }
+
+  const int max_ncomp = max(ncomp);
+  const int length_ncomp = ncomp.n_elem;
+
+  arma::mat mX(1, p, fill::zeros);
+  if (scaling < 3) {
+    mX = mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+
+  arma::mat vX(1, p, fill::ones);
+  if (scaling == 2) {
+    vX = variance(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+
+  arma::mat mY = mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  arma::mat RR(p, max_ncomp, fill::zeros);
+  arma::mat QQ(m, max_ncomp, fill::zeros);
+  arma::mat VV(p, max_ncomp, fill::zeros);
+  arma::cube B(p, m, length_ncomp, fill::zeros);
+
+  arma::cube Yfit;
+  arma::vec R2Y(length_ncomp, fill::zeros);
+  arma::mat Yfit_cur;
+  if (fit) {
+    Yfit.set_size(n, m, length_ncomp);
+    Yfit_cur.zeros(n, m);
+  }
+
+  arma::mat Bcur(p, m, fill::zeros);
+  int i_out = 0;
+
+  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 8, 1, 16);
+  const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
+  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
+  const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
+  const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
+  (void)defl_cache;
+  if (center_t == 1) {
+    stop("pls_model2_fast_gpu does not support FASTPLS_FAST_CENTER_T=1");
+  }
+
+  fastpls_svd::cuda_simpls_fast_set_training_matrices(
+    Xtrain.memptr(),
+    n,
+    p,
+    Ytrain.memptr(),
+    m,
+    fit
+  );
+
+  arma::mat S_shape(p, m, arma::fill::zeros);
+  SimplsFastRefreshWorkspace refresh_ws;
+  refresh_ws.gpu_refresh_enabled = true;
+  arma::vec rr_prev;
+  bool has_rr_prev = false;
+
+  auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
+    arma::vec tt(n, arma::fill::zeros);
+    arma::vec pp(p, arma::fill::zeros);
+    arma::vec qq(m, arma::fill::zeros);
+    double tnorm = 0.0;
+    fastpls_svd::cuda_simpls_fast_component_stats(
+      rr.memptr(),
+      n,
+      p,
+      m,
+      tt.memptr(),
+      pp.memptr(),
+      qq.memptr(),
+      &tnorm
+    );
+    if (!std::isfinite(tnorm) || tnorm <= 0.0) {
+      return false;
+    }
+    rr /= tnorm;
+    rr_prev = rr;
+    has_rr_prev = true;
+
+    arma::vec vv = pp;
+    if (a_idx > 0) {
+      auto Vprev = VV.cols(0, a_idx - 1);
+      vv -= Vprev * (Vprev.t() * pp);
+      if (reorth_v == 1) {
+        vv -= Vprev * (Vprev.t() * vv);
+      }
+    }
+    const double vnorm = arma::norm(vv, 2);
+    if (!std::isfinite(vnorm) || vnorm <= 0.0) {
+      return false;
+    }
+    vv /= vnorm;
+
+    arma::vec vS(m, arma::fill::zeros);
+    fastpls_svd::cuda_rsvd_project_left_row(
+      vv.memptr(),
+      p,
+      m,
+      vS.memptr()
+    );
+    fastpls_svd::cuda_rsvd_deflate_left_rank1(
+      vv.memptr(),
+      vS.memptr(),
+      p,
+      m
+    );
+
+    RR.col(a_idx) = rr;
+    QQ.col(a_idx) = qq;
+    VV.col(a_idx) = vv;
+    Bcur += rr * qq.t();
+
+    while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
+      B.slice(i_out) = Bcur;
+      if (fit) {
+        fastpls_svd::cuda_simpls_fast_rank1_fit_update(
+          tt.memptr(),
+          n,
+          qq.memptr(),
+          m,
+          Yfit_cur.memptr()
+        );
+        R2Y(i_out) = RQ(Ytrain, Yfit_cur);
+        arma::mat yf = Yfit_cur;
+        yf.each_row() += mY;
+        Yfit.slice(i_out) = yf;
+      }
+      ++i_out;
+    }
+    return true;
+  };
+
+  int a = 0;
+  while (a < max_ncomp) {
+    const int k_block = std::min(refresh_block, max_ncomp - a);
+    arma::mat Ublock;
+    const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
+    if (!refresh_ws.refresh(
+          S_shape,
+          warm_start,
+          k_block,
+          inc_power_iters,
+          static_cast<unsigned int>(seed + a),
+          Ublock
+        )) {
+      break;
+    }
+    if (Ublock.n_cols < 1) {
+      break;
+    }
+
+    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
+    bool stop_now = false;
+    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
+      if (!append_component(Ublock.col(j), a)) {
+        stop_now = true;
+        break;
+      }
+    }
+    if (stop_now) {
+      break;
     }
   }
 

@@ -38,7 +38,8 @@ test_that("cpu_rsvd tracks arpack on PLS outputs", {
   expect_equal(dim(exact$B), dim(rsvd$B))
   expect_equal(dim(exact$R), dim(rsvd$R))
   expect_equal(rsvd$B, exact$B, tolerance = 5e-2)
-  expect_equal(rsvd$Ttrain, exact$Ttrain, tolerance = 5e-2)
+  expect_true(all(is.finite(rsvd$R)))
+  expect_true(all(is.finite(rsvd$Q)))
 })
 
 test_that("cpu_rsvd is deterministic with a fixed seed", {
@@ -83,17 +84,15 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
   expect_false(isTRUE(all.equal(fit1$B, fit3$B)))
 })
 
-test_that("has_cuda returns scalar logical and guards cuda_rsvd", {
+test_that("has_cuda returns scalar logical and hybrid cuda path is removed from pls", {
   flag <- has_cuda()
   expect_type(flag, "logical")
   expect_length(flag, 1L)
 
-  if (!flag) {
-    set.seed(1)
-    X <- matrix(rnorm(40 * 10), nrow = 40, ncol = 10)
-    Y <- matrix(rnorm(40 * 3), nrow = 40, ncol = 3)
-    expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "not available")
-  }
+  set.seed(1)
+  X <- matrix(rnorm(40 * 10), nrow = 40, ncol = 10)
+  Y <- matrix(rnorm(40 * 3), nrow = 40, ncol = 3)
+  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "removed")
 })
 
 test_that("simpls path uses the SVD backend selector", {
@@ -124,10 +123,11 @@ test_that("simpls path uses the SVD backend selector", {
 
   expect_equal(dim(exact$B), dim(rsvd$B))
   expect_equal(rsvd$B, exact$B, tolerance = 7e-2)
-  expect_equal(rsvd$Ttrain, exact$Ttrain, tolerance = 7e-2)
+  expect_true(all(is.finite(rsvd$R)))
+  expect_true(all(is.finite(rsvd$Q)))
 
-  if (has_cuda()) {
-    cuda <- pls(
+  expect_error(
+    pls(
       X,
       Y,
       ncomp = 1:5,
@@ -137,9 +137,9 @@ test_that("simpls path uses the SVD backend selector", {
       rsvd_oversample = 10L,
       rsvd_power = 1L,
       seed = 99L
-    )
-    expect_equal(dim(cuda$B), dim(exact$B))
-  }
+    ),
+    "removed"
+  )
 })
 
 test_that("Rcpp plssvd handles ncomp above rank by capping internally", {

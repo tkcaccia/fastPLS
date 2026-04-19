@@ -16,7 +16,7 @@ pls.double.cv(
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+  svd.method = c("irlba", "arpack", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -48,7 +48,10 @@ internally by rank constraints.}
 \item{constrain}{Grouping vector for constrained splitting.}
 \item{scaling}{One of \code{"centering"}, \code{"autoscaling"}, \code{"none"}.}
 \item{method}{One of \code{"simpls"}, \code{"plssvd"}, or \code{"simpls_fast"}.}
-\item{svd.method}{Inner SVD backend used in fold models.}
+\item{svd.method}{Inner SVD backend used in fold models. The former hybrid CUDA
+route via \code{svd.method = "cuda_rsvd"} has been removed from
+\code{pls.double.cv()}; use \code{\link{pls_gpu}} for experimental GPU-native
+fits outside this nested CV helper.}
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
 \item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when

@@ -18,7 +18,7 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"),
+  svd.method = c("irlba", "arpack", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -72,16 +72,15 @@ optimized incremental-deflation profile.
 }
 }
 
-\item{svd.method}{Backend for truncated SVD calls:
+\item{svd.method}{Backend for truncated SVD calls in the CPU path. The former
+hybrid CUDA route via \code{svd.method = "cuda_rsvd"} has been removed from
+\code{pls()}; use \code{\link{pls_gpu}} for the experimental GPU-native fit.
 \itemize{
 \item \code{"irlba"}: in \code{pls_model1/2}, uses legacy IRLB path only when the
 cross-covariance matrix is larger than \code{5 x 5}; otherwise falls back to exact CPU SVD.
 \item \code{"arpack"}: ARPACK-truncated SVD path (Armadillo \code{svds}).
 \item \code{"cpu_rsvd"}: approximate randomized SVD on CPU.
-\item \code{"cuda_rsvd"}: approximate randomized SVD with GPU GEMM sampling
-(available only if \code{\link{has_cuda}()} is TRUE).
-}
-}
+}}
 
 \item{rsvd_oversample}{Oversampling parameter for randomized SVD.
 Effective sampled subspace size is approximately \code{k + rsvd_oversample}.}
@@ -166,8 +165,10 @@ structure and outputs.
 \strong{Exact vs approximate backends}
 \itemize{
 \item \code{arpack}: ARPACK-truncated SVD path.
-\item \code{cpu_rsvd}, \code{cuda_rsvd}: approximate RSVD paths (seeded and reproducible
-for fixed seed/parameters).
+\item \code{cpu_rsvd}: approximate RSVD path (seeded and reproducible for fixed
+seed/parameters).
+\item GPU execution is now exposed separately through \code{\link{pls_gpu}}
+rather than through \code{svd.method}.
 \item \code{irlba}: legacy IRLB branch used only in specific PLS code paths and matrix sizes
 (as described above).
 }
@@ -218,7 +219,7 @@ A survey of Partial Least Squares (PLS) methods, with emphasis on the two-block 
 Technical report, University of Washington.
 }
 
-\seealso{\code{\link{pls_r}}, \code{\link{predict.fastPLS}}, \code{\link{svd_run}}, \code{\link{svd_methods}}}
+\seealso{\code{\link{pls_gpu}}, \code{\link{pls_r}}, \code{\link{predict.fastPLS}}, \code{\link{svd_run}}, \code{\link{svd_methods}}}
 
 \examples{
 set.seed(1)

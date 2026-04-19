@@ -33,6 +33,9 @@ test_that("simpls_fast returns valid fit structure", {
   expect_equal(dim(fit$B), c(ncol(X), nlevels(y), 4L))
   expect_equal(dim(fit$R), c(ncol(X), 4L))
   expect_equal(dim(fit$Q), c(nlevels(y), 4L))
+  expect_false(any(!is.finite(fit$B)))
+  expect_false(any(!is.finite(fit$R)))
+  expect_false(any(!is.finite(fit$Q)))
   expect_true(is.data.frame(fit$Ypred))
   expect_equal(ncol(fit$Ypred), 4L)
 })
@@ -74,5 +77,56 @@ test_that("simpls_fast stays close to legacy baseline on a controlled regression
   opt_rmse <- sqrt(mean((opt_pred - truth)^2))
 
   expect_equal(dim(baseline$B), dim(optimized$B))
+  expect_false(any(!is.finite(optimized$B)))
+  expect_false(any(!is.finite(opt_pred)))
   expect_true(abs(opt_rmse - base_rmse) <= 0.05)
+})
+
+test_that("pls_gpu returns valid structure and stays close to simpls_fast", {
+  skip_if_not(fastPLS::has_cuda(), "CUDA backend not available")
+
+  set.seed(20260419)
+  n <- 96
+  p <- 24
+  z1 <- rnorm(n)
+  z2 <- rnorm(n)
+  X <- cbind(
+    outer(z1, seq_len(p / 2), `*`) + matrix(rnorm(n * (p / 2), sd = 0.1), n, p / 2),
+    outer(z2, seq_len(p / 2), `*`) + matrix(rnorm(n * (p / 2), sd = 0.1), n, p / 2)
+  )
+  Y <- factor(ifelse(z1 + z2 > 0.5, "A", ifelse(z1 - z2 > 0, "B", "C")))
+  idx <- sample(seq_len(n), 24)
+
+  ref_fit <- fastPLS::pls(
+    Xtrain = X[-idx, , drop = FALSE],
+    Ytrain = Y[-idx],
+    Xtest = X[idx, , drop = FALSE],
+    Ytest = Y[idx],
+    ncomp = c(2L, 4L),
+    method = "simpls_fast",
+    svd.method = "cpu_rsvd",
+    fit = FALSE,
+    seed = 91L
+  )
+
+  gpu_fit <- fastPLS::pls_gpu(
+    Xtrain = X[-idx, , drop = FALSE],
+    Ytrain = Y[-idx],
+    Xtest = X[idx, , drop = FALSE],
+    Ytest = Y[idx],
+    ncomp = c(2L, 4L),
+    fit = FALSE,
+    seed = 91L
+  )
+
+  expect_s3_class(gpu_fit, "fastPLS")
+  expect_equal(dim(gpu_fit$B), dim(ref_fit$B))
+  expect_equal(dim(gpu_fit$R), dim(ref_fit$R))
+  expect_equal(dim(gpu_fit$Q), dim(ref_fit$Q))
+  expect_false(any(!is.finite(gpu_fit$B)))
+  expect_true(is.data.frame(gpu_fit$Ypred))
+
+  ref_acc <- mean(ref_fit$Ypred[[2]] == Y[idx])
+  gpu_acc <- mean(gpu_fit$Ypred[[2]] == Y[idx])
+  expect_true(abs(gpu_acc - ref_acc) <= 0.05)
 })
