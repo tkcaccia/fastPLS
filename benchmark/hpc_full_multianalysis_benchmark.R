@@ -104,10 +104,24 @@ public_include_r <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_R", "true")) %in%
 public_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
 skip_arpack_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_ARPACK_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 skip_plssvd_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_PLSSVD_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
-dataset_filter <- tolower(trimws(Sys.getenv("FASTPLS_DATASETS", "metref,cifar100,nmr,singlecell,imagenet")))
+dataset_filter <- tolower(trimws(Sys.getenv(
+  "FASTPLS_DATASETS",
+  "metref,cifar100,singlecell,gtex_v8,tcga_pan_cancer,ccle,tcga_brca,tcga_hnsc_methylation"
+)))
 dataset_filter <- unlist(strsplit(dataset_filter, ",", fixed = TRUE), use.names = FALSE)
 dataset_filter <- dataset_filter[nzchar(dataset_filter)]
-if (!length(dataset_filter)) dataset_filter <- c("metref", "cifar100", "nmr", "singlecell", "imagenet")
+if (!length(dataset_filter)) {
+  dataset_filter <- c(
+    "metref",
+    "cifar100",
+    "singlecell",
+    "gtex_v8",
+    "tcga_pan_cancer",
+    "ccle",
+    "tcga_brca",
+    "tcga_hnsc_methylation"
+  )
+}
 
 public_benchmark_datasets <- c("gtex", "gtex_v8", "tcga_pan_cancer", "tcga_brca", "tcga_hnsc_methylation", "ccle", "covertype", "susy", "yearpredictionmsd")
 ncomp_public_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_PUBLIC_NCOMP_LIST", "2,5,10,20,50,100"), ",", fixed = TRUE)[[1]])
@@ -305,8 +319,100 @@ fixed_train_split <- function(n, train_n) {
   list(train = train_idx, test = test_idx)
 }
 
+normalize_columns <- function(M) {
+  norms <- sqrt(colSums(M^2))
+  norms[!is.finite(norms) | norms <= 0] <- 1
+  sweep(M, 2L, norms, "/", check.margin = FALSE)
+}
+
+synthetic_spectrum <- function(rank, decay = c("fast", "moderate", "slow", "logistic")) {
+  decay <- match.arg(decay)
+  i <- seq_len(rank)
+  switch(
+    decay,
+    fast = 1 / (i^2),
+    moderate = 1 / i,
+    slow = 1 / (i^0.1),
+    logistic = {
+      mid <- (rank + 1) / 2
+      width <- max(rank / 8, 1)
+      1 / (1 + exp((i - mid) / width))
+    }
+  )
+}
+
+synthetic_catalog <- function() {
+  list(
+    synthetic_base = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 101L),
+    synthetic_n_small = list(ntrain = 300L, ntest = 100L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 102L),
+    synthetic_n_large = list(ntrain = 1600L, ntest = 400L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 103L),
+    synthetic_p_wide = list(ntrain = 800L, ntest = 200L, p = 5000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 104L),
+    synthetic_q_wide = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 500L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 105L),
+    synthetic_decay_fast = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "fast", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 106L),
+    synthetic_decay_slow = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "slow", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 107L),
+    synthetic_dropout = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.80, seed_offset = 108L)
+  )
+}
+
+with_local_seed <- function(seed, expr) {
+  has_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  if (has_seed) {
+    old_seed <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    on.exit(assign(".Random.seed", old_seed, envir = .GlobalEnv), add = TRUE)
+  } else {
+    on.exit(rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+  }
+  set.seed(as.integer(seed))
+  force(expr)
+}
+
+make_synthetic_task <- function(name) {
+  cfg <- synthetic_catalog()[[name]]
+  if (is.null(cfg)) stop("Unknown synthetic dataset: ", name)
+
+  seed_base <- as.integer(Sys.getenv("FASTPLS_SEED", "123"))
+  if (!is.finite(seed_base) || is.na(seed_base)) seed_base <- 123L
+  seed_use <- as.integer((seed_base + cfg$seed_offset) %% 2147483647L)
+  if (!is.finite(seed_use) || is.na(seed_use) || seed_use <= 0L) seed_use <- 123L + cfg$seed_offset
+
+  with_local_seed(seed_use, {
+    rank_eff <- max(1L, min(as.integer(cfg$rank), as.integer(cfg$p), as.integer(cfg$q), as.integer(cfg$ntrain + cfg$ntest - 1L)))
+    spec <- synthetic_spectrum(rank_eff, cfg$decay)
+
+    P <- normalize_columns(matrix(rnorm(as.integer(cfg$p) * rank_eff), nrow = as.integer(cfg$p), ncol = rank_eff))
+    C <- normalize_columns(matrix(rnorm(as.integer(cfg$q) * rank_eff), nrow = as.integer(cfg$q), ncol = rank_eff))
+
+    make_block <- function(n_block) {
+      T0 <- matrix(rnorm(as.integer(n_block) * rank_eff), nrow = as.integer(n_block), ncol = rank_eff)
+      T <- sweep(T0, 2L, spec, "*", check.margin = FALSE)
+      X <- T %*% t(P) + cfg$sigma_x * matrix(rnorm(as.integer(n_block) * as.integer(cfg$p)), nrow = as.integer(n_block), ncol = as.integer(cfg$p))
+      Y <- T %*% t(C) + cfg$sigma_y * matrix(rnorm(as.integer(n_block) * as.integer(cfg$q)), nrow = as.integer(n_block), ncol = as.integer(cfg$q))
+      if (isTRUE(cfg$dropout > 0)) {
+        keep_prob <- 1 - cfg$dropout
+        mask <- matrix(rbinom(length(X), size = 1L, prob = keep_prob), nrow = nrow(X), ncol = ncol(X))
+        X <- X * mask
+      }
+      list(X = X, Y = Y)
+    }
+
+    tr <- make_block(cfg$ntrain)
+    te <- make_block(cfg$ntest)
+
+    list(
+      name = name,
+      Xtrain = unname(as.matrix(tr$X)),
+      Ytrain = unname(as.matrix(tr$Y)),
+      Xtest = unname(as.matrix(te$X)),
+      Ytest = unname(as.matrix(te$Y))
+    )
+  })
+}
+
 load_dataset <- function(name) {
   name <- tolower(name)
+  if (startsWith(name, "synthetic_")) {
+    return(make_synthetic_task(name))
+  }
   load_standard_task <- function(path, alias_name = name) {
     e <- new.env(parent = emptyenv())
     objs <- load(path, envir = e)

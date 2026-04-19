@@ -49,7 +49,7 @@ cd "${SCRIPT_ROOT}"
 
 # Core benchmark configuration
 export FASTPLS_DATA_ROOT="${DATA_ROOT}"
-export FASTPLS_DATASETS="${FASTPLS_DATASETS:-metref,cifar100,nmr,singlecell,imagenet}"
+export FASTPLS_DATASETS="${FASTPLS_DATASETS:-metref,cifar100,singlecell,gtex_v8,tcga_pan_cancer,ccle,tcga_brca,tcga_hnsc_methylation}"
 
 # Requested ncomp benchmark grid
 export FASTPLS_NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,20,50,100}"
@@ -147,4 +147,4 @@ unset FASTPLS_MULTI_APPEND
 
 echo "[INFO] Completed"
 echo "[INFO] Dataset result folders under: ${OUTROOT}"
-echo "[INFO] Example: ${OUTROOT}/metref , ${OUTROOT}/cifar100 , ${OUTROOT}/nmr , ${OUTROOT}/singlecell"
+echo "[INFO] Example: ${OUTROOT}/metref , ${OUTROOT}/singlecell , ${OUTROOT}/tcga_brca , ${OUTROOT}/tcga_hnsc_methylation"
