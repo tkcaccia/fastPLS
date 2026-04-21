@@ -8,11 +8,19 @@ REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 RESULTS_DIR="${FASTPLS_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_dataset_memory_compare}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-${HOME}/R/fastpls_bench_fresh}"
 DATASETS="${FASTPLS_DATASETS:-cifar100,ccle}"
-NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,20,50,100,200,500}"
+NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,18,20,50}"
+METREF_NCOMP_LIST="${FASTPLS_METREF_NCOMP_LIST:-2,5,10,22,50,100}"
+CCLE_NCOMP_LIST="${FASTPLS_CCLE_NCOMP_LIST:-2,5,10,18,50,100}"
+CIFAR100_NCOMP_LIST="${FASTPLS_CIFAR100_NCOMP_LIST:-2,5,10,20,50,100,200}"
+NMR_NCOMP_LIST="${FASTPLS_NMR_NCOMP_LIST:-2,5,10,20,50,100,200,500}"
+SMALL_MULTI_NCOMP_LIST="${FASTPLS_SMALL_MULTI_NCOMP_LIST:-2,5,10,20,50}"
+MID_MULTI_NCOMP_LIST="${FASTPLS_MID_MULTI_NCOMP_LIST:-2,5,10,20,50,100}"
 REPS="${FASTPLS_COMPARE_REPS:-3}"
 SPLIT_SEED="${FASTPLS_SPLIT_SEED:-123}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
+VARIANTS_FILTER="${FASTPLS_VARIANTS:-}"
+SKIP_PLOT="${FASTPLS_SKIP_PLOT:-false}"
 
 RAW_CSV="${RESULTS_DIR}/dataset_memory_compare_raw.csv"
 RUN_ROWS_DIR="${RESULTS_DIR}/run_rows"
@@ -26,20 +34,13 @@ rm -f "${RAW_CSV}"
 gpu_sampler() {
   r_pid="$1"
   log_file="$2"
-  seen_pid_sample=0
   while kill -0 "${r_pid}" 2>/dev/null; do
     samples="$(nvidia-smi --query-compute-apps=pid,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null | \
       awk -F',' -v pid="${r_pid}" '($1 + 0) == pid {gsub(/ /, "", $2); print $2}')"
     if [ -n "${samples}" ]; then
-      seen_pid_sample=1
       printf '%s\n' "${samples}" | while IFS= read -r mb; do
         [ -n "${mb}" ] && printf 'pid,%s\n' "${mb}" >> "${log_file}"
       done
-    elif [ "${seen_pid_sample}" -eq 0 ]; then
-      total_used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | awk 'NR == 1 {gsub(/ /, "", $1); print $1; exit}')"
-      if [ -n "${total_used}" ]; then
-        printf 'fallback,%s\n' "${total_used}" >> "${log_file}"
-      fi
     fi
     sleep 0.2
   done
@@ -54,10 +55,7 @@ peak_gpu_from_log() {
   if grep -q '^pid,' "${log_file}"; then
     awk -F',' 'BEGIN{m=-1} /^pid,[0-9.]+$/ { if (($2 + 0) > m) m = $2 + 0 } END { if (m < 0) print "NA"; else print m }' "${log_file}"
   else
-    awk -F',' 'BEGIN{m=-1}
-      /^[0-9.]+$/ { if (($1 + 0) > m) m = $1 + 0 }
-      /^fallback,[0-9.]+$/ { if (($2 + 0) > m) m = $2 + 0 }
-      END { if (m < 0) print "NA"; else print m }' "${log_file}"
+    echo "NA"
   fi
 }
 
@@ -103,9 +101,31 @@ with open(raw_csv, "a", newline="") as fh:
 PY
 }
 
-variants="$(Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); cat(paste(variant_specs()\$variant_name, collapse=' '))")"
+variants="$(Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); specs <- variant_specs(); keep <- trimws(Sys.getenv('FASTPLS_VARIANTS', '')); if (nzchar(keep)) { keep_vec <- trimws(strsplit(keep, ',', fixed = TRUE)[[1L]]); specs <- specs[specs\$variant_name %in% keep_vec, , drop = FALSE] }; cat(paste(specs\$variant_name, collapse=' '))")"
 
 for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
+  dataset_ncomp_list="${NCOMP_LIST}"
+  case "${dataset_id}" in
+    metref)
+      dataset_ncomp_list="${METREF_NCOMP_LIST}"
+      ;;
+    ccle)
+      dataset_ncomp_list="${CCLE_NCOMP_LIST}"
+      ;;
+    cifar100)
+      dataset_ncomp_list="${CIFAR100_NCOMP_LIST}"
+      ;;
+    nmr)
+      dataset_ncomp_list="${NMR_NCOMP_LIST}"
+      ;;
+    singlecell|tcga_brca|tcga_hnsc_methylation)
+      dataset_ncomp_list="${SMALL_MULTI_NCOMP_LIST}"
+      ;;
+    tcga_pan_cancer|gtex_v8|prism)
+      dataset_ncomp_list="${MID_MULTI_NCOMP_LIST}"
+      ;;
+  esac
+
   task_rds="${RESULTS_DIR}/${dataset_id}_task.rds"
   meta_rds="${RESULTS_DIR}/${dataset_id}_task_meta.rds"
   Rscript "${REPO_ROOT}/benchmark/benchmark_dataset_memory_compare.R" \
@@ -116,7 +136,7 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     --split-seed="${SPLIT_SEED}"
 
   for variant_name in ${variants}; do
-    for requested_ncomp in $(printf '%s' "${NCOMP_LIST}" | tr ',' ' '); do
+    for requested_ncomp in $(printf '%s' "${dataset_ncomp_list}" | tr ',' ' '); do
       rep_id=1
       while [ "${rep_id}" -le "${REPS}" ]; do
         run_id="$(printf '%s__%s__n%s__rep%s' "${dataset_id}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
@@ -182,5 +202,9 @@ EOF
   done
 done
 
-Rscript "${REPO_ROOT}/benchmark/plot_dataset_memory_compare.R" "${RESULTS_DIR}"
+if [ "${SKIP_PLOT}" = "true" ]; then
+  echo "[INFO] Skipping plot generation for ${RESULTS_DIR}"
+else
+  Rscript "${REPO_ROOT}/benchmark/plot_dataset_memory_compare.R" "${RESULTS_DIR}"
+fi
 echo "[INFO] Results written to ${RESULTS_DIR}"

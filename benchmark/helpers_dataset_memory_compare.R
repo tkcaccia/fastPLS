@@ -36,8 +36,17 @@ normalize_path_if_exists <- function(path) {
 dataset_filename <- function(dataset_id) {
   switch(
     tolower(dataset_id),
+    metref = "metref.RData",
+    cbmc_citeseq = "cbmc_citeseq.RData",
     cifar100 = "CIFAR100.RData",
     ccle = "ccle.RData",
+    gtex_v8 = "gtex_v8.RData",
+    nmr = "nmr.RData",
+    prism = "prism.RData",
+    singlecell = "singlecell.RData",
+    tcga_brca = "tcga_brca.RData",
+    tcga_hnsc_methylation = "tcga_hnsc_methylation.RData",
+    tcga_pan_cancer = "tcga_pan_cancer.RData",
     stop("Unsupported dataset_id: ", dataset_id)
   )
 }
@@ -83,25 +92,38 @@ make_stratified_split <- function(y, train_frac = 0.9) {
   list(train = sort(train_idx), test = sort(test_idx))
 }
 
-as_task <- function(path, dataset_id, split_seed = 123L) {
-  e <- new.env(parent = emptyenv())
-  load(path, envir = e)
-  objs <- ls(e)
+half_split_idx <- function(n) {
+  idx <- seq_len(n)
+  train_idx <- sample(idx, size = floor(n / 2))
+  test_idx <- setdiff(idx, train_idx)
+  list(train = sort(train_idx), test = sort(test_idx))
+}
 
+safe_factor <- function(y) {
+  if (is.factor(y)) return(droplevels(y))
+  droplevels(factor(y))
+}
+
+load_standard_task <- function(path, dataset_id, split_seed) {
+  e <- new.env(parent = emptyenv())
+  objs <- load(path, envir = e)
   set.seed(as.integer(split_seed))
 
   if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% objs)) {
     y_train <- get("Ytrain", envir = e)
     y_test <- get("Ytest", envir = e)
     if (is.factor(y_train)) {
-      y_train <- droplevels(y_train)
+      y_train <- safe_factor(y_train)
       y_test <- factor(y_test, levels = levels(y_train))
       n_classes <- nlevels(y_train)
+      task_type <- "classification"
     } else {
       n_classes <- ncol(as.matrix(y_train))
+      task_type <- "regression"
     }
     return(list(
       dataset = dataset_id,
+      task_type = task_type,
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
       Xtrain = as.matrix(get("Xtrain", envir = e)),
@@ -121,14 +143,17 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
     y_train <- obj$Ytrain
     y_test <- obj$Ytest
     if (is.factor(y_train)) {
-      y_train <- droplevels(y_train)
+      y_train <- safe_factor(y_train)
       y_test <- factor(y_test, levels = levels(y_train))
       n_classes <- nlevels(y_train)
+      task_type <- "classification"
     } else {
       n_classes <- ncol(as.matrix(y_train))
+      task_type <- "regression"
     }
     return(list(
       dataset = dataset_id,
+      task_type = task_type,
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
       Xtrain = as.matrix(obj$Xtrain),
@@ -148,17 +173,18 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
     if (!length(feat_cols)) {
       feat_cols <- setdiff(names(dt), c("image_path", "split", "label_idx", "label_name"))
     }
-    if ("split" %in% names(dt)) {
-      train_idx <- which(dt$split == "train")
-      test_idx <- which(dt$split == "test")
-    } else {
-      sp <- make_stratified_split(dt$label_idx, train_frac = 0.9)
+    split_col <- if ("split" %in% names(dt)) trimws(tolower(as.character(dt$split))) else rep("train", nrow(dt))
+    train_idx <- which(split_col == "train")
+    test_idx <- which(split_col == "test")
+    if (!length(train_idx) || !length(test_idx)) {
+      sp <- half_split_idx(nrow(dt))
       train_idx <- sp$train
       test_idx <- sp$test
     }
-    y_all <- factor(dt$label_idx)
+    y_all <- safe_factor(dt$label_idx)
     return(list(
       dataset = dataset_id,
+      task_type = "classification",
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
       Xtrain = as.matrix(dt[train_idx, ..feat_cols]),
@@ -174,10 +200,11 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
 
   if (all(c("data", "labels") %in% objs)) {
     X <- as.matrix(get("data", envir = e))
-    y <- droplevels(as.factor(get("labels", envir = e)))
-    sp <- make_stratified_split(y, train_frac = 0.9)
+    y <- safe_factor(get("labels", envir = e))
+    sp <- make_stratified_split(y, train_frac = 0.5)
     return(list(
       dataset = dataset_id,
+      task_type = "classification",
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
       Xtrain = X[sp$train, , drop = FALSE],
@@ -191,6 +218,92 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
     ))
   }
 
+  stop("Unsupported standard task format: ", path)
+}
+
+as_task <- function(path, dataset_id, split_seed = 123L) {
+  dataset_id <- tolower(dataset_id)
+  if (dataset_id %in% c("cifar100", "ccle", "gtex_v8", "prism", "cbmc_citeseq", "tcga_brca", "tcga_hnsc_methylation", "tcga_pan_cancer")) {
+    return(load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed))
+  }
+
+  if (dataset_id == "nmr") {
+    e <- new.env(parent = emptyenv())
+    load(path, envir = e)
+    return(list(
+      dataset = dataset_id,
+      task_type = "regression",
+      dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+      split_seed = as.integer(split_seed),
+      Xtrain = as.matrix(e$Xtrain),
+      Ytrain = as.matrix(e$Ytrain),
+      Xtest = as.matrix(e$Xtest),
+      Ytest = as.matrix(e$Ytest),
+      n_train = nrow(e$Xtrain),
+      n_test = nrow(e$Xtest),
+      p = ncol(e$Xtrain),
+      n_classes = ncol(e$Ytrain)
+    ))
+  }
+
+  if (dataset_id == "singlecell") {
+    e <- new.env(parent = emptyenv())
+    load(path, envir = e)
+    X <- as.matrix(e$data)
+    y <- safe_factor(e$labels)
+    set.seed(as.integer(split_seed))
+    sp <- make_stratified_split(y, train_frac = 0.5)
+    return(list(
+      dataset = dataset_id,
+      task_type = "classification",
+      dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+      split_seed = as.integer(split_seed),
+      Xtrain = X[sp$train, , drop = FALSE],
+      Ytrain = droplevels(y[sp$train]),
+      Xtest = X[sp$test, , drop = FALSE],
+      Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+      n_train = length(sp$train),
+      n_test = length(sp$test),
+      p = ncol(X),
+      n_classes = nlevels(y[sp$train])
+    ))
+  }
+
+  if (dataset_id == "metref") {
+    if (file.exists(path)) {
+      try({
+        task <- load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed)
+        return(task)
+      }, silent = TRUE)
+    }
+    if (!requireNamespace("KODAMA", quietly = TRUE)) {
+      stop("KODAMA package is required to load metref")
+    }
+    suppressPackageStartupMessages(library(KODAMA))
+    data("MetRef", package = "KODAMA")
+    X <- MetRef$data
+    X <- X[, colSums(X) != 0, drop = FALSE]
+    X <- normalization(X)$newXtrain
+    y <- safe_factor(MetRef$donor)
+    set.seed(as.integer(split_seed))
+    ss <- sample(seq_len(nrow(X)), min(100L, floor(nrow(X) / 5L)))
+    tr <- setdiff(seq_len(nrow(X)), ss)
+    return(list(
+      dataset = dataset_id,
+      task_type = "classification",
+      dataset_path = "KODAMA::MetRef",
+      split_seed = as.integer(split_seed),
+      Xtrain = as.matrix(X[tr, , drop = FALSE]),
+      Ytrain = y[tr],
+      Xtest = as.matrix(X[ss, , drop = FALSE]),
+      Ytest = y[ss],
+      n_train = length(tr),
+      n_test = length(ss),
+      p = ncol(X),
+      n_classes = nlevels(y)
+    ))
+  }
+
   stop("Unsupported dataset format for ", dataset_id)
 }
 
@@ -198,36 +311,48 @@ variant_specs <- function() {
   data.frame(
     variant_name = c(
       "cpp_plssvd_cpu_rsvd",
+      "cpp_plssvd_irlba",
+      "cpp_plssvd_arpack",
       "r_plssvd_cpu_rsvd",
+      "r_plssvd_irlba",
+      "r_plssvd_arpack",
       "gpu_plssvd_fp64",
       "gpu_plssvd_fp32",
       "cpp_simpls_cpu_rsvd",
+      "cpp_simpls_irlba",
+      "cpp_simpls_arpack",
       "r_simpls_cpu_rsvd",
+      "r_simpls_irlba",
+      "r_simpls_arpack",
       "pls_pkg_simpls",
       "cpp_simpls_fast_cpu_rsvd",
+      "cpp_simpls_fast_irlba",
+      "cpp_simpls_fast_arpack",
       "r_simpls_fast_cpu_rsvd",
+      "r_simpls_fast_irlba",
+      "r_simpls_fast_arpack",
       "gpu_simpls_fast_fp64",
       "gpu_simpls_fast_fp32"
     ),
     method_family = c(
-      "plssvd", "plssvd", "plssvd", "plssvd",
-      "simpls", "simpls", "simpls",
-      "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast"
+      "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd",
+      "simpls", "simpls", "simpls", "simpls", "simpls", "simpls", "simpls",
+      "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast"
     ),
     engine = c(
-      "CPU", "CPU", "GPU", "GPU",
-      "CPU", "CPU", "CPU",
-      "CPU", "CPU", "GPU", "GPU"
+      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "GPU", "GPU",
+      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "CPU",
+      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "GPU", "GPU"
     ),
     backend = c(
-      "cpu_rsvd", "cpu_rsvd", "gpu_native", "gpu_native",
-      "cpu_rsvd", "cpu_rsvd", "pls_pkg",
-      "cpu_rsvd", "cpu_rsvd", "gpu_native", "gpu_native"
+      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "gpu_native", "gpu_native",
+      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "pls_pkg",
+      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "gpu_native", "gpu_native"
     ),
     implementation_label = c(
-      "Cpp", "R", "CUDA 64-bit", "CUDA 32-bit",
-      "Cpp", "R", "pls_pkg",
-      "Cpp", "R", "CUDA 64-bit", "CUDA 32-bit"
+      "Cpp", "Cpp", "Cpp", "R", "R", "R", "CUDA 64-bit", "CUDA 32-bit",
+      "Cpp", "Cpp", "Cpp", "R", "R", "R", "pls_pkg",
+      "Cpp", "Cpp", "Cpp", "R", "R", "R", "CUDA 64-bit", "CUDA 32-bit"
     ),
     stringsAsFactors = FALSE
   )
@@ -250,24 +375,98 @@ method_panel_label <- function(method_family) {
   )
 }
 
-safe_effective_ncomp <- function(task, requested_ncomp) {
-  cap <- min(
+safe_effective_ncomp <- function(task, requested_ncomp, method_family = NULL) {
+  base_cap <- min(
     as.integer(requested_ncomp),
     as.integer(task$n_train) - 1L,
-    as.integer(task$p),
-    as.integer(task$n_classes)
+    as.integer(task$p)
   )
-  max(1L, cap)
+
+  if (identical(method_family, "plssvd")) {
+    base_cap <- min(base_cap, as.integer(task$n_classes))
+  }
+
+  max(1L, base_cap)
 }
 
-extract_pred_labels <- function(pred_res) {
+extract_pred_labels <- function(pred_res, levels_y = NULL) {
   if (is.null(pred_res$Ypred)) stop("Prediction result is missing `Ypred`")
   yp <- pred_res$Ypred
   if (is.data.frame(yp)) return(as.character(yp[[1L]]))
   if (is.factor(yp)) return(as.character(yp))
-  if (is.matrix(yp) && ncol(yp) >= 1L) return(as.character(yp[, 1L]))
+  if (is.array(yp) && length(dim(yp)) == 3L) {
+    yp <- yp[, , 1L, drop = FALSE]
+    yp <- matrix(yp, nrow = dim(pred_res$Ypred)[1L], ncol = dim(pred_res$Ypred)[2L])
+    pred_names <- colnames(pred_res$Ypred)
+    if (is.null(pred_names)) pred_names <- colnames(yp)
+    if (is.null(pred_names) && !is.null(levels_y) && ncol(yp) == length(levels_y)) pred_names <- levels_y
+    if (is.null(pred_names)) pred_names <- as.character(seq_len(ncol(yp)))
+    return(as.character(pred_names[max.col(yp, ties.method = "first")]))
+  }
+  if (is.matrix(yp) && ncol(yp) >= 1L) {
+    if (!is.null(levels_y) && ncol(yp) > 1L) {
+      pred_names <- colnames(yp)
+      if (is.null(pred_names) && ncol(yp) == length(levels_y)) pred_names <- levels_y
+      if (!is.null(pred_names)) {
+        return(as.character(pred_names[max.col(yp, ties.method = "first")]))
+      }
+    }
+    return(as.character(yp[, 1L]))
+  }
   if (is.list(yp) && length(yp) >= 1L) return(as.character(yp[[1L]]))
   stop("Unsupported prediction structure in `Ypred`")
+}
+
+metric_from_pred <- function(y_true, pred_obj, y_train = NULL) {
+  yp <- pred_obj$Ypred
+  if (is.factor(y_true)) {
+    pred <- NULL
+    if (is.data.frame(yp)) pred <- as.factor(yp[[1L]])
+    if (is.null(pred) && is.factor(yp)) pred <- as.factor(yp)
+    if (is.null(pred) && is.matrix(yp) && ncol(yp) == 1L) pred <- as.factor(yp[, 1L])
+    if (is.null(pred) && is.vector(yp)) pred <- as.factor(yp)
+    if (is.null(pred) && length(dim(yp)) == 3L) {
+      mat <- yp[, , 1L, drop = FALSE]
+      lev <- pred_obj$lev
+      if (is.null(lev)) lev <- levels(y_true)
+      cls <- apply(mat, 1L, which.max)
+      pred <- factor(lev[cls], levels = lev)
+    }
+    if (is.null(pred) && is.matrix(yp) && ncol(yp) > 1L) {
+      lev <- colnames(yp)
+      if (is.null(lev)) lev <- levels(y_true)
+      pred <- factor(lev[max.col(yp, ties.method = "first")], levels = lev)
+    }
+    if (is.null(pred)) stop("Cannot decode classification predictions")
+    val <- mean(as.character(pred) == as.character(y_true), na.rm = TRUE)
+    return(list(metric_name = "accuracy", metric_value = as.numeric(val), pred = pred))
+  }
+
+  y_num <- as.matrix(y_true)
+  pred_num <- NULL
+  if (length(dim(yp)) == 3L) {
+    pred_num <- as.matrix(yp[, , 1L, drop = TRUE])
+  } else if (is.matrix(yp)) {
+    pred_num <- yp
+  } else {
+    pred_num <- matrix(as.numeric(yp), ncol = 1L)
+  }
+  if (!all(dim(pred_num) == dim(y_num))) {
+    pred_num <- matrix(as.numeric(pred_num), nrow = nrow(y_num), ncol = ncol(y_num))
+  }
+  if (ncol(y_num) == 1L) {
+    train_mean <- suppressWarnings(mean(as.numeric(as.matrix(y_train)), na.rm = TRUE))
+    if (!is.finite(train_mean)) {
+      train_mean <- mean(y_num[, 1L], na.rm = TRUE)
+    }
+    press <- sum((pred_num[, 1L] - y_num[, 1L])^2, na.rm = TRUE)
+    tss <- sum((y_num[, 1L] - train_mean)^2, na.rm = TRUE)
+    q2 <- if (is.finite(tss) && tss > 0) 1 - (press / tss) else NA_real_
+    return(list(metric_name = "q2", metric_value = as.numeric(q2), pred = pred_num))
+  }
+
+  rmsd <- sqrt(mean((pred_num - y_num)^2, na.rm = TRUE))
+  list(metric_name = "rmsd", metric_value = as.numeric(rmsd), pred = pred_num)
 }
 
 safe_accuracy <- function(truth, pred) {

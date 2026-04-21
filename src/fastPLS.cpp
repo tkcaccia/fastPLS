@@ -1163,6 +1163,9 @@ List pls_model2_fast_gpu(
   arma::mat mY = mean(Ytrain, 0);
   Ytrain.each_row() -= mY;
 
+  const arma::mat Xt = Xtrain.t();
+  const arma::mat Yt = Ytrain.t();
+
   arma::mat RR(p, max_ncomp, fill::zeros);
   arma::mat QQ(m, max_ncomp, fill::zeros);
   arma::mat VV(p, max_ncomp, fill::zeros);
@@ -1258,9 +1261,9 @@ List pls_model2_fast_gpu(
     fastpls_svd::cuda_simpls_fast_copy_rr(RR.memptr(), p, max_ncomp);
     fastpls_svd::cuda_simpls_fast_copy_qq(QQ.memptr(), m, max_ncomp);
   } else {
-    arma::mat S_shape(p, m, arma::fill::zeros);
+    arma::mat S_shape = Xt * Ytrain;
     SimplsFastRefreshWorkspace refresh_ws;
-    refresh_ws.gpu_refresh_enabled = true;
+    refresh_ws.gpu_refresh_enabled = false;
     arma::vec rr_prev;
     bool has_rr_prev = false;
 
@@ -1269,20 +1272,36 @@ List pls_model2_fast_gpu(
       arma::vec pp(p, arma::fill::zeros);
       arma::vec qq(m, arma::fill::zeros);
       double tnorm = 0.0;
-      fastpls_svd::cuda_simpls_fast_component_stats(
-        rr.memptr(),
-        n,
-        p,
-        m,
-        tt.memptr(),
-        pp.memptr(),
-        qq.memptr(),
-        &tnorm
-      );
-      if (!std::isfinite(tnorm) || tnorm <= 0.0) {
-        return false;
+      bool gpu_stats_ok = true;
+      try {
+        fastpls_svd::cuda_simpls_fast_component_stats(
+          rr.memptr(),
+          n,
+          p,
+          m,
+          tt.memptr(),
+          pp.memptr(),
+          qq.memptr(),
+          &tnorm
+        );
+      } catch (const std::exception&) {
+        gpu_stats_ok = false;
       }
-      rr /= tnorm;
+
+      if (!gpu_stats_ok || !std::isfinite(tnorm) || tnorm <= 0.0) {
+        tt = Xtrain * rr;
+        const double host_tnorm = arma::norm(tt, 2);
+        if (!std::isfinite(host_tnorm) || host_tnorm <= 0.0) {
+          return false;
+        }
+        tt /= host_tnorm;
+        rr /= host_tnorm;
+        pp = Xt * tt;
+        qq = Yt * tt;
+      } else {
+        rr /= tnorm;
+      }
+
       rr_prev = rr;
       has_rr_prev = true;
 
@@ -1300,19 +1319,8 @@ List pls_model2_fast_gpu(
       }
       vv /= vnorm;
 
-      arma::vec vS(m, arma::fill::zeros);
-      fastpls_svd::cuda_rsvd_project_left_row(
-        vv.memptr(),
-        p,
-        m,
-        vS.memptr()
-      );
-      fastpls_svd::cuda_rsvd_deflate_left_rank1(
-        vv.memptr(),
-        vS.memptr(),
-        p,
-        m
-      );
+      arma::rowvec vS = vv.t() * S_shape;
+      S_shape -= vv * vS;
 
       RR.col(a_idx) = rr;
       QQ.col(a_idx) = qq;
