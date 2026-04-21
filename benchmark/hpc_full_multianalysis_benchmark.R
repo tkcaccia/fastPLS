@@ -1,7 +1,16 @@
 #!/usr/bin/env Rscript
 
+fastpls_lib_loc <- trimws(Sys.getenv("FASTPLS_LIB_LOC", ""))
+if (nzchar(fastpls_lib_loc)) {
+  fastpls_lib_loc <- path.expand(fastpls_lib_loc)
+}
+
 suppressPackageStartupMessages({
-  library(fastPLS)
+  if (nzchar(fastpls_lib_loc)) {
+    library(fastPLS, lib.loc = fastpls_lib_loc)
+  } else {
+    library(fastPLS)
+  }
   library(data.table)
 })
 
@@ -65,6 +74,9 @@ if (!length(ncomp_nmr_vec)) ncomp_nmr_vec <- c(2L, 3L, 5L)
 ncomp_singlecell_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_SINGLECELL_NCOMP_LIST", "2,5,10,20,50"), ",", fixed = TRUE)[[1]])
 ncomp_singlecell_vec <- sort(unique(ncomp_singlecell_vec[is.finite(ncomp_singlecell_vec) & ncomp_singlecell_vec >= 1L]))
 if (!length(ncomp_singlecell_vec)) ncomp_singlecell_vec <- c(2L, 5L, 10L, 20L, 50L)
+ncomp_cifar100_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_CIFAR100_NCOMP_LIST", "2,5,10,20,50,100"), ",", fixed = TRUE)[[1]])
+ncomp_cifar100_vec <- sort(unique(ncomp_cifar100_vec[is.finite(ncomp_cifar100_vec) & ncomp_cifar100_vec >= 1L]))
+if (!length(ncomp_cifar100_vec)) ncomp_cifar100_vec <- c(2L, 5L, 10L, 20L, 50L, 100L)
 imagenet_train_n <- as.integer(Sys.getenv("FASTPLS_IMAGENET_TRAIN_N", "1000000"))
 if (!is.finite(imagenet_train_n) || is.na(imagenet_train_n) || imagenet_train_n < 1L) imagenet_train_n <- 1000000L
 default_ncomp <- as.integer(Sys.getenv("FASTPLS_DEFAULT_NCOMP", "2"))
@@ -104,6 +116,23 @@ public_include_r <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_R", "true")) %in%
 public_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
 skip_arpack_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_ARPACK_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 skip_plssvd_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_PLSSVD_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
+timepoint_cutoff_sec <- suppressWarnings(as.numeric(Sys.getenv(
+  "FASTPLS_TIMEPOINT_CUTOFF_SEC",
+  Sys.getenv("FASTPLS_NCOMP_TIME_CUTOFF_SEC", "0")
+)))
+if (!is.finite(timepoint_cutoff_sec) || is.na(timepoint_cutoff_sec) || timepoint_cutoff_sec <= 0) {
+  timepoint_cutoff_sec <- Inf
+}
+timepoint_cutoff_ms <- if (is.finite(timepoint_cutoff_sec)) timepoint_cutoff_sec * 1000 else Inf
+
+parse_dataset_csv <- function(x) {
+  vals <- tolower(trimws(x))
+  vals <- unlist(strsplit(vals, ",", fixed = TRUE), use.names = FALSE)
+  vals[nzchar(vals)]
+}
+
+no_r_datasets <- unique(parse_dataset_csv(Sys.getenv("FASTPLS_NO_R_DATASETS", "")))
+no_pls_pkg_datasets <- unique(parse_dataset_csv(Sys.getenv("FASTPLS_NO_PLS_PKG_DATASETS", "")))
 dataset_filter <- tolower(trimws(Sys.getenv(
   "FASTPLS_DATASETS",
   "metref,cifar100,singlecell,gtex_v8,tcga_pan_cancer,ccle,tcga_brca,tcga_hnsc_methylation"
@@ -118,12 +147,14 @@ if (!length(dataset_filter)) {
     "gtex_v8",
     "tcga_pan_cancer",
     "ccle",
+    "prism",
+    "cbmc_citeseq",
     "tcga_brca",
     "tcga_hnsc_methylation"
   )
 }
 
-public_benchmark_datasets <- c("gtex", "gtex_v8", "tcga_pan_cancer", "tcga_brca", "tcga_hnsc_methylation", "ccle", "covertype", "susy", "yearpredictionmsd")
+public_benchmark_datasets <- c("gtex", "gtex_v8", "tcga_pan_cancer", "tcga_brca", "tcga_hnsc_methylation", "ccle", "prism", "cbmc_citeseq", "citeseq", "covertype", "susy", "yearpredictionmsd")
 ncomp_public_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_PUBLIC_NCOMP_LIST", "2,5,10,20,50,100"), ",", fixed = TRUE)[[1]])
 ncomp_public_vec <- sort(unique(ncomp_public_vec[is.finite(ncomp_public_vec) & ncomp_public_vec >= 1L]))
 if (!length(ncomp_public_vec)) ncomp_public_vec <- c(2L, 5L, 10L, 20L, 50L, 100L)
@@ -176,7 +207,7 @@ gpu_fit_dispatch <- function(Xtrain,
     stop("Unsupported GPU algorithm: ", algorithm)
   }
 
-  fastPLS::pls_gpu(
+  fastPLS::simpls_gpu(
     Xtrain = Xtrain,
     Ytrain = Ytrain,
     Xtest = Xtest,
@@ -281,7 +312,7 @@ metric_from_pred <- function(y_true, pred_obj) {
   y_num <- as.matrix(y_true)
   pred_num <- NULL
   if (length(dim(yp)) == 3L) {
-    pred_num <- yp[, , 1, drop = FALSE]
+    pred_num <- as.matrix(yp[, , 1, drop = TRUE])
   } else if (is.matrix(yp)) {
     pred_num <- yp
   } else {
@@ -308,6 +339,18 @@ stratified_half_split <- function(y) {
   }), use.names = FALSE)
   test_idx <- sort(unique(test_idx))
   train_idx <- setdiff(seq_along(y), test_idx)
+  list(train = train_idx, test = test_idx)
+}
+
+synthetic_stratified_split <- function(y, train_frac) {
+  y <- droplevels(as.factor(y))
+  idx_by <- split(seq_along(y), y)
+  train_idx <- unlist(lapply(idx_by, function(ix) {
+    n_train <- max(1L, floor(length(ix) * train_frac))
+    sample(ix, size = min(length(ix), n_train))
+  }), use.names = FALSE)
+  train_idx <- sort(unique(train_idx))
+  test_idx <- setdiff(seq_along(y), train_idx)
   list(train = train_idx, test = test_idx)
 }
 
@@ -341,16 +384,34 @@ synthetic_spectrum <- function(rank, decay = c("fast", "moderate", "slow", "logi
   )
 }
 
+make_class_from_latent <- function(Tmat, n_classes = 4L, class_bias = NULL, sigma = 0.50) {
+  n_classes <- as.integer(max(2L, n_classes))
+  W <- matrix(rnorm(ncol(Tmat) * n_classes), nrow = ncol(Tmat), ncol = n_classes)
+  logits <- Tmat %*% W + sigma * matrix(rnorm(nrow(Tmat) * n_classes), nrow = nrow(Tmat), ncol = n_classes)
+  if (is.null(class_bias)) class_bias <- rep(0, n_classes)
+  logits <- sweep(logits, 2L, as.numeric(class_bias), "+", check.margin = FALSE)
+  labs <- max.col(logits, ties.method = "first")
+  factor(labs, levels = seq_len(n_classes), labels = paste0("class", seq_len(n_classes)))
+}
+
 synthetic_catalog <- function() {
   list(
-    synthetic_base = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 101L),
-    synthetic_n_small = list(ntrain = 300L, ntest = 100L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 102L),
-    synthetic_n_large = list(ntrain = 1600L, ntest = 400L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 103L),
-    synthetic_p_wide = list(ntrain = 800L, ntest = 200L, p = 5000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 104L),
-    synthetic_q_wide = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 500L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 105L),
-    synthetic_decay_fast = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "fast", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 106L),
-    synthetic_decay_slow = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "slow", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 107L),
-    synthetic_dropout = list(ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.80, seed_offset = 108L)
+    synthetic_regression_base = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 101L),
+    synthetic_regression_n_small = list(task_type = "regression", ntrain = 300L, ntest = 100L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 102L),
+    synthetic_regression_n_large = list(task_type = "regression", ntrain = 1600L, ntest = 400L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 103L),
+    synthetic_regression_p_wide = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 5000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 104L),
+    synthetic_regression_q_wide = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 500L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 105L),
+    synthetic_regression_rank_low = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 5L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 106L),
+    synthetic_regression_rank_high = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 20L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 107L),
+    synthetic_regression_decay_steep = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "fast", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 108L),
+    synthetic_regression_decay_clustered = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "logistic", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 109L),
+    synthetic_regression_decay_flat = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "slow", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, seed_offset = 110L),
+    synthetic_regression_snr_high = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.20, sigma_y = 0.20, dropout = 0.00, seed_offset = 111L),
+    synthetic_regression_snr_low = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 1.00, sigma_y = 1.00, dropout = 0.00, seed_offset = 112L),
+    synthetic_regression_dropout = list(task_type = "regression", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.80, seed_offset = 113L),
+    synthetic_classification_balanced = list(task_type = "classification", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, n_classes = 5L, class_bias = rep(0, 5L), seed_offset = 114L),
+    synthetic_classification_imbalanced = list(task_type = "classification", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.00, n_classes = 5L, class_bias = log(c(0.60, 0.18, 0.10, 0.07, 0.05)), seed_offset = 115L),
+    synthetic_classification_dropout = list(task_type = "classification", ntrain = 800L, ntest = 200L, p = 1000L, q = 100L, rank = 10L, decay = "moderate", sigma_x = 0.50, sigma_y = 0.50, dropout = 0.80, n_classes = 5L, class_bias = rep(0, 5L), seed_offset = 116L)
   )
 }
 
@@ -386,17 +447,39 @@ make_synthetic_task <- function(name) {
       T0 <- matrix(rnorm(as.integer(n_block) * rank_eff), nrow = as.integer(n_block), ncol = rank_eff)
       T <- sweep(T0, 2L, spec, "*", check.margin = FALSE)
       X <- T %*% t(P) + cfg$sigma_x * matrix(rnorm(as.integer(n_block) * as.integer(cfg$p)), nrow = as.integer(n_block), ncol = as.integer(cfg$p))
-      Y <- T %*% t(C) + cfg$sigma_y * matrix(rnorm(as.integer(n_block) * as.integer(cfg$q)), nrow = as.integer(n_block), ncol = as.integer(cfg$q))
       if (isTRUE(cfg$dropout > 0)) {
         keep_prob <- 1 - cfg$dropout
         mask <- matrix(rbinom(length(X), size = 1L, prob = keep_prob), nrow = nrow(X), ncol = ncol(X))
         X <- X * mask
+      }
+      if (identical(cfg$task_type, "classification")) {
+        Y <- make_class_from_latent(
+          Tmat = T,
+          n_classes = cfg$n_classes,
+          class_bias = cfg$class_bias,
+          sigma = cfg$sigma_y
+        )
+      } else {
+        Y <- T %*% t(C) + cfg$sigma_y * matrix(rnorm(as.integer(n_block) * as.integer(cfg$q)), nrow = as.integer(n_block), ncol = as.integer(cfg$q))
       }
       list(X = X, Y = Y)
     }
 
     tr <- make_block(cfg$ntrain)
     te <- make_block(cfg$ntest)
+
+    if (identical(cfg$task_type, "classification")) {
+      y_all <- droplevels(factor(c(as.character(tr$Y), as.character(te$Y))))
+      split <- synthetic_stratified_split(y_all, train_frac = cfg$ntrain / (cfg$ntrain + cfg$ntest))
+      Xall <- rbind(tr$X, te$X)
+      return(list(
+        name = name,
+        Xtrain = unname(as.matrix(Xall[split$train, , drop = FALSE])),
+        Ytrain = y_all[split$train],
+        Xtest = unname(as.matrix(Xall[split$test, , drop = FALSE])),
+        Ytest = factor(y_all[split$test], levels = levels(y_all[split$train]))
+      ))
+    }
 
     list(
       name = name,
@@ -552,6 +635,9 @@ load_dataset <- function(name) {
     tcga_brca = "tcga_brca.RData",
     tcga_hnsc_methylation = "tcga_hnsc_methylation.RData",
     ccle = "ccle.RData",
+    prism = "prism.RData",
+    cbmc_citeseq = "cbmc_citeseq.RData",
+    citeseq = "cbmc_citeseq.RData",
     covertype = "covertype.RData",
     susy = "susy.RData",
     yearpredictionmsd = "yearpredictionmsd.RData"
@@ -648,8 +734,28 @@ methods_for_dataset <- function(dname, methods_all) {
   dname_lc <- tolower(dname)
   if (dname_lc == "metref" || dname_lc %in% public_benchmark_datasets || isTRUE(include_r_impl) || isTRUE(include_pls_pkg_all)) {
     keep_engines <- c("Rcpp", "GPU")
-    include_r_here <- if (isTRUE(include_r_impl)) TRUE else if (dname_lc == "metref") metref_include_r else if (dname_lc %in% public_benchmark_datasets) public_include_r else FALSE
-    include_pls_here <- if (isTRUE(include_pls_pkg_all)) TRUE else if (dname_lc == "metref") metref_include_pls_pkg else if (dname_lc %in% public_benchmark_datasets) public_include_pls_pkg else FALSE
+    include_r_here <- if (dname_lc %in% no_r_datasets) {
+      FALSE
+    } else if (isTRUE(include_r_impl)) {
+      TRUE
+    } else if (dname_lc == "metref") {
+      metref_include_r
+    } else if (dname_lc %in% public_benchmark_datasets) {
+      public_include_r
+    } else {
+      FALSE
+    }
+    include_pls_here <- if (dname_lc %in% no_pls_pkg_datasets) {
+      FALSE
+    } else if (isTRUE(include_pls_pkg_all)) {
+      TRUE
+    } else if (dname_lc == "metref") {
+      metref_include_pls_pkg
+    } else if (dname_lc %in% public_benchmark_datasets) {
+      public_include_pls_pkg
+    } else {
+      FALSE
+    }
     if (isTRUE(include_r_here)) keep_engines <- c(keep_engines, "R")
     m <- m[engine %in% keep_engines]
     if (isTRUE(include_pls_here)) {
@@ -808,8 +914,43 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
   idx <- 0L
   for (i in seq_len(nrow(methods))) {
     cfg <- methods[i]
+    skip_remaining_cfg <- FALSE
+    cutoff_value <- NULL
+    cutoff_ms <- NA_real_
     for (v in values) {
       ncomp_preview <- if (analysis == "ncomp") as.integer(v) else as.integer(ncomp_fixed)
+      if (isTRUE(skip_remaining_cfg)) {
+        skip_msg <- sprintf(
+          "Skipped after previous %s=%s exceeded cutoff (%.2fs > %.2fs)",
+          analysis,
+          as.character(cutoff_value),
+          cutoff_ms / 1000,
+          timepoint_cutoff_ms / 1000
+        )
+        log_msg(
+          "[SKIP] dataset=", dname,
+          " analysis=", analysis,
+          " value=", as.character(v),
+          " method=", cfg$method_id,
+          " msg=", skip_msg
+        )
+        for (r in seq_len(reps_run)) {
+          xtrain_nrow <- nrow(ds0$Xtrain)
+          xtrain_ncol <- ncol(ds0$Xtrain)
+          ytrain_ncol <- if (is.factor(ds0$Ytrain)) 1L else ncol(as.matrix(ds0$Ytrain))
+          ytrain_display_dim <- if (is.factor(ds0$Ytrain)) nlevels(ds0$Ytrain) else ncol(as.matrix(ds0$Ytrain))
+          idx <- idx + 1L
+          rows[[idx]] <- data.table(
+            dataset = dname, analysis = analysis, analysis_value = as.character(v),
+            rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
+            method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_preview,
+            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
+            train_ms = NA_real_, metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_, status = "skipped_after_timepoint_cutoff", msg = skip_msg
+          )
+        }
+        next
+      }
       log_msg(
         "[RUN] dataset=", dname,
         " analysis=", analysis,
@@ -818,7 +959,27 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
         " ncomp=", ncomp_preview,
         " reps=", reps_run
       )
+      cutoff_triggered_here <- FALSE
       for (r in seq_len(reps_run)) {
+        if (isTRUE(cutoff_triggered_here)) {
+          xtrain_nrow <- nrow(ds0$Xtrain)
+          xtrain_ncol <- ncol(ds0$Xtrain)
+          ytrain_ncol <- if (is.factor(ds0$Ytrain)) 1L else ncol(as.matrix(ds0$Ytrain))
+          ytrain_display_dim <- if (is.factor(ds0$Ytrain)) nlevels(ds0$Ytrain) else ncol(as.matrix(ds0$Ytrain))
+          idx <- idx + 1L
+          rows[[idx]] <- data.table(
+            dataset = dname, analysis = analysis, analysis_value = as.character(v),
+            rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
+            method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_preview,
+            xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
+            train_ms = NA_real_, metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_, status = "skipped_after_timepoint_cutoff", msg = sprintf(
+              "Additional replicates skipped after %s=%s exceeded cutoff (%.2fs > %.2fs)",
+              analysis, as.character(v), cutoff_ms / 1000, timepoint_cutoff_ms / 1000
+            )
+          )
+          next
+        }
         ds <- ds0
         ncomp_run <- ncomp_fixed
         analysis_value <- as.character(v)
@@ -910,6 +1071,21 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             train_ms = res$train_ms, metric_name = res$metric_name, metric_value = res$metric_value,
             model_size_mb = res$model_size_mb, status = "ok", msg = ""
           )
+          if (identical(analysis, "ncomp") && is.finite(timepoint_cutoff_ms) && !is.na(res$train_ms) && res$train_ms > timepoint_cutoff_ms) {
+            cutoff_triggered_here <- TRUE
+            skip_remaining_cfg <- TRUE
+            cutoff_value <- analysis_value
+            cutoff_ms <- res$train_ms
+            log_msg(
+              "[WARN] Timepoint cutoff triggered for dataset=", dname,
+              " method=", cfg$method_id,
+              " analysis=", analysis,
+              " value=", analysis_value,
+              " train_sec=", sprintf("%.2f", res$train_ms / 1000),
+              " cutoff_sec=", sprintf("%.2f", timepoint_cutoff_sec),
+              " -> skipping later values"
+            )
+          }
         }
       }
     }
@@ -952,12 +1128,15 @@ log_msg("include_simpls_fast_incremental=", include_simpls_fast_incremental)
 log_msg("only_ncomp=", only_ncomp)
 log_msg("metref_include_r=", metref_include_r, "; metref_include_pls_pkg=", metref_include_pls_pkg)
 log_msg("public_include_r=", public_include_r, "; public_include_pls_pkg=", public_include_pls_pkg)
+log_msg("no_r_datasets=", if (length(no_r_datasets)) paste(no_r_datasets, collapse = ",") else "<none>")
+log_msg("no_pls_pkg_datasets=", if (length(no_pls_pkg_datasets)) paste(no_pls_pkg_datasets, collapse = ",") else "<none>")
+log_msg("timepoint_cutoff_sec=", if (is.finite(timepoint_cutoff_sec)) format(timepoint_cutoff_sec) else "disabled")
 log_msg("threads=", threads)
 log_msg("svd tuning: irlba_svtol=", irlba_svtol, "; rsvd_tol=", rsvd_tol)
 log_msg("replicate policy: default reps=", reps, "; nmr_reps=", nmr_reps)
 log_msg("replicate policy (dataset overrides): metref_reps=", metref_reps, "; singlecell_reps=", singlecell_reps, "; cifar100_reps=", cifar100_reps)
 log_msg("NMR safety filters: skip_arpack_on_nmr=", skip_arpack_on_nmr, "; skip_plssvd_on_nmr=", skip_plssvd_on_nmr)
-log_msg("ncomp(default datasets)=", paste(ncomp_vec, collapse = ","), "; ncomp(NMR)=", paste(ncomp_nmr_vec, collapse = ","), "; ncomp(SingleCell)=", paste(ncomp_singlecell_vec, collapse = ","), "; ncomp(public datasets)=", paste(ncomp_public_vec, collapse = ","), "; default_ncomp(non-ncomp analyses)=", default_ncomp, "; metref_default_ncomp=", metref_default_ncomp, "; singlecell_default_ncomp=", singlecell_default_ncomp, "; cifar100_default_ncomp=", cifar100_default_ncomp, "; public_default_ncomp=", public_default_ncomp)
+log_msg("ncomp(default datasets)=", paste(ncomp_vec, collapse = ","), "; ncomp(NMR)=", paste(ncomp_nmr_vec, collapse = ","), "; ncomp(SingleCell)=", paste(ncomp_singlecell_vec, collapse = ","), "; ncomp(CIFAR100)=", paste(ncomp_cifar100_vec, collapse = ","), "; ncomp(public datasets)=", paste(ncomp_public_vec, collapse = ","), "; default_ncomp(non-ncomp analyses)=", default_ncomp, "; metref_default_ncomp=", metref_default_ncomp, "; singlecell_default_ncomp=", singlecell_default_ncomp, "; cifar100_default_ncomp=", cifar100_default_ncomp, "; public_default_ncomp=", public_default_ncomp)
 log_msg("sample_fracs=", paste(sample_fracs, collapse = ","), "; xvar_fracs=", paste(xvar_fracs, collapse = ","), "; yvar_fracs=", paste(yvar_fracs, collapse = ","))
 
 all_rows <- list(); ai <- 0L
@@ -975,6 +1154,7 @@ for (dname in dataset_filter) {
   if (tolower(dname) == "cifar100") reps_ds <- cifar100_reps
   ncomp_ds <- if (tolower(dname) == "nmr") ncomp_nmr_vec else ncomp_vec
   if (tolower(dname) == "singlecell") ncomp_ds <- ncomp_singlecell_vec
+  if (tolower(dname) == "cifar100") ncomp_ds <- ncomp_cifar100_vec
   if (tolower(dname) %in% public_benchmark_datasets) ncomp_ds <- ncomp_public_vec
   default_ncomp_ds <- if (tolower(dname) == "metref") metref_default_ncomp else default_ncomp
   if (tolower(dname) == "singlecell") default_ncomp_ds <- singlecell_default_ncomp

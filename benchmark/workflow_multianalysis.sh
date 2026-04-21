@@ -49,7 +49,7 @@ cd "${SCRIPT_ROOT}"
 
 # Core benchmark configuration
 export FASTPLS_DATA_ROOT="${DATA_ROOT}"
-export FASTPLS_DATASETS="${FASTPLS_DATASETS:-metref,cifar100,singlecell,gtex_v8,tcga_pan_cancer,ccle,tcga_brca,tcga_hnsc_methylation}"
+export FASTPLS_DATASETS="${FASTPLS_DATASETS:-metref,cifar100,singlecell,gtex_v8,tcga_pan_cancer,ccle,prism,cbmc_citeseq,tcga_brca,tcga_hnsc_methylation}"
 
 # Requested ncomp benchmark grid
 export FASTPLS_NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,20,50,100}"

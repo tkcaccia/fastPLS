@@ -4,7 +4,13 @@
 ^\.DS_Store$
 ^\.\.Rcheck$
 ^\.gitignore$
+^\.git$
 ^benchmark$
+^benchmark_results_local$
 ^scripts$
 ^fastPLS[.]Rcheck$
+^fastPLS-src[.]Rcheck$
+^src/.*\.(o|so)$
+^src/symbols[.]rds$
+^src/Makevars$
 ^\.bench-lib.*$

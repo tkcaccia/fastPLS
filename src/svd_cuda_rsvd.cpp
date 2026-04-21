@@ -13,6 +13,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace fastpls_svd {
 namespace {
@@ -175,6 +176,10 @@ class CudaRSVDWorkspace {
     release();
   }
 
+  void reset() {
+    release();
+  }
+
   void ensure_capacity(int m, int n, int l) {
     if (!handle_ready_) {
       check_cublas(cublasCreate(&handle_), "cublasCreate");
@@ -211,8 +216,37 @@ class CudaRSVDWorkspace {
     bool fit
   ) {
     ensure_capacity(p, m, 1);
-    ensure_buffer(dX_, bytes_for(n, p), bytes_X_, "cudaMalloc(dX)");
-    ensure_buffer(dYtrain_, bytes_for(n, m), bytes_Ytrain_, "cudaMalloc(dYtrain)");
+    if (use_fp32_train_storage()) {
+      if (dX_ != nullptr) {
+        cudaFree(dX_);
+        dX_ = nullptr;
+        bytes_X_ = 0;
+      }
+      if (dYtrain_ != nullptr) {
+        cudaFree(dYtrain_);
+        dYtrain_ = nullptr;
+        bytes_Ytrain_ = 0;
+      }
+      ensure_float_buffer(dXf_, bytes_for_float(n, p), bytes_Xf_, "cudaMalloc(dXf)");
+      ensure_float_buffer(dYtrainf_, bytes_for_float(n, m), bytes_Ytrainf_, "cudaMalloc(dYtrainf)");
+      copy_host_double_to_device_float(dXf_, hX, n, p, "cudaMemcpy(Xtrain_fp32)");
+      copy_host_double_to_device_float(dYtrainf_, hY, n, m, "cudaMemcpy(Ytrain_fp32)");
+    } else {
+      if (dXf_ != nullptr) {
+        cudaFree(dXf_);
+        dXf_ = nullptr;
+        bytes_Xf_ = 0;
+      }
+      if (dYtrainf_ != nullptr) {
+        cudaFree(dYtrainf_);
+        dYtrainf_ = nullptr;
+        bytes_Ytrainf_ = 0;
+      }
+      ensure_buffer(dX_, bytes_for(n, p), bytes_X_, "cudaMalloc(dX)");
+      ensure_buffer(dYtrain_, bytes_for(n, m), bytes_Ytrain_, "cudaMalloc(dYtrain)");
+      check_cuda(cudaMemcpy(dX_, hX, bytes_for(n, p), cudaMemcpyHostToDevice), "cudaMemcpy(Xtrain)");
+      check_cuda(cudaMemcpy(dYtrain_, hY, bytes_for(n, m), cudaMemcpyHostToDevice), "cudaMemcpy(Ytrain)");
+    }
     ensure_buffer(dTvec_, bytes_for(n, 1), bytes_Tvec_, "cudaMalloc(dTvec)");
     ensure_buffer(dPvec_, bytes_for(p, 1), bytes_Pvec_, "cudaMalloc(dPvec)");
     ensure_buffer(dQvec_, bytes_for(m, 1), bytes_Qvec_, "cudaMalloc(dQvec)");
@@ -221,16 +255,20 @@ class CudaRSVDWorkspace {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
       check_cuda(cudaMemset(dYfit_, 0, bytes_for(n, m)), "cudaMemset(dYfit)");
     }
+    crossprod_training_xy(n, p, m);
+  }
 
-    check_cuda(cudaMemcpy(dX_, hX, bytes_for(n, p), cudaMemcpyHostToDevice), "cudaMemcpy(Xtrain)");
-    check_cuda(cudaMemcpy(dYtrain_, hY, bytes_for(n, m), cudaMemcpyHostToDevice), "cudaMemcpy(Ytrain)");
-
-    const double alpha = 1.0;
-    const double beta = 0.0;
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, m, n, &alpha, dX_, n, dYtrain_, n, &beta, dA_, p),
-      "cublasDgemm(S=X^T*Y)"
-    );
+  void release_pls_ytrain_buffer() {
+    if (dYtrain_ != nullptr) {
+      cudaFree(dYtrain_);
+      dYtrain_ = nullptr;
+      bytes_Ytrain_ = 0;
+    }
+    if (dYtrainf_ != nullptr) {
+      cudaFree(dYtrainf_);
+      dYtrainf_ = nullptr;
+      bytes_Ytrainf_ = 0;
+    }
   }
 
   void simpls_fast_begin_device_loop(
@@ -338,10 +376,7 @@ class CudaRSVDWorkspace {
       cublasDcopy(handle_, p, dQ_ + static_cast<size_t>(col_idx) * static_cast<size_t>(p), 1, dRvec_, 1),
       "cublasDcopy(Ublock_col->r)"
     );
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, 1, p, &alpha, dX_, n, dRvec_, p, &beta, dTvec_, n),
-      "cublasDgemm(t=X*r)"
-    );
+    x_times_vec(n, p, dRvec_, dTvec_, "cublasGemm(t=X*r)");
 
     double tnorm = 0.0;
     check_cublas(cublasDnrm2(handle_, n, dTvec_, 1, &tnorm), "cublasDnrm2(t)");
@@ -353,14 +388,8 @@ class CudaRSVDWorkspace {
     check_cublas(cublasDscal(handle_, n, &inv_tnorm, dTvec_, 1), "cublasDscal(t)");
     check_cublas(cublasDscal(handle_, p, &inv_tnorm, dRvec_, 1), "cublasDscal(r)");
 
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, 1, n, &alpha, dX_, n, dTvec_, n, &beta, dPvec_, p),
-      "cublasDgemm(p=X^T*t)"
-    );
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, n, &alpha, dYtrain_, n, dTvec_, n, &beta, dQvec_, m),
-      "cublasDgemm(q=Y^T*t)"
-    );
+    xt_times_vec(n, p, dTvec_, dPvec_, "cublasGemm(p=X^T*t)");
+    yt_times_vec(n, m, dTvec_, dQvec_, "cublasGemm(q=Y^T*t)");
 
     if (prev_v_cols > 0) {
       check_cublas(
@@ -513,8 +542,13 @@ class CudaRSVDWorkspace {
     double* hQ,
     double* hTnorm
   ) {
-    ensure_buffer(dX_, bytes_for(n, p), bytes_X_, "cudaMalloc(dX)");
-    ensure_buffer(dYtrain_, bytes_for(n, m), bytes_Ytrain_, "cudaMalloc(dYtrain)");
+    if (use_fp32_train_storage()) {
+      if (dXf_ == nullptr || dYtrainf_ == nullptr) {
+        throw std::runtime_error("training matrices are not initialized for FP32 workspace");
+      }
+    } else if (dX_ == nullptr || dYtrain_ == nullptr) {
+      throw std::runtime_error("training matrices are not initialized for GPU workspace");
+    }
     ensure_buffer(dTvec_, bytes_for(n, 1), bytes_Tvec_, "cudaMalloc(dTvec)");
     ensure_buffer(dPvec_, bytes_for(p, 1), bytes_Pvec_, "cudaMalloc(dPvec)");
     ensure_buffer(dQvec_, bytes_for(m, 1), bytes_Qvec_, "cudaMalloc(dQvec)");
@@ -524,10 +558,7 @@ class CudaRSVDWorkspace {
 
     const double alpha = 1.0;
     const double beta = 0.0;
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, 1, p, &alpha, dX_, n, dRvec_, p, &beta, dTvec_, n),
-      "cublasDgemm(t=X*r)"
-    );
+    x_times_vec(n, p, dRvec_, dTvec_, "cublasGemm(t=X*r)");
 
     double tnorm = 0.0;
     check_cublas(cublasDnrm2(handle_, n, dTvec_, 1, &tnorm), "cublasDnrm2(t)");
@@ -539,14 +570,8 @@ class CudaRSVDWorkspace {
     check_cublas(cublasDscal(handle_, n, &inv_tnorm, dTvec_, 1), "cublasDscal(t)");
     check_cublas(cublasDscal(handle_, p, &inv_tnorm, dRvec_, 1), "cublasDscal(r)");
 
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, 1, n, &alpha, dX_, n, dTvec_, n, &beta, dPvec_, p),
-      "cublasDgemm(p=X^T*t)"
-    );
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, n, &alpha, dYtrain_, n, dTvec_, n, &beta, dQvec_, m),
-      "cublasDgemm(q=Y^T*t)"
-    );
+    xt_times_vec(n, p, dTvec_, dPvec_, "cublasGemm(p=X^T*t)");
+    yt_times_vec(n, m, dTvec_, dQvec_, "cublasGemm(q=Y^T*t)");
 
     check_cuda(cudaMemcpy(hT, dTvec_, bytes_for(n, 1), cudaMemcpyDeviceToHost), "cudaMemcpy(t)");
     check_cuda(cudaMemcpy(hP, dPvec_, bytes_for(p, 1), cudaMemcpyDeviceToHost), "cudaMemcpy(p)");
@@ -666,6 +691,7 @@ class CudaRSVDWorkspace {
 
     ensure_capacity(p, m, l);
     set_pls_training_matrices(Xtrain.memptr(), n, p, Ytrain.memptr(), m, fit);
+    release_pls_ytrain_buffer();
     ensure_buffer(dRRmat_, bytes_for(n, target), bytes_RRmat_, "cudaMalloc(dRRmat)");
     ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
     ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
@@ -718,10 +744,7 @@ class CudaRSVDWorkspace {
       "cublasDgemm(RHS=Uhat^T*Bsmall)"
     );
 
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, target, p, &alpha, dX_, n, dQ_, p, &beta, dRRmat_, n),
-      "cublasDgemm(T=X*U)"
-    );
+    x_times_mat(n, p, target, dQ_, dRRmat_, "cublasGemm(T=X*U)");
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
@@ -1291,6 +1314,10 @@ class CudaRSVDWorkspace {
     return sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
   }
 
+  static size_t bytes_for_float(int m, int n) {
+    return sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
+  }
+
   static size_t bytes_for_padded_random(int m, int n) {
     size_t elems = static_cast<size_t>(m) * static_cast<size_t>(n);
     if ((elems % 2U) != 0U) {
@@ -1320,6 +1347,244 @@ class CudaRSVDWorkspace {
     current = required;
   }
 
+  void ensure_float_buffer(float*& ptr, size_t required, size_t& current, const char* where) {
+    if (required <= current && ptr != nullptr) {
+      return;
+    }
+    if (ptr != nullptr) {
+      cudaFree(ptr);
+      ptr = nullptr;
+      current = 0;
+    }
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&ptr), required), where);
+    current = required;
+  }
+
+  bool use_fp32_train_storage() const {
+    return env_int_or("FASTPLS_GPU_TRAIN_FP32", 0, 0, 1) == 1;
+  }
+
+  void launch_double_to_float(const double* src, float* dst, size_t n_elem, const char* where) {
+    host_double_tmp_.set_size(static_cast<arma::uword>(n_elem));
+    host_float_tmp_.set_size(static_cast<arma::uword>(n_elem));
+    check_cuda(
+      cudaMemcpy(host_double_tmp_.memptr(), src, sizeof(double) * n_elem, cudaMemcpyDeviceToHost),
+      "cudaMemcpy(double_tmp_host)"
+    );
+    for (size_t i = 0; i < n_elem; ++i) {
+      host_float_tmp_(static_cast<arma::uword>(i)) = static_cast<float>(host_double_tmp_(static_cast<arma::uword>(i)));
+    }
+    check_cuda(cudaMemcpy(dst, host_float_tmp_.memptr(), sizeof(float) * n_elem, cudaMemcpyHostToDevice), where);
+  }
+
+  void launch_float_to_double(const float* src, double* dst, size_t n_elem, const char* where) {
+    host_float_tmp_.set_size(static_cast<arma::uword>(n_elem));
+    host_double_tmp_.set_size(static_cast<arma::uword>(n_elem));
+    check_cuda(
+      cudaMemcpy(host_float_tmp_.memptr(), src, sizeof(float) * n_elem, cudaMemcpyDeviceToHost),
+      "cudaMemcpy(float_tmp_host)"
+    );
+    for (size_t i = 0; i < n_elem; ++i) {
+      host_double_tmp_(static_cast<arma::uword>(i)) = static_cast<double>(host_float_tmp_(static_cast<arma::uword>(i)));
+    }
+    check_cuda(cudaMemcpy(dst, host_double_tmp_.memptr(), sizeof(double) * n_elem, cudaMemcpyHostToDevice), where);
+  }
+
+  void copy_host_double_to_device_float(float* dst, const double* src, int m, int n, const char* where) {
+    const size_t n_elem = static_cast<size_t>(m) * static_cast<size_t>(n);
+    std::vector<float> tmp(n_elem);
+    for (size_t i = 0; i < n_elem; ++i) {
+      tmp[i] = static_cast<float>(src[i]);
+    }
+    check_cuda(cudaMemcpy(dst, tmp.data(), sizeof(float) * n_elem, cudaMemcpyHostToDevice), where);
+  }
+
+  void crossprod_training_xy(int n, int p, int m) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    if (use_fp32_train_storage()) {
+      const float alpha_f = 1.0f;
+      const float beta_f = 0.0f;
+      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(p, m), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
+      check_cublas(
+        cublasSgemm(
+          handle_,
+          CUBLAS_OP_T,
+          CUBLAS_OP_N,
+          p,
+          m,
+          n,
+          &alpha_f,
+          dXf_,
+          n,
+          dYtrainf_,
+          n,
+          &beta_f,
+          dTmpFloatOut_,
+          p
+        ),
+        "cublasSgemm(S=X^T*Y)"
+      );
+      launch_float_to_double(dTmpFloatOut_, dA_, static_cast<size_t>(p) * static_cast<size_t>(m),
+                             "cast_float_to_double(S=X^T*Y)");
+    } else {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, m, n, &alpha, dX_, n, dYtrain_, n, &beta, dA_, p),
+        "cublasDgemm(S=X^T*Y)"
+      );
+    }
+  }
+
+  void x_times_vec(int n, int p, const double* dVec, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    if (use_fp32_train_storage()) {
+      const float alpha_f = 1.0f;
+      const float beta_f = 0.0f;
+      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(p, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
+      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(n, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
+      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(p), "cast_double_to_float(x_times_vec)");
+      check_cublas(
+        cublasSgemm(
+          handle_,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          1,
+          p,
+          &alpha_f,
+          dXf_,
+          n,
+          dTmpFloatIn_,
+          p,
+          &beta_f,
+          dTmpFloatOut_,
+          n
+        ),
+        where
+      );
+      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(n), "cast_float_to_double(x_times_vec)");
+    } else {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, 1, p, &alpha, dX_, n, dVec, p, &beta, dOut, n),
+        where
+      );
+    }
+  }
+
+  void xt_times_vec(int n, int p, const double* dVec, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    if (use_fp32_train_storage()) {
+      const float alpha_f = 1.0f;
+      const float beta_f = 0.0f;
+      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(n, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
+      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(p, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
+      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(n), "cast_double_to_float(xt_times_vec)");
+      check_cublas(
+        cublasSgemm(
+          handle_,
+          CUBLAS_OP_T,
+          CUBLAS_OP_N,
+          p,
+          1,
+          n,
+          &alpha_f,
+          dXf_,
+          n,
+          dTmpFloatIn_,
+          n,
+          &beta_f,
+          dTmpFloatOut_,
+          p
+        ),
+        where
+      );
+      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(p), "cast_float_to_double(xt_times_vec)");
+    } else {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, 1, n, &alpha, dX_, n, dVec, n, &beta, dOut, p),
+        where
+      );
+    }
+  }
+
+  void yt_times_vec(int n, int m, const double* dVec, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    if (use_fp32_train_storage()) {
+      const float alpha_f = 1.0f;
+      const float beta_f = 0.0f;
+      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(n, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
+      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(m, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
+      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(n), "cast_double_to_float(yt_times_vec)");
+      check_cublas(
+        cublasSgemm(
+          handle_,
+          CUBLAS_OP_T,
+          CUBLAS_OP_N,
+          m,
+          1,
+          n,
+          &alpha_f,
+          dYtrainf_,
+          n,
+          dTmpFloatIn_,
+          n,
+          &beta_f,
+          dTmpFloatOut_,
+          m
+        ),
+        where
+      );
+      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(m), "cast_float_to_double(yt_times_vec)");
+    } else {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, n, &alpha, dYtrain_, n, dVec, n, &beta, dOut, m),
+        where
+      );
+    }
+  }
+
+  void x_times_mat(int n, int p, int k, const double* dRight, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    if (use_fp32_train_storage()) {
+      const float alpha_f = 1.0f;
+      const float beta_f = 0.0f;
+      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(p, k), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
+      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(n, k), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
+      launch_double_to_float(dRight, dTmpFloatIn_, static_cast<size_t>(p) * static_cast<size_t>(k),
+                             "cast_double_to_float(x_times_mat)");
+      check_cublas(
+        cublasSgemm(
+          handle_,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          k,
+          p,
+          &alpha_f,
+          dXf_,
+          n,
+          dTmpFloatIn_,
+          p,
+          &beta_f,
+          dTmpFloatOut_,
+          n
+        ),
+        where
+      );
+      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(n) * static_cast<size_t>(k),
+                             "cast_float_to_double(x_times_mat)");
+    } else {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, p, &alpha, dX_, n, dRight, p, &beta, dOut, n),
+        where
+      );
+    }
+  }
+
   void ensure_int_buffer(int*& ptr, size_t required, size_t& current, const char* where) {
     if (required <= current && ptr != nullptr) {
       return;
@@ -1336,6 +1601,10 @@ class CudaRSVDWorkspace {
   void release() {
     if (dX_ != nullptr) cudaFree(dX_);
     if (dYtrain_ != nullptr) cudaFree(dYtrain_);
+    if (dXf_ != nullptr) cudaFree(dXf_);
+    if (dYtrainf_ != nullptr) cudaFree(dYtrainf_);
+    if (dTmpFloatIn_ != nullptr) cudaFree(dTmpFloatIn_);
+    if (dTmpFloatOut_ != nullptr) cudaFree(dTmpFloatOut_);
     if (dA_ != nullptr) cudaFree(dA_);
     if (dOmega_ != nullptr) cudaFree(dOmega_);
     if (dY_ != nullptr) cudaFree(dY_);
@@ -1361,6 +1630,10 @@ class CudaRSVDWorkspace {
     if (dInfo_ != nullptr) cudaFree(dInfo_);
     dX_ = nullptr;
     dYtrain_ = nullptr;
+    dXf_ = nullptr;
+    dYtrainf_ = nullptr;
+    dTmpFloatIn_ = nullptr;
+    dTmpFloatOut_ = nullptr;
     dA_ = nullptr;
     dOmega_ = nullptr;
     dY_ = nullptr;
@@ -1385,6 +1658,8 @@ class CudaRSVDWorkspace {
     dWorkEig_ = nullptr;
     dInfo_ = nullptr;
     bytes_X_ = bytes_Ytrain_ = 0;
+    bytes_Xf_ = bytes_Ytrainf_ = 0;
+    bytes_TmpFloatIn_ = bytes_TmpFloatOut_ = 0;
     bytes_A_ = bytes_Omega_ = bytes_Y_ = bytes_Z_ = 0;
     bytes_Q_ = bytes_Bsmall_ = bytes_Gram_ = 0;
     bytes_Transform_ = 0;
@@ -1407,6 +1682,10 @@ class CudaRSVDWorkspace {
 
   double* dX_ = nullptr;
   double* dYtrain_ = nullptr;
+  float* dXf_ = nullptr;
+  float* dYtrainf_ = nullptr;
+  float* dTmpFloatIn_ = nullptr;
+  float* dTmpFloatOut_ = nullptr;
   double* dA_ = nullptr;
   double* dOmega_ = nullptr;
   double* dY_ = nullptr;
@@ -1432,6 +1711,10 @@ class CudaRSVDWorkspace {
   int* dInfo_ = nullptr;
   size_t bytes_X_ = 0;
   size_t bytes_Ytrain_ = 0;
+  size_t bytes_Xf_ = 0;
+  size_t bytes_Ytrainf_ = 0;
+  size_t bytes_TmpFloatIn_ = 0;
+  size_t bytes_TmpFloatOut_ = 0;
   size_t bytes_A_ = 0;
   size_t bytes_Omega_ = 0;
   size_t bytes_Y_ = 0;
@@ -1466,6 +1749,8 @@ class CudaRSVDWorkspace {
   const double zero_ = 0.0;
   arma::mat hOmega_host_;
   arma::mat hGram_host_;
+  arma::fvec host_float_tmp_;
+  arma::vec host_double_tmp_;
 };
 
 thread_local CudaRSVDWorkspace g_workspace;
@@ -1476,6 +1761,10 @@ bool cuda_runtime_available() {
   int n_devices = 0;
   const cudaError_t status = cudaGetDeviceCount(&n_devices);
   return (status == cudaSuccess && n_devices > 0);
+}
+
+void cuda_reset_workspace() {
+  g_workspace.reset();
 }
 
 bool cuda_rsvd_prefer_block_gpu(int m, int n, int l, int power_iters) {
@@ -1834,6 +2123,9 @@ PLSSVDGPUResult cuda_plssvd_fit(
 
 bool cuda_runtime_available() {
   return false;
+}
+
+void cuda_reset_workspace() {
 }
 
 void cuda_rsvd_sample_y(

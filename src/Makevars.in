@@ -1,14 +1,8 @@
 CXX_STD = CXX17
 
-PKG_CXXFLAGS = -I../inst/include/ -IANN -DRANN -DARMA_64BIT_WORD=1
+PKG_CXXFLAGS = -I../inst/include/ -IANN -DRANN -DARMA_64BIT_WORD=1 @FASTPLS_PKG_CXXFLAGS@
 PKG_CPPFLAGS = @FASTPLS_PKG_CPPFLAGS@
 PKG_LIBS = @FASTPLS_PKG_LIBS@ $(FLIBS)
-
-ifneq ($(wildcard /usr/local/cuda/include/cuda_runtime.h),)
-PKG_CXXFLAGS += -DFASTPLS_HAS_CUDA -I/usr/local/cuda/include
-PKG_CPPFLAGS += -DFASTPLS_HAS_CUDA -I/usr/local/cuda/include
- PKG_LIBS = -L/usr/local/cuda/lib64 -lcudart -lcublas -lcusolver -lcurand $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
-endif
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
 	svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd.o

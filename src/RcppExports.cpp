@@ -92,6 +92,15 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cuda_reset_workspace
+void cuda_reset_workspace();
+RcppExport SEXP _fastPLS_cuda_reset_workspace() {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    cuda_reset_workspace();
+    return R_NilValue;
+END_RCPP
+}
 // truncated_svd_debug
 Rcpp::List truncated_svd_debug(const arma::mat& A, int k, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool left_only);
 RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
@@ -286,6 +295,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_IRLB", (DL_FUNC) &_fastPLS_IRLB, 7},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
+    {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
     {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},

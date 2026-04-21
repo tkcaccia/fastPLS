@@ -1,10 +1,10 @@
-# `pls_gpu()` and PLS algorithm implementation note
+# `simpls_gpu()` and PLS algorithm implementation note
 
 ## Scope
 
 This note summarizes the current implementation status of the main `fastPLS`
 algorithms and, in particular, the new experimental GPU-native entry point
-`pls_gpu()`.
+`simpls_gpu()`.
 
 The goal is to make explicit:
 
@@ -45,7 +45,7 @@ has been removed from the high-level `pls()`, `optim.pls.cv()`, and
 
 ### 2. Experimental GPU-native API
 
-Implemented through `pls_gpu()` in:
+Implemented through `simpls_gpu()` in:
 
 - `/Users/stefano/Documents/fastPLS-src/R/main.R`
 
@@ -164,7 +164,7 @@ Recent `simpls_fast` engineering in the repo includes:
 - faster prediction path in the general `predict.fastPLS()` machinery;
 - conservative internal tuning for randomized SVD oversampling / power settings.
 
-## `pls_gpu()`
+## `simpls_gpu()`
 
 Implementation entry points:
 
@@ -176,7 +176,7 @@ Implementation entry points:
   - `/Users/stefano/Documents/fastPLS-src/src/svd_cuda_rsvd.cpp`
   - `/Users/stefano/Documents/fastPLS-src/src/svd_cuda_rsvd.h`
 
-`pls_gpu()` is an experimental GPU-native implementation of the `simpls_fast`
+`simpls_gpu()` is an experimental GPU-native implementation of the `simpls_fast`
 fit loop.
 
 It is separate from `pls()` because:
@@ -185,7 +185,7 @@ It is separate from `pls()` because:
 - the GPU path still evolves rapidly,
 - benchmarking and validation are easier when the GPU engine is explicit.
 
-### Current `pls_gpu()` flow
+### Current `simpls_gpu()` flow
 
 1. preprocess `X` and encode `Y` exactly like the standard high-level API;
 2. upload training `X`, `Y`, and the initial cross-covariance to the GPU;
@@ -212,7 +212,7 @@ The current GPU engine includes:
 - GPU-side rank-1 deflation
 - GPU-side rank-1 fitted-response accumulation
 
-### What `pls_gpu()` still is not
+### What `simpls_gpu()` still is not
 
 It is a real separate GPU engine, but it is still experimental.
 
@@ -260,7 +260,7 @@ This was a hybrid path because:
 The package now uses a cleaner split:
 
 - `pls()` for standard CPU-side algorithms and CPU-side randomized SVD,
-- `pls_gpu()` for the experimental GPU-native path.
+- `simpls_gpu()` for the experimental GPU-native path.
 
 This reduces API ambiguity and makes benchmark interpretation much clearer.
 
@@ -275,7 +275,7 @@ This benchmark compares:
 - `hybrid_cpu`
   - standard `simpls_fast` through `pls(..., svd.method = "cpu_rsvd")`
 - `full_gpu`
-  - experimental `pls_gpu()`
+  - experimental `simpls_gpu()`
 
 Datasets currently used in that script:
 
@@ -364,15 +364,15 @@ The current test intent is:
 
 - preserve standard `pls()` semantics on CPU backends,
 - ensure the removed hybrid CUDA route errors clearly in high-level APIs,
-- ensure `pls_gpu()` returns a valid `fastPLS` object structure,
+- ensure `simpls_gpu()` returns a valid `fastPLS` object structure,
 - ensure the GPU fit stays reasonably close to the supported CPU reference on a
   controlled problem when CUDA is available.
 
 ## Main caveats
 
-1. `pls_gpu()` is experimental.
+1. `simpls_gpu()` is experimental.
 2. The high-level hybrid CUDA path in `pls()` is intentionally gone.
-3. Low-level CUDA/SVD machinery still exists internally because `pls_gpu()`
+3. Low-level CUDA/SVD machinery still exists internally because `simpls_gpu()`
    uses it.
 4. `R CMD check --as-cran` should always be rerun after further GPU-interface
    changes, because the API split affects documentation and exported surface.
@@ -382,7 +382,7 @@ The current test intent is:
 Use:
 
 - `pls()` for the stable package API and CPU-side work;
-- `pls_gpu()` only when explicitly benchmarking or experimenting with the
+- `simpls_gpu()` only when explicitly benchmarking or experimenting with the
   GPU-native fit path.
 
 That split reflects the current maturity of the two execution families.

@@ -150,6 +150,37 @@
   force(expr)
 }
 
+.with_gpu_native_options <- function(expr,
+                                     gpu_device_state = FALSE,
+                                     gpu_qr = TRUE,
+                                     gpu_eig = TRUE,
+                                     gpu_qless_qr = FALSE,
+                                     gpu_finalize_threshold = 32L,
+                                     gpu_train_fp32 = TRUE) {
+  old <- c(
+    FASTPLS_GPU_DEVICE_STATE = Sys.getenv("FASTPLS_GPU_DEVICE_STATE", unset = NA_character_),
+    FASTPLS_GPU_QR = Sys.getenv("FASTPLS_GPU_QR", unset = NA_character_),
+    FASTPLS_GPU_EIG = Sys.getenv("FASTPLS_GPU_EIG", unset = NA_character_),
+    FASTPLS_GPU_QLESS_QR = Sys.getenv("FASTPLS_GPU_QLESS_QR", unset = NA_character_),
+    FASTPLS_GPU_FINALIZE_THRESHOLD = Sys.getenv("FASTPLS_GPU_FINALIZE_THRESHOLD", unset = NA_character_),
+    FASTPLS_GPU_TRAIN_FP32 = Sys.getenv("FASTPLS_GPU_TRAIN_FP32", unset = NA_character_)
+  )
+  on.exit({
+    for (nm in names(old)) {
+      .restore_env_scalar(nm, old[[nm]])
+    }
+  }, add = TRUE)
+  Sys.setenv(
+    FASTPLS_GPU_DEVICE_STATE = if (isTRUE(gpu_device_state)) "1" else "0",
+    FASTPLS_GPU_QR = if (isTRUE(gpu_qr)) "1" else "0",
+    FASTPLS_GPU_EIG = if (isTRUE(gpu_eig)) "1" else "0",
+    FASTPLS_GPU_QLESS_QR = if (isTRUE(gpu_qless_qr)) "1" else "0",
+    FASTPLS_GPU_FINALIZE_THRESHOLD = as.character(as.integer(gpu_finalize_threshold)),
+    FASTPLS_GPU_TRAIN_FP32 = if (isTRUE(gpu_train_fp32)) "1" else "0"
+  )
+  force(expr)
+}
+
 .normalize_svd_method <- function(method) {
   if (length(method) == 1L && !is.na(method) && identical(as.character(method), "dc")) {
     warning("svd.method='dc' is deprecated; use 'arpack' instead.", call. = FALSE)
@@ -164,7 +195,7 @@
       identical(as.character(svd.method), "cuda_rsvd")) {
     stop(
       sprintf(
-        "The hybrid CUDA path via svd.method='cuda_rsvd' has been removed from %s; use pls_gpu() or plssvd_gpu() for GPU-native fits instead.",
+        "The hybrid CUDA path via svd.method='cuda_rsvd' has been removed from %s; use simpls_gpu() or plssvd_gpu() for GPU-native fits instead.",
         context
       ),
       call. = FALSE
@@ -526,7 +557,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
   res
 }
 
-#' Experimental GPU-native PLS fit
+#' Experimental GPU-native SIMPLS-fast fit
 #'
 #' Uses a separate CUDA-oriented `simpls_fast` engine that keeps the training
 #' matrices and deflated cross-covariance resident on device throughout the fit.
@@ -545,21 +576,28 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @return A `fastPLS` object.
 #' @export
-pls_gpu = function(Xtrain,
-                   Ytrain,
-                   Xtest = NULL,
-                   Ytest = NULL,
-                   ncomp = 2,
-                   scaling = c("centering", "autoscaling", "none"),
-                   rsvd_oversample = 10L,
-                   rsvd_power = 1L,
-                   svds_tol = 0,
-                   seed = 1L,
-                   fit = FALSE,
-                   proj = FALSE) {
+simpls_gpu = function(Xtrain,
+                      Ytrain,
+                      Xtest = NULL,
+                      Ytest = NULL,
+                      ncomp = 2,
+                      scaling = c("centering", "autoscaling", "none"),
+                      rsvd_oversample = 10L,
+                      rsvd_power = 1L,
+                      svds_tol = 0,
+                      seed = 1L,
+                      fit = FALSE,
+                      proj = FALSE,
+                      gpu_device_state = FALSE,
+                      gpu_qr = FALSE,
+                      gpu_eig = FALSE,
+                      gpu_qless_qr = TRUE,
+                      gpu_finalize_threshold = 32L,
+                      gpu_train_fp32 = TRUE) {
   if (!has_cuda()) {
-    stop("pls_gpu requires a CUDA-enabled fastPLS build")
+    stop("simpls_gpu requires a CUDA-enabled fastPLS build")
   }
+  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
 
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   Xtrain <- as.matrix(Xtrain)
@@ -582,17 +620,26 @@ pls_gpu = function(Xtrain,
   if (missing(rsvd_oversample)) rsvd_oversample <- tuned$rsvd_oversample
   if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
 
-  model <- pls.model2.fast.gpu(
-    Xtrain = Xtrain,
-    Ytrain = Ytrain,
-    ncomp = as.integer(ncomp),
-    fit = fit,
-    scaling = scal,
-    rsvd_oversample = rsvd_oversample,
-    rsvd_power = rsvd_power,
-    svds_tol = svds_tol,
-    seed = seed
+  model <- .with_gpu_native_options(
+    pls.model2.fast.gpu(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      ncomp = as.integer(ncomp),
+      fit = fit,
+      scaling = scal,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = svds_tol,
+      seed = seed
+    ),
+    gpu_device_state = gpu_device_state,
+    gpu_qr = gpu_qr,
+    gpu_eig = gpu_eig,
+    gpu_qless_qr = gpu_qless_qr,
+    gpu_finalize_threshold = gpu_finalize_threshold,
+    gpu_train_fp32 = gpu_train_fp32
   )
+  cuda_reset_workspace()
   model$classification <- classification
   model$lev <- lev
 
@@ -614,6 +661,11 @@ pls_gpu = function(Xtrain,
 
   class(model) <- "fastPLS"
   model
+}
+
+pls_gpu = function(...) {
+  .Deprecated("simpls_gpu", package = "fastPLS")
+  simpls_gpu(...)
 }
 
 #' Experimental GPU-native PLSSVD fit
@@ -647,10 +699,16 @@ plssvd_gpu = function(Xtrain,
                       svds_tol = 0,
                       seed = 1L,
                       fit = FALSE,
-                      proj = FALSE) {
+                      proj = FALSE,
+                      gpu_qr = FALSE,
+                      gpu_eig = FALSE,
+                      gpu_qless_qr = FALSE,
+                      gpu_finalize_threshold = 32L,
+                      gpu_train_fp32 = TRUE) {
   if (!has_cuda()) {
     stop("plssvd_gpu requires a CUDA-enabled fastPLS build")
   }
+  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
 
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   Xtrain <- as.matrix(Xtrain)
@@ -664,17 +722,26 @@ plssvd_gpu = function(Xtrain,
     Ytrain <- as.matrix(Ytrain)
   }
 
-  model <- pls.model1.gpu(
-    Xtrain = Xtrain,
-    Ytrain = Ytrain,
-    ncomp = as.integer(ncomp),
-    fit = fit,
-    scaling = scal,
-    rsvd_oversample = rsvd_oversample,
-    rsvd_power = rsvd_power,
-    svds_tol = svds_tol,
-    seed = seed
+  model <- .with_gpu_native_options(
+    pls.model1.gpu(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      ncomp = as.integer(ncomp),
+      fit = fit,
+      scaling = scal,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = svds_tol,
+      seed = seed
+    ),
+    gpu_device_state = FALSE,
+    gpu_qr = gpu_qr,
+    gpu_eig = gpu_eig,
+    gpu_qless_qr = gpu_qless_qr,
+    gpu_finalize_threshold = gpu_finalize_threshold,
+    gpu_train_fp32 = gpu_train_fp32
   )
+  cuda_reset_workspace()
   model$classification <- classification
   model$lev <- lev
 
@@ -872,6 +939,11 @@ svd_benchmark <- function(A,
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              svds_tol = 0,
+                             irlba_work = 0L,
+                             irlba_maxit = 2000L,
+                             irlba_tol = 1e-6,
+                             irlba_eps = 1e-9,
+                             irlba_svtol = 1e-6,
                              seed = 1L) {
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
@@ -881,13 +953,68 @@ svd_benchmark <- function(A,
   max_rank <- min(nrow(A), ncol(A))
   k <- min(k, max_rank)
 
-  if (svd.method != "cpu_rsvd") {
+  full_svd <- function() {
     s <- svd(A, nu = k, nv = k)
-    return(list(
+    list(
       u = s$u[, seq_len(k), drop = FALSE],
       d = s$d[seq_len(k)],
       v = s$v[, seq_len(k), drop = FALSE]
-    ))
+    )
+  }
+
+  if (svd.method == "irlba" && k < max_rank) {
+    if (requireNamespace("irlba", quietly = TRUE)) {
+      work <- as.integer(irlba_work)
+      if (!is.finite(work) || is.na(work) || work <= k) {
+        work <- max(k + 7L, 8L)
+      }
+      out <- tryCatch(
+        irlba::irlba(
+          A,
+          nv = k,
+          nu = k,
+          work = work,
+          maxit = as.integer(irlba_maxit),
+          tol = as.numeric(irlba_tol),
+          eps = as.numeric(irlba_eps),
+          svtol = as.numeric(irlba_svtol)
+        ),
+        error = function(e) NULL
+      )
+      if (!is.null(out)) {
+        return(list(
+          u = out$u[, seq_len(k), drop = FALSE],
+          d = out$d[seq_len(k)],
+          v = out$v[, seq_len(k), drop = FALSE]
+        ))
+      }
+    }
+    return(full_svd())
+  }
+
+  if (svd.method == "arpack" && k < max_rank) {
+    if (requireNamespace("RSpectra", quietly = TRUE)) {
+      opts <- list()
+      if (is.finite(svds_tol) && !is.na(svds_tol) && svds_tol > 0) {
+        opts$tol <- as.numeric(svds_tol)
+      }
+      out <- tryCatch(
+        RSpectra::svds(A, k = k, nu = k, nv = k, opts = opts),
+        error = function(e) NULL
+      )
+      if (!is.null(out)) {
+        return(list(
+          u = out$u[, seq_len(k), drop = FALSE],
+          d = out$d[seq_len(k)],
+          v = out$v[, seq_len(k), drop = FALSE]
+        ))
+      }
+    }
+    return(full_svd())
+  }
+
+  if (svd.method != "cpu_rsvd") {
+    return(full_svd())
   }
 
   l <- min(max_rank, k + max(0L, as.integer(rsvd_oversample)))
@@ -931,6 +1058,11 @@ svd_benchmark <- function(A,
                           rsvd_oversample,
                           rsvd_power,
                           svds_tol,
+                          irlba_work,
+                          irlba_maxit,
+                          irlba_tol,
+                          irlba_eps,
+                          irlba_svtol,
                           seed) {
   n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
   ncomp <- as.integer(ncomp)
@@ -955,7 +1087,20 @@ svd_benchmark <- function(A,
   Ytrain <- sweep(Ytrain, 2, mY[1, ], "-")
 
   S <- crossprod(Xtrain, Ytrain)
-  s <- .truncated_svd_r(S, max_ncomp_eff, svd.method, rsvd_oversample, rsvd_power, svds_tol, seed)
+  s <- .truncated_svd_r(
+    S,
+    max_ncomp_eff,
+    svd.method,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    irlba_work,
+    irlba_maxit,
+    irlba_tol,
+    irlba_eps,
+    irlba_svtol,
+    seed
+  )
   max_ncomp_eff <- min(max_ncomp_eff, ncol(s$u), ncol(s$v))
   R <- s$u[, seq_len(max_ncomp_eff), drop = FALSE]
   Q <- s$v[, seq_len(max_ncomp_eff), drop = FALSE]
@@ -1006,6 +1151,11 @@ svd_benchmark <- function(A,
                           rsvd_oversample,
                           rsvd_power,
                           svds_tol,
+                          irlba_work,
+                          irlba_maxit,
+                          irlba_tol,
+                          irlba_eps,
+                          irlba_svtol,
                           seed) {
   n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
   ncomp <- as.integer(ncomp)
@@ -1040,9 +1190,13 @@ svd_benchmark <- function(A,
 
   i_out <- 1L
   for (a in seq_len(max_ncomp)) {
-    rr <- .truncated_svd_r(S, 1L, svd.method, rsvd_oversample, rsvd_power, svds_tol, seed + a - 1L)$u[, 1, drop = FALSE]
+    rr <- .truncated_svd_r(
+      S, 1L, svd.method, rsvd_oversample, rsvd_power, svds_tol,
+      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+      seed + a - 1L
+    )$u[, 1, drop = FALSE]
     tt <- X %*% rr
-    tt <- sweep(tt, 2, colMeans(tt), "-")
+    tt <- tt - mean(tt)
     tnorm <- sqrt(sum(tt * tt))
     tt <- tt / tnorm
     rr <- rr / tnorm
@@ -1104,6 +1258,11 @@ svd_benchmark <- function(A,
                                rsvd_oversample,
                                rsvd_power,
                                svds_tol,
+                               irlba_work,
+                               irlba_maxit,
+                               irlba_tol,
+                               irlba_eps,
+                               irlba_svtol,
                                seed,
                                fast_block = 8L) {
   n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
@@ -1150,6 +1309,11 @@ svd_benchmark <- function(A,
       rsvd_oversample = rsvd_oversample,
       rsvd_power = rsvd_power,
       svds_tol = svds_tol,
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol,
       seed = seed + a - 1L
     )$u
     if (!is.matrix(Ublock)) {
@@ -1277,17 +1441,23 @@ pls_r = function (Xtrain,
     ncomp <- cap$ncomp
     model <- .pls_model1_r(
       Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol,
+      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+      seed
     )
   } else if (meth == 2L) {
     model <- .pls_model2_r(
       Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol,
+      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+      seed
     )
   } else {
     model <- .pls_model2_fast_r(
       Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, svds_tol, seed
+      svdmeth, rsvd_oversample, rsvd_power, svds_tol,
+      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+      seed
     )
   }
   model$classification <- classification
@@ -1304,13 +1474,19 @@ pls_r = function (Xtrain,
         Xperm <- Xtrain[ss, , drop = FALSE]
         if (meth == 1L) {
           mperm <- .pls_model1_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, svds_tol, seed + i)
+                                 rsvd_oversample, rsvd_power, svds_tol,
+                                 irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+                                 seed + i)
         } else if (meth == 2L) {
           mperm <- .pls_model2_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, svds_tol, seed + i)
+                                 rsvd_oversample, rsvd_power, svds_tol,
+                                 irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+                                 seed + i)
         } else {
           mperm <- .pls_model2_fast_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                      rsvd_oversample, rsvd_power, svds_tol, seed + i)
+                                      rsvd_oversample, rsvd_power, svds_tol,
+                                      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
+                                      seed + i)
         }
         mperm$classification <- classification
         mperm$lev <- lev
@@ -1351,7 +1527,7 @@ pls_r = function (Xtrain,
 #' @param method One of `"simpls"`, `"plssvd"`, `"simpls_fast"`.
 #' @param svd.method One of `"irlba"`, `"arpack"`, `"cpu_rsvd"` (with `"dc"` kept as a deprecated alias for `"arpack"`).
 #'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
-#'   from `pls()`; use [pls_gpu()] for the experimental GPU-native fit.
+#'   from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
 #' @param svds_tol Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.

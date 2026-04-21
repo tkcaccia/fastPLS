@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 root_dir <- Sys.getenv("FASTPLS_DATA_ROOT", "/home/chiamaka/Documents/fastpls/data")
-out_dir <- Sys.getenv("FASTPLS_BENCH_OUT", file.path(getwd(), "benchmark_results_simpls_fast_gpu"))
+out_dir <- Sys.getenv("FASTPLS_BENCH_OUT", file.path(getwd(), "benchmark_results_pls_gpu_qless"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 if (!requireNamespace("fastPLS", quietly = TRUE)) stop("fastPLS must be installed")
@@ -9,6 +9,25 @@ if (!requireNamespace("data.table", quietly = TRUE)) stop("data.table must be in
 
 library(data.table)
 set.seed(12345)
+
+parse_int_list <- function(x, default) {
+  x <- trimws(x)
+  if (!nzchar(x)) return(default)
+  vals <- suppressWarnings(as.integer(strsplit(x, ",", fixed = TRUE)[[1L]]))
+  vals <- vals[is.finite(vals) & !is.na(vals) & vals > 0L]
+  if (!length(vals)) return(default)
+  unique(vals)
+}
+
+bench_ncomp <- parse_int_list(Sys.getenv("FASTPLS_BENCH_NCOMP_LIST", ""), c(50L))
+bench_reps <- {
+  v <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_BENCH_REPS", "3")))
+  if (!is.finite(v) || is.na(v) || v < 1L) 3L else v
+}
+bench_datasets <- {
+  x <- trimws(Sys.getenv("FASTPLS_BENCH_DATASETS", ""))
+  if (!nzchar(x)) character() else unique(trimws(strsplit(x, ",", fixed = TRUE)[[1L]]))
+}
 
 metric_accuracy <- function(truth, pred) {
   mean(as.character(truth) == as.character(pred), na.rm = TRUE)
@@ -48,7 +67,8 @@ as_task <- function(path, dataset_id) {
     ))
   }
 
-  if ("out" %in% objs && is.list(get("out", envir = e)) && all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% names(get("out", envir = e)))) {
+  if ("out" %in% objs && is.list(get("out", envir = e)) &&
+      all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% names(get("out", envir = e)))) {
     obj <- get("out", envir = e)
     return(list(
       dataset = dataset_id,
@@ -96,7 +116,23 @@ as_task <- function(path, dataset_id) {
   stop(sprintf("Unsupported dataset format for %s", dataset_id))
 }
 
-run_one <- function(task, engine, rep_id) {
+with_env <- function(vars, expr) {
+  old <- Sys.getenv(names(vars), unset = NA_character_)
+  names(old) <- names(vars)
+  on.exit({
+    for (nm in names(vars)) {
+      if (is.na(old[[nm]])) {
+        Sys.unsetenv(nm)
+      } else {
+        Sys.setenv(structure(old[[nm]], names = nm))
+      }
+    }
+  }, add = TRUE)
+  do.call(Sys.setenv, as.list(vars))
+  force(expr)
+}
+
+run_one <- function(task, engine, rep_id, ncomp = 50L) {
   fit_obj <- NULL
   elapsed <- NA_real_
   pred <- NULL
@@ -107,17 +143,29 @@ run_one <- function(task, engine, rep_id) {
     hybrid_cpu = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain,
       Xtest = task$Xtest, Ytest = task$Ytest,
-      ncomp = 50L, method = "simpls_fast", svd.method = "cpu_rsvd",
+      ncomp = ncomp, method = "simpls_fast", svd.method = "cpu_rsvd",
       fit = FALSE, seed = 12345L + rep_id
     ),
-    full_gpu = function() fastPLS::simpls_gpu(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain,
-      Xtest = task$Xtest, Ytest = task$Ytest,
-      ncomp = 50L, fit = FALSE, seed = 12345L + rep_id
+    gpu_explicit = function() with_env(
+      c(FASTPLS_GPU_DEVICE_STATE = "0", FASTPLS_GPU_QLESS_QR = "0"),
+      fastPLS::simpls_gpu(
+        Xtrain = task$Xtrain, Ytrain = task$Ytrain,
+        Xtest = task$Xtest, Ytest = task$Ytest,
+        ncomp = ncomp, fit = FALSE, seed = 12345L + rep_id
+      )
+    ),
+    gpu_qless = function() with_env(
+      c(FASTPLS_GPU_DEVICE_STATE = "0", FASTPLS_GPU_QLESS_QR = "1"),
+      fastPLS::simpls_gpu(
+        Xtrain = task$Xtrain, Ytrain = task$Ytrain,
+        Xtest = task$Xtest, Ytest = task$Ytest,
+        ncomp = ncomp, fit = FALSE, seed = 12345L + rep_id
+      )
     )
   )
 
   tryCatch({
+    if (engine != "hybrid_cpu") invisible(train_call())
     elapsed <- system.time({ fit_obj <- train_call() })[["elapsed"]]
     pred <- fit_obj$Ypred[[1L]]
   }, error = function(err) {
@@ -130,7 +178,7 @@ run_one <- function(task, engine, rep_id) {
     rep = rep_id,
     train_time_seconds = elapsed,
     accuracy = if (is.null(pred)) NA_real_ else metric_accuracy(task$Ytest, pred),
-    ncomp = 50L,
+    ncomp = ncomp,
     p = ncol(task$Xtrain),
     train_n = nrow(task$Xtrain),
     test_n = nrow(task$Xtest),
@@ -145,32 +193,36 @@ dataset_files <- c(
   metref = file.path(root_dir, "metref.RData"),
   singlecell = file.path(root_dir, "singlecell.RData"),
   cifar100 = file.path(root_dir, "CIFAR100.RData"),
-  gtex = file.path(root_dir, "gtex.RData"),
+  gtex_v8 = file.path(root_dir, "gtex.RData"),
   tcga_pan_cancer = file.path(root_dir, "tcga_pan_cancer.RData"),
   ccle = file.path(root_dir, "ccle.RData")
 )
+if (length(bench_datasets)) {
+  dataset_files <- dataset_files[names(dataset_files) %in% bench_datasets]
+}
 tasks <- lapply(names(dataset_files), function(nm) as_task(dataset_files[[nm]], nm))
 names(tasks) <- names(dataset_files)
 
 engines <- c("hybrid_cpu")
 if (fastPLS::has_cuda()) {
-  engines <- c(engines, "full_gpu")
+  engines <- c(engines, "gpu_explicit", "gpu_qless")
 }
 
 results <- rbindlist(lapply(tasks, function(task) {
-  rbindlist(lapply(engines, function(engine) {
-    rbindlist(lapply(1:3, function(rep_id) {
-      as.data.table(run_one(task, engine, rep_id))
+  rbindlist(lapply(bench_ncomp, function(ncomp_i) {
+    rbindlist(lapply(engines, function(engine) {
+      rbindlist(lapply(seq_len(bench_reps), function(rep_id) {
+        as.data.table(run_one(task, engine, rep_id, ncomp = ncomp_i))
+      }))
     }))
   }))
 }), use.names = TRUE)
 
 summary_dt <- results[, .(
-  train_time_seconds_median = median(train_time_seconds),
-  train_time_seconds_mean = mean(train_time_seconds),
-  accuracy_median = median(accuracy),
-  accuracy_mean = mean(accuracy),
-  ncomp = unique(ncomp)[1],
+  train_time_seconds_median = median(train_time_seconds, na.rm = TRUE),
+  train_time_seconds_mean = mean(train_time_seconds, na.rm = TRUE),
+  accuracy_median = median(accuracy, na.rm = TRUE),
+  accuracy_mean = mean(accuracy, na.rm = TRUE),
   p = unique(p)[1],
   train_n = unique(train_n)[1],
   test_n = unique(test_n)[1],
@@ -182,10 +234,22 @@ summary_dt <- results[, .(
     errs <- unique(error[!ok & nzchar(error)])
     if (length(errs)) errs[1] else ""
   }
-), by = .(dataset, engine)]
+), by = .(dataset, engine, ncomp)]
 
-fwrite(results, file.path(out_dir, "simpls_fast_gpu_benchmark_raw.csv"))
-fwrite(summary_dt, file.path(out_dir, "simpls_fast_gpu_benchmark_summary.csv"))
+compare_dt <- merge(
+  summary_dt[engine == "gpu_explicit"],
+  summary_dt[engine == "gpu_qless"],
+  by = c("dataset", "ncomp"),
+  suffixes = c("_explicit", "_qless")
+)
+compare_dt[, `:=`(
+  speedup_qless_vs_explicit = train_time_seconds_median_explicit / train_time_seconds_median_qless,
+  accuracy_diff_qless_minus_explicit = accuracy_median_qless - accuracy_median_explicit
+)]
+
+fwrite(results, file.path(out_dir, "pls_gpu_qless_raw.csv"))
+fwrite(summary_dt, file.path(out_dir, "pls_gpu_qless_summary.csv"))
+fwrite(compare_dt, file.path(out_dir, "pls_gpu_qless_compare.csv"))
 
 sink(file.path(out_dir, "sessionInfo.txt"))
 print(sessionInfo())

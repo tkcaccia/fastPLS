@@ -28,6 +28,10 @@ has_cuda <- function() {
     .Call(`_fastPLS_has_cuda`)
 }
 
+cuda_reset_workspace <- function() {
+    invisible(.Call(`_fastPLS_cuda_reset_workspace`))
+}
+
 truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only) {
     .Call(`_fastPLS_truncated_svd_debug`, A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only)
 }
@@ -67,4 +71,3 @@ pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_ove
 pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model1_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
-

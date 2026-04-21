@@ -24,6 +24,7 @@ PLSSVDGPUResult cuda_plssvd_fit(
   const SVDOptions& opt
 );
 bool cuda_runtime_available();
+void cuda_reset_workspace();
 void cuda_rsvd_sample_y(
   const double* hA,
   int m,

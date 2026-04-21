@@ -592,6 +592,11 @@ bool has_cuda() {
 }
 
 // [[Rcpp::export]]
+void cuda_reset_workspace() {
+  fastpls_svd::cuda_reset_workspace();
+}
+
+// [[Rcpp::export]]
 Rcpp::List truncated_svd_debug(
   const arma::mat& A,
   int k,

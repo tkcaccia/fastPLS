@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 root_dir <- Sys.getenv("FASTPLS_DATA_ROOT", "/home/chiamaka/Documents/fastpls/data")
-out_dir <- Sys.getenv("FASTPLS_BENCH_OUT", file.path(getwd(), "benchmark_results_simpls_fast_gpu"))
+out_dir <- Sys.getenv("FASTPLS_BENCH_OUT", file.path(getwd(), "benchmark_results_simpls_fast_gpu_ncomp"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 if (!requireNamespace("fastPLS", quietly = TRUE)) stop("fastPLS must be installed")
@@ -9,6 +9,10 @@ if (!requireNamespace("data.table", quietly = TRUE)) stop("data.table must be in
 
 library(data.table)
 set.seed(12345)
+
+ncomp_list <- as.integer(strsplit(Sys.getenv("FASTPLS_NCOMP_LIST", "2,5,10,20,50,100"), ",")[[1]])
+ncomp_list <- unique(ncomp_list[is.finite(ncomp_list) & ncomp_list > 0L])
+reps <- as.integer(Sys.getenv("FASTPLS_REPS", "3"))
 
 metric_accuracy <- function(truth, pred) {
   mean(as.character(truth) == as.character(pred), na.rm = TRUE)
@@ -96,7 +100,7 @@ as_task <- function(path, dataset_id) {
   stop(sprintf("Unsupported dataset format for %s", dataset_id))
 }
 
-run_one <- function(task, engine, rep_id) {
+run_one <- function(task, engine, ncomp, rep_id) {
   fit_obj <- NULL
   elapsed <- NA_real_
   pred <- NULL
@@ -107,13 +111,13 @@ run_one <- function(task, engine, rep_id) {
     hybrid_cpu = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain,
       Xtest = task$Xtest, Ytest = task$Ytest,
-      ncomp = 50L, method = "simpls_fast", svd.method = "cpu_rsvd",
+      ncomp = as.integer(ncomp), method = "simpls_fast", svd.method = "cpu_rsvd",
       fit = FALSE, seed = 12345L + rep_id
     ),
     full_gpu = function() fastPLS::simpls_gpu(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain,
       Xtest = task$Xtest, Ytest = task$Ytest,
-      ncomp = 50L, fit = FALSE, seed = 12345L + rep_id
+      ncomp = as.integer(ncomp), fit = FALSE, seed = 12345L + rep_id
     )
   )
 
@@ -128,9 +132,9 @@ run_one <- function(task, engine, rep_id) {
     dataset = task$dataset,
     engine = engine,
     rep = rep_id,
+    ncomp = as.integer(ncomp),
     train_time_seconds = elapsed,
     accuracy = if (is.null(pred)) NA_real_ else metric_accuracy(task$Ytest, pred),
-    ncomp = 50L,
     p = ncol(task$Xtrain),
     train_n = nrow(task$Xtrain),
     test_n = nrow(task$Xtest),
@@ -145,10 +149,11 @@ dataset_files <- c(
   metref = file.path(root_dir, "metref.RData"),
   singlecell = file.path(root_dir, "singlecell.RData"),
   cifar100 = file.path(root_dir, "CIFAR100.RData"),
-  gtex = file.path(root_dir, "gtex.RData"),
+  gtex_v8 = file.path(root_dir, "gtex.RData"),
   tcga_pan_cancer = file.path(root_dir, "tcga_pan_cancer.RData"),
   ccle = file.path(root_dir, "ccle.RData")
 )
+
 tasks <- lapply(names(dataset_files), function(nm) as_task(dataset_files[[nm]], nm))
 names(tasks) <- names(dataset_files)
 
@@ -159,18 +164,19 @@ if (fastPLS::has_cuda()) {
 
 results <- rbindlist(lapply(tasks, function(task) {
   rbindlist(lapply(engines, function(engine) {
-    rbindlist(lapply(1:3, function(rep_id) {
-      as.data.table(run_one(task, engine, rep_id))
+    rbindlist(lapply(ncomp_list, function(nc) {
+      rbindlist(lapply(seq_len(reps), function(rep_id) {
+        as.data.table(run_one(task, engine, nc, rep_id))
+      }))
     }))
   }))
 }), use.names = TRUE)
 
 summary_dt <- results[, .(
-  train_time_seconds_median = median(train_time_seconds),
-  train_time_seconds_mean = mean(train_time_seconds),
-  accuracy_median = median(accuracy),
-  accuracy_mean = mean(accuracy),
-  ncomp = unique(ncomp)[1],
+  train_time_seconds_median = median(train_time_seconds, na.rm = TRUE),
+  train_time_seconds_mean = mean(train_time_seconds, na.rm = TRUE),
+  accuracy_median = median(accuracy, na.rm = TRUE),
+  accuracy_mean = mean(accuracy, na.rm = TRUE),
   p = unique(p)[1],
   train_n = unique(train_n)[1],
   test_n = unique(test_n)[1],
@@ -182,10 +188,10 @@ summary_dt <- results[, .(
     errs <- unique(error[!ok & nzchar(error)])
     if (length(errs)) errs[1] else ""
   }
-), by = .(dataset, engine)]
+), by = .(dataset, engine, ncomp)]
 
-fwrite(results, file.path(out_dir, "simpls_fast_gpu_benchmark_raw.csv"))
-fwrite(summary_dt, file.path(out_dir, "simpls_fast_gpu_benchmark_summary.csv"))
+fwrite(results, file.path(out_dir, "simpls_fast_gpu_ncomp_raw.csv"))
+fwrite(summary_dt, file.path(out_dir, "simpls_fast_gpu_ncomp_summary.csv"))
 
 sink(file.path(out_dir, "sessionInfo.txt"))
 print(sessionInfo())

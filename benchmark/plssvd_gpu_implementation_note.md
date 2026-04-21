@@ -41,7 +41,7 @@ So the current split is:
 
 - CPU-side `pls()` for standard `plssvd`, `simpls`, and `simpls_fast`
 - GPU-side `plssvd_gpu()` for GPU-native PLSSVD
-- GPU-side `pls_gpu()` for GPU-native `simpls_fast`
+- GPU-side `simpls_gpu()` for GPU-native `simpls_fast`
 
 ## Algorithmic goal
 
@@ -173,7 +173,7 @@ Additional CPU-side API checks also confirm that:
 - `svd_methods()` no longer exposes `cuda_rsvd`
 - `svd_run()` and `svd_benchmark()` no longer advertise the mixed CUDA route
 - `pls(..., svd.method = "cuda_rsvd")` errors with guidance toward
-  `pls_gpu()` or `plssvd_gpu()`
+  `simpls_gpu()` or `plssvd_gpu()`
 
 ## Benchmark summary
 

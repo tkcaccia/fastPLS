@@ -1,0 +1,7 @@
+sim_family,panel,task_type,n,p,q,n_classes,r_true,spectrum_regime_default,noise_regime_default,dropout_rate_default,count_like_default,pls_pkg_allowed,description
+sim_reg_base,main,regression,1500,5000,50,,20,sharp_decay,medium_noise,0,FALSE,TRUE,Baseline multivariate regression synthetic dataset
+sim_reg_large_q,main,regression,1500,5000,500,,20,slow_decay,medium_noise,0,FALSE,FALSE,Large-q regression to stress multivariate response scaling
+sim_reg_pggn,supplement,regression,300,20000,20,,10,sharp_decay,medium_noise,0,FALSE,FALSE,Extreme p>>n regression synthetic dataset
+sim_cls_base,main,classification,1500,5000,10,10,20,sharp_decay,medium_noise,0,FALSE,TRUE,Baseline multiclass classification synthetic dataset
+sim_cls_many_classes,supplement,classification,3000,5000,50,50,30,slow_decay,medium_noise,0,FALSE,FALSE,Many-class classification synthetic dataset
+sim_sparse_singlecell_like,main,classification,5000,10000,20,20,20,slow_decay,medium_noise,0.8,TRUE,FALSE,Sparse single-cell-like classification dataset with zero inflation

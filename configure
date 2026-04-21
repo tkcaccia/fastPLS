@@ -3,7 +3,10 @@ set -eu
 
 use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
 openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
+use_cuda="${FASTPLS_USE_CUDA:-auto}"
+cuda_root="${CUDA_ROOT:-/usr/local/cuda}"
 
+pkg_cxxflags=""
 pkg_cppflags=""
 pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 
@@ -12,7 +15,29 @@ if [ "${use_openblas}" = "1" ]; then
   pkg_libs="-L${openblas_root}/lib -lopenblas"
 fi
 
+cuda_header="${cuda_root}/include/cuda_runtime.h"
+cuda_lib_dir="${cuda_root}/lib64"
+have_cuda=0
+
+if [ "${use_cuda}" = "1" ]; then
+  have_cuda=1
+elif [ "${use_cuda}" = "auto" ] && [ -f "${cuda_header}" ] && [ -d "${cuda_lib_dir}" ]; then
+  have_cuda=1
+fi
+
+if [ "${have_cuda}" = "1" ]; then
+  cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_root}/include"
+  if [ -n "${pkg_cppflags}" ]; then
+    pkg_cppflags="${pkg_cppflags} ${cuda_flags}"
+  else
+    pkg_cppflags="${cuda_flags}"
+  fi
+  pkg_cxxflags="${cuda_flags}"
+  pkg_libs="-L${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
+fi
+
 sed \
+  -e "s|@FASTPLS_PKG_CXXFLAGS@|${pkg_cxxflags}|g" \
   -e "s|@FASTPLS_PKG_CPPFLAGS@|${pkg_cppflags}|g" \
   -e "s|@FASTPLS_PKG_LIBS@|${pkg_libs}|g" \
   src/Makevars.in > src/Makevars

@@ -1,6 +1,7 @@
-\name{pls_gpu}
+\name{simpls_gpu}
+\alias{simpls_gpu}
 \alias{pls_gpu}
-\title{Experimental GPU-Native PLS Fit}
+\title{Experimental GPU-Native SIMPLS-fast Fit}
 
 \description{
 Fit the experimental CUDA-oriented \code{simpls_fast} engine. This path keeps
@@ -9,7 +10,7 @@ of the fit while preserving the standard \code{fastPLS} output structure.
 }
 
 \usage{
-pls_gpu(
+simpls_gpu(
   Xtrain,
   Ytrain,
   Xtest = NULL,
@@ -21,7 +22,13 @@ pls_gpu(
   svds_tol = 0,
   seed = 1L,
   fit = FALSE,
-  proj = FALSE
+  proj = FALSE,
+  gpu_device_state = FALSE,
+  gpu_qr = FALSE,
+  gpu_eig = FALSE,
+  gpu_qless_qr = TRUE,
+  gpu_finalize_threshold = 32L,
+  gpu_train_fp32 = TRUE
 )
 }
 
@@ -53,15 +60,29 @@ logic.}
 
 \item{proj}{If \code{TRUE} and \code{Xtest} is provided, return projected test
 scores \code{Ttest}.}
+
+\item{gpu_device_state}{Enable extra GPU device-state logging for debugging.}
+
+\item{gpu_qr}{Use GPU-native QR where supported.}
+
+\item{gpu_eig}{Use GPU-native eigendecomposition where supported.}
+
+\item{gpu_qless_qr}{Use the q-less QR path where supported.}
+
+\item{gpu_finalize_threshold}{Threshold controlling when GPU-side
+finalization is attempted.}
+
+\item{gpu_train_fp32}{When \code{TRUE} (the default), keep the GPU training
+buffers in mixed float32 mode to reduce device memory usage.}
 }
 
 \details{
-\code{pls_gpu()} is separate from \code{\link{pls}} and does not change the
+\code{simpls_gpu()} is separate from \code{\link{pls}} and does not change the
 existing behavior of \code{method = "simpls_fast"}. It is intended for
 benchmarking and experimental GPU work.
 
-Compared with the hybrid CUDA-assisted path, this function keeps more of the
-SIMPLS-fast loop on device:
+Compared with the removed hybrid CUDA-assisted path, this function keeps more
+of the SIMPLS-fast loop on device:
 \itemize{
 \item training \code{X} and \code{Y},
 \item the evolving deflated cross-covariance,
@@ -71,6 +92,10 @@ SIMPLS-fast loop on device:
 
 The implementation remains experimental and may evolve more rapidly than the
 standard \code{pls()} API.
+
+The default configuration now uses mixed float32 training buffers together with
+automatic workspace reset after each fit, which lowers peak and residual GPU
+memory use in the benchmarked CIFAR100 workflow while preserving accuracy.
 }
 
 \value{
@@ -88,7 +113,7 @@ An object of class \code{fastPLS} with the same main structure returned by
 
 \examples{
 \dontrun{
-fit <- pls_gpu(
+fit <- simpls_gpu(
   Xtrain,
   Ytrain,
   Xtest = Xtest,

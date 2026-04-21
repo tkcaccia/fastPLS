@@ -1,7 +1,7 @@
 # fastPLS
 
-`fastPLS` provides C++ and pure-R implementations of partial least squares (PLS)
-with interchangeable SVD backends.
+`fastPLS` provides C++, GPU-native, and pure-R implementations of partial least
+squares (PLS) with interchangeable CPU SVD backends.
 
 ## Implemented PLS Algorithms
 
@@ -12,8 +12,7 @@ with interchangeable SVD backends.
   iterative SIMPLS-style deflation of `S`, extracting one latent direction per
   component and updating coefficients cumulatively.
 - `method = "simpls_fast"` (experimental):
-  SIMPLS-like deflation with block direction refresh and optional incremental
-  block-power updates.
+  SIMPLS-like deflation with the current fixed incremental-deflation profile.
 
 ## SVD Backends
 
@@ -26,9 +25,10 @@ with interchangeable SVD backends.
 - `cpu_rsvd`:
   randomized SVD on CPU (Gaussian sketch + optional power iterations + reduced
   exact SVD).
-- `cuda_rsvd`:
-  randomized SVD with GPU GEMM sampling (cuBLAS), then CPU QR/reduced SVD
-  finalization.
+- The former hybrid `cuda_rsvd` route through `pls()` has been removed.
+- GPU-native fitting is now exposed separately through:
+  - `simpls_gpu()`
+  - `plssvd_gpu()`
 
 Check runtime availability using `has_cuda()` and `svd_methods()`.
 
@@ -39,12 +39,12 @@ Check runtime availability using `has_cuda()` and `svd_methods()`.
 | `plssvd` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `irlba` | Typically exact fallback for small matrices; legacy IRLB branch for larger `S` in PLS C++ loops | Iterative Lanczos branch in selected PLS paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `plssvd` | `cuda_rsvd` | Approximate | Iterative randomized sampling/power GEMM on GPU + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) per component on deflated `S` | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `irlba` | Legacy truncated branch in selected C++ paths | Iterative Lanczos in selected paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
 | `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `cuda_rsvd` | Approximate | GPU randomized sampling/power + CPU finalization | Hybrid GPU+CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls_fast` | `arpack`/`irlba`/`cpu_rsvd`/`cuda_rsvd` | Depends on backend (`arpack` exact, RSVD approximate) | Block refresh + optional incremental updates in outer loop | CPU or Hybrid | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls_fast` | `arpack`/`irlba`/`cpu_rsvd` | Depends on backend (`arpack` exact, RSVD approximate) | Fixed incremental-deflation outer loop | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `plssvd_gpu` |
+| `simpls_fast` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `simpls_gpu` |
 
 Notes:
 - `svd_run()`/`svd_benchmark()` are backend utility wrappers; their `irlba` label currently follows exact dispatch in utility mode.
@@ -54,6 +54,8 @@ Notes:
 Main modeling functions:
 - `pls()` (C++ backends)
 - `pls_r()` (pure-R reference path)
+- `simpls_gpu()` (GPU-native SIMPLS-fast)
+- `plssvd_gpu()` (GPU-native PLSSVD)
 - `predict.fastPLS()`
 
 Model selection and diagnostics:
@@ -79,6 +81,10 @@ SVD utilities:
 - `simpls_fast` now permanently uses the former incremental-deflation
   configuration. Legacy `fast_*` tuning arguments are accepted for backward
   compatibility but are deprecated and ignored.
+- The GPU-native APIs reset their CUDA workspace after each fit.
+- The GPU-native APIs now default to mixed float32 training buffers
+  (`gpu_train_fp32 = TRUE`) to lower GPU memory usage while preserving the
+  observed CIFAR100 accuracy in the benchmarked workflows.
 
 ## References
 

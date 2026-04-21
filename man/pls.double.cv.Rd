@@ -50,7 +50,7 @@ internally by rank constraints.}
 \item{method}{One of \code{"simpls"}, \code{"plssvd"}, or \code{"simpls_fast"}.}
 \item{svd.method}{Inner SVD backend used in fold models. The former hybrid CUDA
 route via \code{svd.method = "cuda_rsvd"} has been removed from
-\code{pls.double.cv()}; use \code{\link{pls_gpu}} for experimental GPU-native
+\code{pls.double.cv()}; use \code{\link{simpls_gpu}} for experimental GPU-native
 fits outside this nested CV helper.}
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
