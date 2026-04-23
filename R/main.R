@@ -990,23 +990,6 @@ svd_benchmark <- function(A,
   }
 
   if (svd.method == "arpack" && k < max_rank) {
-    if (requireNamespace("RSpectra", quietly = TRUE)) {
-      opts <- list()
-      if (is.finite(svds_tol) && !is.na(svds_tol) && svds_tol > 0) {
-        opts$tol <- as.numeric(svds_tol)
-      }
-      out <- tryCatch(
-        RSpectra::svds(A, k = k, nu = k, nv = k, opts = opts),
-        error = function(e) NULL
-      )
-      if (!is.null(out)) {
-        return(list(
-          u = out$u[, seq_len(k), drop = FALSE],
-          d = out$d[seq_len(k)],
-          v = out$v[, seq_len(k), drop = FALSE]
-        ))
-      }
-    }
     return(full_svd())
   }
 

@@ -22,10 +22,10 @@ pls_r(
   rsvd_power = 1L,
   svds_tol = 0,
   irlba_work = 0L,
-  irlba_maxit = 2000L,
-  irlba_tol = 1e-06,
+  irlba_maxit = 1000L,
+  irlba_tol = 1e-05,
   irlba_eps = 1e-09,
-  irlba_svtol = 1e-06,
+  irlba_svtol = 1e-05,
   seed = 1L,
   fit = FALSE,
   proj = FALSE,
@@ -42,19 +42,19 @@ Same semantics as in \code{\link{pls}}, restricted to the pure-R code path.}
 \itemize{
 \item \code{"cpu_rsvd"}: randomized SVD implemented in R (Gaussian range finder,
 optional power iterations, reduced exact SVD).
-\item \code{"irlba"}, \code{"arpack"}: both currently map to exact base \code{svd()} in
-\code{pls_r}; they are retained for interface compatibility with \code{pls()}.
+\item \code{"irlba"}: bundled internal IRLBA wrapper.
+\item \code{"arpack"}: currently maps to exact base \code{svd()} in
+\code{pls_r}; retained for interface compatibility with \code{pls()}.
 }
 }
 
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
 \item{svds_tol}{Included for API compatibility with \code{\link{pls}}. In the
-current pure-R implementation, \code{"arpack"} and \code{"irlba"} paths use base
-\code{svd()} and do not consume this tolerance directly.}
-\item{irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol}{Included for API
-compatibility with \code{\link{pls}}. These IRLBA controls are used in C++ paths,
-not in current pure-R computations.}
+current pure-R implementation, \code{"arpack"} uses base
+\code{svd()} and does not consume this tolerance directly.}
+\item{irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol}{Controls for the
+bundled IRLBA wrapper used by the pure-R \code{"irlba"} path.}
 \item{seed}{RSVD seed.}
 }
 

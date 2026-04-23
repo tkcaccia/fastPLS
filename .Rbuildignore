@@ -14,3 +14,8 @@
 ^src/symbols[.]rds$
 ^src/Makevars$
 ^\.bench-lib.*$
+^PACKAGES$
+^PACKAGES[.]gz$
+^PACKAGES[.]rds$
+^Library$
+^Outputs$

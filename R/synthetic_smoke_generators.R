@@ -4,7 +4,7 @@
 
 if (getRversion() >= "2.15.1") {
   utils::globalVariables(c(
-    ".N", "algorithm", "axis", "effective_ncomp", "engine",
+    ".", ":=", ".N", "algorithm", "axis", "effective_ncomp", "engine",
     "fast_profile", "method_id", "msg", "n_train", "n_unique",
     "noise_rank", "p", "scenario_family", "status", "svd_method",
     "value"

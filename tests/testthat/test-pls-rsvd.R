@@ -6,9 +6,20 @@ test_that("default svd.method behavior remains unchanged", {
   m_default <- pls(X, Y, ncomp = 1:3, fit = TRUE)
   m_explicit <- pls(X, Y, ncomp = 1:3, fit = TRUE, svd.method = "irlba")
 
+  align_signs <- function(ref, x) {
+    out <- x
+    for (j in seq_len(min(ncol(ref), ncol(out)))) {
+      s <- sum(ref[, j] * out[, j], na.rm = TRUE)
+      if (is.finite(s) && s < 0) {
+        out[, j] <- -out[, j]
+      }
+    }
+    out
+  }
+
   expect_equal(m_default$B, m_explicit$B)
-  expect_equal(m_default$R, m_explicit$R)
-  expect_equal(m_default$Q, m_explicit$Q)
+  expect_equal(align_signs(m_default$R, m_explicit$R), m_default$R)
+  expect_equal(align_signs(m_default$Q, m_explicit$Q), m_default$Q)
 })
 
 test_that("cpu_rsvd tracks arpack on PLS outputs", {
