@@ -963,31 +963,28 @@ svd_benchmark <- function(A,
   }
 
   if (svd.method == "irlba" && k < max_rank) {
-    if (requireNamespace("irlba", quietly = TRUE)) {
-      work <- as.integer(irlba_work)
-      if (!is.finite(work) || is.na(work) || work <= k) {
-        work <- max(k + 7L, 8L)
-      }
-      out <- tryCatch(
-        irlba::irlba(
-          A,
-          nv = k,
-          nu = k,
-          work = work,
-          maxit = as.integer(irlba_maxit),
-          tol = as.numeric(irlba_tol),
-          eps = as.numeric(irlba_eps),
-          svtol = as.numeric(irlba_svtol)
-        ),
-        error = function(e) NULL
-      )
-      if (!is.null(out)) {
-        return(list(
-          u = out$u[, seq_len(k), drop = FALSE],
-          d = out$d[seq_len(k)],
-          v = out$v[, seq_len(k), drop = FALSE]
-        ))
-      }
+    work <- as.integer(irlba_work)
+    if (!is.finite(work) || is.na(work) || work <= k) {
+      work <- max(k + 7L, 8L)
+    }
+    out <- tryCatch(
+      IRLB(
+        A,
+        nu = k,
+        work = work,
+        maxit = as.integer(irlba_maxit),
+        tol = as.numeric(irlba_tol),
+        eps = as.numeric(irlba_eps),
+        svtol = as.numeric(irlba_svtol)
+      ),
+      error = function(e) NULL
+    )
+    if (!is.null(out)) {
+      return(list(
+        u = out$u[, seq_len(k), drop = FALSE],
+        d = out$d[seq_len(k)],
+        v = out$v[, seq_len(k), drop = FALSE]
+      ))
     }
     return(full_svd())
   }
