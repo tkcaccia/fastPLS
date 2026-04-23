@@ -55,12 +55,12 @@ BEGIN_RCPP
 END_RCPP
 }
 // IRLB
-List IRLB(arma::mat& X, int nu, int work, int maxit, double tol, double eps, double svtol);
+List IRLB(const arma::mat& X, int nu, int work, int maxit, double tol, double eps, double svtol);
 RcppExport SEXP _fastPLS_IRLB(SEXP XSEXP, SEXP nuSEXP, SEXP workSEXP, SEXP maxitSEXP, SEXP tolSEXP, SEXP epsSEXP, SEXP svtolSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
     Rcpp::traits::input_parameter< int >::type nu(nuSEXP);
     Rcpp::traits::input_parameter< int >::type work(workSEXP);
     Rcpp::traits::input_parameter< int >::type maxit(maxitSEXP);

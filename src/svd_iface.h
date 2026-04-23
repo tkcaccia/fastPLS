@@ -22,7 +22,8 @@ enum class Backend {
 
 enum class Method {
   EXACT = 0,
-  RSVD = 1
+  RSVD = 1,
+  IRLBA = 2
 };
 
 struct SVDOptions {
@@ -60,6 +61,7 @@ bool method_is_legacy_irlba(int svd_method);
 SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend backend);
 
 SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt);
+SVDResult truncated_svd_cpu_irlba(const Mat& A, int k, const SVDOptions& opt);
 SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt);
 
 // Shared post-processing for randomized range finder outputs.

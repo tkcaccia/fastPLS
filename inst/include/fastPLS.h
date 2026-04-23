@@ -14,7 +14,7 @@
 using namespace Rcpp;
 using namespace arma;
 
-List IRLB(arma::mat& X, int nu, int work, int maxit, double tol, double eps,   double svtol);
+List IRLB(const arma::mat& X, int nu, int work, int maxit, double tol, double eps,   double svtol);
 double RQ(arma::mat yData,arma::mat yPred);
 arma::mat variance(arma::mat x);
 arma::mat transformy(arma::ivec y);

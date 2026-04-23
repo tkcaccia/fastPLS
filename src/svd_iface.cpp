@@ -27,6 +27,9 @@ SVDOptions options_from_method_id(
   opt.use_full_svd = use_full_svd;
 
   switch (svd_method) {
+    case SVD_METHOD_IRLBA:
+      opt.method = Method::IRLBA;
+      break;
     case SVD_METHOD_CPU_RSVD:
     case SVD_METHOD_CUDA_RSVD:
       opt.method = Method::RSVD;
@@ -59,6 +62,9 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
 
   if (backend == Backend::CUDA) {
 #ifdef FASTPLS_HAS_CUDA
+    if (opt.method == Method::IRLBA) {
+      return truncated_svd_cpu_irlba(A, k, opt);
+    }
     if (opt.method != Method::RSVD) {
       return truncated_svd_cpu_exact(A, k, opt);
     }
@@ -71,12 +77,19 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
 #ifdef FASTPLS_HAS_BANDICOOT
   if (backend == Backend::BANDICOOT) {
     // Placeholder for optional Bandicoot backend wiring.
+    if (opt.method == Method::IRLBA) {
+      return truncated_svd_cpu_irlba(A, k, opt);
+    }
     if (opt.method == Method::RSVD) {
       return truncated_svd_cpu_rsvd(A, k, opt);
     }
     return truncated_svd_cpu_exact(A, k, opt);
   }
 #endif
+
+  if (opt.method == Method::IRLBA) {
+    return truncated_svd_cpu_irlba(A, k, opt);
+  }
 
   if (opt.method == Method::RSVD) {
     return truncated_svd_cpu_rsvd(A, k, opt);

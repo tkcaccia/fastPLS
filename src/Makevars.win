@@ -4,4 +4,4 @@ PKG_CXXFLAGS = -I../inst/include/ -IANN -O3 -DWIN32 -DDLL_EXPORTS -DANN_NO_RANDO
 PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
-	 svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o
+	 svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o

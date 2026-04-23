@@ -501,7 +501,7 @@ double RQ(arma::mat yData,arma::mat yPred){
 * CENTER either NULL (no centering) or a vector of length ncol(X)
 * SVTOL double tolerance max allowed per cent change in each estimated singular value */
 // [[Rcpp::export]]
-List IRLB(arma::mat& X,
+List IRLB(const arma::mat& X,
                  int nu,
                  int work,
                  int maxit,
@@ -533,7 +533,7 @@ List IRLB(arma::mat& X,
   arma::vec svratio = arma::zeros<arma::vec>(work); // work
 
 
-  irlb (X.memptr(), NULL, 0, m, n, nu, work, maxit, 0,
+  irlb (const_cast<double*>(X.memptr()), NULL, 0, m, n, nu, work, maxit, 0,
           tol, NULL, NULL, NULL,
           s.memptr(), U.memptr(), V.memptr(), &iter, &mprod,
           eps, lwork, V1.memptr(), U1.memptr(), W.memptr(),
