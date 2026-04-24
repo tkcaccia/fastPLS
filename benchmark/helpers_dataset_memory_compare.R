@@ -41,6 +41,7 @@ dataset_filename <- function(dataset_id) {
     cifar100 = "CIFAR100.RData",
     ccle = "ccle.RData",
     gtex_v8 = "gtex_v8.RData",
+    imagenet = "imagenet.RData",
     nmr = "nmr.RData",
     prism = "prism.RData",
     singlecell = "singlecell.RData",
@@ -96,6 +97,14 @@ half_split_idx <- function(n) {
   idx <- seq_len(n)
   train_idx <- sample(idx, size = floor(n / 2))
   test_idx <- setdiff(idx, train_idx)
+  list(train = sort(train_idx), test = sort(test_idx))
+}
+
+fixed_train_split <- function(n, train_n) {
+  if (n < 2L) stop("Need at least 2 rows to split train/test")
+  train_n_eff <- min(max(1L, as.integer(train_n)), n - 1L)
+  train_idx <- sample.int(n, size = train_n_eff)
+  test_idx <- setdiff(seq_len(n), train_idx)
   list(train = sort(train_idx), test = sort(test_idx))
 }
 
@@ -225,6 +234,79 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
   dataset_id <- tolower(dataset_id)
   if (dataset_id %in% c("cifar100", "ccle", "gtex_v8", "prism", "cbmc_citeseq", "tcga_brca", "tcga_hnsc_methylation", "tcga_pan_cancer")) {
     return(load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed))
+  }
+
+  if (dataset_id == "imagenet") {
+    e <- new.env(parent = emptyenv())
+    objs <- load(path, envir = e)
+    train_n <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_IMAGENET_TRAIN_N", "1000000")))
+    if (!is.finite(train_n) || is.na(train_n) || train_n < 1L) train_n <- 1000000L
+    set.seed(as.integer(split_seed))
+
+    if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% objs)) {
+      Xall <- rbind(as.matrix(e$Xtrain), as.matrix(e$Xtest))
+      yall <- safe_factor(c(as.character(e$Ytrain), as.character(e$Ytest)))
+      sp <- fixed_train_split(nrow(Xall), train_n)
+      return(list(
+        dataset = dataset_id,
+        task_type = "classification",
+        dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+        split_seed = as.integer(split_seed),
+        Xtrain = Xall[sp$train, , drop = FALSE],
+        Ytrain = droplevels(yall[sp$train]),
+        Xtest = Xall[sp$test, , drop = FALSE],
+        Ytest = factor(yall[sp$test], levels = levels(yall[sp$train])),
+        n_train = length(sp$train),
+        n_test = length(sp$test),
+        p = ncol(Xall),
+        n_classes = nlevels(yall[sp$train])
+      ))
+    }
+
+    if ("r" %in% objs && is.data.frame(e$r) && "label_idx" %in% colnames(e$r)) {
+      X <- e$r[, -c(1:3), drop = FALSE]
+      X <- as.data.frame(lapply(X, function(x) suppressWarnings(as.numeric(as.character(x)))))
+      keep <- vapply(X, function(v) any(is.finite(v)), logical(1))
+      X <- as.matrix(X[, keep, drop = FALSE])
+      y <- safe_factor(e$r[, "label_idx"])
+      sp <- fixed_train_split(nrow(X), train_n)
+      return(list(
+        dataset = dataset_id,
+        task_type = "classification",
+        dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+        split_seed = as.integer(split_seed),
+        Xtrain = X[sp$train, , drop = FALSE],
+        Ytrain = droplevels(y[sp$train]),
+        Xtest = X[sp$test, , drop = FALSE],
+        Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+        n_train = length(sp$train),
+        n_test = length(sp$test),
+        p = ncol(X),
+        n_classes = nlevels(y[sp$train])
+      ))
+    }
+
+    if (all(c("data", "labels") %in% objs)) {
+      X <- as.matrix(e$data)
+      y <- safe_factor(e$labels)
+      sp <- fixed_train_split(nrow(X), train_n)
+      return(list(
+        dataset = dataset_id,
+        task_type = "classification",
+        dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
+        split_seed = as.integer(split_seed),
+        Xtrain = X[sp$train, , drop = FALSE],
+        Ytrain = droplevels(y[sp$train]),
+        Xtest = X[sp$test, , drop = FALSE],
+        Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+        n_train = length(sp$train),
+        n_test = length(sp$test),
+        p = ncol(X),
+        n_classes = nlevels(y[sp$train])
+      ))
+    }
+
+    stop("Unsupported imagenet.RData format: ", path)
   }
 
   if (dataset_id == "nmr") {

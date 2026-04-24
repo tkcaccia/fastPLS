@@ -268,6 +268,11 @@ fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   return fastpls_svd::truncated_svd(S, k, opt, backend);
 }
 
+bool plssvd_use_small_exact_svd(const int max_rank) {
+  const int threshold = env_int_or("FASTPLS_PLSSVD_SMALL_EXACT_MAX_RANK", 32, 5, 512);
+  return max_rank <= threshold;
+}
+
 struct SimplsFastRefreshWorkspace {
   arma::mat Omega;
   arma::mat Y;
@@ -616,7 +621,7 @@ Rcpp::List truncated_svd_debug(
     svds_tol,
     static_cast<unsigned int>(seed),
     left_only,
-    true
+    false
   );
 
   return Rcpp::List::create(
@@ -1793,7 +1798,7 @@ List pls_model1(
     svds_tol,
     static_cast<unsigned int>(seed),
     false,
-    true
+    plssvd_use_small_exact_svd(max_plssvd_rank)
   );
   svd_u = svd_res.U;
   svd_s = svd_res.s;

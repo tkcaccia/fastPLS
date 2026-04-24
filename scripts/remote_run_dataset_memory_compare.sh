@@ -7,18 +7,23 @@ REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 RESULTS_DIR="${FASTPLS_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_dataset_memory_compare}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-${HOME}/R/fastpls_bench_fresh}"
-DATASETS="${FASTPLS_DATASETS:-cifar100,ccle}"
+DATASETS="${FASTPLS_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,singlecell,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
 NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,18,20,50}"
 METREF_NCOMP_LIST="${FASTPLS_METREF_NCOMP_LIST:-2,5,10,22,50,100}"
 CCLE_NCOMP_LIST="${FASTPLS_CCLE_NCOMP_LIST:-2,5,10,18,50,100}"
 CIFAR100_NCOMP_LIST="${FASTPLS_CIFAR100_NCOMP_LIST:-2,5,10,20,50,100,200}"
+IMAGENET_NCOMP_LIST="${FASTPLS_IMAGENET_NCOMP_LIST:-2,5,10,20,50,100}"
 NMR_NCOMP_LIST="${FASTPLS_NMR_NCOMP_LIST:-2,5,10,20,50,100,200,500}"
 SMALL_MULTI_NCOMP_LIST="${FASTPLS_SMALL_MULTI_NCOMP_LIST:-2,5,10,20,50}"
 MID_MULTI_NCOMP_LIST="${FASTPLS_MID_MULTI_NCOMP_LIST:-2,5,10,20,50,100}"
+GTEX_V8_NCOMP_LIST="${FASTPLS_GTEX_V8_NCOMP_LIST:-2,5,10,20,32,50,100}"
+TCGA_PAN_CANCER_NCOMP_LIST="${FASTPLS_TCGA_PAN_CANCER_NCOMP_LIST:-2,5,10,20,32,50,100}"
 REPS="${FASTPLS_COMPARE_REPS:-3}"
 SPLIT_SEED="${FASTPLS_SPLIT_SEED:-123}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
+TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
+RUN_TIMEOUT_SEC="${FASTPLS_RUN_TIMEOUT_SEC:-0}"
 VARIANTS_FILTER="${FASTPLS_VARIANTS:-}"
 SKIP_PLOT="${FASTPLS_SKIP_PLOT:-false}"
 
@@ -27,8 +32,12 @@ RUN_ROWS_DIR="${RESULTS_DIR}/run_rows"
 GPU_LOG_DIR="${RESULTS_DIR}/gpu_samples"
 PRED_DIR="${RESULTS_DIR}/predictions"
 LOG_DIR="${RESULTS_DIR}/logs"
+SAVE_PREDICTIONS="${FASTPLS_SAVE_PREDICTIONS:-false}"
 
-mkdir -p "${RESULTS_DIR}" "${RUN_ROWS_DIR}" "${GPU_LOG_DIR}" "${PRED_DIR}" "${LOG_DIR}"
+mkdir -p "${RESULTS_DIR}" "${RUN_ROWS_DIR}" "${GPU_LOG_DIR}" "${LOG_DIR}"
+if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+  mkdir -p "${PRED_DIR}"
+fi
 rm -f "${RAW_CSV}"
 
 gpu_sampler() {
@@ -101,6 +110,102 @@ with open(raw_csv, "a", newline="") as fh:
 PY
 }
 
+write_missing_row() {
+  row_csv="$1"
+  task_rds="$2"
+  variant_name="$3"
+  requested_ncomp="$4"
+  rep_id="$5"
+  host_rss="$6"
+  gpu_peak="$7"
+  time_log="$8"
+  pred_file="$9"
+
+  status="missing_row"
+  msg="Benchmark process exited without producing a row CSV"
+  if [ -s "${time_log}" ]; then
+    if grep -q 'Command terminated by signal 9' "${time_log}"; then
+      status="killed_sig9"
+      msg="Benchmark process terminated by signal 9"
+    elif grep -q 'Command exited with non-zero status 124' "${time_log}"; then
+      status="killed_timeout"
+      msg="Benchmark process exceeded timeout"
+    elif grep -qi 'out of memory' "${time_log}"; then
+      status="killed_oom"
+      msg="Benchmark process appears to have been killed due to memory pressure"
+    fi
+  fi
+
+  Rscript - "${REPO_ROOT}" "${task_rds}" "${variant_name}" "${requested_ncomp}" "${rep_id}" "${host_rss}" "${gpu_peak}" "${status}" "${msg}" "${pred_file}" "${row_csv}" <<'RS'
+args <- commandArgs(trailingOnly = TRUE)
+repo_root <- args[[1L]]
+task_rds <- args[[2L]]
+variant_name <- args[[3L]]
+requested_ncomp <- as.integer(args[[4L]])
+rep_id <- as.integer(args[[5L]])
+host_rss <- suppressWarnings(as.numeric(args[[6L]]))
+gpu_peak <- suppressWarnings(as.numeric(args[[7L]]))
+status <- args[[8L]]
+msg <- args[[9L]]
+pred_file <- args[[10L]]
+row_csv <- args[[11L]]
+
+source(file.path(repo_root, "benchmark", "helpers_dataset_memory_compare.R"))
+task <- readRDS(task_rds)
+spec <- variant_spec(variant_name)
+
+effective_ncomp <- tryCatch(
+  safe_effective_ncomp(task, requested_ncomp, method_family = spec$method_family),
+  error = function(e) NA_integer_
+)
+metric_name <- if (identical(task$task_type, "classification")) {
+  "accuracy"
+} else if (isTRUE(task$n_classes == 1L)) {
+  "q2"
+} else {
+  "rmsd"
+}
+
+if (!is.finite(host_rss)) host_rss <- NA_real_
+if (!is.finite(gpu_peak)) gpu_peak <- NA_real_
+if (!nzchar(pred_file) || !file.exists(pred_file)) pred_file <- NA_character_
+
+row <- data.frame(
+  dataset = task$dataset,
+  task_type = task$task_type,
+  variant_name = variant_name,
+  method_family = spec$method_family,
+  method_panel = method_panel_label(spec$method_family),
+  engine = spec$engine,
+  backend = spec$backend,
+  implementation_label = spec$implementation_label,
+  replicate = as.integer(rep_id),
+  requested_ncomp = as.integer(requested_ncomp),
+  effective_ncomp = as.integer(effective_ncomp),
+  n_train = as.integer(task$n_train),
+  n_test = as.integer(task$n_test),
+  p = as.integer(task$p),
+  n_classes = as.integer(task$n_classes),
+  fit_time_ms = NA_real_,
+  predict_time_ms = NA_real_,
+  total_time_ms = NA_real_,
+  metric_name = metric_name,
+  metric_value = NA_real_,
+  accuracy = NA_real_,
+  prediction_file = pred_file,
+  peak_host_rss_mb = host_rss,
+  peak_gpu_mem_mb = gpu_peak,
+  status = status,
+  msg = msg,
+  dataset_path = task$dataset_path,
+  split_seed = as.integer(task$split_seed),
+  stringsAsFactors = FALSE
+)
+
+utils::write.csv(row, row_csv, row.names = FALSE, quote = TRUE, na = "")
+RS
+}
+
 variants="$(Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); specs <- variant_specs(); keep <- trimws(Sys.getenv('FASTPLS_VARIANTS', '')); if (nzchar(keep)) { keep_vec <- trimws(strsplit(keep, ',', fixed = TRUE)[[1L]]); specs <- specs[specs\$variant_name %in% keep_vec, , drop = FALSE] }; cat(paste(specs\$variant_name, collapse=' '))")"
 
 for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
@@ -115,13 +220,22 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     cifar100)
       dataset_ncomp_list="${CIFAR100_NCOMP_LIST}"
       ;;
+    imagenet)
+      dataset_ncomp_list="${IMAGENET_NCOMP_LIST}"
+      ;;
     nmr)
       dataset_ncomp_list="${NMR_NCOMP_LIST}"
       ;;
     singlecell|tcga_brca|tcga_hnsc_methylation)
       dataset_ncomp_list="${SMALL_MULTI_NCOMP_LIST}"
       ;;
-    tcga_pan_cancer|gtex_v8|prism)
+    gtex_v8)
+      dataset_ncomp_list="${GTEX_V8_NCOMP_LIST}"
+      ;;
+    tcga_pan_cancer)
+      dataset_ncomp_list="${TCGA_PAN_CANCER_NCOMP_LIST}"
+      ;;
+    prism)
       dataset_ncomp_list="${MID_MULTI_NCOMP_LIST}"
       ;;
   esac
@@ -142,7 +256,11 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
         run_id="$(printf '%s__%s__n%s__rep%s' "${dataset_id}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
         row_csv="${RUN_ROWS_DIR}/${run_id}.csv"
         pid_file="${RUN_ROWS_DIR}/${run_id}.pid"
-        pred_file="${PRED_DIR}/${run_id}.rds"
+        if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+          pred_file="${PRED_DIR}/${run_id}.rds"
+        else
+          pred_file=""
+        fi
         stdout_log="${LOG_DIR}/${run_id}.stdout.log"
         time_log="${LOG_DIR}/${run_id}.time.log"
         gpu_log="${GPU_LOG_DIR}/${run_id}.txt"
@@ -164,7 +282,11 @@ exec Rscript "${REPO_ROOT}/benchmark/benchmark_dataset_memory_compare.R" \
 EOF
         chmod +x "${run_script}"
 
-        "${TIME_BIN}" -v "${run_script}" >"${stdout_log}" 2>"${time_log}" &
+        if [ "${RUN_TIMEOUT_SEC}" -gt 0 ] 2>/dev/null; then
+          "${TIME_BIN}" -v "${TIMEOUT_BIN}" --signal=TERM --kill-after=30s "${RUN_TIMEOUT_SEC}" "${run_script}" >"${stdout_log}" 2>"${time_log}" &
+        else
+          "${TIME_BIN}" -v "${run_script}" >"${stdout_log}" 2>"${time_log}" &
+        fi
         cmd_pid=$!
 
         r_pid=""
@@ -194,6 +316,9 @@ EOF
 
         host_rss="$(peak_rss_from_time_log "${time_log}")"
         gpu_peak="$(peak_gpu_from_log "${gpu_log}")"
+        if [ ! -s "${row_csv}" ]; then
+          write_missing_row "${row_csv}" "${task_rds}" "${variant_name}" "${requested_ncomp}" "${rep_id}" "${host_rss}" "${gpu_peak}" "${time_log}" "${pred_file}"
+        fi
         append_row "${RAW_CSV}" "${row_csv}" "${host_rss}" "${gpu_peak}"
 
         rep_id=$((rep_id + 1))

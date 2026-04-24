@@ -962,6 +962,10 @@ svd_benchmark <- function(A,
     )
   }
 
+  if (max_rank < 6L) {
+    return(full_svd())
+  }
+
   if (svd.method == "irlba" && k < max_rank) {
     work <- as.integer(irlba_work)
     if (!is.finite(work) || is.na(work) || work <= k) {

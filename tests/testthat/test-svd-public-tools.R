@@ -37,3 +37,23 @@ test_that("svd_benchmark returns rows per method and rep", {
   expect_true(all(c("method", "rep", "elapsed", "status") %in% colnames(b)))
   expect_true(all(b$status %in% c("ok", "error", "unavailable")))
 })
+
+test_that("small SVD inputs use exact fallback for every backend", {
+  set.seed(42)
+  A <- matrix(rnorm(40 * 5), 40, 5)
+  ref <- svd(A, nu = 3, nv = 3)
+
+  for (method in c("arpack", "irlba", "cpu_rsvd")) {
+    out <- svd_run(
+      A,
+      k = 3,
+      method = method,
+      rsvd_oversample = 0L,
+      rsvd_power = 0L,
+      seed = 99L
+    )
+    expect_equal(out$s, ref$d[1:3], tolerance = 1e-8)
+    expect_equal(abs(out$U), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
+    expect_equal(abs(t(out$Vt)), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)
+  }
+})

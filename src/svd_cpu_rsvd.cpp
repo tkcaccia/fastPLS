@@ -100,6 +100,7 @@ SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   if (l >= max_rank) {
     SVDOptions exact_opt = opt;
     exact_opt.method = Method::EXACT;
+    exact_opt.use_full_svd = true;
     return truncated_svd_cpu_exact(A, static_cast<int>(target), exact_opt);
   }
 

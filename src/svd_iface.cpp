@@ -60,6 +60,14 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
     throw std::runtime_error("truncated_svd: k must be >= 1");
   }
 
+  const arma::uword min_dim = std::min(A.n_rows, A.n_cols);
+  if (opt.use_full_svd || min_dim < 6) {
+    SVDOptions full_opt = opt;
+    full_opt.method = Method::EXACT;
+    full_opt.use_full_svd = true;
+    return truncated_svd_cpu_exact(A, k, full_opt);
+  }
+
   if (backend == Backend::CUDA) {
 #ifdef FASTPLS_HAS_CUDA
     if (opt.method == Method::IRLBA) {
