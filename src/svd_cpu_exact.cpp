@@ -1,8 +1,38 @@
 #include "svd_iface.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <limits>
+#include <stdexcept>
 
 namespace fastpls_svd {
+namespace {
+
+double env_double_or(const char* key, double fallback, double lo, double hi) {
+  const char* raw = std::getenv(key);
+  if (raw == nullptr) return fallback;
+  char* endptr = nullptr;
+  double v = std::strtod(raw, &endptr);
+  if (endptr == raw || !std::isfinite(v)) return fallback;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return v;
+}
+
+bool allow_large_exact_fallback(const Mat& A) {
+  const double max_mb = env_double_or(
+    "FASTPLS_ARPACK_EXACT_FALLBACK_MAX_MB",
+    128.0,
+    0.0,
+    std::numeric_limits<double>::max()
+  );
+  const double input_mb =
+    static_cast<double>(A.n_elem) * static_cast<double>(sizeof(double)) /
+    (1024.0 * 1024.0);
+  return input_mb <= max_mb;
+}
+
+} // namespace
 
 SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt) {
   SVDResult out;
@@ -28,10 +58,22 @@ SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt) {
   bool ok = false;
 #if defined(ARMA_USE_ARPACK)
   if (!opt.use_full_svd && rank < max_rank) {
-    ok = arma::svds(U, s, V, A, rank, opt.svds_tol);
+    const double svds_tol = env_double_or(
+      "FASTPLS_ARPACK_TOL",
+      opt.svds_tol,
+      0.0,
+      1.0
+    );
+    ok = arma::svds(U, s, V, A, rank, svds_tol);
   }
 #endif
   if (!ok) {
+    if (!opt.use_full_svd && rank < max_rank && !allow_large_exact_fallback(A)) {
+      throw std::runtime_error(
+        "ARPACK svds() failed and exact SVD fallback was blocked by "
+        "FASTPLS_ARPACK_EXACT_FALLBACK_MAX_MB to avoid excessive RAM use"
+      );
+    }
     if (opt.left_only) {
       arma::svd_econ(U, s, V, A, "left");
     } else {
