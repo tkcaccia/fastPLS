@@ -3,9 +3,9 @@
 \title{Pure-R Reference Implementation of fastPLS Algorithms}
 
 \description{
-Pure-R implementation of \code{plssvd}, \code{simpls}, and \code{simpls_fast}
-paths used for validation and CPU-only reference runs. This function still
-excludes CUDA backends.
+Pure-R implementation of \code{plssvd} and optimized \code{simpls} paths used
+for validation and CPU-only reference runs. \code{simpls_fast} remains accepted
+as a legacy alias for \code{simpls}. This function still excludes CUDA backends.
 }
 
 \usage{
@@ -17,7 +17,7 @@ pls_r(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "arpack", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -43,16 +43,12 @@ Same semantics as in \code{\link{pls}}, restricted to the pure-R code path.}
 \item \code{"cpu_rsvd"}: randomized SVD implemented in R (Gaussian range finder,
 optional power iterations, reduced exact SVD).
 \item \code{"irlba"}: bundled internal IRLBA wrapper.
-\item \code{"arpack"}: currently maps to exact base \code{svd()} in
-\code{pls_r}; retained for interface compatibility with \code{pls()}.
 }
 }
 
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
-\item{svds_tol}{Included for API compatibility with \code{\link{pls}}. In the
-current pure-R implementation, \code{"arpack"} uses base
-\code{svd()} and does not consume this tolerance directly.}
+\item{svds_tol}{Reserved backend tolerance placeholder.}
 \item{irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol}{Controls for the
 bundled IRLBA wrapper used by the pure-R \code{"irlba"} path.}
 \item{seed}{RSVD seed.}
@@ -64,9 +60,9 @@ bundled IRLBA wrapper used by the pure-R \code{"irlba"} path.}
 \code{pls_r} reproduces the same high-level model structure returned by
 \code{pls()} but uses R matrix operations and a pure-R truncated SVD helper.
 It is suitable for correctness checks, method comparison, and environments
-where the C++ path is not desired. The \code{simpls_fast} pure-R path mirrors
-the fixed optimized incremental-deflation profile now used by the compiled
-\code{simpls_fast} implementation.
+where the C++ path is not desired. The \code{simpls} pure-R path now mirrors
+the fixed optimized incremental-deflation profile formerly exposed as
+\code{simpls_fast}.
 }
 
 \value{

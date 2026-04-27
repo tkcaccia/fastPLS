@@ -26,25 +26,19 @@ dt[, predictive_metric := fifelse(task_type == "classification", accuracy_median
 dt[, metric_label := fifelse(task_type == "classification", "Accuracy", "Q2")]
 
 color_vals <- c(
-  "Rcpp / plssvd / arpack" = "#7570b3",
   "Rcpp / plssvd / cpu_rsvd" = "#d95f02",
   "Rcpp / plssvd / irlba" = "#1b9e77",
-  "Rcpp / simpls / arpack" = "#7570b3",
   "Rcpp / simpls / cpu_rsvd" = "#d95f02",
   "Rcpp / simpls / irlba" = "#1b9e77",
-  "Rcpp / simpls_fast / arpack" = "#7570b3",
   "Rcpp / simpls_fast / cpu_rsvd" = "#d95f02",
   "Rcpp / simpls_fast / irlba" = "#1b9e77",
   "GPU / plssvd" = "#e7298a",
   "GPU / simpls_fast" = "#66a61e",
   "pls_pkg / simpls" = "#666666",
-  "R / plssvd / arpack" = "#8da0cb",
   "R / plssvd / cpu_rsvd" = "#fc8d62",
   "R / plssvd / irlba" = "#66c2a5",
-  "R / simpls / arpack" = "#8da0cb",
   "R / simpls / cpu_rsvd" = "#fc8d62",
   "R / simpls / irlba" = "#66c2a5",
-  "R / simpls_fast / arpack" = "#8da0cb",
   "R / simpls_fast / cpu_rsvd" = "#fc8d62",
   "R / simpls_fast / irlba" = "#66c2a5"
 )

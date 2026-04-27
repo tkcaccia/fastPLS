@@ -27,7 +27,6 @@ The goal is to make explicit:
 It exists alongside:
 
 - `pls(..., method = "plssvd", svd.method = "cpu_rsvd")`
-- `pls(..., method = "plssvd", svd.method = "arpack")`
 - `pls(..., method = "plssvd", svd.method = "irlba")`
 
 The former mixed route through:

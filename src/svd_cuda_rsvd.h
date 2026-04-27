@@ -23,6 +23,13 @@ PLSSVDGPUResult cuda_plssvd_fit(
   bool fit,
   const SVDOptions& opt
 );
+PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
+  const Mat& Xtrain,
+  const Mat& Ytrain,
+  const arma::ivec& ncomp,
+  bool fit,
+  const SVDOptions& opt
+);
 bool cuda_runtime_available();
 void cuda_reset_workspace();
 void cuda_rsvd_sample_y(
@@ -89,7 +96,8 @@ void cuda_simpls_fast_set_training_matrices(
   int p,
   const double* hY,
   int m,
-  bool fit
+  bool fit,
+  bool form_crossprod = true
 );
 void cuda_simpls_fast_begin_device_loop(
   int n,

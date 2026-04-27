@@ -7,7 +7,7 @@
 svd_run(
   A,
   k,
-  method = c("arpack", "cpu_rsvd", "irlba"),
+  method = c("cpu_rsvd", "irlba"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -26,9 +26,7 @@ svd_run(
 
 \item{rsvd_power}{RSVD power iterations.}
 
-\item{svds_tol}{Tolerance passed to ARPACK `svds()` when `svd.method = "arpack"`.
-Larger values can reduce runtime but may reduce numerical precision. Ignored by
-non-ARPACK backends.}
+\item{svds_tol}{Reserved backend tolerance placeholder.}
 
 \item{seed}{RSVD seed.}
 

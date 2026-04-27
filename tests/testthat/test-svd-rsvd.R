@@ -1,11 +1,11 @@
-test_that("cpu_rsvd approximates arpack on dense matrices", {
+test_that("cpu_rsvd approximates exact SVD on dense matrices", {
   set.seed(1001)
   A <- matrix(rnorm(80 * 30), nrow = 80, ncol = 30)
 
   exact <- fastPLS:::truncated_svd_debug(
     A = A,
     k = 6,
-    svd_method = 2L,
+    svd_method = 3L,
     rsvd_oversample = 10L,
     rsvd_power = 1L,
     svds_tol = 0,

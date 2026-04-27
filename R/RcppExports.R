@@ -52,6 +52,26 @@ pls_predict <- function(model, Xtest, proj) {
     .Call(`_fastPLS_pls_predict`, model, Xtest, proj)
 }
 
+kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
+    .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
+}
+
+center_kernel_train_cpp <- function(K) {
+    .Call(`_fastPLS_center_kernel_train_cpp`, K)
+}
+
+center_kernel_test_cpp <- function(Ktest, train_col_means, train_grand_mean) {
+    .Call(`_fastPLS_center_kernel_test_cpp`, Ktest, train_col_means, train_grand_mean)
+}
+
+opls_filter_cpp <- function(X, Y, north, scaling) {
+    .Call(`_fastPLS_opls_filter_cpp`, X, Y, north, scaling)
+}
+
+opls_apply_filter_cpp <- function(X, mX, vX, W_orth, P_orth) {
+    .Call(`_fastPLS_opls_apply_filter_cpp`, X, mX, vX, W_orth, P_orth)
+}
+
 unic <- function(x) {
     .Call(`_fastPLS_unic`, x)
 }
@@ -68,6 +88,22 @@ pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_ove
     .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
+pls_model1_rsvd_xprod_precision <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision) {
+    .Call(`_fastPLS_pls_model1_rsvd_xprod_precision`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision)
+}
+
+pls_model2_fast_rsvd_xprod_precision <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision) {
+    .Call(`_fastPLS_pls_model2_fast_rsvd_xprod_precision`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision)
+}
+
 pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model1_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
+}
+
+pls_model1_gpu_implicit_xprod <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model1_gpu_implicit_xprod`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
+}
+
+pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod) {
+    .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod)
 }

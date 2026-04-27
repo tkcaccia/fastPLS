@@ -192,6 +192,75 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// kernel_matrix_cpp
+arma::mat kernel_matrix_cpp(const arma::mat& X1, const arma::mat& X2, const int kernel, const double gamma, const int degree, const double coef0);
+RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP X1SEXP, SEXP X2SEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X1(X1SEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X2(X2SEXP);
+    Rcpp::traits::input_parameter< const int >::type kernel(kernelSEXP);
+    Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< const int >::type degree(degreeSEXP);
+    Rcpp::traits::input_parameter< const double >::type coef0(coef0SEXP);
+    rcpp_result_gen = Rcpp::wrap(kernel_matrix_cpp(X1, X2, kernel, gamma, degree, coef0));
+    return rcpp_result_gen;
+END_RCPP
+}
+// center_kernel_train_cpp
+Rcpp::List center_kernel_train_cpp(const arma::mat& K);
+RcppExport SEXP _fastPLS_center_kernel_train_cpp(SEXP KSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type K(KSEXP);
+    rcpp_result_gen = Rcpp::wrap(center_kernel_train_cpp(K));
+    return rcpp_result_gen;
+END_RCPP
+}
+// center_kernel_test_cpp
+arma::mat center_kernel_test_cpp(const arma::mat& Ktest, const arma::rowvec& train_col_means, const double train_grand_mean);
+RcppExport SEXP _fastPLS_center_kernel_test_cpp(SEXP KtestSEXP, SEXP train_col_meansSEXP, SEXP train_grand_meanSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ktest(KtestSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type train_col_means(train_col_meansSEXP);
+    Rcpp::traits::input_parameter< const double >::type train_grand_mean(train_grand_meanSEXP);
+    rcpp_result_gen = Rcpp::wrap(center_kernel_test_cpp(Ktest, train_col_means, train_grand_mean));
+    return rcpp_result_gen;
+END_RCPP
+}
+// opls_filter_cpp
+Rcpp::List opls_filter_cpp(arma::mat X, arma::mat Y, const int north, const int scaling);
+RcppExport SEXP _fastPLS_opls_filter_cpp(SEXP XSEXP, SEXP YSEXP, SEXP northSEXP, SEXP scalingSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type X(XSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const int >::type north(northSEXP);
+    Rcpp::traits::input_parameter< const int >::type scaling(scalingSEXP);
+    rcpp_result_gen = Rcpp::wrap(opls_filter_cpp(X, Y, north, scaling));
+    return rcpp_result_gen;
+END_RCPP
+}
+// opls_apply_filter_cpp
+arma::mat opls_apply_filter_cpp(arma::mat X, const arma::rowvec& mX, const arma::rowvec& vX, const arma::mat& W_orth, const arma::mat& P_orth);
+RcppExport SEXP _fastPLS_opls_apply_filter_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, SEXP W_orthSEXP, SEXP P_orthSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type mX(mXSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type vX(vXSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type W_orth(W_orthSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type P_orth(P_orthSEXP);
+    rcpp_result_gen = Rcpp::wrap(opls_apply_filter_cpp(X, mX, vX, W_orth, P_orth));
+    return rcpp_result_gen;
+END_RCPP
+}
 // unic
 int unic(arma::mat x);
 RcppExport SEXP _fastPLS_unic(SEXP xSEXP) {
@@ -268,6 +337,46 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_model1_rsvd_xprod_precision
+List pls_model1_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model1_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_model2_fast_rsvd_xprod_precision
+List pls_model2_fast_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    return rcpp_result_gen;
+END_RCPP
+}
 // pls_model1_gpu
 List pls_model1_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
 RcppExport SEXP _fastPLS_pls_model1_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
@@ -287,6 +396,50 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_model1_gpu_implicit_xprod
+List pls_model1_gpu_implicit_xprod(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model1_gpu_implicit_xprod(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model1_gpu_implicit_xprod(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_cv_predict_compiled
+List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, bool xprod);
+RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP xprodSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xdata(XdataSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ydata(YdataSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type constrain(constrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< int >::type kfold(kfoldSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type classification(classificationSEXP);
+    Rcpp::traits::input_parameter< bool >::type xprod(xprodSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_cv_predict_compiled(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_light", (DL_FUNC) &_fastPLS_pls_light, 4},
@@ -301,11 +454,20 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
     {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
+    {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
+    {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
+    {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},
+    {"_fastPLS_opls_filter_cpp", (DL_FUNC) &_fastPLS_opls_filter_cpp, 4},
+    {"_fastPLS_opls_apply_filter_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_cpp, 5},
     {"_fastPLS_unic", (DL_FUNC) &_fastPLS_unic, 1},
     {"_fastPLS_optim_pls_cv", (DL_FUNC) &_fastPLS_optim_pls_cv, 12},
     {"_fastPLS_double_pls_cv", (DL_FUNC) &_fastPLS_double_pls_cv, 13},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
+    {"_fastPLS_pls_model1_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model1_rsvd_xprod_precision, 10},
+    {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 9},
+    {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
+    {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 15},
     {NULL, NULL, 0}
 };
 

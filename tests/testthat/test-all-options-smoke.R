@@ -47,7 +47,7 @@ test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
 
   back <- as.character(svd_methods()$method[svd_methods()$enabled])
   back <- setdiff(back, "cuda_rsvd")
-  if (!length(back)) back <- "arpack"
+  if (!length(back)) back <- "cpu_rsvd"
 
   for (s in back) {
     for (m in c("plssvd", "simpls", "simpls_fast")) {
@@ -109,7 +109,7 @@ test_that("pls_r supports simpls_fast for regression and classification", {
   y_cls <- factor(sample(c("A", "B", "C"), 60, replace = TRUE))
   idx <- sample(seq_len(60), 15)
 
-  for (s in c("arpack", "cpu_rsvd")) {
+  for (s in c("irlba", "cpu_rsvd")) {
     fit_reg <- pls_r(
       X[-idx, , drop = FALSE],
       y_reg[-idx, , drop = FALSE],

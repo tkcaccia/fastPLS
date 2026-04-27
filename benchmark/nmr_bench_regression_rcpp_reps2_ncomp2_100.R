@@ -42,9 +42,9 @@ cuda_ok <- tryCatch(isTRUE(has_cuda()), error = function(e) FALSE)
 
 methods <- rbind(
   data.frame(engine = "Rcpp", algorithm = rep(c("simpls", "plssvd"), each = 4),
-             svd_method = rep(c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"), 2), stringsAsFactors = FALSE),
+             svd_method = rep(c("irlba", "cpu_rsvd", "cuda_rsvd"), 2), stringsAsFactors = FALSE),
   data.frame(engine = "Rcpp", algorithm = "simpls_fast",
-             svd_method = c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"), stringsAsFactors = FALSE)
+             svd_method = c("irlba", "cpu_rsvd", "cuda_rsvd"), stringsAsFactors = FALSE)
 )
 methods$config <- paste(methods$engine, methods$algorithm, methods$svd_method, sep = "_")
 

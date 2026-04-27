@@ -17,12 +17,8 @@ The returned table reflects \code{R/main.R} dispatch identifiers:
 \item \code{irlba}: legacy label. In PLS model code paths this can trigger the IRLB branch
 for sufficiently large cross-covariance matrices; in generic SVD utility wrappers it maps to
 exact CPU SVD dispatch.
-\item \code{arpack}: ARPACK-truncated CPU SVD dispatch via Armadillo \code{svds()}.
 \item \code{cpu_rsvd}: CPU randomized SVD.
 }
-
-The string \code{"arpack"} is a compatibility/backend label in this package API;
-the implementation path is the exact CPU SVD wrapper in \code{src/svd_cpu_exact.cpp}.
 
 GPU-native fits are exposed separately through \code{\link{simpls_gpu}} and
 \code{\link{plssvd_gpu}}. The former mixed CPU/GPU route through

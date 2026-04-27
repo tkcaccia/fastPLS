@@ -4,9 +4,9 @@
 
 \description{
 Fit PLS models for regression or classification using C++ implementations of
-PLS-SVD (\code{method = "plssvd"}), SIMPLS-style deflation
-(\code{method = "simpls"}), or the optimized accelerated SIMPLS variant
-(\code{method = "simpls_fast"}).
+PLS-SVD (\code{method = "plssvd"}) or the optimized SIMPLS implementation
+(\code{method = "simpls"}). \code{method = "simpls_fast"} is kept as a legacy
+alias for the same optimized SIMPLS code path.
 }
 
 \usage{
@@ -18,7 +18,7 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "arpack", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -28,7 +28,7 @@ pls(
   irlba_eps = 1e-09,
   irlba_svtol = 1e-05,
   seed = 1L,
-  fast_block = 8L,
+  fast_block = 1L,
   fast_center_t = FALSE,
   fast_reorth_v = FALSE,
   fast_incremental = TRUE,
@@ -65,10 +65,9 @@ For factor responses, the code converts labels to one-hot columns via
 \itemize{
 \item \code{"plssvd"}: single truncated SVD of cross-covariance
 \eqn{S = X^T Y}, then component-wise reconstruction of regression coefficients.
-\item \code{"simpls"}: iterative SIMPLS-like deflation of \eqn{S} with one
-leading direction extracted per component.
-\item \code{"simpls_fast"}: accelerated SIMPLS-like deflation using the fixed
-optimized incremental-deflation profile.
+\item \code{"simpls"}: optimized SIMPLS-like deflation using the fixed
+incremental-deflation profile formerly exposed as \code{"simpls_fast"}.
+\item \code{"simpls_fast"}: legacy alias for \code{"simpls"}.
 }
 }
 
@@ -78,7 +77,6 @@ hybrid CUDA route via \code{svd.method = "cuda_rsvd"} has been removed from
 \itemize{
 \item \code{"irlba"}: in \code{pls_model1/2}, uses legacy IRLB path only when the
 cross-covariance matrix is larger than \code{5 x 5}; otherwise falls back to exact CPU SVD.
-\item \code{"arpack"}: ARPACK-truncated SVD path (Armadillo \code{svds}).
 \item \code{"cpu_rsvd"}: approximate randomized SVD on CPU.
 }}
 
@@ -87,9 +85,7 @@ Effective sampled subspace size is approximately \code{k + rsvd_oversample}.}
 
 \item{rsvd_power}{Number of randomized power iterations for RSVD backends.}
 
-\item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
-\code{svd.method = "arpack"}. Larger values can reduce runtime but may loosen
-convergence precision. Ignored by non-ARPACK backends.}
+\item{svds_tol}{Reserved backend tolerance placeholder.}
 
 \item{irlba_work}{IRLBA working subspace size. Used when legacy \code{"irlba"}
 path is active in C++ PLS loops. \code{0} keeps the internal default.}
@@ -104,22 +100,21 @@ path is active in C++ PLS loops. \code{0} keeps the internal default.}
 
 \item{seed}{Random seed used by randomized SVD backends.}
 
-\item{fast_block}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+\item{fast_block}{Refresh block size for the optimized \code{simpls} path.}
+
+\item{fast_center_t}{Deprecated and ignored. \code{simpls} now permanently uses
 the optimized former incremental-deflation profile.}
 
-\item{fast_center_t}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+\item{fast_reorth_v}{Deprecated and ignored. \code{simpls} now permanently uses
 the optimized former incremental-deflation profile.}
 
-\item{fast_reorth_v}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+\item{fast_incremental}{Deprecated and ignored. \code{simpls} now permanently uses
 the optimized former incremental-deflation profile.}
 
-\item{fast_incremental}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+\item{fast_inc_iters}{Deprecated and ignored. \code{simpls} now permanently uses
 the optimized former incremental-deflation profile.}
 
-\item{fast_inc_iters}{Deprecated and ignored. \code{simpls_fast} now permanently uses
-the optimized former incremental-deflation profile.}
-
-\item{fast_defl_cache}{Deprecated and ignored. \code{simpls_fast} now permanently uses
+\item{fast_defl_cache}{Deprecated and ignored. \code{simpls} now permanently uses
 the optimized former incremental-deflation profile.}
 
 \item{fit}{If \code{TRUE}, return in-sample fitted values and \code{R2Y}.}
@@ -146,25 +141,14 @@ component-wise coefficient tensors \eqn{B(:,:,a)}.
 
 \strong{SIMPLS (\code{simpls}):}
 \itemize{
-\item Iteratively extracts one leading direction from current \eqn{S}.
-\item Computes \eqn{t, p, q, v}, orthogonalizes \eqn{v}, and deflates
-\eqn{S \leftarrow S - v(v^T S)}.
-\item Builds cumulative \eqn{B} as \eqn{RQ^T} at requested components.
-}
-
-\strong{SIMPLS fast (\code{simpls_fast}):}
-\itemize{
 \item Preserves SIMPLS-like deflation and cumulative \eqn{B} updates.
 \item Uses the fixed optimized incremental-deflation profile that was previously
 benchmarked as the incdefl variant.
-\item Keeps the same user-facing method name while removing low-level profile selection.
-\item Numerical trajectories can differ from \code{simpls} while keeping similar
-structure and outputs.
+\item \code{simpls_fast} remains accepted only as a compatibility alias.
 }
 
 \strong{Exact vs approximate backends}
 \itemize{
-\item \code{arpack}: ARPACK-truncated SVD path.
 \item \code{cpu_rsvd}: approximate RSVD path (seeded and reproducible for fixed
 seed/parameters).
 \item GPU execution is now exposed separately through \code{\link{simpls_gpu}}
@@ -228,6 +212,6 @@ X <- as.matrix(iris[, -5])
 y <- iris[, 5]
 ss <- sample(seq_len(nrow(X)), 30)
 
-fit <- pls(X[-ss, ], y[-ss], ncomp = c(2, 3), method = "simpls", svd.method = "arpack")
+fit <- pls(X[-ss, ], y[-ss], ncomp = c(2, 3), method = "simpls", svd.method = "irlba")
 pred <- predict(fit, X[ss, ], Ytest = y[ss])
 }

@@ -57,13 +57,26 @@ if (!nrow(ok)) {
   print(status_counts)
   quit(save = "no", status = 0)
 }
+if (!"predict_ms" %in% names(ok)) ok[, predict_ms := NA_real_]
+if (!"total_ms" %in% names(ok)) ok[, total_ms := train_ms + fifelse(is.na(predict_ms), 0, predict_ms)]
+for (mem_col in c("peak_host_rss_mb", "host_rss_delta_mb", "peak_gpu_mem_mb", "gpu_mem_delta_mb")) {
+  if (!mem_col %in% names(ok)) ok[, (mem_col) := NA_real_]
+}
 
 ok_sum <- ok[, .(
   train_ms_median = median(train_ms, na.rm = TRUE),
   train_ms_mean = mean(train_ms, na.rm = TRUE),
+  predict_ms_median = median(predict_ms, na.rm = TRUE),
+  predict_ms_mean = mean(predict_ms, na.rm = TRUE),
+  total_ms_median = median(total_ms, na.rm = TRUE),
+  total_ms_mean = mean(total_ms, na.rm = TRUE),
   metric_median = median(metric_value, na.rm = TRUE),
   metric_mean = mean(metric_value, na.rm = TRUE),
   model_size_mb_median = median(model_size_mb, na.rm = TRUE),
+  peak_host_rss_mb_median = median(peak_host_rss_mb, na.rm = TRUE),
+  host_rss_delta_mb_median = median(host_rss_delta_mb, na.rm = TRUE),
+  peak_gpu_mem_mb_median = median(peak_gpu_mem_mb, na.rm = TRUE),
+  gpu_mem_delta_mb_median = median(gpu_mem_delta_mb, na.rm = TRUE),
   n_ok = .N
 ), by = .(dataset, analysis, analysis_value, ncomp, metric_name, method_id, engine, algorithm, svd_method, fast_profile, param_set)]
 
@@ -84,8 +97,8 @@ ok_sum[, svd_family := fifelse(
           "gpu",
           fifelse(grepl("irlba", svd_method, ignore.case = TRUE),
                   "irlba",
-                  fifelse(grepl("arpack|svds|dc|exact", svd_method, ignore.case = TRUE),
-                          "arpack",
+                  fifelse(grepl("exact", svd_method, ignore.case = TRUE),
+                          "exact",
                           tolower(svd_method))))
 )]
 ok_sum[, engine_shape := fifelse(
@@ -94,13 +107,13 @@ ok_sum[, engine_shape := fifelse(
   fifelse(engine == "R", "R", fifelse(engine == "Rcpp", "Rcpp", fifelse(engine == "GPU", "GPU", engine)))
 )]
 
-svd_levels <- c("irlba", "rsvd", "gpu", "arpack", sort(setdiff(unique(ok_sum$svd_family), c("irlba", "rsvd", "gpu", "arpack"))))
+svd_levels <- c("irlba", "rsvd", "gpu", "exact", sort(setdiff(unique(ok_sum$svd_family), c("irlba", "rsvd", "gpu", "exact"))))
 svd_levels <- svd_levels[svd_levels %in% unique(ok_sum$svd_family)]
 svd_palette <- c(
   irlba = "#1b9e77",
   rsvd = "#d95f02",
   gpu = "#e7298a",
-  arpack = "#7570b3"
+  exact = "#7570b3"
 )
 if (length(setdiff(svd_levels, names(svd_palette)))) {
   extra_levels <- setdiff(svd_levels, names(svd_palette))
@@ -129,7 +142,7 @@ analysis_levels <- unique(ok_sum$analysis)
 
 plot_time <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   xvar <- if (use_ncomp_x) "ncomp" else if (all(is.finite(dt$analysis_value_num))) "analysis_value_num" else "analysis_value"
-  p <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
+  p <- ggplot(dt, aes_string(x = xvar, y = "total_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.8, alpha = 0.9) +
     geom_point(size = 1.8) +
     scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
@@ -137,9 +150,9 @@ plot_time <- function(dt, analysis_name, use_ncomp_x = FALSE) {
     facet_wrap(~dataset, scales = "free_y") +
     theme_minimal(base_size = 11) +
     labs(
-      title = paste0("Train Time - ", analysis_name),
+      title = paste0("Total Fit + Prediction Time - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
-      y = "Median train time (ms)",
+      y = "Median total time (fit + prediction, ms)",
       color = "svd",
       shape = "implementation"
     )
@@ -168,7 +181,7 @@ plot_metric <- function(dt, analysis_name, use_ncomp_x = FALSE) {
 plot_subanalysis <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   xvar <- if (use_ncomp_x) "ncomp" else if (all(is.finite(dt$analysis_value_num))) "analysis_value_num" else "analysis_value"
 
-  p1 <- ggplot(dt, aes_string(x = xvar, y = "train_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
+  p1 <- ggplot(dt, aes_string(x = xvar, y = "total_ms_median", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.7) +
     geom_point(size = 1.4) +
     scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
@@ -176,9 +189,9 @@ plot_subanalysis <- function(dt, analysis_name, use_ncomp_x = FALSE) {
     facet_grid(dataset ~ algorithm_panel, scales = "free_y") +
     theme_minimal(base_size = 10) +
     labs(
-      title = paste0("Subanalysis Train Time - ", analysis_name),
+      title = paste0("Subanalysis Total Fit + Prediction Time - ", analysis_name),
       x = if (use_ncomp_x) "ncomp" else "analysis value",
-      y = "Median train time (ms)",
+      y = "Median total time (fit + prediction, ms)",
       color = "svd",
       shape = "implementation"
     )
@@ -201,6 +214,82 @@ plot_subanalysis <- function(dt, analysis_name, use_ncomp_x = FALSE) {
   ggsave(file.path(plot_dir, paste0("sub_metric_", analysis_name, "_dataset_algorithm_", plot_scope, ".png")), p2, width = 15, height = 11, dpi = 150)
 }
 
+plot_three_by_four <- function(dt, analysis_name, use_ncomp_x = FALSE) {
+  if (!identical(analysis_name, "ncomp")) return(invisible(NULL))
+  xvar <- "ncomp"
+  metric_label <- unique(dt$metric_name[!is.na(dt$metric_name)])[1]
+  metric_label <- switch(
+    metric_label,
+    accuracy = "Accuracy",
+    q2 = "Q2",
+    rmsd = "RMSD",
+    toupper(metric_label)
+  )
+
+  host_col <- if (any(is.finite(dt$host_rss_delta_mb_median))) "host_rss_delta_mb_median" else "peak_host_rss_mb_median"
+  gpu_col <- if (any(is.finite(dt$gpu_mem_delta_mb_median))) "gpu_mem_delta_mb_median" else "peak_gpu_mem_mb_median"
+  long <- rbindlist(
+    list(
+      dt[, .(dataset, ncomp, algorithm_panel, svd_family, engine_shape, method_id, panel_row = "Total time (fit + prediction, ms)", value = total_ms_median)],
+      dt[, .(dataset, ncomp, algorithm_panel, svd_family, engine_shape, method_id, panel_row = metric_label, value = metric_median)],
+      dt[, .(dataset, ncomp, algorithm_panel, svd_family, engine_shape, method_id, panel_row = "RAM allocation (peak RSS delta, MB)", value = get(host_col))],
+      dt[, .(dataset, ncomp, algorithm_panel, svd_family, engine_shape, method_id, panel_row = "GPU memory allocation (peak delta, MB)", value = get(gpu_col))]
+    ),
+    fill = TRUE
+  )
+  long[, panel_row := factor(
+    panel_row,
+    levels = c(
+      "Total time (fit + prediction, ms)",
+      metric_label,
+      "RAM allocation (peak RSS delta, MB)",
+      "GPU memory allocation (peak delta, MB)"
+    )
+  )]
+  finite_long <- long[is.finite(value)]
+  if (!nrow(finite_long)) return(invisible(NULL))
+
+  missing_panels <- long[, .(has_data = any(is.finite(value))), by = .(panel_row, algorithm_panel)][has_data == FALSE]
+  if (nrow(missing_panels)) {
+    missing_panels[, `:=`(
+      ncomp = median(long$ncomp, na.rm = TRUE),
+      value = 0,
+      label = "not recorded"
+    )]
+  }
+
+  p <- ggplot(long, aes_string(x = xvar, y = "value", color = "svd_family", shape = "engine_shape", group = "method_id")) +
+    geom_line(linewidth = 0.7, alpha = 0.9, na.rm = TRUE) +
+    geom_point(size = 1.5, na.rm = TRUE) +
+    geom_text(
+      data = missing_panels,
+      aes(x = ncomp, y = value, label = label),
+      inherit.aes = FALSE,
+      size = 3.5,
+      color = "grey35"
+    ) +
+    scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
+    scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
+    scale_x_continuous(breaks = sort(unique(long$ncomp))) +
+    facet_grid(panel_row ~ algorithm_panel, scales = "free_y", drop = FALSE) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.background = element_rect(fill = "white", colour = NA),
+      panel.background = element_rect(fill = "white", colour = NA),
+      legend.background = element_rect(fill = "white", colour = NA),
+      legend.key = element_rect(fill = "white", colour = NA)
+    ) +
+    labs(
+      title = paste0("3x4 ncomp benchmark - ", plot_scope),
+      x = "ncomp",
+      y = "Median value (row-specific shared scale)",
+      color = "svd",
+      shape = "implementation"
+    )
+  ggsave(file.path(plot_dir, paste0("three_by_four_", analysis_name, "_", plot_scope, ".png")), p, width = 16, height = 14, dpi = 150, bg = "white")
+  invisible(p)
+}
+
 for (an in analysis_levels) {
   dt <- ok_sum[analysis == an]
   if (!nrow(dt)) next
@@ -209,6 +298,7 @@ for (an in analysis_levels) {
   plot_time(dt, an, use_ncomp_x = use_ncomp)
   plot_metric(dt, an, use_ncomp_x = use_ncomp)
   plot_subanalysis(dt, an, use_ncomp_x = use_ncomp)
+  plot_three_by_four(dt, an, use_ncomp_x = use_ncomp)
 }
 
 fwrite(ok_sum, file.path(out_dir, paste0("multianalysis_plot_summary_", plot_scope, ".csv")))

@@ -108,7 +108,7 @@ include_r_impl <- tolower(Sys.getenv("FASTPLS_INCLUDE_R_IMPL", "false")) %in% c(
 methods <- data.frame(
   engine = "Rcpp",
   algorithm = rep(c("simpls", "plssvd"), each = 4),
-  svd_method = rep(c("irlba", "arpack", "cpu_rsvd", "cuda_rsvd"), 2),
+  svd_method = rep(c("irlba", "cpu_rsvd", "cuda_rsvd"), 2),
   stringsAsFactors = FALSE
 )
 if (include_r_impl) {
@@ -117,7 +117,7 @@ if (include_r_impl) {
     data.frame(
       engine = "R",
       algorithm = rep(c("simpls", "plssvd"), each = 3),
-      svd_method = rep(c("irlba", "arpack", "cpu_rsvd"), 2),
+      svd_method = rep(c("irlba", "cpu_rsvd"), 2),
       stringsAsFactors = FALSE
     )
   )

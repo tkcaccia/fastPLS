@@ -16,7 +16,7 @@ pls.double.cv(
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "simpls_fast"),
-  svd.method = c("irlba", "arpack", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -54,8 +54,7 @@ route via \code{svd.method = "cuda_rsvd"} has been removed from
 fits outside this nested CV helper.}
 \item{rsvd_oversample}{RSVD oversampling parameter.}
 \item{rsvd_power}{RSVD power iterations.}
-\item{svds_tol}{Tolerance passed to ARPACK \code{svds()} when
-\code{svd.method = "arpack"}.}
+\item{svds_tol}{Reserved backend tolerance placeholder.}
 \item{irlba_work}{IRLBA working subspace size. \code{0} keeps internal default.}
 \item{irlba_maxit}{IRLBA maximum iterations.}
 \item{irlba_tol}{IRLBA convergence tolerance.}

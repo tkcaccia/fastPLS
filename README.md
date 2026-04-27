@@ -74,17 +74,13 @@ SVD utilities:
 
 - For randomized backends (`cpu_rsvd`, `cuda_rsvd`), set `seed`,
   `rsvd_oversample`, and `rsvd_power` explicitly.
-- For `arpack`, `svds_tol` controls ARPACK convergence tolerance in C++ paths.
-  Higher values can improve speed at the cost of looser convergence.
 - For legacy `irlba` paths, tune `irlba_work`, `irlba_maxit`, `irlba_tol`,
   `irlba_eps`, and `irlba_svtol` from the R API.
 - `simpls_fast` now permanently uses the former incremental-deflation
   configuration. Legacy `fast_*` tuning arguments are accepted for backward
   compatibility but are deprecated and ignored.
-- The GPU-native APIs reset their CUDA workspace after each fit.
-- The GPU-native APIs now default to mixed float32 training buffers
-  (`gpu_train_fp32 = TRUE`) to lower GPU memory usage while preserving the
-  observed CIFAR100 accuracy in the benchmarked workflows.
+- The GPU-native APIs reset their CUDA workspace after each fit and keep
+  training buffers in double precision.
 
 ## References
 

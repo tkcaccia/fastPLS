@@ -27,8 +27,7 @@ simpls_gpu(
   gpu_qr = FALSE,
   gpu_eig = FALSE,
   gpu_qless_qr = TRUE,
-  gpu_finalize_threshold = 32L,
-  gpu_train_fp32 = TRUE
+  gpu_finalize_threshold = 32L
 )
 }
 
@@ -71,9 +70,6 @@ scores \code{Ttest}.}
 
 \item{gpu_finalize_threshold}{Threshold controlling when GPU-side
 finalization is attempted.}
-
-\item{gpu_train_fp32}{When \code{TRUE} (the default), keep the GPU training
-buffers in mixed float32 mode to reduce device memory usage.}
 }
 
 \details{
@@ -93,9 +89,8 @@ of the SIMPLS-fast loop on device:
 The implementation remains experimental and may evolve more rapidly than the
 standard \code{pls()} API.
 
-The default configuration now uses mixed float32 training buffers together with
-automatic workspace reset after each fit, which lowers peak and residual GPU
-memory use in the benchmarked CIFAR100 workflow while preserving accuracy.
+The default configuration uses double-precision training buffers and automatic
+workspace reset after each fit.
 }
 
 \value{

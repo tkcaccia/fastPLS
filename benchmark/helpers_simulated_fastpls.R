@@ -699,7 +699,7 @@ simfast_method_grid <- function(include_cuda = FALSE, include_r_impl = FALSE) {
   dt <- data.table::CJ(
     engine = "Rcpp",
     method = c("plssvd", "simpls", "simpls_fast"),
-    svd_method = c("irlba", "cpu_rsvd", "arpack"),
+    svd_method = c("irlba", "cpu_rsvd"),
     fast_profile = c("default", "default", "incdefl"),
     unique = TRUE
   )

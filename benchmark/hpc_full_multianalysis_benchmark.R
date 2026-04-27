@@ -77,6 +77,13 @@ if (!length(ncomp_singlecell_vec)) ncomp_singlecell_vec <- c(2L, 5L, 10L, 20L, 5
 ncomp_cifar100_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_CIFAR100_NCOMP_LIST", "2,5,10,20,50,100"), ",", fixed = TRUE)[[1]])
 ncomp_cifar100_vec <- sort(unique(ncomp_cifar100_vec[is.finite(ncomp_cifar100_vec) & ncomp_cifar100_vec >= 1L]))
 if (!length(ncomp_cifar100_vec)) ncomp_cifar100_vec <- c(2L, 5L, 10L, 20L, 50L, 100L)
+ncomp_ccle_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_CCLE_NCOMP_LIST", "2,5,10,18,50,100"), ",", fixed = TRUE)[[1]])
+ncomp_ccle_vec <- sort(unique(ncomp_ccle_vec[is.finite(ncomp_ccle_vec) & ncomp_ccle_vec >= 1L]))
+if (!length(ncomp_ccle_vec)) ncomp_ccle_vec <- c(2L, 5L, 10L, 18L, 50L, 100L)
+ncomp_gtex_pan_prism_vec <- as.integer(strsplit(Sys.getenv("FASTPLS_GTEX_PAN_PRISM_NCOMP_LIST", "2,5,10,20,32,50,100"), ",", fixed = TRUE)[[1]])
+ncomp_gtex_pan_prism_vec <- sort(unique(ncomp_gtex_pan_prism_vec[is.finite(ncomp_gtex_pan_prism_vec) & ncomp_gtex_pan_prism_vec >= 1L]))
+if (!length(ncomp_gtex_pan_prism_vec)) ncomp_gtex_pan_prism_vec <- c(2L, 5L, 10L, 20L, 32L, 50L, 100L)
+tcga_small_datasets <- c("singlecell", "tcga_brca", "tcga_hnsc_methylation")
 imagenet_train_n <- as.integer(Sys.getenv("FASTPLS_IMAGENET_TRAIN_N", "1000000"))
 if (!is.finite(imagenet_train_n) || is.na(imagenet_train_n) || imagenet_train_n < 1L) imagenet_train_n <- 1000000L
 default_ncomp <- as.integer(Sys.getenv("FASTPLS_DEFAULT_NCOMP", "2"))
@@ -114,7 +121,6 @@ metref_include_r <- tolower(Sys.getenv("FASTPLS_METREF_INCLUDE_R", "true")) %in%
 metref_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_METREF_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
 public_include_r <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_R", "true")) %in% c("1", "true", "yes", "y")
 public_include_pls_pkg <- tolower(Sys.getenv("FASTPLS_PUBLIC_INCLUDE_PLS_PKG", "true")) %in% c("1", "true", "yes", "y")
-skip_arpack_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_ARPACK_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 skip_plssvd_on_nmr <- tolower(Sys.getenv("FASTPLS_SKIP_PLSSVD_ON_NMR", "true")) %in% c("1", "true", "yes", "y")
 timepoint_cutoff_sec <- suppressWarnings(as.numeric(Sys.getenv(
   "FASTPLS_TIMEPOINT_CUTOFF_SEC",
@@ -323,6 +329,118 @@ metric_from_pred <- function(y_true, pred_obj) {
   }
   rmsd <- sqrt(mean((pred_num - y_num)^2))
   list(metric_name = "rmsd", metric_value = as.numeric(rmsd))
+}
+
+read_proc_rss_mb <- function(pid = Sys.getpid()) {
+  status_file <- file.path("/proc", as.character(pid), "status")
+  if (!file.exists(status_file)) return(NA_real_)
+  x <- tryCatch(readLines(status_file, warn = FALSE), error = function(e) character())
+  line <- grep("^VmRSS:", x, value = TRUE)
+  if (!length(line)) return(NA_real_)
+  kb <- suppressWarnings(as.numeric(sub("^VmRSS:\\s*([0-9.]+).*", "\\1", line[[1]])))
+  if (!is.finite(kb)) NA_real_ else kb / 1024
+}
+
+read_gpu_process_mem_mb <- function(pid = Sys.getpid()) {
+  if (!nzchar(Sys.which("nvidia-smi"))) return(NA_real_)
+  x <- tryCatch(
+    system2(
+      "nvidia-smi",
+      c("--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"),
+      stdout = TRUE,
+      stderr = FALSE
+    ),
+    error = function(e) character()
+  )
+  if (!length(x)) return(NA_real_)
+  vals <- vapply(strsplit(x, ",", fixed = TRUE), function(parts) {
+    parts <- trimws(parts)
+    if (length(parts) < 2L || !identical(parts[[1]], as.character(pid))) return(NA_real_)
+    suppressWarnings(as.numeric(parts[[2]]))
+  }, numeric(1))
+  vals <- vals[is.finite(vals)]
+  if (!length(vals)) NA_real_ else sum(vals)
+}
+
+start_memory_monitor <- function(track_gpu = FALSE) {
+  measure <- tolower(Sys.getenv("FASTPLS_MEASURE_MEMORY", "true")) %in% c("1", "true", "yes", "y")
+  pid <- Sys.getpid()
+  rss_before <- read_proc_rss_mb(pid)
+  gpu_before <- if (isTRUE(track_gpu)) read_gpu_process_mem_mb(pid) else NA_real_
+  if (!measure || !file.exists(file.path("/proc", as.character(pid), "status"))) {
+    return(list(
+      pid = pid,
+      sampler_pid = NA_integer_,
+      path = NA_character_,
+      rss_before_mb = rss_before,
+      gpu_before_mb = gpu_before,
+      track_gpu = isTRUE(track_gpu)
+    ))
+  }
+  interval <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_MEMORY_SAMPLE_SEC", "0.2")))
+  if (!is.finite(interval) || is.na(interval) || interval <= 0) interval <- 0.2
+  tmp <- tempfile("fastpls_mem_", fileext = ".csv")
+  nvidia_cmd <- if (isTRUE(track_gpu) && nzchar(Sys.which("nvidia-smi"))) {
+    sprintf(
+      "gpu=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null | awk -F, -v pid=%d '{gsub(/ /,\"\",$1); gsub(/ /,\"\",$2); if ($1==pid) s+=$2} END{if (s==\"\") print \"NA\"; else print s}')",
+      pid
+    )
+  } else {
+    "gpu=NA"
+  }
+  loop <- sprintf(
+    "printf 'rss_mb,gpu_mem_mb\\n' > %s; while :; do rss=$(awk '/VmRSS:/ {print $2/1024}' /proc/%d/status 2>/dev/null); if [ -z \"$rss\" ]; then rss=NA; fi; %s; printf '%%s,%%s\\n' \"$rss\" \"$gpu\" >> %s; sleep %.3f; done & echo $!",
+    shQuote(tmp),
+    pid,
+    nvidia_cmd,
+    shQuote(tmp),
+    interval
+  )
+  sampler_pid <- suppressWarnings(as.integer(system(paste("sh -c", shQuote(loop)), intern = TRUE)))
+  if (!length(sampler_pid) || !is.finite(sampler_pid[[1]])) sampler_pid <- NA_integer_
+  list(
+    pid = pid,
+    sampler_pid = sampler_pid[[1]],
+    path = tmp,
+    rss_before_mb = rss_before,
+    gpu_before_mb = gpu_before,
+    track_gpu = isTRUE(track_gpu)
+  )
+}
+
+stop_memory_monitor <- function(mon) {
+  if (is.null(mon)) {
+    return(list(
+      peak_host_rss_mb = NA_real_,
+      host_rss_delta_mb = NA_real_,
+      peak_gpu_mem_mb = NA_real_,
+      gpu_mem_delta_mb = NA_real_
+    ))
+  }
+  if (is.finite(mon$sampler_pid) && !is.na(mon$sampler_pid)) {
+    try(system2("kill", as.character(mon$sampler_pid), stdout = FALSE, stderr = FALSE), silent = TRUE)
+    Sys.sleep(0.05)
+  }
+  rss_after <- read_proc_rss_mb(mon$pid)
+  gpu_after <- if (isTRUE(mon$track_gpu)) read_gpu_process_mem_mb(mon$pid) else NA_real_
+  rss_vals <- c(mon$rss_before_mb, rss_after)
+  gpu_vals <- c(mon$gpu_before_mb, gpu_after)
+  if (!is.na(mon$path) && file.exists(mon$path)) {
+    smp <- tryCatch(fread(mon$path), error = function(e) data.table())
+    if ("rss_mb" %in% names(smp)) rss_vals <- c(rss_vals, suppressWarnings(as.numeric(smp$rss_mb)))
+    if ("gpu_mem_mb" %in% names(smp)) gpu_vals <- c(gpu_vals, suppressWarnings(as.numeric(smp$gpu_mem_mb)))
+    unlink(mon$path)
+  }
+  rss_vals <- rss_vals[is.finite(rss_vals)]
+  gpu_vals <- gpu_vals[is.finite(gpu_vals)]
+  peak_rss <- if (length(rss_vals)) max(rss_vals, na.rm = TRUE) else NA_real_
+  peak_gpu <- if (length(gpu_vals)) max(gpu_vals, na.rm = TRUE) else NA_real_
+  list(
+    peak_host_rss_mb = peak_rss,
+    host_rss_delta_mb = if (is.finite(peak_rss) && is.finite(mon$rss_before_mb)) max(0, peak_rss - mon$rss_before_mb) else NA_real_,
+    peak_gpu_mem_mb = peak_gpu,
+    gpu_mem_delta_mb = if (is.finite(peak_gpu) && is.finite(mon$gpu_before_mb)) max(0, peak_gpu - mon$gpu_before_mb) else NA_real_
+  )
 }
 
 half_split_idx <- function(n) {
@@ -689,7 +807,7 @@ subset_yvars <- function(ds, frac) {
 }
 
 method_grid <- function(cuda_ok, include_r = FALSE) {
-  svd <- c("irlba", "arpack", "cpu_rsvd")
+  svd <- c("irlba", "cpu_rsvd")
   dt <- CJ(
     engine = "Rcpp",
     algorithm = c("simpls", "plssvd", "simpls_fast"),
@@ -702,7 +820,7 @@ method_grid <- function(cuda_ok, include_r = FALSE) {
     (algorithm == "simpls_fast" & fast_profile == "incdefl")
   ]
   if (isTRUE(include_r)) {
-    svd_r <- c("irlba", "arpack", "cpu_rsvd")
+    svd_r <- c("irlba", "cpu_rsvd")
     dt_r <- CJ(
       engine = "R",
       algorithm = c("simpls", "plssvd", "simpls_fast"),
@@ -769,13 +887,7 @@ methods_for_dataset <- function(dname, methods_all) {
   } else {
     m <- m[engine %in% c("Rcpp", "GPU")]
   }
-  if (tolower(dname) %in% c("nmr", "imagenet")) {
-    m <- m[!(algorithm == "simpls" & svd_method == "arpack")]
-  }
   if (tolower(dname) == "nmr") {
-    if (skip_arpack_on_nmr) {
-      m <- m[svd_method != "arpack"]
-    }
     if (skip_plssvd_on_nmr) {
       m <- m[algorithm != "plssvd"]
     }
@@ -785,6 +897,17 @@ methods_for_dataset <- function(dname, methods_all) {
 
 fit_build <- function(ds, cfg, ncomp, param_cfg) {
   cfg <- as.list(cfg)
+  mem_monitor <- start_memory_monitor(track_gpu = identical(cfg$engine, "GPU"))
+  on.exit({
+    if (!is.null(mem_monitor)) {
+      try(stop_memory_monitor(mem_monitor), silent = TRUE)
+    }
+  }, add = TRUE)
+  finish_result <- function(out) {
+    mem <- stop_memory_monitor(mem_monitor)
+    mem_monitor <<- NULL
+    c(out, mem)
+  }
 
   if (identical(cfg$engine, "pls_pkg")) {
     if (!requireNamespace("pls", quietly = TRUE)) {
@@ -807,13 +930,22 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
 
       Xte <- as.data.frame(ds$Xtest)
       colnames(Xte) <- x_names
+      t0 <- proc.time()[3]
       pred_arr <- predict(mdl, newdata = Xte, ncomp = as.integer(ncomp))
       pred_mat <- pred_arr[, , 1, drop = FALSE]
       pred_idx <- apply(pred_mat, 1, which.max)
       lev <- colnames(Ymm)
       pred <- factor(class_map[lev[pred_idx]], levels = class_lev)
       m <- list(metric_name = "accuracy", metric_value = mean(as.character(pred) == as.character(ds$Ytest), na.rm = TRUE))
-      return(list(train_ms = as.numeric(train_ms), metric_name = m$metric_name, metric_value = as.numeric(m$metric_value), model_size_mb = as.numeric(object.size(mdl)) / (1024^2)))
+      predict_ms <- (proc.time()[3] - t0) * 1000
+      return(finish_result(list(
+        train_ms = as.numeric(train_ms),
+        predict_ms = as.numeric(predict_ms),
+        total_ms = as.numeric(train_ms + predict_ms),
+        metric_name = m$metric_name,
+        metric_value = as.numeric(m$metric_value),
+        model_size_mb = as.numeric(object.size(mdl)) / (1024^2)
+      )))
     }
 
     ymat <- as.matrix(ds$Ytrain)
@@ -828,6 +960,7 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
 
     Xte <- as.data.frame(ds$Xtest)
     colnames(Xte) <- x_names
+    t0 <- proc.time()[3]
     pred_arr <- predict(mdl, newdata = Xte, ncomp = as.integer(ncomp))
     pred_mat <- pred_arr[, , 1, drop = FALSE]
     pred_num <- as.matrix(pred_mat)
@@ -836,7 +969,15 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
       pred_num <- matrix(as.numeric(pred_num), nrow = nrow(y_true), ncol = ncol(y_true))
     }
     rmsd <- sqrt(mean((pred_num - y_true)^2))
-    return(list(train_ms = as.numeric(train_ms), metric_name = "rmsd", metric_value = as.numeric(rmsd), model_size_mb = as.numeric(object.size(mdl)) / (1024^2)))
+    predict_ms <- (proc.time()[3] - t0) * 1000
+    return(finish_result(list(
+      train_ms = as.numeric(train_ms),
+      predict_ms = as.numeric(predict_ms),
+      total_ms = as.numeric(train_ms + predict_ms),
+      metric_name = "rmsd",
+      metric_value = as.numeric(rmsd),
+      model_size_mb = as.numeric(object.size(mdl)) / (1024^2)
+    )))
   }
 
   args <- list(
@@ -881,9 +1022,18 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
     )
     train_ms <- (proc.time()[3] - t0) * 1000
 
+    t0 <- proc.time()[3]
     pred <- predict(model, newdata = ds$Xtest, Ytest = ds$Ytest, proj = FALSE)
     m <- metric_from_pred(ds$Ytest, pred)
-    return(list(train_ms = as.numeric(train_ms), metric_name = m$metric_name, metric_value = as.numeric(m$metric_value), model_size_mb = as.numeric(object.size(model)) / (1024^2)))
+    predict_ms <- (proc.time()[3] - t0) * 1000
+    return(finish_result(list(
+      train_ms = as.numeric(train_ms),
+      predict_ms = as.numeric(predict_ms),
+      total_ms = as.numeric(train_ms + predict_ms),
+      metric_name = m$metric_name,
+      metric_value = as.numeric(m$metric_value),
+      model_size_mb = as.numeric(object.size(model)) / (1024^2)
+    )))
   }
 
   if (identical(cfg$engine, "Rcpp")) {
@@ -903,10 +1053,19 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
   model <- do.call(fn, call_args)
   train_ms <- (proc.time()[3] - t0) * 1000
 
+  t0 <- proc.time()[3]
   pred <- predict(model, newdata = ds$Xtest, Ytest = ds$Ytest, proj = FALSE)
   m <- metric_from_pred(ds$Ytest, pred)
+  predict_ms <- (proc.time()[3] - t0) * 1000
 
-  list(train_ms = as.numeric(train_ms), metric_name = m$metric_name, metric_value = as.numeric(m$metric_value), model_size_mb = as.numeric(object.size(model)) / (1024^2))
+  finish_result(list(
+    train_ms = as.numeric(train_ms),
+    predict_ms = as.numeric(predict_ms),
+    total_ms = as.numeric(train_ms + predict_ms),
+    metric_name = m$metric_name,
+    metric_value = as.numeric(m$metric_value),
+    model_size_mb = as.numeric(object.size(model)) / (1024^2)
+  ))
 }
 
 run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L, reps_run = reps) {
@@ -945,8 +1104,12 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_preview,
             xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-            train_ms = NA_real_, metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
-            model_size_mb = NA_real_, status = "skipped_after_timepoint_cutoff", msg = skip_msg
+            train_ms = NA_real_, predict_ms = NA_real_, total_ms = NA_real_,
+            metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_,
+            peak_host_rss_mb = NA_real_, host_rss_delta_mb = NA_real_,
+            peak_gpu_mem_mb = NA_real_, gpu_mem_delta_mb = NA_real_,
+            status = "skipped_after_timepoint_cutoff", msg = skip_msg
           )
         }
         next
@@ -972,8 +1135,12 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_preview,
             xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-            train_ms = NA_real_, metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
-            model_size_mb = NA_real_, status = "skipped_after_timepoint_cutoff", msg = sprintf(
+            train_ms = NA_real_, predict_ms = NA_real_, total_ms = NA_real_,
+            metric_name = if (is.factor(ds0$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_,
+            peak_host_rss_mb = NA_real_, host_rss_delta_mb = NA_real_,
+            peak_gpu_mem_mb = NA_real_, gpu_mem_delta_mb = NA_real_,
+            status = "skipped_after_timepoint_cutoff", msg = sprintf(
               "Additional replicates skipped after %s=%s exceeded cutoff (%.2fs > %.2fs)",
               analysis, as.character(v), cutoff_ms / 1000, timepoint_cutoff_ms / 1000
             )
@@ -1003,8 +1170,12 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
               rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
               method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
               xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-              train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
-              model_size_mb = NA_real_, status = "skipped_plssvd_cap", msg = ""
+              train_ms = NA_real_, predict_ms = NA_real_, total_ms = NA_real_,
+              metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+              model_size_mb = NA_real_,
+              peak_host_rss_mb = NA_real_, host_rss_delta_mb = NA_real_,
+              peak_gpu_mem_mb = NA_real_, gpu_mem_delta_mb = NA_real_,
+              status = "skipped_plssvd_cap", msg = ""
             )
             next
           }
@@ -1017,8 +1188,12 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
               method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
             xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-            train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
-            model_size_mb = NA_real_, status = "skipped_cuda_disabled", msg = ""
+            train_ms = NA_real_, predict_ms = NA_real_, total_ms = NA_real_,
+            metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_,
+            peak_host_rss_mb = NA_real_, host_rss_delta_mb = NA_real_,
+            peak_gpu_mem_mb = NA_real_, gpu_mem_delta_mb = NA_real_,
+            status = "skipped_cuda_disabled", msg = ""
           )
           next
         }
@@ -1059,8 +1234,12 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
             xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-            train_ms = NA_real_, metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
-            model_size_mb = NA_real_, status = "error", msg = msg_txt
+            train_ms = NA_real_, predict_ms = NA_real_, total_ms = NA_real_,
+            metric_name = if (is.factor(ds$Ytest)) "accuracy" else "rmsd", metric_value = NA_real_,
+            model_size_mb = NA_real_,
+            peak_host_rss_mb = NA_real_, host_rss_delta_mb = NA_real_,
+            peak_gpu_mem_mb = NA_real_, gpu_mem_delta_mb = NA_real_,
+            status = "error", msg = msg_txt
           )
         } else {
           rows[[idx]] <- data.table(
@@ -1068,20 +1247,27 @@ run_analysis <- function(dname, ds0, methods, analysis, values, ncomp_fixed = 5L
             rep = r, engine = cfg$engine, algorithm = cfg$algorithm, svd_method = cfg$svd_method, fast_profile = cfg$fast_profile,
             method_id = cfg$method_id, param_set = NA_character_, ncomp = ncomp_run,
             xtrain_nrow = xtrain_nrow, xtrain_ncol = xtrain_ncol, ytrain_ncol = ytrain_ncol, ytrain_display_dim = ytrain_display_dim,
-            train_ms = res$train_ms, metric_name = res$metric_name, metric_value = res$metric_value,
-            model_size_mb = res$model_size_mb, status = "ok", msg = ""
+            train_ms = res$train_ms, predict_ms = res$predict_ms, total_ms = res$total_ms,
+            metric_name = res$metric_name, metric_value = res$metric_value,
+            model_size_mb = res$model_size_mb,
+            peak_host_rss_mb = res$peak_host_rss_mb,
+            host_rss_delta_mb = res$host_rss_delta_mb,
+            peak_gpu_mem_mb = res$peak_gpu_mem_mb,
+            gpu_mem_delta_mb = res$gpu_mem_delta_mb,
+            status = "ok", msg = ""
           )
-          if (identical(analysis, "ncomp") && is.finite(timepoint_cutoff_ms) && !is.na(res$train_ms) && res$train_ms > timepoint_cutoff_ms) {
+          elapsed_ms <- if (!is.null(res$total_ms) && is.finite(res$total_ms)) res$total_ms else res$train_ms
+          if (identical(analysis, "ncomp") && is.finite(timepoint_cutoff_ms) && !is.na(elapsed_ms) && elapsed_ms > timepoint_cutoff_ms) {
             cutoff_triggered_here <- TRUE
             skip_remaining_cfg <- TRUE
             cutoff_value <- analysis_value
-            cutoff_ms <- res$train_ms
+            cutoff_ms <- elapsed_ms
             log_msg(
               "[WARN] Timepoint cutoff triggered for dataset=", dname,
               " method=", cfg$method_id,
               " analysis=", analysis,
               " value=", analysis_value,
-              " train_sec=", sprintf("%.2f", res$train_ms / 1000),
+              " total_sec=", sprintf("%.2f", elapsed_ms / 1000),
               " cutoff_sec=", sprintf("%.2f", timepoint_cutoff_sec),
               " -> skipping later values"
             )
@@ -1114,8 +1300,12 @@ header <- data.table(
   dataset = character(), analysis = character(), analysis_value = character(), rep = integer(),
   engine = character(), algorithm = character(), svd_method = character(), fast_profile = character(), method_id = character(),
   param_set = character(), ncomp = integer(), xtrain_nrow = integer(), xtrain_ncol = integer(), ytrain_ncol = integer(), ytrain_display_dim = integer(),
-  train_ms = numeric(), metric_name = character(), metric_value = numeric(),
-  model_size_mb = numeric(), status = character(), msg = character()
+  train_ms = numeric(), predict_ms = numeric(), total_ms = numeric(),
+  metric_name = character(), metric_value = numeric(),
+  model_size_mb = numeric(),
+  peak_host_rss_mb = numeric(), host_rss_delta_mb = numeric(),
+  peak_gpu_mem_mb = numeric(), gpu_mem_delta_mb = numeric(),
+  status = character(), msg = character()
 )
 if (!append_mode || !file.exists(out_csv)) {
   fwrite(header, out_csv)
@@ -1135,7 +1325,7 @@ log_msg("threads=", threads)
 log_msg("svd tuning: irlba_svtol=", irlba_svtol, "; rsvd_tol=", rsvd_tol)
 log_msg("replicate policy: default reps=", reps, "; nmr_reps=", nmr_reps)
 log_msg("replicate policy (dataset overrides): metref_reps=", metref_reps, "; singlecell_reps=", singlecell_reps, "; cifar100_reps=", cifar100_reps)
-log_msg("NMR safety filters: skip_arpack_on_nmr=", skip_arpack_on_nmr, "; skip_plssvd_on_nmr=", skip_plssvd_on_nmr)
+log_msg("NMR safety filters: skip_plssvd_on_nmr=", skip_plssvd_on_nmr)
 log_msg("ncomp(default datasets)=", paste(ncomp_vec, collapse = ","), "; ncomp(NMR)=", paste(ncomp_nmr_vec, collapse = ","), "; ncomp(SingleCell)=", paste(ncomp_singlecell_vec, collapse = ","), "; ncomp(CIFAR100)=", paste(ncomp_cifar100_vec, collapse = ","), "; ncomp(public datasets)=", paste(ncomp_public_vec, collapse = ","), "; default_ncomp(non-ncomp analyses)=", default_ncomp, "; metref_default_ncomp=", metref_default_ncomp, "; singlecell_default_ncomp=", singlecell_default_ncomp, "; cifar100_default_ncomp=", cifar100_default_ncomp, "; public_default_ncomp=", public_default_ncomp)
 log_msg("sample_fracs=", paste(sample_fracs, collapse = ","), "; xvar_fracs=", paste(xvar_fracs, collapse = ","), "; yvar_fracs=", paste(yvar_fracs, collapse = ","))
 
@@ -1153,9 +1343,14 @@ for (dname in dataset_filter) {
   if (tolower(dname) == "singlecell") reps_ds <- singlecell_reps
   if (tolower(dname) == "cifar100") reps_ds <- cifar100_reps
   ncomp_ds <- if (tolower(dname) == "nmr") ncomp_nmr_vec else ncomp_vec
-  if (tolower(dname) == "singlecell") ncomp_ds <- ncomp_singlecell_vec
+  if (tolower(dname) %in% tcga_small_datasets) ncomp_ds <- ncomp_singlecell_vec
   if (tolower(dname) == "cifar100") ncomp_ds <- ncomp_cifar100_vec
+  if (tolower(dname) == "ccle") ncomp_ds <- ncomp_ccle_vec
+  if (tolower(dname) %in% c("gtex", "gtex_v8", "tcga_pan_cancer", "prism")) ncomp_ds <- ncomp_gtex_pan_prism_vec
   if (tolower(dname) %in% public_benchmark_datasets) ncomp_ds <- ncomp_public_vec
+  if (tolower(dname) == "ccle") ncomp_ds <- ncomp_ccle_vec
+  if (tolower(dname) %in% c("gtex", "gtex_v8", "tcga_pan_cancer", "prism")) ncomp_ds <- ncomp_gtex_pan_prism_vec
+  if (tolower(dname) %in% c("tcga_brca", "tcga_hnsc_methylation")) ncomp_ds <- ncomp_singlecell_vec
   default_ncomp_ds <- if (tolower(dname) == "metref") metref_default_ncomp else default_ncomp
   if (tolower(dname) == "singlecell") default_ncomp_ds <- singlecell_default_ncomp
   if (tolower(dname) == "cifar100") default_ncomp_ds <- cifar100_default_ncomp
@@ -1204,14 +1399,27 @@ if (!nrow(res)) {
 }
 
 raw_all <- fread(out_csv)
+for (mem_col in c("peak_host_rss_mb", "host_rss_delta_mb", "peak_gpu_mem_mb", "gpu_mem_delta_mb")) {
+  if (!mem_col %in% names(raw_all)) raw_all[, (mem_col) := NA_real_]
+}
 sumtab <- raw_all[status == "ok", .(
   reps_ok = .N,
   train_ms_median = median(train_ms, na.rm = TRUE),
   train_ms_mean = mean(train_ms, na.rm = TRUE),
   train_ms_sd = sd(train_ms, na.rm = TRUE),
+  predict_ms_median = median(predict_ms, na.rm = TRUE),
+  predict_ms_mean = mean(predict_ms, na.rm = TRUE),
+  predict_ms_sd = sd(predict_ms, na.rm = TRUE),
+  total_ms_median = median(total_ms, na.rm = TRUE),
+  total_ms_mean = mean(total_ms, na.rm = TRUE),
+  total_ms_sd = sd(total_ms, na.rm = TRUE),
   metric_median = median(metric_value, na.rm = TRUE),
   metric_mean = mean(metric_value, na.rm = TRUE),
-  model_size_mb_median = median(model_size_mb, na.rm = TRUE)
+  model_size_mb_median = median(model_size_mb, na.rm = TRUE),
+  peak_host_rss_mb_median = median(peak_host_rss_mb, na.rm = TRUE),
+  host_rss_delta_mb_median = median(host_rss_delta_mb, na.rm = TRUE),
+  peak_gpu_mem_mb_median = median(peak_gpu_mem_mb, na.rm = TRUE),
+  gpu_mem_delta_mb_median = median(gpu_mem_delta_mb, na.rm = TRUE)
 ), by = .(dataset, analysis, analysis_value, engine, algorithm, svd_method, fast_profile, method_id, param_set, ncomp, metric_name)]
 
 fwrite(sumtab, file.path(out_dir, "multianalysis_summary.csv"))

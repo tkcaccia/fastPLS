@@ -59,7 +59,7 @@ test_that("optimized plssvd stays numerically close to the legacy path on a cont
     Ytest = Y[idx, , drop = FALSE],
     ncomp = c(1L, 2L),
     method = "plssvd",
-    svd.method = "arpack",
+    svd.method = "cpu_rsvd",
     fit = TRUE,
     seed = 123L
   )

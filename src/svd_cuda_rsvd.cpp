@@ -207,46 +207,50 @@ class CudaRSVDWorkspace {
     }
   }
 
+  void ensure_matrix_free_capacity(int m, int n, int l) {
+    if (!handle_ready_) {
+      check_cublas(cublasCreate(&handle_), "cublasCreate");
+      handle_ready_ = true;
+    }
+    if (!solver_ready_) {
+      check_cusolver(cusolverDnCreate(&solver_), "cusolverDnCreate");
+      solver_ready_ = true;
+    }
+
+    ensure_buffer(dOmega_, bytes_for_padded_random(n, l), bytes_Omega_, "cudaMalloc(dOmega)");
+    ensure_buffer(dY_, bytes_for_padded_random(m, l), bytes_Y_, "cudaMalloc(dY)");
+    ensure_buffer(dZ_, bytes_for(n, l), bytes_Z_, "cudaMalloc(dZ)");
+    ensure_buffer(dQ_, bytes_for(m, l), bytes_Q_, "cudaMalloc(dQ)");
+    ensure_buffer(dBsmall_, bytes_for(l, n), bytes_Bsmall_, "cudaMalloc(dBsmall)");
+    ensure_buffer(dGram_, bytes_for(l, l), bytes_Gram_, "cudaMalloc(dGram)");
+    ensure_buffer(dTau_, bytes_for(l, 1), bytes_Tau_, "cudaMalloc(dTau)");
+    ensure_buffer(dEvals_, bytes_for(l, 1), bytes_Evals_, "cudaMalloc(dEvals)");
+    ensure_int_buffer(dInfo_, sizeof(int), bytes_Info_, "cudaMalloc(dInfo)");
+
+    if (!rng_ready_) {
+      check_curand(curandCreateGenerator(&rng_, CURAND_RNG_PSEUDO_DEFAULT), "curandCreateGenerator");
+      rng_ready_ = true;
+    }
+  }
+
   void set_pls_training_matrices(
     const double* hX,
     int n,
     int p,
     const double* hY,
     int m,
-    bool fit
+    bool fit,
+    bool form_crossprod = true
   ) {
-    ensure_capacity(p, m, 1);
-    if (use_fp32_train_storage()) {
-      if (dX_ != nullptr) {
-        cudaFree(dX_);
-        dX_ = nullptr;
-        bytes_X_ = 0;
-      }
-      if (dYtrain_ != nullptr) {
-        cudaFree(dYtrain_);
-        dYtrain_ = nullptr;
-        bytes_Ytrain_ = 0;
-      }
-      ensure_float_buffer(dXf_, bytes_for_float(n, p), bytes_Xf_, "cudaMalloc(dXf)");
-      ensure_float_buffer(dYtrainf_, bytes_for_float(n, m), bytes_Ytrainf_, "cudaMalloc(dYtrainf)");
-      copy_host_double_to_device_float(dXf_, hX, n, p, "cudaMemcpy(Xtrain_fp32)");
-      copy_host_double_to_device_float(dYtrainf_, hY, n, m, "cudaMemcpy(Ytrain_fp32)");
+    if (form_crossprod) {
+      ensure_capacity(p, m, 1);
     } else {
-      if (dXf_ != nullptr) {
-        cudaFree(dXf_);
-        dXf_ = nullptr;
-        bytes_Xf_ = 0;
-      }
-      if (dYtrainf_ != nullptr) {
-        cudaFree(dYtrainf_);
-        dYtrainf_ = nullptr;
-        bytes_Ytrainf_ = 0;
-      }
-      ensure_buffer(dX_, bytes_for(n, p), bytes_X_, "cudaMalloc(dX)");
-      ensure_buffer(dYtrain_, bytes_for(n, m), bytes_Ytrain_, "cudaMalloc(dYtrain)");
-      check_cuda(cudaMemcpy(dX_, hX, bytes_for(n, p), cudaMemcpyHostToDevice), "cudaMemcpy(Xtrain)");
-      check_cuda(cudaMemcpy(dYtrain_, hY, bytes_for(n, m), cudaMemcpyHostToDevice), "cudaMemcpy(Ytrain)");
+      ensure_matrix_free_capacity(p, m, 1);
     }
+    ensure_buffer(dX_, bytes_for(n, p), bytes_X_, "cudaMalloc(dX)");
+    ensure_buffer(dYtrain_, bytes_for(n, m), bytes_Ytrain_, "cudaMalloc(dYtrain)");
+    check_cuda(cudaMemcpy(dX_, hX, bytes_for(n, p), cudaMemcpyHostToDevice), "cudaMemcpy(Xtrain)");
+    check_cuda(cudaMemcpy(dYtrain_, hY, bytes_for(n, m), cudaMemcpyHostToDevice), "cudaMemcpy(Ytrain)");
     ensure_buffer(dTvec_, bytes_for(n, 1), bytes_Tvec_, "cudaMalloc(dTvec)");
     ensure_buffer(dPvec_, bytes_for(p, 1), bytes_Pvec_, "cudaMalloc(dPvec)");
     ensure_buffer(dQvec_, bytes_for(m, 1), bytes_Qvec_, "cudaMalloc(dQvec)");
@@ -255,7 +259,9 @@ class CudaRSVDWorkspace {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
       check_cuda(cudaMemset(dYfit_, 0, bytes_for(n, m)), "cudaMemset(dYfit)");
     }
-    crossprod_training_xy(n, p, m);
+    if (form_crossprod) {
+      crossprod_training_xy(n, p, m);
+    }
   }
 
   void release_pls_ytrain_buffer() {
@@ -263,11 +269,6 @@ class CudaRSVDWorkspace {
       cudaFree(dYtrain_);
       dYtrain_ = nullptr;
       bytes_Ytrain_ = 0;
-    }
-    if (dYtrainf_ != nullptr) {
-      cudaFree(dYtrainf_);
-      dYtrainf_ = nullptr;
-      bytes_Ytrainf_ = 0;
     }
   }
 
@@ -542,11 +543,7 @@ class CudaRSVDWorkspace {
     double* hQ,
     double* hTnorm
   ) {
-    if (use_fp32_train_storage()) {
-      if (dXf_ == nullptr || dYtrainf_ == nullptr) {
-        throw std::runtime_error("training matrices are not initialized for FP32 workspace");
-      }
-    } else if (dX_ == nullptr || dYtrain_ == nullptr) {
+    if (dX_ == nullptr || dYtrain_ == nullptr) {
       throw std::runtime_error("training matrices are not initialized for GPU workspace");
     }
     ensure_buffer(dTvec_, bytes_for(n, 1), bytes_Tvec_, "cudaMalloc(dTvec)");
@@ -745,10 +742,161 @@ class CudaRSVDWorkspace {
     );
 
     x_times_mat(n, p, target, dQ_, dRRmat_, "cublasGemm(T=X*U)");
+    ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
     );
+
+    PLSSVDGPUResult out;
+    out.R.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(target));
+    out.Ttrain.set_size(static_cast<arma::uword>(n), static_cast<arma::uword>(target));
+    check_cuda(cudaMemcpy(out.R.memptr(), dQ_, bytes_for(p, target), cudaMemcpyDeviceToHost), "cudaMemcpy(R_plssvd)");
+    check_cuda(cudaMemcpy(out.Ttrain.memptr(), dRRmat_, bytes_for(n, target), cudaMemcpyDeviceToHost), "cudaMemcpy(T_plssvd)");
+
+    arma::vec s_host(target, arma::fill::zeros);
+    copy_top_singular_values(l, target, s_host.memptr());
+    arma::mat rhs_host(static_cast<arma::uword>(target), static_cast<arma::uword>(m), arma::fill::zeros);
+    check_cuda(cudaMemcpy(rhs_host.memptr(), dZ_, bytes_for(target, m), cudaMemcpyDeviceToHost), "cudaMemcpy(RHS_plssvd)");
+    out.Q.set_size(static_cast<arma::uword>(m), static_cast<arma::uword>(target));
+    out.Q.zeros();
+    for (int j = 0; j < target; ++j) {
+      const double sj = s_host(static_cast<arma::uword>(j));
+      if (std::isfinite(sj) && sj > 0.0) {
+        out.Q.col(static_cast<arma::uword>(j)) = (rhs_host.row(static_cast<arma::uword>(j)) / sj).t();
+      }
+    }
+
+    out.B.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(m), ncomp.n_elem);
+    out.B.zeros();
+    out.R2Y.set_size(ncomp.n_elem);
+    out.R2Y.zeros();
+    if (fit) {
+      out.Yfit.set_size(static_cast<arma::uword>(n), static_cast<arma::uword>(m), ncomp.n_elem);
+    }
+
+    for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
+      const int requested_mc = static_cast<int>(ncomp(a));
+      const int mc = std::min(std::max(requested_mc, 1), target);
+      check_cuda(
+        cudaMemcpy2D(
+          dGram_,
+          bytes_for(mc, 1),
+          dQQmat_,
+          bytes_for(target, 1),
+          bytes_for(mc, 1),
+          static_cast<size_t>(mc),
+          cudaMemcpyDeviceToDevice
+        ),
+        "cudaMemcpy2D(G_a)"
+      );
+      check_cuda(
+        cudaMemcpy2D(
+          dBsmall_,
+          bytes_for(mc, 1),
+          dZ_,
+          bytes_for(target, 1),
+          bytes_for(mc, 1),
+          static_cast<size_t>(m),
+          cudaMemcpyDeviceToDevice
+        ),
+        "cudaMemcpy2D(RHS_a)"
+      );
+      solve_spd_system_inplace(mc, m);
+
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
+        "cublasDgemm(B=U*W)"
+      );
+      check_cuda(
+        cudaMemcpy(out.B.slice(a).memptr(), dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost),
+        "cudaMemcpy(B_slice)"
+      );
+
+      if (fit) {
+        check_cublas(
+          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, m, mc, &alpha, dRRmat_, n, dBsmall_, mc, &beta, dYfit_, n),
+          "cublasDgemm(Yfit=T*W)"
+        );
+        check_cuda(
+          cudaMemcpy(out.Yfit.slice(a).memptr(), dYfit_, bytes_for(n, m), cudaMemcpyDeviceToHost),
+          "cudaMemcpy(Yfit_slice)"
+        );
+        out.R2Y(a) = rq_value_local(Ytrain, out.Yfit.slice(a));
+      }
+    }
+
+    return out;
+  }
+
+  PLSSVDGPUResult plssvd_fit_implicit_xprod(
+    const arma::mat& Xtrain,
+    const arma::mat& Ytrain,
+    const arma::ivec& ncomp,
+    bool fit,
+    const SVDOptions& opt
+  ) {
+    const int n = static_cast<int>(Xtrain.n_rows);
+    const int p = static_cast<int>(Xtrain.n_cols);
+    const int m = static_cast<int>(Ytrain.n_cols);
+    const int max_rank = std::min(p, m);
+    const int target = std::min(max_rank, std::max(static_cast<int>(ncomp.max()), 1));
+    if (target < 1) {
+      throw std::runtime_error("cuda_plssvd_fit_implicit_xprod target rank is < 1");
+    }
+    const int l = std::min(max_rank, target + std::max(opt.oversample, 0));
+
+    ensure_matrix_free_capacity(p, m, l);
+    set_pls_training_matrices(Xtrain.memptr(), n, p, Ytrain.memptr(), m, fit, false);
+    ensure_matrix_free_capacity(p, m, l);
+
+    check_curand(
+      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(opt.seed)),
+      "curandSetPseudoRandomGeneratorSeed"
+    );
+    check_curand(
+      curandGenerateNormalDouble(rng_, dOmega_, padded_random_elems(m, l), 0.0, 1.0),
+      "curandGenerateNormalDouble(Omega)"
+    );
+
+    const double alpha = 1.0;
+    const double beta = 0.0;
+
+    implicit_a_times_mat(n, p, m, l, dOmega_, dY_, "implicit_A_times_Omega");
+    for (int i = 0; i < std::max(opt.power_iters, 0); ++i) {
+      implicit_at_times_mat(n, p, m, l, dY_, dZ_, "implicit_AT_times_Y");
+      implicit_a_times_mat(n, p, m, l, dZ_, dY_, "implicit_A_times_Z");
+    }
+
+    orthonormalize_qr_inplace(p, l);
+    implicit_bsmall_from_basis(n, p, m, l, dY_, dBsmall_, "implicit_Bsmall=QTA");
+    release_pls_ytrain_buffer();
+
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &alpha, dBsmall_, l, dBsmall_, l, &beta, dGram_, l),
+      "cublasDgemm(Bsmall*Bsmall^T)"
+    );
+    finalize_left_block_from_gram_inplace(l, target);
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, target, l, &alpha, dY_, p, dOmega_, l, &beta, dQ_, p),
+      "cublasDgemm(U=Q*Uhat)"
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, m, l, &alpha, dOmega_, l, dBsmall_, l, &beta, dZ_, target),
+      "cublasDgemm(RHS=Uhat^T*Bsmall)"
+    );
+
+    x_times_mat(n, p, target, dQ_, dRRmat_, "cublasGemm(T=X*U)");
+    ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
+      "cublasDgemm(G=T^T*T)"
+    );
+
+    ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+    if (fit) {
+      ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
+    }
 
     PLSSVDGPUResult out;
     out.R.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(target));
@@ -1314,10 +1462,6 @@ class CudaRSVDWorkspace {
     return sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
   }
 
-  static size_t bytes_for_float(int m, int n) {
-    return sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
-  }
-
   static size_t bytes_for_padded_random(int m, int n) {
     size_t elems = static_cast<size_t>(m) * static_cast<size_t>(n);
     if ((elems % 2U) != 0U) {
@@ -1347,242 +1491,97 @@ class CudaRSVDWorkspace {
     current = required;
   }
 
-  void ensure_float_buffer(float*& ptr, size_t required, size_t& current, const char* where) {
-    if (required <= current && ptr != nullptr) {
-      return;
-    }
-    if (ptr != nullptr) {
-      cudaFree(ptr);
-      ptr = nullptr;
-      current = 0;
-    }
-    check_cuda(cudaMalloc(reinterpret_cast<void**>(&ptr), required), where);
-    current = required;
-  }
-
-  bool use_fp32_train_storage() const {
-    return env_int_or("FASTPLS_GPU_TRAIN_FP32", 0, 0, 1) == 1;
-  }
-
-  void launch_double_to_float(const double* src, float* dst, size_t n_elem, const char* where) {
-    host_double_tmp_.set_size(static_cast<arma::uword>(n_elem));
-    host_float_tmp_.set_size(static_cast<arma::uword>(n_elem));
-    check_cuda(
-      cudaMemcpy(host_double_tmp_.memptr(), src, sizeof(double) * n_elem, cudaMemcpyDeviceToHost),
-      "cudaMemcpy(double_tmp_host)"
-    );
-    for (size_t i = 0; i < n_elem; ++i) {
-      host_float_tmp_(static_cast<arma::uword>(i)) = static_cast<float>(host_double_tmp_(static_cast<arma::uword>(i)));
-    }
-    check_cuda(cudaMemcpy(dst, host_float_tmp_.memptr(), sizeof(float) * n_elem, cudaMemcpyHostToDevice), where);
-  }
-
-  void launch_float_to_double(const float* src, double* dst, size_t n_elem, const char* where) {
-    host_float_tmp_.set_size(static_cast<arma::uword>(n_elem));
-    host_double_tmp_.set_size(static_cast<arma::uword>(n_elem));
-    check_cuda(
-      cudaMemcpy(host_float_tmp_.memptr(), src, sizeof(float) * n_elem, cudaMemcpyDeviceToHost),
-      "cudaMemcpy(float_tmp_host)"
-    );
-    for (size_t i = 0; i < n_elem; ++i) {
-      host_double_tmp_(static_cast<arma::uword>(i)) = static_cast<double>(host_float_tmp_(static_cast<arma::uword>(i)));
-    }
-    check_cuda(cudaMemcpy(dst, host_double_tmp_.memptr(), sizeof(double) * n_elem, cudaMemcpyHostToDevice), where);
-  }
-
-  void copy_host_double_to_device_float(float* dst, const double* src, int m, int n, const char* where) {
-    const size_t n_elem = static_cast<size_t>(m) * static_cast<size_t>(n);
-    std::vector<float> tmp(n_elem);
-    for (size_t i = 0; i < n_elem; ++i) {
-      tmp[i] = static_cast<float>(src[i]);
-    }
-    check_cuda(cudaMemcpy(dst, tmp.data(), sizeof(float) * n_elem, cudaMemcpyHostToDevice), where);
-  }
-
   void crossprod_training_xy(int n, int p, int m) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    if (use_fp32_train_storage()) {
-      const float alpha_f = 1.0f;
-      const float beta_f = 0.0f;
-      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(p, m), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
-      check_cublas(
-        cublasSgemm(
-          handle_,
-          CUBLAS_OP_T,
-          CUBLAS_OP_N,
-          p,
-          m,
-          n,
-          &alpha_f,
-          dXf_,
-          n,
-          dYtrainf_,
-          n,
-          &beta_f,
-          dTmpFloatOut_,
-          p
-        ),
-        "cublasSgemm(S=X^T*Y)"
-      );
-      launch_float_to_double(dTmpFloatOut_, dA_, static_cast<size_t>(p) * static_cast<size_t>(m),
-                             "cast_float_to_double(S=X^T*Y)");
-    } else {
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, m, n, &alpha, dX_, n, dYtrain_, n, &beta, dA_, p),
-        "cublasDgemm(S=X^T*Y)"
-      );
-    }
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, m, n, &alpha, dX_, n, dYtrain_, n, &beta, dA_, p),
+      "cublasDgemm(S=X^T*Y)"
+    );
   }
 
   void x_times_vec(int n, int p, const double* dVec, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    if (use_fp32_train_storage()) {
-      const float alpha_f = 1.0f;
-      const float beta_f = 0.0f;
-      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(p, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
-      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(n, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
-      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(p), "cast_double_to_float(x_times_vec)");
-      check_cublas(
-        cublasSgemm(
-          handle_,
-          CUBLAS_OP_N,
-          CUBLAS_OP_N,
-          n,
-          1,
-          p,
-          &alpha_f,
-          dXf_,
-          n,
-          dTmpFloatIn_,
-          p,
-          &beta_f,
-          dTmpFloatOut_,
-          n
-        ),
-        where
-      );
-      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(n), "cast_float_to_double(x_times_vec)");
-    } else {
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, 1, p, &alpha, dX_, n, dVec, p, &beta, dOut, n),
-        where
-      );
-    }
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, 1, p, &alpha, dX_, n, dVec, p, &beta, dOut, n),
+      where
+    );
   }
 
   void xt_times_vec(int n, int p, const double* dVec, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    if (use_fp32_train_storage()) {
-      const float alpha_f = 1.0f;
-      const float beta_f = 0.0f;
-      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(n, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
-      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(p, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
-      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(n), "cast_double_to_float(xt_times_vec)");
-      check_cublas(
-        cublasSgemm(
-          handle_,
-          CUBLAS_OP_T,
-          CUBLAS_OP_N,
-          p,
-          1,
-          n,
-          &alpha_f,
-          dXf_,
-          n,
-          dTmpFloatIn_,
-          n,
-          &beta_f,
-          dTmpFloatOut_,
-          p
-        ),
-        where
-      );
-      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(p), "cast_float_to_double(xt_times_vec)");
-    } else {
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, 1, n, &alpha, dX_, n, dVec, n, &beta, dOut, p),
-        where
-      );
-    }
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, 1, n, &alpha, dX_, n, dVec, n, &beta, dOut, p),
+      where
+    );
   }
 
   void yt_times_vec(int n, int m, const double* dVec, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    if (use_fp32_train_storage()) {
-      const float alpha_f = 1.0f;
-      const float beta_f = 0.0f;
-      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(n, 1), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
-      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(m, 1), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
-      launch_double_to_float(dVec, dTmpFloatIn_, static_cast<size_t>(n), "cast_double_to_float(yt_times_vec)");
-      check_cublas(
-        cublasSgemm(
-          handle_,
-          CUBLAS_OP_T,
-          CUBLAS_OP_N,
-          m,
-          1,
-          n,
-          &alpha_f,
-          dYtrainf_,
-          n,
-          dTmpFloatIn_,
-          n,
-          &beta_f,
-          dTmpFloatOut_,
-          m
-        ),
-        where
-      );
-      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(m), "cast_float_to_double(yt_times_vec)");
-    } else {
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, n, &alpha, dYtrain_, n, dVec, n, &beta, dOut, m),
-        where
-      );
-    }
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, n, &alpha, dYtrain_, n, dVec, n, &beta, dOut, m),
+      where
+    );
   }
 
   void x_times_mat(int n, int p, int k, const double* dRight, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    if (use_fp32_train_storage()) {
-      const float alpha_f = 1.0f;
-      const float beta_f = 0.0f;
-      ensure_float_buffer(dTmpFloatIn_, bytes_for_float(p, k), bytes_TmpFloatIn_, "cudaMalloc(dTmpFloatIn)");
-      ensure_float_buffer(dTmpFloatOut_, bytes_for_float(n, k), bytes_TmpFloatOut_, "cudaMalloc(dTmpFloatOut)");
-      launch_double_to_float(dRight, dTmpFloatIn_, static_cast<size_t>(p) * static_cast<size_t>(k),
-                             "cast_double_to_float(x_times_mat)");
-      check_cublas(
-        cublasSgemm(
-          handle_,
-          CUBLAS_OP_N,
-          CUBLAS_OP_N,
-          n,
-          k,
-          p,
-          &alpha_f,
-          dXf_,
-          n,
-          dTmpFloatIn_,
-          p,
-          &beta_f,
-          dTmpFloatOut_,
-          n
-        ),
-        where
-      );
-      launch_float_to_double(dTmpFloatOut_, dOut, static_cast<size_t>(n) * static_cast<size_t>(k),
-                             "cast_float_to_double(x_times_mat)");
-    } else {
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, p, &alpha, dX_, n, dRight, p, &beta, dOut, n),
-        where
-      );
-    }
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, p, &alpha, dX_, n, dRight, p, &beta, dOut, n),
+      where
+    );
+  }
+
+  void implicit_a_times_mat(int n, int p, int m, int k, const double* dRight, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    ensure_buffer(dRRmat_, bytes_for(n, k), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, m, &alpha, dYtrain_, n,
+                  dRight, m, &beta, dRRmat_, n),
+      where
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, k, n, &alpha, dX_, n,
+                  dRRmat_, n, &beta, dOut, p),
+      where
+    );
+  }
+
+  void implicit_at_times_mat(int n, int p, int m, int k, const double* dRight, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    ensure_buffer(dRRmat_, bytes_for(n, k), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, p, &alpha, dX_, n,
+                  dRight, p, &beta, dRRmat_, n),
+      where
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, k, n, &alpha, dYtrain_, n,
+                  dRRmat_, n, &beta, dOut, m),
+      where
+    );
+  }
+
+  void implicit_bsmall_from_basis(int n, int p, int m, int l, const double* dBasis, double* dOut, const char* where) {
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    ensure_buffer(dRRmat_, bytes_for(n, l), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, l, p, &alpha, dX_, n,
+                  dBasis, p, &beta, dRRmat_, n),
+      where
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, n, &alpha, dRRmat_, n,
+                  dYtrain_, n, &beta, dOut, l),
+      where
+    );
   }
 
   void ensure_int_buffer(int*& ptr, size_t required, size_t& current, const char* where) {
@@ -1601,10 +1600,6 @@ class CudaRSVDWorkspace {
   void release() {
     if (dX_ != nullptr) cudaFree(dX_);
     if (dYtrain_ != nullptr) cudaFree(dYtrain_);
-    if (dXf_ != nullptr) cudaFree(dXf_);
-    if (dYtrainf_ != nullptr) cudaFree(dYtrainf_);
-    if (dTmpFloatIn_ != nullptr) cudaFree(dTmpFloatIn_);
-    if (dTmpFloatOut_ != nullptr) cudaFree(dTmpFloatOut_);
     if (dA_ != nullptr) cudaFree(dA_);
     if (dOmega_ != nullptr) cudaFree(dOmega_);
     if (dY_ != nullptr) cudaFree(dY_);
@@ -1630,10 +1625,6 @@ class CudaRSVDWorkspace {
     if (dInfo_ != nullptr) cudaFree(dInfo_);
     dX_ = nullptr;
     dYtrain_ = nullptr;
-    dXf_ = nullptr;
-    dYtrainf_ = nullptr;
-    dTmpFloatIn_ = nullptr;
-    dTmpFloatOut_ = nullptr;
     dA_ = nullptr;
     dOmega_ = nullptr;
     dY_ = nullptr;
@@ -1658,8 +1649,6 @@ class CudaRSVDWorkspace {
     dWorkEig_ = nullptr;
     dInfo_ = nullptr;
     bytes_X_ = bytes_Ytrain_ = 0;
-    bytes_Xf_ = bytes_Ytrainf_ = 0;
-    bytes_TmpFloatIn_ = bytes_TmpFloatOut_ = 0;
     bytes_A_ = bytes_Omega_ = bytes_Y_ = bytes_Z_ = 0;
     bytes_Q_ = bytes_Bsmall_ = bytes_Gram_ = 0;
     bytes_Transform_ = 0;
@@ -1682,10 +1671,6 @@ class CudaRSVDWorkspace {
 
   double* dX_ = nullptr;
   double* dYtrain_ = nullptr;
-  float* dXf_ = nullptr;
-  float* dYtrainf_ = nullptr;
-  float* dTmpFloatIn_ = nullptr;
-  float* dTmpFloatOut_ = nullptr;
   double* dA_ = nullptr;
   double* dOmega_ = nullptr;
   double* dY_ = nullptr;
@@ -1711,10 +1696,6 @@ class CudaRSVDWorkspace {
   int* dInfo_ = nullptr;
   size_t bytes_X_ = 0;
   size_t bytes_Ytrain_ = 0;
-  size_t bytes_Xf_ = 0;
-  size_t bytes_Ytrainf_ = 0;
-  size_t bytes_TmpFloatIn_ = 0;
-  size_t bytes_TmpFloatOut_ = 0;
   size_t bytes_A_ = 0;
   size_t bytes_Omega_ = 0;
   size_t bytes_Y_ = 0;
@@ -1749,8 +1730,6 @@ class CudaRSVDWorkspace {
   const double zero_ = 0.0;
   arma::mat hOmega_host_;
   arma::mat hGram_host_;
-  arma::fvec host_float_tmp_;
-  arma::vec host_double_tmp_;
 };
 
 thread_local CudaRSVDWorkspace g_workspace;
@@ -1899,12 +1878,13 @@ void cuda_simpls_fast_set_training_matrices(
   int p,
   const double* hY,
   int m,
-  bool fit
+  bool fit,
+  bool form_crossprod
 ) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.set_pls_training_matrices(hX, n, p, hY, m, fit);
+  g_workspace.set_pls_training_matrices(hX, n, p, hY, m, fit, form_crossprod);
 }
 
 void cuda_simpls_fast_begin_device_loop(
@@ -2054,6 +2034,19 @@ PLSSVDGPUResult cuda_plssvd_fit(
   return g_workspace.plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt);
 }
 
+PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
+  const Mat& Xtrain,
+  const Mat& Ytrain,
+  const arma::ivec& ncomp,
+  bool fit,
+  const SVDOptions& opt
+) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  return g_workspace.plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt);
+}
+
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
   const arma::uword target = std::min<arma::uword>(
@@ -2112,6 +2105,16 @@ SVDResult cuda_rsvd_resident_svd(const Mat&, int, const SVDOptions&) {
 }
 
 PLSSVDGPUResult cuda_plssvd_fit(
+  const Mat&,
+  const Mat&,
+  const arma::ivec&,
+  bool,
+  const SVDOptions&
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   const Mat&,
   const Mat&,
   const arma::ivec&,
@@ -2216,6 +2219,7 @@ void cuda_simpls_fast_set_training_matrices(
   int,
   const double*,
   int,
+  bool,
   bool
 ) {
   throw std::runtime_error("CUDA backend not compiled");

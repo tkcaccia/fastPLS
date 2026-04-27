@@ -11,7 +11,7 @@ test_that("pls and predict support regression workflow", {
     Y[idx, , drop = FALSE],
     ncomp = 1:3,
     method = "simpls",
-    svd.method = "arpack",
+    svd.method = "cpu_rsvd",
     fit = TRUE
   )
 
@@ -40,7 +40,7 @@ test_that("pls and predict support classification workflow", {
     y[idx],
     ncomp = 1:2,
     method = "plssvd",
-    svd.method = "arpack",
+    svd.method = "cpu_rsvd",
     fit = TRUE
   )
 
@@ -70,7 +70,7 @@ test_that("pls_r supports regression and classification workflows", {
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
     method = "plssvd",
-    svd.method = "arpack",
+    svd.method = "cpu_rsvd",
     fit = TRUE
   )
   expect_s3_class(reg_fit, "fastPLS")
@@ -105,7 +105,7 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
     ncomp = 1:2,
     kfold = 3,
     method = "simpls",
-    svd.method = "arpack"
+    svd.method = "cpu_rsvd"
   )
   expect_true(is.list(cv_reg))
   expect_true("Q2Y" %in% names(cv_reg))
@@ -116,7 +116,7 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
     ncomp = 1:2,
     kfold = 3,
     method = "simpls",
-    svd.method = "arpack"
+    svd.method = "cpu_rsvd"
   )
   expect_true(is.list(cv_cls))
   expect_true("Q2Y" %in% names(cv_cls))
@@ -129,7 +129,7 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
     kfold_inner = 3,
     kfold_outer = 3,
     method = "simpls",
-    svd.method = "arpack"
+    svd.method = "cpu_rsvd"
   )
   expect_true(is.list(dcv_reg))
   expect_true("Q2Y" %in% names(dcv_reg))
@@ -145,7 +145,7 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
     kfold_inner = 3,
     kfold_outer = 3,
     method = "simpls",
-    svd.method = "arpack"
+    svd.method = "cpu_rsvd"
   )
   expect_true(is.list(dcv_cls))
   expect_true(is.factor(dcv_cls$Ypred))
@@ -159,18 +159,19 @@ test_that("SVD utilities and helper functions are usable in practice", {
   sm <- svd_methods()
   expect_true(is.data.frame(sm))
   expect_equal(colnames(sm), c("method", "enabled"))
-  expect_true(all(c("irlba", "arpack", "cpu_rsvd") %in% sm$method))
+  expect_true(all(c("irlba", "cpu_rsvd") %in% sm$method))
+  expect_false("arpack" %in% sm$method)
   expect_false("cuda_rsvd" %in% sm$method)
 
-  sr <- svd_run(A, k = 4, method = "arpack")
+  sr <- svd_run(A, k = 4, method = "cpu_rsvd")
   expect_true(is.list(sr))
   expect_true(all(c("U", "s", "Vt", "method", "elapsed") %in% names(sr)))
   expect_equal(ncol(sr$U), 4L)
   expect_equal(length(sr$s), 4L)
 
-  sb <- svd_benchmark(A, k = 4, methods = c("irlba", "arpack", "cpu_rsvd"), reps = 2L)
+  sb <- svd_benchmark(A, k = 4, methods = c("irlba", "cpu_rsvd"), reps = 2L)
   expect_true(is.data.frame(sb))
-  expect_equal(nrow(sb), 6L)
+  expect_equal(nrow(sb), 4L)
   expect_true(all(c("method", "rep", "elapsed", "status") %in% names(sb)))
   expect_true(all(sb$status %in% c("ok", "error", "unavailable")))
 
@@ -187,11 +188,11 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_true(is.numeric(C2))
   expect_equal(length(C2), 5L)
 
-  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "arpack")
+  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd")
   vip_uni <- ViP(model_uni)
   expect_true(is.matrix(vip_uni))
 
-  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "arpack")
+  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd")
   vip_multi <- ViP(model_multi)
   expect_true(is.list(vip_multi))
   expect_equal(length(vip_multi), 2L)

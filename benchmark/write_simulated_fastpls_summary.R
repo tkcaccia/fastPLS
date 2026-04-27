@@ -79,7 +79,7 @@ if (nrow(simpls_fast_gain)) {
 plssvd_cap <- summary_dt[method == "plssvd" & effective_ncomp_median < requested_ncomp]
 
 spectral_effect <- if (nrow(spectrum_rows)) {
-  spectrum_rows[backend %in% c("cpu_rsvd", "irlba", "arpack", "gpu_native"),
+  spectrum_rows[backend %in% c("cpu_rsvd", "irlba", "gpu_native"),
                 .(elapsed_ms_median = mean(elapsed_ms_median), predictive_median = mean(predictive_median, na.rm = TRUE)),
                 by = .(method, backend, spectrum_regime)]
 } else {

@@ -108,6 +108,52 @@ fixed_train_split <- function(n, train_n) {
   list(train = sort(train_idx), test = sort(test_idx))
 }
 
+env_positive_int <- function(name, default) {
+  val <- suppressWarnings(as.integer(Sys.getenv(name, as.character(default))))
+  if (!is.finite(val) || is.na(val) || val < 1L) default else val
+}
+
+sample_stratified_n <- function(y, n_target) {
+  y <- safe_factor(y)
+  n <- length(y)
+  n_target <- min(max(1L, as.integer(n_target)), n)
+  idx <- seq_len(n)
+  by_class <- split(idx, y)
+  non_empty <- by_class[vapply(by_class, length, integer(1)) > 0L]
+  if (n_target <= length(non_empty)) {
+    return(sort(sample(vapply(non_empty, function(ii) sample(ii, 1L), integer(1)), n_target)))
+  }
+  base <- vapply(non_empty, function(ii) sample(ii, 1L), integer(1))
+  remaining <- setdiff(idx, base)
+  extra_n <- n_target - length(base)
+  extra <- if (extra_n > 0L) sample(remaining, extra_n) else integer(0)
+  sort(c(base, extra))
+}
+
+sample_rows_n <- function(n, n_target) {
+  n_target <- min(max(1L, as.integer(n_target)), n)
+  sort(sample.int(n, size = n_target))
+}
+
+numeric_frame_to_matrix <- function(x) {
+  is_plain_numeric <- vapply(
+    x,
+    function(v) is.numeric(v) || is.integer(v) || is.logical(v),
+    logical(1)
+  )
+  if (all(is_plain_numeric)) {
+    return(as.matrix(x))
+  }
+  x <- as.data.frame(lapply(x, function(v) {
+    if (is.numeric(v) || is.integer(v) || is.logical(v)) {
+      as.numeric(v)
+    } else {
+      suppressWarnings(as.numeric(as.character(v)))
+    }
+  }))
+  as.matrix(x)
+}
+
 safe_factor <- function(y) {
   if (is.factor(y)) return(droplevels(y))
   droplevels(factor(y))
@@ -239,71 +285,96 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
   if (dataset_id == "imagenet") {
     e <- new.env(parent = emptyenv())
     objs <- load(path, envir = e)
-    train_n <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_IMAGENET_TRAIN_N", "1000000")))
-    if (!is.finite(train_n) || is.na(train_n) || train_n < 1L) train_n <- 1000000L
+    train_n <- env_positive_int("FASTPLS_IMAGENET_TRAIN_N", 50000L)
+    test_n <- env_positive_int("FASTPLS_IMAGENET_TEST_N", 10000L)
     set.seed(as.integer(split_seed))
 
     if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% objs)) {
-      Xall <- rbind(as.matrix(e$Xtrain), as.matrix(e$Xtest))
-      yall <- safe_factor(c(as.character(e$Ytrain), as.character(e$Ytest)))
-      sp <- fixed_train_split(nrow(Xall), train_n)
-      return(list(
+      y_train_all <- safe_factor(e$Ytrain)
+      train_idx <- sample_stratified_n(y_train_all, min(train_n, nrow(e$Xtrain)))
+      test_idx <- sample_rows_n(nrow(e$Xtest), min(test_n, nrow(e$Xtest)))
+      y_train <- droplevels(y_train_all[train_idx])
+      y_test <- factor(e$Ytest[test_idx], levels = levels(y_train))
+      task <- list(
         dataset = dataset_id,
         task_type = "classification",
         dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
         split_seed = as.integer(split_seed),
-        Xtrain = Xall[sp$train, , drop = FALSE],
-        Ytrain = droplevels(yall[sp$train]),
-        Xtest = Xall[sp$test, , drop = FALSE],
-        Ytest = factor(yall[sp$test], levels = levels(yall[sp$train])),
-        n_train = length(sp$train),
-        n_test = length(sp$test),
-        p = ncol(Xall),
-        n_classes = nlevels(yall[sp$train])
-      ))
+        Xtrain = as.matrix(e$Xtrain[train_idx, , drop = FALSE]),
+        Ytrain = y_train,
+        Xtest = as.matrix(e$Xtest[test_idx, , drop = FALSE]),
+        Ytest = y_test,
+        n_train = length(train_idx),
+        n_test = length(test_idx),
+        p = ncol(e$Xtrain),
+        n_classes = nlevels(y_train)
+      )
+      rm(e)
+      gc()
+      return(task)
     }
 
     if ("r" %in% objs && is.data.frame(e$r) && "label_idx" %in% colnames(e$r)) {
-      X <- e$r[, -c(1:3), drop = FALSE]
-      X <- as.data.frame(lapply(X, function(x) suppressWarnings(as.numeric(as.character(x)))))
-      keep <- vapply(X, function(v) any(is.finite(v)), logical(1))
-      X <- as.matrix(X[, keep, drop = FALSE])
       y <- safe_factor(e$r[, "label_idx"])
-      sp <- fixed_train_split(nrow(X), train_n)
-      return(list(
+      sp <- fixed_train_split(nrow(e$r), min(train_n, nrow(e$r) - 1L))
+      if (length(sp$test) > test_n) {
+        sp$test <- sort(sample(sp$test, test_n))
+      }
+      rows <- c(sp$train, sp$test)
+      feat_cols <- grep("^feat_", names(e$r), value = TRUE)
+      if (!length(feat_cols)) {
+        feat_cols <- setdiff(names(e$r), names(e$r)[seq_len(min(3L, ncol(e$r)))])
+      }
+      Xsub <- e$r[rows, feat_cols, drop = FALSE]
+      X <- numeric_frame_to_matrix(Xsub)
+      keep <- colSums(is.finite(X)) > 0
+      X <- as.matrix(X[, keep, drop = FALSE])
+      train_rows <- seq_along(sp$train)
+      test_rows <- length(sp$train) + seq_along(sp$test)
+      y_train <- droplevels(y[sp$train])
+      task <- list(
         dataset = dataset_id,
         task_type = "classification",
         dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
         split_seed = as.integer(split_seed),
-        Xtrain = X[sp$train, , drop = FALSE],
-        Ytrain = droplevels(y[sp$train]),
-        Xtest = X[sp$test, , drop = FALSE],
-        Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+        Xtrain = X[train_rows, , drop = FALSE],
+        Ytrain = y_train,
+        Xtest = X[test_rows, , drop = FALSE],
+        Ytest = factor(y[sp$test], levels = levels(y_train)),
         n_train = length(sp$train),
         n_test = length(sp$test),
         p = ncol(X),
-        n_classes = nlevels(y[sp$train])
-      ))
+        n_classes = nlevels(y_train)
+      )
+      rm(e, Xsub, X)
+      gc()
+      return(task)
     }
 
     if (all(c("data", "labels") %in% objs)) {
-      X <- as.matrix(e$data)
       y <- safe_factor(e$labels)
-      sp <- fixed_train_split(nrow(X), train_n)
-      return(list(
+      sp <- fixed_train_split(nrow(e$data), min(train_n, nrow(e$data) - 1L))
+      if (length(sp$test) > test_n) {
+        sp$test <- sort(sample(sp$test, test_n))
+      }
+      y_train <- droplevels(y[sp$train])
+      task <- list(
         dataset = dataset_id,
         task_type = "classification",
         dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
         split_seed = as.integer(split_seed),
-        Xtrain = X[sp$train, , drop = FALSE],
-        Ytrain = droplevels(y[sp$train]),
-        Xtest = X[sp$test, , drop = FALSE],
-        Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+        Xtrain = as.matrix(e$data[sp$train, , drop = FALSE]),
+        Ytrain = y_train,
+        Xtest = as.matrix(e$data[sp$test, , drop = FALSE]),
+        Ytest = factor(y[sp$test], levels = levels(y_train)),
         n_train = length(sp$train),
         n_test = length(sp$test),
-        p = ncol(X),
-        n_classes = nlevels(y[sp$train])
-      ))
+        p = ncol(e$data),
+        n_classes = nlevels(y_train)
+      )
+      rm(e)
+      gc()
+      return(task)
     }
 
     stop("Unsupported imagenet.RData format: ", path)
@@ -390,54 +461,34 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
 }
 
 variant_specs <- function() {
-  data.frame(
-    variant_name = c(
-      "cpp_plssvd_cpu_rsvd",
-      "cpp_plssvd_irlba",
-      "cpp_plssvd_arpack",
-      "r_plssvd_cpu_rsvd",
-      "r_plssvd_irlba",
-      "r_plssvd_arpack",
-      "gpu_plssvd_fp64",
-      "gpu_plssvd_fp32",
-      "cpp_simpls_cpu_rsvd",
-      "cpp_simpls_irlba",
-      "cpp_simpls_arpack",
-      "r_simpls_cpu_rsvd",
-      "r_simpls_irlba",
-      "r_simpls_arpack",
-      "pls_pkg_simpls",
-      "cpp_simpls_fast_cpu_rsvd",
-      "cpp_simpls_fast_irlba",
-      "cpp_simpls_fast_arpack",
-      "r_simpls_fast_cpu_rsvd",
-      "r_simpls_fast_irlba",
-      "r_simpls_fast_arpack",
-      "gpu_simpls_fast_fp64",
-      "gpu_simpls_fast_fp32"
-    ),
-    method_family = c(
-      "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd", "plssvd",
-      "simpls", "simpls", "simpls", "simpls", "simpls", "simpls", "simpls",
-      "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast", "simpls_fast"
-    ),
-    engine = c(
-      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "GPU", "GPU",
-      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "CPU",
-      "CPU", "CPU", "CPU", "CPU", "CPU", "CPU", "GPU", "GPU"
-    ),
-    backend = c(
-      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "gpu_native", "gpu_native",
-      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "pls_pkg",
-      "cpu_rsvd", "irlba", "arpack", "cpu_rsvd", "irlba", "arpack", "gpu_native", "gpu_native"
-    ),
-    implementation_label = c(
-      "Cpp", "Cpp", "Cpp", "R", "R", "R", "CUDA 64-bit", "CUDA 32-bit",
-      "Cpp", "Cpp", "Cpp", "R", "R", "R", "pls_pkg",
-      "Cpp", "Cpp", "Cpp", "R", "R", "R", "CUDA 64-bit", "CUDA 32-bit"
-    ),
-    stringsAsFactors = FALSE
+  rows <- list(
+    c("cpp_plssvd_cpu_rsvd", "plssvd", "CPU", "cpu_rsvd", "Cpp"),
+    c("cpp_plssvd_irlba", "plssvd", "CPU", "irlba", "Cpp"),
+    c("r_plssvd_cpu_rsvd", "plssvd", "CPU", "cpu_rsvd", "R"),
+    c("r_plssvd_irlba", "plssvd", "CPU", "irlba", "R"),
+    c("gpu_plssvd_fp64", "plssvd", "GPU", "gpu_native", "CUDA 64-bit"),
+    c("cpp_simpls_cpu_rsvd", "simpls", "CPU", "cpu_rsvd", "Cpp"),
+    c("cpp_simpls_irlba", "simpls", "CPU", "irlba", "Cpp"),
+    c("r_simpls_cpu_rsvd", "simpls", "CPU", "cpu_rsvd", "R"),
+    c("r_simpls_irlba", "simpls", "CPU", "irlba", "R"),
+    c("gpu_simpls_fp64", "simpls", "GPU", "gpu_native", "CUDA 64-bit"),
+    c("pls_pkg_simpls", "simpls", "CPU", "pls_pkg", "pls_pkg"),
+    c("cpp_kernelpls_cpu_rsvd", "kernelpls", "CPU", "cpu_rsvd", "Cpp"),
+    c("cpp_kernelpls_irlba", "kernelpls", "CPU", "irlba", "Cpp"),
+    c("r_kernelpls_cpu_rsvd", "kernelpls", "CPU", "cpu_rsvd", "R"),
+    c("r_kernelpls_irlba", "kernelpls", "CPU", "irlba", "R"),
+    c("gpu_kernelpls_fp64", "kernelpls", "GPU", "gpu_native", "CUDA 64-bit"),
+    c("pls_pkg_kernelpls", "kernelpls", "CPU", "pls_pkg", "pls_pkg"),
+    c("cpp_opls_cpu_rsvd", "opls", "CPU", "cpu_rsvd", "Cpp"),
+    c("cpp_opls_irlba", "opls", "CPU", "irlba", "Cpp"),
+    c("r_opls_cpu_rsvd", "opls", "CPU", "cpu_rsvd", "R"),
+    c("r_opls_irlba", "opls", "CPU", "irlba", "R"),
+    c("gpu_opls_fp64", "opls", "GPU", "gpu_native", "CUDA 64-bit"),
+    c("pls_pkg_opls", "opls", "CPU", "pls_pkg", "pls_pkg")
   )
+  out <- as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE)
+  names(out) <- c("variant_name", "method_family", "engine", "backend", "implementation_label")
+  out
 }
 
 variant_spec <- function(variant_name) {
@@ -452,7 +503,9 @@ method_panel_label <- function(method_family) {
     method_family,
     plssvd = "plssvd",
     simpls = "simpls",
-    simpls_fast = "simpls-fast",
+    simpls_fast = "simpls",
+    opls = "opls",
+    kernelpls = "kernelpls",
     method_family
   )
 }

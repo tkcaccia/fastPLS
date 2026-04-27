@@ -38,8 +38,6 @@ struct SVDOptions {
 
 enum SVDMethodId {
   SVD_METHOD_IRLBA = 1,
-  SVD_METHOD_ARPACK = 2,
-  SVD_METHOD_DC = SVD_METHOD_ARPACK, // deprecated alias
   SVD_METHOD_CPU_EXACT = 3,
   SVD_METHOD_CPU_RSVD = 4,
   SVD_METHOD_CUDA_RSVD = 5

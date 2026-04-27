@@ -394,13 +394,10 @@ synthetic_smoke_methods <- function(cuda_ok = FALSE,
 
   out <- data.table::rbindlist(list(
     data.table::data.table(engine = "Rcpp", algorithm = "plssvd", svd_method = "irlba", fast_profile = "default"),
-    data.table::data.table(engine = "Rcpp", algorithm = "plssvd", svd_method = "arpack", fast_profile = "default"),
     data.table::data.table(engine = "Rcpp", algorithm = "plssvd", svd_method = "cpu_rsvd", fast_profile = "default"),
     data.table::data.table(engine = "Rcpp", algorithm = "simpls", svd_method = "irlba", fast_profile = "default"),
-    data.table::data.table(engine = "Rcpp", algorithm = "simpls", svd_method = "arpack", fast_profile = "default"),
     data.table::data.table(engine = "Rcpp", algorithm = "simpls", svd_method = "cpu_rsvd", fast_profile = "default"),
     data.table::data.table(engine = "Rcpp", algorithm = "simpls_fast", svd_method = "irlba", fast_profile = "incdefl"),
-    data.table::data.table(engine = "Rcpp", algorithm = "simpls_fast", svd_method = "arpack", fast_profile = "incdefl"),
     data.table::data.table(engine = "Rcpp", algorithm = "simpls_fast", svd_method = "cpu_rsvd", fast_profile = "incdefl")
   ))
 
@@ -408,14 +405,11 @@ synthetic_smoke_methods <- function(cuda_ok = FALSE,
     out <- data.table::rbindlist(list(
       out,
       data.table::data.table(engine = "R", algorithm = "plssvd", svd_method = "irlba", fast_profile = "default"),
-      data.table::data.table(engine = "R", algorithm = "plssvd", svd_method = "arpack", fast_profile = "default"),
       data.table::data.table(engine = "R", algorithm = "plssvd", svd_method = "cpu_rsvd", fast_profile = "default"),
       data.table::data.table(engine = "R", algorithm = "simpls", svd_method = "irlba", fast_profile = "default"),
-      data.table::data.table(engine = "R", algorithm = "simpls", svd_method = "arpack", fast_profile = "default"),
       data.table::data.table(engine = "R", algorithm = "simpls", svd_method = "cpu_rsvd", fast_profile = "default"),
       data.table::data.table(engine = "R", algorithm = "simpls_fast", svd_method = "cpu_rsvd", fast_profile = "incdefl"),
-      data.table::data.table(engine = "R", algorithm = "simpls_fast", svd_method = "irlba", fast_profile = "incdefl"),
-      data.table::data.table(engine = "R", algorithm = "simpls_fast", svd_method = "arpack", fast_profile = "incdefl")
+      data.table::data.table(engine = "R", algorithm = "simpls_fast", svd_method = "irlba", fast_profile = "incdefl")
     ), fill = TRUE)
   }
 

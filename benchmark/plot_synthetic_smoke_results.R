@@ -44,8 +44,8 @@ decorate_plot_dt <- function(dt) {
       "gpu",
       fifelse(grepl("irlba", svd_method, ignore.case = TRUE),
         "irlba",
-        fifelse(grepl("arpack|svds|dc|exact", svd_method, ignore.case = TRUE),
-          "arpack",
+        fifelse(grepl("exact", svd_method, ignore.case = TRUE),
+          "exact",
           fifelse(grepl("pls_pkg", svd_method, ignore.case = TRUE),
             "pls_pkg",
             tolower(svd_method)
@@ -70,13 +70,13 @@ decorate_plot_dt <- function(dt) {
 sum_dt <- decorate_plot_dt(sum_dt)
 fair_dt <- decorate_plot_dt(fair_dt)
 
-svd_levels <- c("irlba", "rsvd", "gpu", "arpack", "pls_pkg")
+svd_levels <- c("irlba", "rsvd", "gpu", "exact", "pls_pkg")
 svd_levels <- svd_levels[svd_levels %in% unique(c(sum_dt$svd_family, fair_dt$svd_family))]
 svd_palette <- c(
   irlba = "#1b9e77",
   rsvd = "#d95f02",
   gpu = "#e7298a",
-  arpack = "#7570b3",
+  exact = "#7570b3",
   pls_pkg = "#666666"
 )
 svd_palette <- svd_palette[svd_levels]

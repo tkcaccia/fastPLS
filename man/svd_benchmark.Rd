@@ -7,7 +7,7 @@
 svd_benchmark(
   A,
   k,
-  methods = c("irlba", "arpack", "cpu_rsvd"),
+  methods = c("irlba", "cpu_rsvd"),
   reps = 3L,
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -29,7 +29,7 @@ svd_benchmark(
 
 \item{rsvd_power}{RSVD power iterations.}
 
-\item{svds_tol}{Tolerance passed to ARPACK `svds()` when applicable.}
+\item{svds_tol}{Reserved backend tolerance placeholder.}
 
 \item{seed}{RSVD seed.}
 

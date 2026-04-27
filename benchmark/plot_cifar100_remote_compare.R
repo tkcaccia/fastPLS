@@ -48,8 +48,6 @@ variant_colors <- c(
   test_gpu_simpls_fast_host_qr = "#33a02c",
   test_gpu_plssvd_qless = "#6a3d9a",
   test_gpu_simpls_fast_qless = "#b15928",
-  test_gpu_plssvd_mixed_fp32 = "#e31a1c",
-  test_gpu_simpls_fast_mixed_fp32 = "#ff7f00",
   test_cpu_plssvd_cpu_rsvd = "#1f78b4",
   test_cpu_simpls_fast_cpu_rsvd = "#b2df8a",
   test_cpu_plssvd_irlba = "#fb9a99",

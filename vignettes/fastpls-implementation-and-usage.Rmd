@@ -17,7 +17,8 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 classification with:
 
 - two algorithms: `plssvd` and `simpls`
-- multiple SVD backends (`irlba`, `dc`, `cpu_rsvd`, `cuda_rsvd`)
+- multiple CPU SVD backends (`irlba`, `cpu_rsvd`) plus separate GPU-native
+  wrappers where CUDA is available
 - Rcpp and pure-R interfaces (`pls()` and `pls_r()`)
 - cross-validation helpers (`optim.pls.cv()`, `pls.double.cv()`)
 
@@ -97,16 +98,16 @@ SIMPLS while improving throughput on large matrices.
 
 ### 3) SVD Backends
 
-- `irlba`: legacy fast truncated route.
-- `dc`: deterministic exact CPU backend implemented with Armadillo `svd_econ()`.
+- `irlba`: bundled truncated SVD route.
 - `cpu_rsvd`: randomized CPU SVD with `rsvd_oversample`, `rsvd_power`, and `seed`.
-- `cuda_rsvd`: CUDA randomized SVD (available only when `has_cuda()` is `TRUE`).
+- GPU execution is exposed through GPU-native wrappers such as `plssvd_gpu()`
+  and `simpls_gpu()`, not through `pls(..., svd.method = "cuda_rsvd")`.
 
 ### 4) `pls()` vs `pls_r()`
 
 - `pls()` calls compiled code paths for performance.
-- `pls_r()` mirrors the same user API in pure R and supports
-  `irlba`, `dc`, and `cpu_rsvd`.
+- `pls_r()` mirrors the same user API in pure R and supports `irlba` and
+  `cpu_rsvd`.
 - for classification, factor `Y` is converted internally to one-hot encoding and
   class labels are returned by `predict.fastPLS()`.
 
@@ -117,7 +118,7 @@ m_reg <- pls(
   Xtr, Ytr_reg,
   ncomp = 1:3,
   method = "simpls",
-  svd.method = "dc",
+  svd.method = "irlba",
   fit = TRUE
 )
 
@@ -154,7 +155,7 @@ m_cls <- pls(
   Xtr, ytr_cls, Xte, yte_cls,
   ncomp = 1:2,
   method = "plssvd",
-  svd.method = "dc",
+  svd.method = "irlba",
   fit = TRUE
 )
 
@@ -186,7 +187,7 @@ cv1 <- optim.pls.cv(
   ncomp = 1:3,
   kfold = 3,
   method = "simpls",
-  svd.method = "dc"
+  svd.method = "irlba"
 )
 
 names(cv1)
@@ -201,7 +202,7 @@ cv2 <- pls.double.cv(
   kfold_inner = 3,
   kfold_outer = 3,
   method = "simpls",
-  svd.method = "dc"
+  svd.method = "irlba"
 )
 
 names(cv2)
@@ -211,8 +212,8 @@ names(cv2)
 
 ```{r}
 svd_methods()
-svd_run(Xtr, k = 3, method = "dc")
-svd_benchmark(Xtr, k = 3, methods = c("irlba", "dc", "cpu_rsvd"), reps = 2)
+svd_run(Xtr, k = 3, method = "irlba")
+svd_benchmark(Xtr, k = 3, methods = c("irlba", "cpu_rsvd"), reps = 2)
 ```
 
 ## Additional Helpers
@@ -238,7 +239,8 @@ str(vip)
   structure; fastPLS automatically enforces the valid component cap.
 - For reproducible approximate SVD, keep `svd.method = "cpu_rsvd"` and set
   `seed` (and optionally `rsvd_power`).
-- Use `has_cuda()` to check whether `cuda_rsvd` is available in your session.
+- Use `has_cuda()` to check whether GPU-native wrappers are available in your
+  session.
 
 ## References
 

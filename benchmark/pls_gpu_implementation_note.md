@@ -33,7 +33,6 @@ Available methods:
 Available public SVD backends in `pls()`:
 
 - `irlba`
-- `arpack`
 - `cpu_rsvd`
 
 The former hybrid CUDA route through:
@@ -84,7 +83,6 @@ Properties:
 
 Approximation behavior:
 
-- `arpack`: truncated CPU SVD
 - `cpu_rsvd`: approximate randomized SVD
 - `irlba`: legacy IRLB/exact fallback path depending on code path and matrix size
 

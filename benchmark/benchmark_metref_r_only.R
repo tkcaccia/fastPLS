@@ -47,7 +47,7 @@ methods <- rbindlist(list(
   data.table(
     engine = "R",
     algorithm = rep(c("plssvd", "simpls", "simpls_fast"), each = 3L),
-    svd_method = rep(c("arpack", "cpu_rsvd", "irlba"), times = 3L)
+    svd_method = rep(c("cpu_rsvd", "irlba"), times = 3L)
   ),
   data.table(
     engine = "pls_pkg",
@@ -249,7 +249,7 @@ p <- ggplot(
   geom_point(size = 2) +
   facet_grid(panel ~ algorithm, scales = "free_y") +
   scale_color_manual(
-    values = c(arpack = "#7570b3", cpu_rsvd = "#d95f02", irlba = "#1b9e77", pls_pkg = "#666666"),
+    values = c(cpu_rsvd = "#d95f02", irlba = "#1b9e77", pls_pkg = "#666666"),
     drop = FALSE
   ) +
   scale_shape_manual(values = c(R = 16, pls_pkg = 15), drop = FALSE) +

@@ -159,15 +159,13 @@ variant_specs <- function(include_optional_cpu = TRUE, include_test_cpu = TRUE) 
         "test_gpu_plssvd_host_qr",
         "test_gpu_simpls_fast_host_qr",
         "test_gpu_plssvd_qless",
-        "test_gpu_simpls_fast_qless",
-        "test_gpu_plssvd_mixed_fp32",
-        "test_gpu_simpls_fast_mixed_fp32"
+        "test_gpu_simpls_fast_qless"
       ),
       code_tree = "test",
-      method_family = c("plssvd", "simpls_fast", "plssvd", "simpls_fast", "plssvd", "simpls_fast"),
+      method_family = c("plssvd", "simpls_fast", "plssvd", "simpls_fast"),
       engine = "GPU",
       backend = "gpu_native",
-      precision_mode = c("host_qr_eig", "host_qr_eig", "qless_host", "qless_host", "mixed_fp32", "mixed_fp32"),
+      precision_mode = c("host_qr_eig", "host_qr_eig", "qless_host", "qless_host"),
       label_mode = "default",
       stringsAsFactors = FALSE
     )

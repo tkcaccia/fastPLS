@@ -32,7 +32,7 @@ reps <- 3L
 
 cfg <- expand.grid(
   algorithm = c("simpls", "plssvd"),
-  svd_method = c("irlba", "arpack", "cpu_exact", "cpu_rsvd", "cuda_rsvd"),
+  svd_method = c("irlba", "cpu_exact", "cpu_rsvd", "cuda_rsvd"),
   stringsAsFactors = FALSE
 )
 cfg$method_id <- paste0("Rcpp_", cfg$algorithm, "_", cfg$svd_method)

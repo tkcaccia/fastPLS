@@ -155,22 +155,6 @@ result_row <- tryCatch({
       gpu_eig = FALSE,
       gpu_qless_qr = TRUE
     ),
-    "GPU::plssvd::gpu_native::mixed_fp32" = function() fastPLS::plssvd_gpu(
-      Xtrain = task$Xtrain,
-      Ytrain = task$Ytrain,
-      ncomp = as.integer(effective_cap),
-      fit = FALSE,
-      seed = 123L + as.integer(replicate_id),
-      gpu_train_fp32 = TRUE
-    ),
-    "GPU::simpls_fast::gpu_native::mixed_fp32" = function() fastPLS::simpls_gpu(
-      Xtrain = task$Xtrain,
-      Ytrain = task$Ytrain,
-      ncomp = as.integer(effective_cap),
-      fit = FALSE,
-      seed = 123L + as.integer(replicate_id),
-      gpu_train_fp32 = TRUE
-    ),
     "CPU::plssvd::cpu_rsvd::default" = function() fastPLS::pls(
       Xtrain = task$Xtrain,
       Ytrain = task$Ytrain,

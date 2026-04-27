@@ -23,8 +23,7 @@ plssvd_gpu(
   gpu_qr = FALSE,
   gpu_eig = FALSE,
   gpu_qless_qr = FALSE,
-  gpu_finalize_threshold = 32L,
-  gpu_train_fp32 = TRUE
+  gpu_finalize_threshold = 32L
 )
 }
 \arguments{
@@ -60,9 +59,6 @@ plssvd_gpu(
 
 \item{gpu_finalize_threshold}{Threshold controlling when GPU-side
 finalization is attempted.}
-
-\item{gpu_train_fp32}{When \code{TRUE} (the default), keep the GPU training
-buffers in mixed float32 mode to reduce device memory usage.}
 }
 \value{
 A \code{fastPLS} object.
@@ -77,9 +73,8 @@ outputs once the fit is complete.
 This function requires a CUDA-enabled \code{fastPLS} build and an available CUDA
 device; otherwise it errors.
 
-The default configuration now uses mixed float32 training buffers together with
-automatic workspace reset after each fit, which lowers device-memory pressure
-in the benchmarked CIFAR100 workflow while preserving accuracy.
+The default configuration uses double-precision training buffers and automatic
+workspace reset after each fit.
 }
 \seealso{
 \code{\link{pls}}, \code{\link{simpls_gpu}}, \code{\link{predict.fastPLS}},

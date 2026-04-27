@@ -34,8 +34,6 @@ PRED_DIR="${RESULTS_DIR}/predictions"
 LOG_DIR="${RESULTS_DIR}/logs"
 SAVE_PREDICTIONS="${FASTPLS_SAVE_PREDICTIONS:-false}"
 
-export FASTPLS_ARPACK_TOL="${FASTPLS_ARPACK_TOL:-1e-5}"
-
 mkdir -p "${RESULTS_DIR}" "${RUN_ROWS_DIR}" "${GPU_LOG_DIR}" "${LOG_DIR}"
 if [ "${SAVE_PREDICTIONS}" = "true" ]; then
   mkdir -p "${PRED_DIR}"
@@ -81,6 +79,20 @@ rss_kb = float("${rss_kb}")
 print(round(rss_kb / 1024.0, 3))
 PY
   fi
+}
+
+row_status_from_csv() {
+  row_csv="$1"
+  "${PYTHON_BIN}" - "${row_csv}" <<'PY'
+import csv, sys
+path = sys.argv[1]
+try:
+    with open(path, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    print(rows[-1].get("status", "") if rows else "")
+except Exception:
+    print("")
+PY
 }
 
 append_row() {
@@ -251,10 +263,28 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     --meta-rds="${meta_rds}" \
     --split-seed="${SPLIT_SEED}"
 
+  dataset_reps="${REPS}"
+  case "${dataset_id}" in
+    cifar100|imagenet|nmr|prism)
+      dataset_reps=1
+      ;;
+  esac
+
   for variant_name in ${variants}; do
+    case "${dataset_id}:${variant_name}" in
+      nmr:r_*|imagenet:r_*)
+        echo "[INFO] Skipping pure-R variant ${variant_name} for ${dataset_id}"
+        continue
+        ;;
+    esac
+    variant_timed_out=0
     for requested_ncomp in $(printf '%s' "${dataset_ncomp_list}" | tr ',' ' '); do
+      if [ "${variant_timed_out}" -eq 1 ]; then
+        echo "[INFO] Skipping ${dataset_id}/${variant_name} ncomp=${requested_ncomp} after earlier timeout for this variant"
+        continue
+      fi
       rep_id=1
-      while [ "${rep_id}" -le "${REPS}" ]; do
+      while [ "${rep_id}" -le "${dataset_reps}" ]; do
         run_id="$(printf '%s__%s__n%s__rep%s' "${dataset_id}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
         row_csv="${RUN_ROWS_DIR}/${run_id}.csv"
         pid_file="${RUN_ROWS_DIR}/${run_id}.pid"
@@ -322,11 +352,22 @@ EOF
           write_missing_row "${row_csv}" "${task_rds}" "${variant_name}" "${requested_ncomp}" "${rep_id}" "${host_rss}" "${gpu_peak}" "${time_log}" "${pred_file}"
         fi
         append_row "${RAW_CSV}" "${row_csv}" "${host_rss}" "${gpu_peak}"
+        row_status="$(row_status_from_csv "${row_csv}")"
+        if [ "${row_status}" = "killed_timeout" ]; then
+          echo "[INFO] Timeout for ${dataset_id}/${variant_name} ncomp=${requested_ncomp} rep=${rep_id}; skipping remaining reps and higher ncomp for this variant"
+          variant_timed_out=1
+          break
+        fi
 
         rep_id=$((rep_id + 1))
       done
     done
   done
+  if [ "${SKIP_PLOT}" = "true" ]; then
+    echo "[INFO] Skipping plot generation after ${dataset_id}"
+  else
+    Rscript "${REPO_ROOT}/benchmark/plot_dataset_memory_compare.R" "${RESULTS_DIR}"
+  fi
 done
 
 if [ "${SKIP_PLOT}" = "true" ]; then
