@@ -27,6 +27,7 @@ pls_r(
   irlba_eps = 1e-09,
   irlba_svtol = 1e-05,
   seed = 1L,
+  fast_block = 1L,
   fit = FALSE,
   proj = FALSE,
   perm.test = FALSE,
@@ -52,6 +53,7 @@ optional power iterations, reduced exact SVD).
 \item{irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol}{Controls for the
 bundled IRLBA wrapper used by the pure-R \code{"irlba"} path.}
 \item{seed}{RSVD seed.}
+\item{fast_block}{Refresh block size for the optimized SIMPLS path.}
 }
 
 \details{

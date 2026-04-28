@@ -26,7 +26,7 @@ optim.pls.cv(
   irlba_eps = 1e-09,
   irlba_svtol = 1e-05,
   seed = 1L,
-  fast_block = 8L,
+  fast_block = 1L,
   fast_center_t = FALSE,
   fast_reorth_v = FALSE,
   fast_incremental = TRUE,

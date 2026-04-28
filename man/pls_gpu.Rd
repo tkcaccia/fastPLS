@@ -27,7 +27,13 @@ simpls_gpu(
   gpu_qr = FALSE,
   gpu_eig = FALSE,
   gpu_qless_qr = TRUE,
-  gpu_finalize_threshold = 32L
+  gpu_finalize_threshold = 32L,
+  fast_block = 1L,
+  fast_center_t = FALSE,
+  fast_reorth_v = FALSE,
+  fast_incremental = TRUE,
+  fast_inc_iters = 2L,
+  fast_defl_cache = TRUE
 )
 }
 
@@ -71,6 +77,18 @@ resident on the GPU. This is enabled by default for CUDA SIMPLS.}
 
 \item{gpu_finalize_threshold}{Threshold controlling when GPU-side
 finalization is attempted.}
+
+\item{fast_block}{Refresh block size for SIMPLS-fast variants.}
+
+\item{fast_center_t}{Deprecated and ignored.}
+
+\item{fast_reorth_v}{Deprecated and ignored.}
+
+\item{fast_incremental}{Deprecated and ignored.}
+
+\item{fast_inc_iters}{Deprecated and ignored.}
+
+\item{fast_defl_cache}{Deprecated and ignored.}
 }
 
 \details{

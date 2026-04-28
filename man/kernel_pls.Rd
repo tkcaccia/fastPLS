@@ -15,7 +15,8 @@ kernel_pls_r(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   svd.method = c("irlba", "cpu_rsvd"), rsvd_oversample = 10L,
   rsvd_power = 1L, svds_tol = 0, irlba_work = 0L,
   irlba_maxit = 1000L, irlba_tol = 1e-5, irlba_eps = 1e-9,
-  irlba_svtol = 1e-5, seed = 1L, fit = FALSE, proj = FALSE)
+  irlba_svtol = 1e-5, seed = 1L, fast_block = 1L,
+  fit = FALSE, proj = FALSE)
 
 kernel_pls_cpp(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
@@ -24,14 +25,15 @@ kernel_pls_cpp(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   svd.method = c("irlba", "cpu_rsvd"), rsvd_oversample = 10L,
   rsvd_power = 1L, svds_tol = 0, irlba_work = 0L,
   irlba_maxit = 1000L, irlba_tol = 1e-5, irlba_eps = 1e-9,
-  irlba_svtol = 1e-5, seed = 1L, fit = FALSE, proj = FALSE)
+  irlba_svtol = 1e-5, seed = 1L, fast_block = 1L,
+  fit = FALSE, proj = FALSE)
 
 kernel_pls_cuda(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
-  coef0 = 1, method = c("simpls_fast"),
+  coef0 = 1, method = c("simpls", "simpls_fast"),
   rsvd_oversample = 10L, rsvd_power = 1L, svds_tol = 0,
-  seed = 1L, fit = FALSE, proj = FALSE, ...)
+  seed = 1L, fast_block = 1L, fit = FALSE, proj = FALSE, ...)
 
 kernel_pls_fast_r(...)
 

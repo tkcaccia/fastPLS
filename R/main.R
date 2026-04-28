@@ -208,6 +208,31 @@
   isTRUE(s_mb > 32) || (isTRUE(q >= 100) && isTRUE(ncomp <= 10))
 }
 
+.should_store_coefficients <- function(p, q, nslices = 1L, compact_prediction_available = TRUE) {
+  mode <- tolower(Sys.getenv("FASTPLS_STORE_B", unset = "auto"))
+  if (mode %in% c("always", "1", "true", "yes")) {
+    return(TRUE)
+  }
+  if (mode %in% c("never", "0", "false", "no")) {
+    return(FALSE)
+  }
+  if (!isTRUE(compact_prediction_available)) {
+    return(TRUE)
+  }
+  max_mb <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_STORE_B_MAX_MB", unset = "256")))
+  if (!is.finite(max_mb) || max_mb < 0) {
+    max_mb <- 256
+  }
+  b_mb <- as.numeric(p) * as.numeric(q) * max(1L, as.integer(nslices)) * 8 / 1024^2
+  isTRUE(b_mb <= max_mb)
+}
+
+.annotate_coefficient_storage <- function(model, store_B) {
+  model$B_stored <- isTRUE(store_B)
+  model$compact_prediction <- !isTRUE(store_B)
+  model
+}
+
 .guard_removed_hybrid_cuda <- function(svd.method, context = "pls()") {
   if (length(svd.method) == 1L &&
       !is.na(svd.method) &&
@@ -518,14 +543,13 @@ pls.model1.rsvd.xprod.precision =
             rsvd_power = 1L,
             svds_tol = 0,
             seed = 1L,
-            xprod_precision = c("implicit64", "implicit64_irlba", "double"))
+            xprod_precision = c("implicit64", "double"))
   {
     xprod_precision <- match.arg(xprod_precision)
     precision_id <- switch(
       xprod_precision,
       double = 0L,
-      implicit64 = 3L,
-      implicit64_irlba = 4L
+      implicit64 = 3L
     )
     Xtrain <- as.matrix(Xtrain)
     Ytrain <- as.matrix(Ytrain)
@@ -543,6 +567,7 @@ pls.model1.rsvd.xprod.precision =
       as.integer(precision_id)
     )
     model$pls_method <- "plssvd"
+    model$predict_latent_ok <- TRUE
     class(model) = "fastPLS"
     model
   }
@@ -557,7 +582,7 @@ pls.model2.fast.rsvd.xprod.precision =
             rsvd_power = 1L,
             svds_tol = 0,
             seed = 1L,
-            xprod_precision = c("implicit64", "implicit64_irlba", "double"),
+            xprod_precision = c("implicit64", "double"),
             fast_block = 1L,
             fast_center_t = FALSE,
             fast_reorth_v = FALSE,
@@ -569,8 +594,7 @@ pls.model2.fast.rsvd.xprod.precision =
     precision_id <- switch(
       xprod_precision,
       double = 0L,
-      implicit64 = 3L,
-      implicit64_irlba = 4L
+      implicit64 = 3L
     )
     profile <- .resolve_simpls_fast_profile(
       fast_block = fast_block,
@@ -1678,6 +1702,9 @@ plssvd_gpu = function(Xtrain,
   if (!identical(backend, "cuda")) {
     .guard_removed_hybrid_cuda(svd.method, "PLS CV")
     svd.method <- .normalize_svd_method(match.arg(svd.method))
+    if (identical(svd.method, "irlba")) {
+      xprod <- FALSE
+    }
     svdmeth <- .svd_method_id(svd.method)
   } else {
     svdmeth <- .svd_method_id("cuda_rsvd")
@@ -1787,7 +1814,8 @@ plssvd_gpu = function(Xtrain,
 #' @param kfold Number of CV folds.
 #' @param scaling Scaling mode.
 #' @param svd.method CPU SVD backend for Cpp functions.
-#' @param xprod Use the matrix-free xprod backend where available.
+#' @param xprod Use the matrix-free xprod backend where available. Ignored for
+#'   `svd.method = "irlba"`.
 #' @param ... Additional backend tuning arguments.
 #' @return A list with `Ypred`, decoded `pred`, `metrics`, `fold`, and status.
 #' @export
@@ -2226,7 +2254,8 @@ svd_benchmark <- function(A,
   Ttrain <- Xtrain %*% R
   G_full <- crossprod(Ttrain)
 
-  B <- array(0, dim = c(p, m, length_ncomp))
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
   C_latent <- array(0, dim = c(max_ncomp_eff, max_ncomp_eff, length_ncomp))
   W_latent <- array(0, dim = c(max_ncomp_eff, m, length_ncomp))
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
@@ -2244,7 +2273,9 @@ svd_benchmark <- function(A,
     C_latent[, , i] <- C_i
     W_i <- coeff_latent %*% t(Q_mc)
     W_latent[seq_len(mc), , i] <- W_i
-    B[, , i] <- R_mc %*% W_i
+    if (store_B) {
+      B[, , i] <- R_mc %*% W_i
+    }
     if (fit) {
       yf <- Ttrain[, seq_len(mc), drop = FALSE] %*% W_i
       R2Y[i] <- RQ(Ytrain, yf)
@@ -2253,7 +2284,6 @@ svd_benchmark <- function(A,
   }
 
   out <- list(
-    B = B,
     C_latent = C_latent,
     W_latent = W_latent,
     Q = Q,
@@ -2269,6 +2299,10 @@ svd_benchmark <- function(A,
     R2Y = R2Y,
     xprod_precision = "implicit64"
   )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
   class(out) <- "fastPLS"
   out
 }
@@ -2304,11 +2338,12 @@ svd_benchmark <- function(A,
   RR <- matrix(0, nrow = p, ncol = max_ncomp)
   QQ <- matrix(0, nrow = m, ncol = max_ncomp)
   VV <- matrix(0, nrow = p, ncol = max_ncomp)
-  B <- array(0, dim = c(p, m, length_ncomp))
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
   R2Y <- rep(NA_real_, length_ncomp)
   Yfit_cur <- if (fit) matrix(0, nrow = n, ncol = m) else NULL
-  Bcur <- matrix(0, nrow = p, ncol = m)
+  Bcur <- if (store_B) matrix(0, nrow = p, ncol = m) else NULL
 
   i_out <- 1L
   a <- 1L
@@ -2355,11 +2390,15 @@ svd_benchmark <- function(A,
       RR[, a] <- rr[, 1]
       QQ[, a] <- qq[, 1]
       VV[, a] <- vv[, 1]
-      Bcur <- Bcur + rr %*% t(qq)
+      if (store_B) {
+        Bcur <- Bcur + rr %*% t(qq)
+      }
       rr_prev <- rr[, 1]
 
       while (i_out <= length_ncomp && a == ncomp[i_out]) {
-        B[, , i_out] <- Bcur
+        if (store_B) {
+          B[, , i_out] <- Bcur
+        }
         if (fit) {
           Yfit_cur <- Yfit_cur + tt %*% t(qq)
           R2Y[i_out] <- RQ(Y, Yfit_cur)
@@ -2375,7 +2414,6 @@ svd_benchmark <- function(A,
   }
 
   out <- list(
-    B = B,
     P = matrix(0, nrow = 0, ncol = 0),
     Q = QQ,
     Ttrain = matrix(0, nrow = 0, ncol = 0),
@@ -2390,6 +2428,10 @@ svd_benchmark <- function(A,
     R2Y = R2Y,
     xprod_precision = "implicit64"
   )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
   class(out) <- "fastPLS"
   out
 }
@@ -2451,7 +2493,8 @@ svd_benchmark <- function(A,
   Q <- s$v[, seq_len(max_ncomp_eff), drop = FALSE]
   Ttrain <- Xtrain %*% R
 
-  B <- array(0, dim = c(p, m, length_ncomp))
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
   C_latent <- array(0, dim = c(max_ncomp_eff, max_ncomp_eff, length_ncomp))
   W_latent <- array(0, dim = c(max_ncomp_eff, m, length_ncomp))
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
@@ -2470,7 +2513,9 @@ svd_benchmark <- function(A,
     C_latent[, , i] <- C_i
     W_i <- coeff_latent %*% t(Q_mc)
     W_latent[seq_len(mc), , i] <- W_i
-    B[, , i] <- R_mc %*% W_i
+    if (store_B) {
+      B[, , i] <- R_mc %*% W_i
+    }
     if (fit) {
       yf <- T_mc %*% W_i
       R2Y[i] <- RQ(Ytrain, yf)
@@ -2479,7 +2524,6 @@ svd_benchmark <- function(A,
   }
 
   out <- list(
-    B = B,
     C_latent = C_latent,
     W_latent = W_latent,
     Q = Q,
@@ -2494,6 +2538,10 @@ svd_benchmark <- function(A,
     Yfit = Yfit,
     R2Y = R2Y
   )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
   class(out) <- "fastPLS"
   out
 }
@@ -2540,7 +2588,8 @@ svd_benchmark <- function(A,
   QQ <- matrix(0, nrow = m, ncol = max_ncomp)
   TT <- matrix(0, nrow = n, ncol = max_ncomp)
   VV <- matrix(0, nrow = p, ncol = max_ncomp)
-  B <- array(0, dim = c(p, m, length_ncomp))
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
   R2Y <- rep(NA_real_, length_ncomp)
 
@@ -2575,9 +2624,11 @@ svd_benchmark <- function(A,
     if (a == ncomp[i_out]) {
       RR_a <- RR[, seq_len(a), drop = FALSE]
       QQ_a <- QQ[, seq_len(a), drop = FALSE]
-      B[, , i_out] <- RR_a %*% t(QQ_a)
+      if (store_B) {
+        B[, , i_out] <- RR_a %*% t(QQ_a)
+      }
       if (fit) {
-        yf <- Xtrain %*% B[, , i_out]
+        yf <- TT[, seq_len(a), drop = FALSE] %*% t(QQ_a)
         Yfit[, , i_out] <- sweep(yf, 2, mY[1, ], "+")
         R2Y[i_out] <- RQ(Ytrain, Yfit[, , i_out])
       }
@@ -2587,7 +2638,6 @@ svd_benchmark <- function(A,
   }
 
   out <- list(
-    B = B,
     P = PP,
     Q = QQ,
     Ttrain = TT,
@@ -2601,6 +2651,10 @@ svd_benchmark <- function(A,
     Yfit = Yfit,
     R2Y = R2Y
   )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
   class(out) <- "fastPLS"
   out
 }
@@ -2647,11 +2701,13 @@ svd_benchmark <- function(A,
   RR <- matrix(0, nrow = p, ncol = max_ncomp)
   QQ <- matrix(0, nrow = m, ncol = max_ncomp)
   VV <- matrix(0, nrow = p, ncol = max_ncomp)
-  B <- array(0, dim = c(p, m, length_ncomp))
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
   R2Y <- rep(NA_real_, length_ncomp)
+  Yfit_cur <- if (fit) matrix(0, nrow = n, ncol = m) else NULL
 
-  Bcur <- matrix(0, nrow = p, ncol = m)
+  Bcur <- if (store_B) matrix(0, nrow = p, ncol = m) else NULL
   i_out <- 1L
   a <- 1L
   refresh_block <- max(1L, as.integer(fast_block))
@@ -2690,7 +2746,8 @@ svd_benchmark <- function(A,
       tnorm <- sqrt(tnorm_sq)
       rr <- rr / tnorm
       pp <- pp / tnorm
-      qq <- crossprod(Y, X %*% rr)
+      tt <- X %*% rr
+      qq <- crossprod(Y, tt)
 
       vv <- pp
       if (a > 1L) {
@@ -2708,13 +2765,17 @@ svd_benchmark <- function(A,
       RR[, a] <- rr[, 1]
       QQ[, a] <- qq[, 1]
       VV[, a] <- vv[, 1]
-      Bcur <- Bcur + rr %*% t(qq)
+      if (store_B) {
+        Bcur <- Bcur + rr %*% t(qq)
+      }
 
       while (i_out <= length_ncomp && a == ncomp[i_out]) {
-        B[, , i_out] <- Bcur
+        if (store_B) {
+          B[, , i_out] <- Bcur
+        }
         if (fit) {
-          yf <- Xtrain %*% Bcur
-          Yfit[, , i_out] <- sweep(yf, 2, mY[1, ], "+")
+          Yfit_cur <- Yfit_cur + tt %*% t(qq)
+          Yfit[, , i_out] <- sweep(Yfit_cur, 2, mY[1, ], "+")
           R2Y[i_out] <- RQ(Ytrain, Yfit[, , i_out])
         }
         i_out <- i_out + 1L
@@ -2727,7 +2788,6 @@ svd_benchmark <- function(A,
   }
 
   out <- list(
-    B = B,
     P = matrix(0, nrow = 0, ncol = 0),
     Q = QQ,
     Ttrain = matrix(0, nrow = 0, ncol = 0),
@@ -2741,6 +2801,10 @@ svd_benchmark <- function(A,
     Yfit = Yfit,
     R2Y = R2Y
   )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
   class(out) <- "fastPLS"
   out
 }
@@ -3015,14 +3079,10 @@ pls =  function (Xtrain,
     if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
   }
 
-  use_xprod_default <- svd.method %in% c("cpu_rsvd", "irlba") &&
+  use_xprod_default <- identical(svd.method, "cpu_rsvd") &&
     meth %in% c(1L, 3L) &&
     .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
-  xprod_precision_default <- if (identical(svd.method, "irlba")) {
-    "implicit64_irlba"
-  } else {
-    "implicit64"
-  }
+  xprod_precision_default <- "implicit64"
 
   if(meth==1){
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)

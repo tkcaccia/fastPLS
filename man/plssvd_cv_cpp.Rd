@@ -32,7 +32,8 @@ simpls_fast_cv_cuda(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
 \item{kfold}{Number of cross-validation folds.}
 \item{scaling}{One of \code{"centering"}, \code{"autoscaling"}, or \code{"none"}.}
 \item{svd.method}{CPU SVD backend for Cpp functions.}
-\item{xprod}{Use matrix-free cross-product backends where available.}
+\item{xprod}{Use matrix-free cross-product backends where available. Ignored for
+\code{svd.method = "irlba"}.}
 \item{...}{Additional backend tuning arguments.}
 }
 \value{

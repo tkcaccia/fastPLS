@@ -1,7 +1,8 @@
 # fastPLS
 
 `fastPLS` provides C++, GPU-native, and pure-R implementations of partial least
-squares (PLS) with interchangeable CPU SVD backends.
+squares (PLS) with interchangeable CPU SVD backends and compact latent
+prediction for large response spaces.
 
 ## Implemented PLS Algorithms
 
@@ -9,19 +10,19 @@ squares (PLS) with interchangeable CPU SVD backends.
   single truncated SVD of cross-covariance `S = X^T Y`, then coefficient
   reconstruction per requested component count.
 - `method = "simpls"`:
-  iterative SIMPLS-style deflation of `S`, extracting one latent direction per
-  component and updating coefficients cumulatively.
-- `method = "simpls_fast"` (experimental):
-  SIMPLS-like deflation with the current fixed incremental-deflation profile.
+  the optimized SIMPLS path formerly exposed as `simpls_fast`, using
+  incremental deflation and compact latent prediction when coefficient storage
+  would be large.
+- `method = "simpls_fast"`:
+  accepted as a legacy alias for `method = "simpls"`.
+- `opls_*()` and `kernel_pls_*()`:
+  OPLS filtering and kernel-PLS wrappers built on the same PLSSVD/SIMPLS cores.
 
 ## SVD Backends
 
 - `irlba`:
-  legacy label; in `pls_model1/2`, IRLB is used only for sufficiently large
-  cross-covariance matrices. In `svd_run`/`svd_benchmark`, this label currently
-  follows exact CPU dispatch.
-- `arpack`:
-  ARPACK-truncated SVD path through Armadillo `svds()`. 
+  bundled internal IRLBA wrapper. Matrix-free xprod is intentionally disabled
+  for IRLBA routes; use `cpu_rsvd` for the xprod-enabled randomized path.
 - `cpu_rsvd`:
   randomized SVD on CPU (Gaussian sketch + optional power iterations + reduced
   exact SVD).
@@ -36,18 +37,13 @@ Check runtime availability using `has_cuda()` and `svd_methods()`.
 
 | Outer algorithm | Inner backend | Exact/approximate | Iterative/direct (inner) | CPU/GPU | Supported functions |
 |---|---|---|---|---|---|
-| `plssvd` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `plssvd` | `irlba` | Typically exact fallback for small matrices; legacy IRLB branch for larger `S` in PLS C++ loops | Iterative Lanczos branch in selected PLS paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `plssvd` | `irlba` | Truncated | Bundled IRLBA wrapper | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
 | `plssvd` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `arpack` | ARPACK-truncated | Direct SVD (`svds`) per component on deflated `S` | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `irlba` | Legacy truncated branch in selected C++ paths | Iterative Lanczos in selected paths | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls_fast` | `arpack`/`irlba`/`cpu_rsvd` | Depends on backend (`arpack` exact, RSVD approximate) | Fixed incremental-deflation outer loop | CPU | `pls`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `irlba` | Truncated | Bundled IRLBA wrapper inside optimized SIMPLS loop | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD inside optimized SIMPLS loop | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
+| `opls` / `kernel_pls` | `irlba` / `cpu_rsvd` | Depends on backend | Shared fastPLS core after OPLS filtering or kernel construction | CPU | `opls_*`, `kernel_pls_*` |
 | `plssvd` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `plssvd_gpu` |
-| `simpls_fast` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `simpls_gpu` |
-
-Notes:
-- `svd_run()`/`svd_benchmark()` are backend utility wrappers; their `irlba` label currently follows exact dispatch in utility mode.
+| `simpls` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `simpls_gpu` |
 
 ## Public API (current)
 
@@ -79,6 +75,11 @@ SVD utilities:
 - `simpls_fast` now permanently uses the former incremental-deflation
   configuration. Legacy `fast_*` tuning arguments are accepted for backward
   compatibility but are deprecated and ignored.
+- For high-dimensional multivariate responses, fastPLS can omit the full
+  coefficient cube `B` and predict from compact latent factors instead. Set
+  `FASTPLS_STORE_B=always` to force legacy coefficient storage,
+  `FASTPLS_STORE_B=never` to force compact storage, or tune the automatic
+  threshold with `FASTPLS_STORE_B_MAX_MB` (default: `256`).
 - The GPU-native APIs reset their CUDA workspace after each fit and keep
   training buffers in double precision.
 

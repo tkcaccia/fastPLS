@@ -14,7 +14,8 @@ opls_r(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   svd.method = c("irlba", "cpu_rsvd"), rsvd_oversample = 10L,
   rsvd_power = 1L, svds_tol = 0, irlba_work = 0L,
   irlba_maxit = 1000L, irlba_tol = 1e-5, irlba_eps = 1e-9,
-  irlba_svtol = 1e-5, seed = 1L, fit = FALSE, proj = FALSE)
+  irlba_svtol = 1e-5, seed = 1L, fast_block = 1L,
+  fit = FALSE, proj = FALSE)
 
 opls_cpp(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   north = 1L, scaling = c("centering", "autoscaling", "none"),
@@ -22,13 +23,14 @@ opls_cpp(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   svd.method = c("irlba", "cpu_rsvd"), rsvd_oversample = 10L,
   rsvd_power = 1L, svds_tol = 0, irlba_work = 0L,
   irlba_maxit = 1000L, irlba_tol = 1e-5, irlba_eps = 1e-9,
-  irlba_svtol = 1e-5, seed = 1L, fit = FALSE, proj = FALSE)
+  irlba_svtol = 1e-5, seed = 1L, fast_block = 1L,
+  fit = FALSE, proj = FALSE)
 
 opls_cuda(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
   north = 1L, scaling = c("centering", "autoscaling", "none"),
-  method = c("plssvd", "simpls_fast"), rsvd_oversample = 10L,
-  rsvd_power = 1L, svds_tol = 0, seed = 1L, fit = FALSE,
-  proj = FALSE, ...)
+  method = c("plssvd", "simpls", "simpls_fast"), rsvd_oversample = 10L,
+  rsvd_power = 1L, svds_tol = 0, seed = 1L, fast_block = 1L,
+  fit = FALSE, proj = FALSE, ...)
 
 opls_fast_r(...)
 
