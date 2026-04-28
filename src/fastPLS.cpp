@@ -1726,6 +1726,7 @@ List pls_predict(List& model, arma::mat Xtest, bool proj) {
   if (!used_latent_predict &&
       prefer_latent_predict &&
       pls_method == "plssvd" &&
+      !model.containsElementNamed("W_latent") &&
       model.containsElementNamed("C_latent")) {
     Rcpp::NumericVector R_vec = model["R"];
     Rcpp::NumericVector Q_vec = model["Q"];
@@ -1773,6 +1774,52 @@ List pls_predict(List& model, arma::mat Xtest, bool proj) {
         arma::mat scores = Xtest * RR.cols(0, static_cast<arma::uword>(mc - 1));
         arma::mat coeff = CC.slice(a).submat(0, 0, mc - 1, mc - 1);
         Ypred.slice(a) = scores * coeff * QQ.cols(0, static_cast<arma::uword>(mc - 1)).t();
+        Ypred.slice(a).each_row() += mY;
+      }
+      used_latent_predict = latent_ok;
+    }
+  }
+
+  if (!used_latent_predict &&
+      prefer_latent_predict &&
+      pls_method == "plssvd" &&
+      model.containsElementNamed("W_latent")) {
+    Rcpp::NumericVector R_vec = model["R"];
+    Rcpp::NumericVector W_vec = model["W_latent"];
+    Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+    Rcpp::IntegerVector W_dim = W_vec.attr("dim");
+    if (R_dim.size() == 2L && W_dim.size() == 3L &&
+        R_dim[0] == Xtest.n_cols &&
+        W_dim[0] == R_dim[1] && W_dim[1] == m &&
+        W_dim[2] >= static_cast<int>(length_ncomp) &&
+        R_dim[1] > 0) {
+      const arma::mat RR(
+        R_vec.begin(),
+        static_cast<arma::uword>(R_dim[0]),
+        static_cast<arma::uword>(R_dim[1]),
+        false,
+        true
+      );
+      const arma::cube WW(
+        W_vec.begin(),
+        static_cast<arma::uword>(W_dim[0]),
+        static_cast<arma::uword>(W_dim[1]),
+        static_cast<arma::uword>(W_dim[2]),
+        false,
+        true
+      );
+      bool latent_ok = true;
+      for (arma::uword a = 0; a < length_ncomp; ++a) {
+        const int mc = ncomp(a);
+        if (mc < 1 ||
+            mc > static_cast<int>(RR.n_cols) ||
+            mc > static_cast<int>(WW.n_rows) ||
+            a >= WW.n_slices) {
+          latent_ok = false;
+          break;
+        }
+        arma::mat scores = Xtest * RR.cols(0, static_cast<arma::uword>(mc - 1));
+        Ypred.slice(a) = scores * WW.slice(a).rows(0, static_cast<arma::uword>(mc - 1));
         Ypred.slice(a).each_row() += mY;
       }
       used_latent_predict = latent_ok;
@@ -2361,6 +2408,7 @@ List pls_model1(
   arma::cube B(p,m,length_ncomp);
   B.zeros();
   arma::cube C_latent(max_ncomp_eff, max_ncomp_eff, length_ncomp, arma::fill::zeros);
+  arma::cube W_latent(max_ncomp_eff, m, length_ncomp, arma::fill::zeros);
   arma::cube Yfit;
   if(fit){
     Yfit.resize(n,m,length_ncomp);
@@ -2411,9 +2459,11 @@ List pls_model1(
       }
 
       C_latent.slice(a).submat(0, 0, mc_eff - 1, mc_eff - 1) = coeff_latent;
-      B.slice(a) = svd_u_mc * coeff_latent * svd_v_mc.t();
+      arma::mat W_a = coeff_latent * svd_v_mc.t();
+      W_latent.slice(a).submat(0, 0, mc_eff - 1, m - 1) = W_a;
+      B.slice(a) = svd_u_mc * W_a;
       if(fit){
-        arma::mat temp1 = T_a * coeff_latent * svd_v_mc.t();
+        arma::mat temp1 = T_a * W_a;
         R2Y(a)=RQ(Ytrain,temp1);
         temp1.each_row()+=mY;
         Yfit.slice(a)=temp1;
@@ -2441,9 +2491,11 @@ List pls_model1(
       if (predict_solved) {
         C_latent.slice(a).submat(0, 0, mc_eff - 1, mc_eff - 1) = coeff_for_predict;
       }
-      B.slice(a)= svd_u_mc * coeff_latent * svd_v_mc.t();
+      arma::mat W_a = coeff_latent * svd_v_mc.t();
+      W_latent.slice(a).submat(0, 0, mc_eff - 1, m - 1) = W_a;
+      B.slice(a)= svd_u_mc * W_a;
       if(fit){
-        arma::mat temp1=Xtrain*B.slice(a);
+        arma::mat temp1=T_a * W_a;
         R2Y(a)=RQ(Ytrain,temp1);
         temp1.each_row()+=mY;
         Yfit.slice(a)=temp1;
@@ -2456,6 +2508,7 @@ List pls_model1(
   return List::create(
     Named("B")       = B,
     Named("C_latent") = C_latent,
+    Named("W_latent") = W_latent,
     Named("Q")       = svd_v_eff,
     Named("Ttrain")  = T,
     Named("R")       = svd_u_eff,
@@ -2574,6 +2627,7 @@ List pls_model1_rsvd_xprod_precision(
   arma::mat T_eff = Xtrain * svd_u;
   arma::mat G_full = T_eff.t() * T_eff;
   arma::cube C_latent(max_ncomp_eff, max_ncomp_eff, length_ncomp, arma::fill::zeros);
+  arma::cube W_latent(max_ncomp_eff, m, length_ncomp, arma::fill::zeros);
   arma::vec R2Y(length_ncomp, fill::zeros);
 
   for (int a = 0; a < length_ncomp; ++a) {
@@ -2591,9 +2645,11 @@ List pls_model1_rsvd_xprod_precision(
     if (!solved) stop("plssvd latent solve failed");
 
     C_latent.slice(a).submat(0, 0, mc_eff - 1, mc_eff - 1) = coeff_latent;
-    B.slice(a) = svd_u_mc * coeff_latent * svd_v_mc.t();
+    arma::mat W_a = coeff_latent * svd_v_mc.t();
+    W_latent.slice(a).submat(0, 0, mc_eff - 1, m - 1) = W_a;
+    B.slice(a) = svd_u_mc * W_a;
     if (fit) {
-      arma::mat temp1 = T_a * coeff_latent * svd_v_mc.t();
+      arma::mat temp1 = T_a * W_a;
       R2Y(a) = RQ(Ytrain, temp1);
       temp1.each_row() += mY;
       Yfit.slice(a) = temp1;
@@ -2603,6 +2659,7 @@ List pls_model1_rsvd_xprod_precision(
   return List::create(
     Named("B")       = B,
     Named("C_latent") = C_latent,
+    Named("W_latent") = W_latent,
     Named("Q")       = svd_v,
     Named("Ttrain")  = T_eff,
     Named("R")       = svd_u,
@@ -2950,6 +3007,7 @@ List pls_model1_gpu(
   return List::create(
     Named("B")       = gpu.B,
     Named("C_latent") = gpu.C_latent,
+    Named("W_latent") = gpu.W_latent,
     Named("Q")       = gpu.Q,
     Named("Ttrain")  = gpu.Ttrain,
     Named("R")       = gpu.R,
@@ -3040,6 +3098,7 @@ List pls_model1_gpu_implicit_xprod(
   return List::create(
     Named("B")       = gpu.B,
     Named("C_latent") = gpu.C_latent,
+    Named("W_latent") = gpu.W_latent,
     Named("Q")       = gpu.Q,
     Named("Ttrain")  = gpu.Ttrain,
     Named("R")       = gpu.R,

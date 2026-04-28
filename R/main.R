@@ -2215,6 +2215,7 @@ svd_benchmark <- function(A,
 
   B <- array(0, dim = c(p, m, length_ncomp))
   C_latent <- array(0, dim = c(max_ncomp_eff, max_ncomp_eff, length_ncomp))
+  W_latent <- array(0, dim = c(max_ncomp_eff, m, length_ncomp))
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
   R2Y <- rep(NA_real_, length_ncomp)
 
@@ -2228,9 +2229,11 @@ svd_benchmark <- function(A,
     C_i <- C_latent[, , i, drop = FALSE][, , 1]
     C_i[seq_len(mc), seq_len(mc)] <- coeff_latent
     C_latent[, , i] <- C_i
-    B[, , i] <- R_mc %*% coeff_latent %*% t(Q_mc)
+    W_i <- coeff_latent %*% t(Q_mc)
+    W_latent[seq_len(mc), , i] <- W_i
+    B[, , i] <- R_mc %*% W_i
     if (fit) {
-      yf <- Ttrain[, seq_len(mc), drop = FALSE] %*% coeff_latent %*% t(Q_mc)
+      yf <- Ttrain[, seq_len(mc), drop = FALSE] %*% W_i
       R2Y[i] <- RQ(Ytrain, yf)
       Yfit[, , i] <- sweep(yf, 2, mY[1, ], "+")
     }
@@ -2239,6 +2242,7 @@ svd_benchmark <- function(A,
   out <- list(
     B = B,
     C_latent = C_latent,
+    W_latent = W_latent,
     Q = Q,
     Ttrain = Ttrain,
     R = R,
@@ -2436,6 +2440,7 @@ svd_benchmark <- function(A,
 
   B <- array(0, dim = c(p, m, length_ncomp))
   C_latent <- array(0, dim = c(max_ncomp_eff, max_ncomp_eff, length_ncomp))
+  W_latent <- array(0, dim = c(max_ncomp_eff, m, length_ncomp))
   Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
   R2Y <- rep(NA_real_, length_ncomp)
 
@@ -2450,9 +2455,11 @@ svd_benchmark <- function(A,
     C_i <- C_latent[, , i, drop = FALSE][, , 1]
     C_i[seq_len(mc), seq_len(mc)] <- coeff_latent
     C_latent[, , i] <- C_i
-    B[, , i] <- R_mc %*% coeff_latent %*% t(Q_mc)
+    W_i <- coeff_latent %*% t(Q_mc)
+    W_latent[seq_len(mc), , i] <- W_i
+    B[, , i] <- R_mc %*% W_i
     if (fit) {
-      yf <- T_mc %*% coeff_latent %*% t(Q_mc)
+      yf <- T_mc %*% W_i
       R2Y[i] <- RQ(Ytrain, yf)
       Yfit[, , i] <- sweep(yf, 2, mY[1, ], "+")
     }
@@ -2461,6 +2468,7 @@ svd_benchmark <- function(A,
   out <- list(
     B = B,
     C_latent = C_latent,
+    W_latent = W_latent,
     Q = Q,
     Ttrain = Ttrain,
     R = R,

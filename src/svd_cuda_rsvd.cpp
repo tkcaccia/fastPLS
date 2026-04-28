@@ -747,8 +747,6 @@ class CudaRSVDWorkspace {
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
     );
-    arma::mat G_host(static_cast<arma::uword>(target), static_cast<arma::uword>(target), arma::fill::zeros);
-    check_cuda(cudaMemcpy(G_host.memptr(), dQQmat_, bytes_for(target, target), cudaMemcpyDeviceToHost), "cudaMemcpy(G_plssvd)");
 
     PLSSVDGPUResult out;
     out.R.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(target));
@@ -777,6 +775,12 @@ class CudaRSVDWorkspace {
       ncomp.n_elem
     );
     out.C_latent.zeros();
+    out.W_latent.set_size(
+      static_cast<arma::uword>(target),
+      static_cast<arma::uword>(m),
+      ncomp.n_elem
+    );
+    out.W_latent.zeros();
     out.R2Y.set_size(ncomp.n_elem);
     out.R2Y.zeros();
     if (fit) {
@@ -812,14 +816,9 @@ class CudaRSVDWorkspace {
       );
       solve_spd_system_inplace(mc, m);
 
-      arma::mat coeff_host(static_cast<arma::uword>(mc), static_cast<arma::uword>(mc), arma::fill::zeros);
-      arma::mat G_a = G_host.submat(0, 0, mc - 1, mc - 1);
-      arma::mat D_a(mc, mc, arma::fill::zeros);
-      D_a.diag() = s_host.subvec(0, mc - 1);
-      bool c_solved = arma::solve(coeff_host, G_a, D_a, arma::solve_opts::likely_sympd);
-      if (!c_solved) c_solved = arma::solve(coeff_host, G_a, D_a);
-      if (!c_solved) throw std::runtime_error("cuda_plssvd latent coefficient solve failed");
-      out.C_latent.slice(a).submat(0, 0, mc - 1, mc - 1) = coeff_host;
+      arma::mat w_host(static_cast<arma::uword>(mc), static_cast<arma::uword>(m), arma::fill::zeros);
+      check_cuda(cudaMemcpy(w_host.memptr(), dBsmall_, bytes_for(mc, m), cudaMemcpyDeviceToHost), "cudaMemcpy(W_latent)");
+      out.W_latent.slice(a).submat(0, 0, mc - 1, m - 1) = w_host;
 
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
@@ -909,8 +908,6 @@ class CudaRSVDWorkspace {
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
     );
-    arma::mat G_host(static_cast<arma::uword>(target), static_cast<arma::uword>(target), arma::fill::zeros);
-    check_cuda(cudaMemcpy(G_host.memptr(), dQQmat_, bytes_for(target, target), cudaMemcpyDeviceToHost), "cudaMemcpy(G_plssvd)");
 
     ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
     if (fit) {
@@ -944,6 +941,12 @@ class CudaRSVDWorkspace {
       ncomp.n_elem
     );
     out.C_latent.zeros();
+    out.W_latent.set_size(
+      static_cast<arma::uword>(target),
+      static_cast<arma::uword>(m),
+      ncomp.n_elem
+    );
+    out.W_latent.zeros();
     out.R2Y.set_size(ncomp.n_elem);
     out.R2Y.zeros();
     if (fit) {
@@ -979,14 +982,9 @@ class CudaRSVDWorkspace {
       );
       solve_spd_system_inplace(mc, m);
 
-      arma::mat coeff_host(static_cast<arma::uword>(mc), static_cast<arma::uword>(mc), arma::fill::zeros);
-      arma::mat G_a = G_host.submat(0, 0, mc - 1, mc - 1);
-      arma::mat D_a(mc, mc, arma::fill::zeros);
-      D_a.diag() = s_host.subvec(0, mc - 1);
-      bool c_solved = arma::solve(coeff_host, G_a, D_a, arma::solve_opts::likely_sympd);
-      if (!c_solved) c_solved = arma::solve(coeff_host, G_a, D_a);
-      if (!c_solved) throw std::runtime_error("cuda_plssvd latent coefficient solve failed");
-      out.C_latent.slice(a).submat(0, 0, mc - 1, mc - 1) = coeff_host;
+      arma::mat w_host(static_cast<arma::uword>(mc), static_cast<arma::uword>(m), arma::fill::zeros);
+      check_cuda(cudaMemcpy(w_host.memptr(), dBsmall_, bytes_for(mc, m), cudaMemcpyDeviceToHost), "cudaMemcpy(W_latent)");
+      out.W_latent.slice(a).submat(0, 0, mc - 1, m - 1) = w_host;
 
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
