@@ -1526,7 +1526,10 @@ plssvd_gpu = function(Xtrain,
     Ytrain <- as.matrix(Ytrain)
   }
 
-  use_xprod_default <- .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
+  # CUDA PLSSVD's implicit matrix-free xprod is fast for small component
+  # counts, but high-dimensional multivariate regression drifts at larger k.
+  use_xprod_default <- .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp) &&
+    max(as.integer(ncomp), na.rm = TRUE) <= 10L
   fit_fun <- if (use_xprod_default) pls.model1.gpu.implicit.xprod else pls.model1.gpu
   model <- .with_gpu_native_options(
     fit_fun(
