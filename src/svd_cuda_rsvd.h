@@ -9,6 +9,7 @@ struct PLSSVDGPUResult {
   Mat R;
   Mat Q;
   Mat Ttrain;
+  arma::cube C_latent;
   arma::cube B;
   arma::cube Yfit;
   Vec R2Y;
