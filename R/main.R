@@ -322,6 +322,7 @@ pls.model1 =
       irlba_svtol = irlba_svtol
     )
     model$pls_method <- "plssvd"
+    model$predict_latent_ok <- TRUE
     class(model) = "fastPLS"
     model
   }
@@ -355,6 +356,7 @@ pls.model1.gpu =
       seed
     )
     model$pls_method <- "plssvd"
+    model$predict_latent_ok <- TRUE
     class(model) = "fastPLS"
     model
   }
@@ -388,6 +390,7 @@ pls.model1.gpu.implicit.xprod =
       seed
     )
     model$pls_method <- "plssvd"
+    model$predict_latent_ok <- TRUE
     class(model) = "fastPLS"
     model
   }
@@ -515,10 +518,15 @@ pls.model1.rsvd.xprod.precision =
             rsvd_power = 1L,
             svds_tol = 0,
             seed = 1L,
-            xprod_precision = c("implicit64", "double"))
+            xprod_precision = c("implicit64", "implicit64_irlba", "double"))
   {
     xprod_precision <- match.arg(xprod_precision)
-    precision_id <- switch(xprod_precision, double = 0L, implicit64 = 3L)
+    precision_id <- switch(
+      xprod_precision,
+      double = 0L,
+      implicit64 = 3L,
+      implicit64_irlba = 4L
+    )
     Xtrain <- as.matrix(Xtrain)
     Ytrain <- as.matrix(Ytrain)
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
@@ -549,7 +557,7 @@ pls.model2.fast.rsvd.xprod.precision =
             rsvd_power = 1L,
             svds_tol = 0,
             seed = 1L,
-            xprod_precision = c("implicit64", "double"),
+            xprod_precision = c("implicit64", "implicit64_irlba", "double"),
             fast_block = 1L,
             fast_center_t = FALSE,
             fast_reorth_v = FALSE,
@@ -558,7 +566,12 @@ pls.model2.fast.rsvd.xprod.precision =
             fast_defl_cache = TRUE)
   {
     xprod_precision <- match.arg(xprod_precision)
-    precision_id <- switch(xprod_precision, double = 0L, implicit64 = 3L)
+    precision_id <- switch(
+      xprod_precision,
+      double = 0L,
+      implicit64 = 3L,
+      implicit64_irlba = 4L
+    )
     profile <- .resolve_simpls_fast_profile(
       fast_block = fast_block,
       fast_center_t = fast_center_t,
@@ -699,8 +712,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
         nrow = dim(res$Ypred)[1L],
         ncol = dim(res$Ypred)[2L]
       )
-      ypred_i <- t(t(ypred_i) + as.numeric(object$mY))
-      res$Ypred[, , i] <- ypred_i
       res$Q2Y[i] = RQ(Ytest_transf, ypred_i)
     }
   }
@@ -1526,10 +1537,7 @@ plssvd_gpu = function(Xtrain,
     Ytrain <- as.matrix(Ytrain)
   }
 
-  # CUDA PLSSVD's implicit matrix-free xprod is fast for small component
-  # counts, but high-dimensional multivariate regression drifts at larger k.
-  use_xprod_default <- .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp) &&
-    max(as.integer(ncomp), na.rm = TRUE) <= 10L
+  use_xprod_default <- .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
   fit_fun <- if (use_xprod_default) pls.model1.gpu.implicit.xprod else pls.model1.gpu
   model <- .with_gpu_native_options(
     fit_fun(
@@ -3005,9 +3013,14 @@ pls =  function (Xtrain,
     if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
   }
 
-  use_xprod_default <- identical(svd.method, "cpu_rsvd") &&
+  use_xprod_default <- svd.method %in% c("cpu_rsvd", "irlba") &&
     meth %in% c(1L, 3L) &&
     .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
+  xprod_precision_default <- if (identical(svd.method, "irlba")) {
+    "implicit64_irlba"
+  } else {
+    "implicit64"
+  }
 
   if(meth==1){
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
@@ -3023,7 +3036,7 @@ pls =  function (Xtrain,
         rsvd_power=rsvd_power,
         svds_tol=svds_tol,
         seed=seed,
-        xprod_precision="implicit64"
+        xprod_precision=xprod_precision_default
       )
     } else {
       model=pls.model1(
@@ -3076,7 +3089,7 @@ pls =  function (Xtrain,
         rsvd_power=rsvd_power,
         svds_tol=svds_tol,
         seed=seed,
-        xprod_precision="implicit64",
+        xprod_precision=xprod_precision_default,
         fast_block=fast_block,
         fast_center_t=fast_center_t,
         fast_reorth_v=fast_reorth_v,
@@ -3706,7 +3719,7 @@ Vip <- function(object) {
 ViP <- function(model) {
 
   u <- nrow(model$Q)
-  if (u==1) return (Vip(model))
+  if (u==1) return (as.matrix(Vip(model)))
   V <- list ()
   for (i in 1:u) V[[i]] <- Vip(list(Q=model$Q[i,], Ttrain=model$Ttrain, R=model$R))
   return (V)

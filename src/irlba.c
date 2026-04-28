@@ -28,6 +28,9 @@
 
 #include "irlba.h"
 
+static void
+custom_mult(char transpose, int m, int n, void *a, double *b, double *c);
+
 
 
 /* helper function for calling rnorm below */
@@ -213,6 +216,9 @@ irlb (double *A,                // Input data matrix (double case)
         case 1:
           dsdmult ('n', m, n, AS, x, W + j * m);
           break;
+        case 2:
+          custom_mult ('n', m, n, AS, x, W + j * m);
+          break;
         default:
           alpha = 1;
           beta = 0;
@@ -251,6 +257,9 @@ irlb (double *A,                // Input data matrix (double case)
             {
             case 1:
               dsdmult ('t', m, n, AS, W + j * m, F);
+              break;
+            case 2:
+              custom_mult ('t', m, n, AS, W + j * m, F);
               break;
             default:
               alpha = 1.0;
@@ -318,6 +327,9 @@ irlb (double *A,                // Input data matrix (double case)
                 {
                 case 1:
                   dsdmult ('n', m, n, AS, x, W + (j + 1) * m);
+                  break;
+                case 2:
+                  custom_mult ('n', m, n, AS, x, W + (j + 1) * m);
                   break;
                 default:
                   alpha = 1.0;
@@ -501,5 +513,11 @@ dsdmult (char transpose, int m, int n, void * a, double *b, double *c)
   sdmult (cha, t, one, zero, &chb, &chc, &chol_c);
 }
 
-
-
+static void
+custom_mult(char transpose, int m, int n, void *a, double *b, double *c)
+{
+  fastpls_irlba_operator *op = (fastpls_irlba_operator *) a;
+  if (op && op->mult) {
+    op->mult(transpose, m, n, op->data, b, c);
+  }
+}

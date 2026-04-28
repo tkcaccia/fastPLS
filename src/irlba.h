@@ -35,6 +35,19 @@ dsdmult(char transpose, // 't' -> op(a) = t(a), non-transposed a otherwise
         double *b,      // double precision dense vector
         double *c);     // output
 
+typedef void (*fastpls_irlba_mult_func)(
+        char transpose,
+        int m,
+        int n,
+        void *data,
+        double *b,
+        double *c);
+
+typedef struct {
+        fastpls_irlba_mult_func mult;
+        void *data;
+} fastpls_irlba_operator;
+
 /* IRLB function for sparse or dense double-precision valued matrices */
 int
 irlb(double *A,     // input data matrix (dense case)

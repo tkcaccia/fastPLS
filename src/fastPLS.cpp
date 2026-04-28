@@ -3,6 +3,7 @@
 #include <RcppArmadillo.h>
 #include <R_ext/Rdynload.h>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <random>
 
@@ -41,6 +42,17 @@ int env_int_or(const char* key, int fallback, int lo, int hi) {
   if (v < lo) v = lo;
   if (v > hi) v = hi;
   return static_cast<int>(v);
+}
+
+double env_double_or(const char* key, double fallback, double lo, double hi) {
+  const char* raw = std::getenv(key);
+  if (raw == nullptr) return fallback;
+  char* endptr = nullptr;
+  double v = std::strtod(raw, &endptr);
+  if (endptr == raw || !std::isfinite(v)) return fallback;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return v;
 }
 
 bool is_rsvd_backend_method(const int svd_method) {
@@ -468,6 +480,204 @@ bool refresh_deflated_crossprod_left_double(
   }
 
   Ublock = project_deflated_left_double(Q * Uhat, V, n_prev);
+  if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
+    Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
+  }
+  return (Ublock.n_cols > 0);
+}
+
+struct CrossprodIrlbaData {
+  const arma::mat* X = nullptr;
+  const arma::mat* Y = nullptr;
+  const arma::mat* V = nullptr;
+  int n_prev = 0;
+  arma::vec tmp_n;
+  arma::vec tmp_p;
+};
+
+extern "C" void crossprod_irlba_mult(
+  char transpose,
+  int m,
+  int n,
+  void* data,
+  double* b,
+  double* c
+) {
+  CrossprodIrlbaData* op = static_cast<CrossprodIrlbaData*>(data);
+  if (op == nullptr || op->X == nullptr || op->Y == nullptr) {
+    return;
+  }
+  const arma::mat& X = *(op->X);
+  const arma::mat& Ymat = *(op->Y);
+  const arma::mat* V = op->V;
+  const int n_prev = op->n_prev;
+
+  if (transpose == 't' || transpose == 'T') {
+    arma::vec b_view(b, static_cast<arma::uword>(m), false, true);
+    arma::vec c_view(c, static_cast<arma::uword>(n), false, true);
+    op->tmp_p = b_view;
+    if (V != nullptr && n_prev > 0) {
+      const arma::uword cols = std::min<arma::uword>(
+        static_cast<arma::uword>(n_prev),
+        V->n_cols
+      );
+      if (cols > 0) {
+        arma::mat Vprev = V->cols(0, cols - 1);
+        op->tmp_p -= Vprev * (Vprev.t() * op->tmp_p);
+      }
+    }
+    op->tmp_n = X * op->tmp_p;
+    c_view = Ymat.t() * op->tmp_n;
+  } else {
+    arma::vec b_view(b, static_cast<arma::uword>(n), false, true);
+    arma::vec c_view(c, static_cast<arma::uword>(m), false, true);
+    op->tmp_n = Ymat * b_view;
+    c_view = X.t() * op->tmp_n;
+    if (V != nullptr && n_prev > 0) {
+      const arma::uword cols = std::min<arma::uword>(
+        static_cast<arma::uword>(n_prev),
+        V->n_cols
+      );
+      if (cols > 0) {
+        arma::mat Vprev = V->cols(0, cols - 1);
+        c_view -= Vprev * (Vprev.t() * c_view);
+      }
+    }
+  }
+}
+
+fastpls_svd::SVDResult truncated_irlba_crossprod_double(
+  const arma::mat& X,
+  const arma::mat& Ymat,
+  const arma::mat* V,
+  const int n_prev,
+  const int k,
+  const unsigned int seed,
+  const bool left_only
+) {
+  fastpls_svd::SVDResult out;
+  const int m = static_cast<int>(X.n_cols);
+  const int n = static_cast<int>(Ymat.n_cols);
+  const int max_rank = std::min(m, n);
+  const int rank = std::min(std::max(k, 1), max_rank);
+  if (rank < 1 || m < 4 || n < 4) {
+    return out;
+  }
+
+  int work = env_int_or("FASTPLS_IRLBA_WORK", 0, 0, max_rank);
+  if (work <= rank) {
+    work = std::max(rank + 7, 8);
+  }
+  if (work > max_rank) {
+    work = max_rank;
+  }
+  const int maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 1000, 1, 10000000);
+  const double tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-5, 0.0, 1.0);
+  const double eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1.0);
+  const double svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-5, 0.0, 1.0);
+
+  int iter = 0;
+  int mprod = 0;
+  const int lwork = 7 * work * (1 + work);
+  arma::vec s = arma::zeros<arma::vec>(rank);
+  arma::mat U = arma::zeros<arma::mat>(m, work);
+  arma::mat Vmat = gaussian_matrix_local(
+    static_cast<arma::uword>(n),
+    static_cast<arma::uword>(work),
+    seed
+  );
+  arma::mat V1 = arma::zeros<arma::mat>(n, work);
+  arma::mat U1 = arma::zeros<arma::mat>(m, work);
+  arma::mat W = arma::zeros<arma::mat>(m, work);
+  arma::vec F = arma::zeros<arma::vec>(n);
+  arma::mat B = arma::zeros<arma::mat>(work, work);
+  arma::mat BU = arma::zeros<arma::mat>(work, work);
+  arma::mat BV = arma::mat(work, work);
+  arma::vec BS = arma::zeros<arma::vec>(work);
+  arma::vec BW = arma::zeros<arma::vec>(lwork);
+  arma::vec res = arma::zeros<arma::vec>(work);
+  arma::vec T = arma::zeros<arma::vec>(lwork);
+  arma::vec svratio = arma::zeros<arma::vec>(work);
+
+  CrossprodIrlbaData op_data;
+  op_data.X = &X;
+  op_data.Y = &Ymat;
+  op_data.V = V;
+  op_data.n_prev = n_prev;
+  fastpls_irlba_operator op;
+  op.mult = crossprod_irlba_mult;
+  op.data = &op_data;
+
+  irlb(
+    nullptr,
+    &op,
+    2,
+    m,
+    n,
+    rank,
+    work,
+    maxit,
+    0,
+    tol,
+    nullptr,
+    nullptr,
+    nullptr,
+    s.memptr(),
+    U.memptr(),
+    Vmat.memptr(),
+    &iter,
+    &mprod,
+    eps,
+    lwork,
+    V1.memptr(),
+    U1.memptr(),
+    W.memptr(),
+    F.memptr(),
+    B.memptr(),
+    BU.memptr(),
+    BV.memptr(),
+    BS.memptr(),
+    BW.memptr(),
+    res.memptr(),
+    T.memptr(),
+    svtol,
+    svratio.memptr()
+  );
+
+  out.U = U.cols(0, rank - 1);
+  out.s = s;
+  if (!left_only) {
+    out.Vt = Vmat.cols(0, rank - 1).t();
+  }
+  return out;
+}
+
+bool refresh_deflated_crossprod_left_irlba(
+  const arma::mat& X,
+  const arma::mat& Ymat,
+  const arma::mat& V,
+  const int n_prev,
+  const arma::vec* warm_start,
+  const int k_block,
+  const unsigned int seed,
+  arma::mat& Ublock,
+  arma::vec& shat
+) {
+  (void) warm_start;
+  fastpls_svd::SVDResult svd_res = truncated_irlba_crossprod_double(
+    X,
+    Ymat,
+    &V,
+    n_prev,
+    k_block,
+    seed,
+    true
+  );
+  if (svd_res.U.n_cols < 1) {
+    return false;
+  }
+  Ublock = project_deflated_left_double(svd_res.U, V, n_prev);
+  shat = svd_res.s;
   if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
     Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
   }
@@ -2586,6 +2796,18 @@ List pls_model1_rsvd_xprod_precision(
       false,
       plssvd_use_small_exact_svd(max_plssvd_rank)
     );
+  } else if (xprod_precision == 4) {
+    // Matrix-free bundled IRLBA for A = X'Y with the same xprod trigger as
+    // RSVD. This avoids constructing the p-by-q crossproduct.
+    svd_res = truncated_irlba_crossprod_double(
+      Xtrain,
+      Ytrain,
+      nullptr,
+      0,
+      max_ncomp_eff,
+      static_cast<unsigned int>(seed),
+      false
+    );
   } else {
     arma::mat S = Xtrain.t() * Ytrain;
     svd_res = compute_truncated_svd_dispatch(
@@ -2671,7 +2893,9 @@ List pls_model1_rsvd_xprod_precision(
     Named("ncomp")   = ncomp,
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y,
-    Named("xprod_precision") = xprod_precision
+    Named("xprod_precision") = xprod_precision,
+    Named("xprod_mode") = (xprod_precision == 4 ? "implicit_irlba" :
+      (xprod_precision == 3 ? "implicit" : "materialized"))
   );
 }
 
@@ -2722,15 +2946,17 @@ List pls_model2_fast_rsvd_xprod_precision(
   }
 
   const bool use_implicit_double_xprod = (xprod_precision == 3);
+  const bool use_implicit_irlba_xprod = (xprod_precision == 4);
+  const bool use_implicit_xprod = use_implicit_double_xprod || use_implicit_irlba_xprod;
 
   arma::mat Xt;
   arma::mat Yt;
-  if (!use_implicit_double_xprod) {
+  if (!use_implicit_xprod) {
     Xt = Xtrain.t();
     Yt = Ytrain.t();
   }
   arma::mat S;
-  if (!use_implicit_double_xprod) {
+  if (!use_implicit_xprod) {
     S = Xt * Ytrain;
   }
 
@@ -2762,7 +2988,7 @@ List pls_model2_fast_rsvd_xprod_precision(
   const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
   const int fast_crossprod_min_n_to_p_ratio = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024);
   const bool use_crossprod_cache =
-    (!use_implicit_double_xprod) &&
+    (!use_implicit_xprod) &&
     (fast_optimized == 1) &&
     (center_t == 0) &&
     (max_ncomp >= fast_crossprod_min_ncomp) &&
@@ -2791,7 +3017,7 @@ List pls_model2_fast_rsvd_xprod_precision(
       pp /= tnorm;
       qq = Sxy_cache.t() * rr;
       if (fit) tt = Xtrain * rr;
-    } else if (use_implicit_double_xprod) {
+    } else if (use_implicit_xprod) {
       tt = Xtrain * rr;
       if (center_t == 1) {
         tt -= arma::mean(tt);
@@ -2830,7 +3056,7 @@ List pls_model2_fast_rsvd_xprod_precision(
     if (!std::isfinite(vnorm) || vnorm <= 0.0) return false;
     vv /= vnorm;
 
-    if (use_implicit_double_xprod) {
+    if (use_implicit_xprod) {
       // No persistent S exists in the implicit paths. Future refreshes apply
       // the VV projector directly to X'Y.
     } else if (defl_cache == 1) {
@@ -2886,6 +3112,22 @@ List pls_model2_fast_rsvd_xprod_precision(
         break;
       }
       adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
+    } else if (use_implicit_irlba_xprod) {
+      arma::vec shat_block;
+      if (!refresh_deflated_crossprod_left_irlba(
+            Xtrain,
+            Ytrain,
+            VV,
+            a,
+            warm_start,
+            k_block,
+            static_cast<unsigned int>(seed + a),
+            Ublock,
+            shat_block
+          )) {
+        break;
+      }
+      adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
     } else {
       if (!refresh_ws.refresh(
             S,
@@ -2927,7 +3169,7 @@ List pls_model2_fast_rsvd_xprod_precision(
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y,
     Named("xprod_precision") = xprod_precision,
-    Named("xprod_mode") = use_implicit_double_xprod ? "implicit" : "materialized"
+    Named("xprod_mode") = use_implicit_double_xprod ? "implicit" : (use_implicit_irlba_xprod ? "implicit_irlba" : "materialized")
   );
 }
 
