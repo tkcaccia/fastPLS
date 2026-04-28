@@ -353,6 +353,89 @@ class CudaRSVDWorkspace {
     );
   }
 
+  void simpls_fast_refresh_block_implicit_resident(
+    int n,
+    int p,
+    int m,
+    int l,
+    int k,
+    int prev_v_cols,
+    bool use_rr_warm_start,
+    unsigned int seed,
+    int power_iters,
+    double* hSvals
+  ) {
+    ensure_matrix_free_capacity(p, m, l);
+    check_curand(
+      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)),
+      "curandSetPseudoRandomGeneratorSeed"
+    );
+    check_curand(
+      curandGenerateNormalDouble(rng_, dY_, padded_random_elems(p, l), 0.0, 1.0),
+      "curandGenerateNormalDouble(Y0_implicit)"
+    );
+    if (use_rr_warm_start) {
+      check_cublas(
+        cublasDcopy(handle_, p, dRvec_, 1, dY_, 1),
+        "cublasDcopy(rr->Y0_implicit)"
+      );
+    }
+
+    for (int i = 0; i < power_iters; ++i) {
+      implicit_at_times_mat_deflated(
+        n,
+        p,
+        m,
+        l,
+        dY_,
+        dZ_,
+        prev_v_cols,
+        "implicit_SIMPLS_SAT_times_Y"
+      );
+      implicit_a_times_mat_deflated(
+        n,
+        p,
+        m,
+        l,
+        dZ_,
+        dY_,
+        prev_v_cols,
+        "implicit_SIMPLS_S_times_Z"
+      );
+    }
+
+    subtract_left_projection_inplace(
+      p,
+      l,
+      prev_v_cols,
+      dY_,
+      "implicit_SIMPLS_project_before_qr"
+    );
+    orthonormalize_qr_inplace(p, l);
+    implicit_bsmall_from_deflated_basis(
+      n,
+      p,
+      m,
+      l,
+      dY_,
+      dBsmall_,
+      prev_v_cols,
+      "implicit_SIMPLS_Bsmall=QTA"
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &one_, dBsmall_, l, dBsmall_, l, &zero_, dGram_, l),
+      "cublasDgemm(implicit_Bsmall*Bsmall^T)"
+    );
+
+    finalize_left_block_from_gram_inplace(l, k);
+    copy_top_singular_values(l, k, hSvals);
+
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, l, &one_, dY_, p, dOmega_, l, &zero_, dQ_, p),
+      "cublasDgemm(implicit_Ublock=Q*Uhat)"
+    );
+  }
+
   bool simpls_fast_append_component_from_block(
     int n,
     int p,
@@ -361,7 +444,8 @@ class CudaRSVDWorkspace {
     int col_idx,
     int prev_v_cols,
     bool reorth_v,
-    bool fit
+    bool fit,
+    bool materialized_crossprod
   ) {
     ensure_buffer(dTvec_, bytes_for(n, 1), bytes_Tvec_, "cudaMalloc(dTvec)");
     ensure_buffer(dPvec_, bytes_for(p, 1), bytes_Pvec_, "cudaMalloc(dPvec)");
@@ -481,14 +565,16 @@ class CudaRSVDWorkspace {
     const double inv_vnorm = 1.0 / vnorm;
     check_cublas(cublasDscal(handle_, p, &inv_vnorm, dPvec_, 1), "cublasDscal(v)");
 
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, p, &alpha, dA_, p, dPvec_, p, &beta, dZ_, m),
-      "cublasDgemm(v^T*S)"
-    );
-    check_cublas(
-      cublasDger(handle_, p, m, &minus_one, dPvec_, 1, dZ_, 1, dA_, p),
-      "cublasDger(deflate)"
-    );
+    if (materialized_crossprod) {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, 1, p, &alpha, dA_, p, dPvec_, p, &beta, dZ_, m),
+        "cublasDgemm(v^T*S)"
+      );
+      check_cublas(
+        cublasDger(handle_, p, m, &minus_one, dPvec_, 1, dZ_, 1, dA_, p),
+        "cublasDger(deflate)"
+      );
+    }
 
     check_cublas(
       cublasDcopy(handle_, p, dRvec_, 1, dRRmat_ + static_cast<size_t>(a_idx) * static_cast<size_t>(p), 1),
@@ -1571,15 +1657,15 @@ class CudaRSVDWorkspace {
   void implicit_a_times_mat(int n, int p, int m, int k, const double* dRight, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    ensure_buffer(dRRmat_, bytes_for(n, k), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    ensure_buffer(dTransform_, bytes_for(n, k), bytes_Transform_, "cudaMalloc(dTransform)");
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, m, &alpha, dYtrain_, n,
-                  dRight, m, &beta, dRRmat_, n),
+                  dRight, m, &beta, dTransform_, n),
       where
     );
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, p, k, n, &alpha, dX_, n,
-                  dRRmat_, n, &beta, dOut, p),
+                  dTransform_, n, &beta, dOut, p),
       where
     );
   }
@@ -1587,15 +1673,15 @@ class CudaRSVDWorkspace {
   void implicit_at_times_mat(int n, int p, int m, int k, const double* dRight, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    ensure_buffer(dRRmat_, bytes_for(n, k), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    ensure_buffer(dTransform_, bytes_for(n, k), bytes_Transform_, "cudaMalloc(dTransform)");
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, k, p, &alpha, dX_, n,
-                  dRight, p, &beta, dRRmat_, n),
+                  dRight, p, &beta, dTransform_, n),
       where
     );
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, k, n, &alpha, dYtrain_, n,
-                  dRRmat_, n, &beta, dOut, m),
+                  dTransform_, n, &beta, dOut, m),
       where
     );
   }
@@ -1603,17 +1689,97 @@ class CudaRSVDWorkspace {
   void implicit_bsmall_from_basis(int n, int p, int m, int l, const double* dBasis, double* dOut, const char* where) {
     const double alpha = 1.0;
     const double beta = 0.0;
-    ensure_buffer(dRRmat_, bytes_for(n, l), bytes_RRmat_, "cudaMalloc(dRRmat)");
+    ensure_buffer(dTransform_, bytes_for(n, l), bytes_Transform_, "cudaMalloc(dTransform)");
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, n, l, p, &alpha, dX_, n,
-                  dBasis, p, &beta, dRRmat_, n),
+                  dBasis, p, &beta, dTransform_, n),
       where
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, n, &alpha, dRRmat_, n,
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, n, &alpha, dTransform_, n,
                   dYtrain_, n, &beta, dOut, l),
       where
     );
+  }
+
+  void subtract_left_projection_inplace(
+    int p,
+    int k,
+    int prev_v_cols,
+    double* dMat,
+    const char* where
+  ) {
+    if (prev_v_cols <= 0) {
+      return;
+    }
+    const double alpha = 1.0;
+    const double beta = 0.0;
+    const double minus_one = -1.0;
+    ensure_buffer(dCoeff_, bytes_for(prev_v_cols, k), bytes_Coeff_, "cudaMalloc(dCoeff)");
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, prev_v_cols, k, p,
+                  &alpha, dVVmat_, p, dMat, p, &beta, dCoeff_, prev_v_cols),
+      where
+    );
+    check_cublas(
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, prev_v_cols,
+                  &minus_one, dVVmat_, p, dCoeff_, prev_v_cols, &alpha, dMat, p),
+      where
+    );
+  }
+
+  void implicit_a_times_mat_deflated(
+    int n,
+    int p,
+    int m,
+    int k,
+    const double* dRight,
+    double* dOut,
+    int prev_v_cols,
+    const char* where
+  ) {
+    implicit_a_times_mat(n, p, m, k, dRight, dOut, where);
+    subtract_left_projection_inplace(p, k, prev_v_cols, dOut, where);
+  }
+
+  void implicit_at_times_mat_deflated(
+    int n,
+    int p,
+    int m,
+    int k,
+    const double* dRight,
+    double* dOut,
+    int prev_v_cols,
+    const char* where
+  ) {
+    if (prev_v_cols <= 0) {
+      implicit_at_times_mat(n, p, m, k, dRight, dOut, where);
+      return;
+    }
+    ensure_buffer(dQ_, bytes_for(p, k), bytes_Q_, "cudaMalloc(dQ)");
+    check_cuda(cudaMemcpy(dQ_, dRight, bytes_for(p, k), cudaMemcpyDeviceToDevice), "cudaMemcpy(deflated_basis)");
+    subtract_left_projection_inplace(p, k, prev_v_cols, dQ_, where);
+    implicit_at_times_mat(n, p, m, k, dQ_, dOut, where);
+  }
+
+  void implicit_bsmall_from_deflated_basis(
+    int n,
+    int p,
+    int m,
+    int l,
+    const double* dBasis,
+    double* dOut,
+    int prev_v_cols,
+    const char* where
+  ) {
+    if (prev_v_cols <= 0) {
+      implicit_bsmall_from_basis(n, p, m, l, dBasis, dOut, where);
+      return;
+    }
+    ensure_buffer(dQ_, bytes_for(p, l), bytes_Q_, "cudaMalloc(dQ)");
+    check_cuda(cudaMemcpy(dQ_, dBasis, bytes_for(p, l), cudaMemcpyDeviceToDevice), "cudaMemcpy(deflated_bsmall_basis)");
+    subtract_left_projection_inplace(p, l, prev_v_cols, dQ_, where);
+    implicit_bsmall_from_basis(n, p, m, l, dQ_, dOut, where);
   }
 
   void ensure_int_buffer(int*& ptr, size_t required, size_t& current, const char* where) {
@@ -1948,6 +2114,35 @@ void cuda_simpls_fast_refresh_block_resident(
   g_workspace.simpls_fast_refresh_block_resident(p, m, l, k, use_rr_warm_start, seed, power_iters, hSvals);
 }
 
+void cuda_simpls_fast_refresh_block_implicit_resident(
+  int n,
+  int p,
+  int m,
+  int l,
+  int k,
+  int prev_v_cols,
+  bool use_rr_warm_start,
+  unsigned int seed,
+  int power_iters,
+  double* hSvals
+) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  g_workspace.simpls_fast_refresh_block_implicit_resident(
+    n,
+    p,
+    m,
+    l,
+    k,
+    prev_v_cols,
+    use_rr_warm_start,
+    seed,
+    power_iters,
+    hSvals
+  );
+}
+
 bool cuda_simpls_fast_append_component_from_block(
   int n,
   int p,
@@ -1956,7 +2151,8 @@ bool cuda_simpls_fast_append_component_from_block(
   int col_idx,
   int prev_v_cols,
   bool reorth_v,
-  bool fit
+  bool fit,
+  bool materialized_crossprod
 ) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
@@ -1969,7 +2165,8 @@ bool cuda_simpls_fast_append_component_from_block(
     col_idx,
     prev_v_cols,
     reorth_v,
-    fit
+    fit,
+    materialized_crossprod
   );
 }
 
@@ -2280,6 +2477,21 @@ void cuda_simpls_fast_refresh_block_resident(
   throw std::runtime_error("CUDA backend not compiled");
 }
 
+void cuda_simpls_fast_refresh_block_implicit_resident(
+  int,
+  int,
+  int,
+  int,
+  int,
+  int,
+  bool,
+  unsigned int,
+  int,
+  double*
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
 bool cuda_simpls_fast_append_component_from_block(
   int,
   int,
@@ -2287,6 +2499,7 @@ bool cuda_simpls_fast_append_component_from_block(
   int,
   int,
   int,
+  bool,
   bool,
   bool
 ) {

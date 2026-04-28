@@ -942,7 +942,8 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
     kernel_center = kc,
     kernel_engine = kernel_engine,
     ncomp = inner$ncomp,
-    xprod_mode = inner$xprod_mode
+    xprod_mode = inner$xprod_mode,
+    gpu_resident = isTRUE(inner$gpu_resident)
   )
   class(out) <- c("fastPLSKernel", "fastPLS")
   if (!is.null(Xtest)) {
@@ -1181,7 +1182,8 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
     north = filt$north,
     opls_engine = filter_engine,
     ncomp = inner$ncomp,
-    xprod_mode = inner$xprod_mode
+    xprod_mode = inner$xprod_mode,
+    gpu_resident = isTRUE(inner$gpu_resident)
   )
   class(out) <- c("fastPLSOpls", "fastPLS")
   if (!is.null(Xtest)) {
@@ -1387,7 +1389,7 @@ simpls_gpu = function(Xtrain,
                       seed = 1L,
                       fit = FALSE,
                       proj = FALSE,
-                      gpu_device_state = FALSE,
+                      gpu_device_state = TRUE,
                       gpu_qr = FALSE,
                       gpu_eig = FALSE,
                       gpu_qless_qr = TRUE,
@@ -1446,7 +1448,7 @@ simpls_gpu = function(Xtrain,
   }
   model <- .with_gpu_native_options(
     if (use_xprod_default) .with_simpls_gpu_xprod(fit_expr()) else fit_expr(),
-    gpu_device_state = if (use_xprod_default) FALSE else gpu_device_state,
+    gpu_device_state = gpu_device_state,
     gpu_qr = gpu_qr,
     gpu_eig = gpu_eig,
     gpu_qless_qr = gpu_qless_qr,
@@ -1742,7 +1744,7 @@ plssvd_gpu = function(Xtrain,
       res <- .with_simpls_gpu_xprod(
         .with_gpu_native_options(
           run_cv_profiled(),
-          gpu_device_state = FALSE,
+          gpu_device_state = TRUE,
           gpu_qr = gpu_qr,
           gpu_eig = gpu_eig,
           gpu_qless_qr = gpu_qless_qr,
@@ -1752,7 +1754,7 @@ plssvd_gpu = function(Xtrain,
     } else {
       res <- .with_gpu_native_options(
         run_cv_profiled(),
-        gpu_device_state = FALSE,
+        gpu_device_state = method %in% c("simpls", "simpls_fast"),
         gpu_qr = gpu_qr,
         gpu_eig = gpu_eig,
         gpu_qless_qr = gpu_qless_qr,

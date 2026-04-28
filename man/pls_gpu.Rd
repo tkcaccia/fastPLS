@@ -23,7 +23,7 @@ simpls_gpu(
   seed = 1L,
   fit = FALSE,
   proj = FALSE,
-  gpu_device_state = FALSE,
+  gpu_device_state = TRUE,
   gpu_qr = FALSE,
   gpu_eig = FALSE,
   gpu_qless_qr = TRUE,
@@ -60,7 +60,8 @@ logic.}
 \item{proj}{If \code{TRUE} and \code{Xtest} is provided, return projected test
 scores \code{Ttest}.}
 
-\item{gpu_device_state}{Enable extra GPU device-state logging for debugging.}
+\item{gpu_device_state}{Keep the SIMPLS block-refresh and deflation state
+resident on the GPU. This is enabled by default for CUDA SIMPLS.}
 
 \item{gpu_qr}{Use GPU-native QR where supported.}
 

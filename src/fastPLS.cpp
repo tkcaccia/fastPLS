@@ -1581,9 +1581,11 @@ List pls_model2_fast_gpu(
 
   const bool use_implicit_xprod =
     (env_int_or("FASTPLS_GPU_SIMPLS_XPROD", 0, 0, 1) == 1);
+  const bool use_device_state =
+    (env_int_or("FASTPLS_GPU_DEVICE_STATE", 0, 0, 1) == 1);
   arma::mat Xt;
   arma::mat Yt;
-  if (!use_implicit_xprod) {
+  if (!use_implicit_xprod && !use_device_state) {
     Xt = Xtrain.t();
     Yt = Ytrain.t();
   }
@@ -1610,8 +1612,6 @@ List pls_model2_fast_gpu(
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
   const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
   (void)defl_cache;
-  const bool use_device_state =
-    (!use_implicit_xprod) && (env_int_or("FASTPLS_GPU_DEVICE_STATE", 0, 0, 1) == 1);
   AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
   if (center_t == 1) {
     stop("pls_model2_fast_gpu does not support FASTPLS_FAST_CENTER_T=1");
@@ -1636,16 +1636,31 @@ List pls_model2_fast_gpu(
       const int k_block = std::min(refresh_cfg.first, remaining);
       const int power_iters_block = refresh_cfg.second;
       arma::vec shat_block(k_block, arma::fill::zeros);
-      fastpls_svd::cuda_simpls_fast_refresh_block_resident(
-        p,
-        m,
-        k_block,
-        k_block,
-        has_rr_prev,
-        static_cast<unsigned int>(seed + a),
-        power_iters_block,
-        shat_block.memptr()
-      );
+      if (use_implicit_xprod) {
+        fastpls_svd::cuda_simpls_fast_refresh_block_implicit_resident(
+          n,
+          p,
+          m,
+          k_block,
+          k_block,
+          a,
+          has_rr_prev,
+          static_cast<unsigned int>(seed + a),
+          power_iters_block,
+          shat_block.memptr()
+        );
+      } else {
+        fastpls_svd::cuda_simpls_fast_refresh_block_resident(
+          p,
+          m,
+          k_block,
+          k_block,
+          has_rr_prev,
+          static_cast<unsigned int>(seed + a),
+          power_iters_block,
+          shat_block.memptr()
+        );
+      }
       adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
 
       bool stop_now = false;
@@ -1658,7 +1673,8 @@ List pls_model2_fast_gpu(
               j,
               a,
               (reorth_v == 1),
-              fit
+              fit,
+              !use_implicit_xprod
             )) {
           stop_now = true;
           break;
@@ -1846,7 +1862,10 @@ List pls_model2_fast_gpu(
     Named("ncomp")   = ncomp,
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y,
-    Named("xprod_mode") = use_implicit_xprod ? "implicit" : "materialized"
+    Named("xprod_mode") = use_implicit_xprod ?
+      (use_device_state ? "implicit_resident" : "implicit") :
+      (use_device_state ? "materialized_resident" : "materialized"),
+    Named("gpu_resident") = use_device_state
   );
 }
 

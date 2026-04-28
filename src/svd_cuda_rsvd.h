@@ -118,6 +118,18 @@ void cuda_simpls_fast_refresh_block_resident(
   int power_iters,
   double* hSvals = nullptr
 );
+void cuda_simpls_fast_refresh_block_implicit_resident(
+  int n,
+  int p,
+  int m,
+  int l,
+  int k,
+  int prev_v_cols,
+  bool use_rr_warm_start,
+  unsigned int seed,
+  int power_iters,
+  double* hSvals = nullptr
+);
 bool cuda_simpls_fast_append_component_from_block(
   int n,
   int p,
@@ -126,7 +138,8 @@ bool cuda_simpls_fast_append_component_from_block(
   int col_idx,
   int prev_v_cols,
   bool reorth_v,
-  bool fit
+  bool fit,
+  bool materialized_crossprod
 );
 void cuda_simpls_fast_copy_rr(
   double* hRR,
