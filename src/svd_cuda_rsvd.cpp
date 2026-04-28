@@ -827,6 +827,7 @@ class CudaRSVDWorkspace {
       "cublasDgemm(RHS=Uhat^T*Bsmall)"
     );
 
+    ensure_buffer(dRRmat_, bytes_for(n, target), bytes_RRmat_, "cudaMalloc(dRRmat)");
     x_times_mat(n, p, target, dQ_, dRRmat_, "cublasGemm(T=X*U)");
     ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
     check_cublas(
@@ -988,6 +989,7 @@ class CudaRSVDWorkspace {
       "cublasDgemm(RHS=Uhat^T*Bsmall)"
     );
 
+    ensure_buffer(dRRmat_, bytes_for(n, target), bytes_RRmat_, "cudaMalloc(dRRmat)");
     x_times_mat(n, p, target, dQ_, dRRmat_, "cublasGemm(T=X*U)");
     ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
     check_cublas(

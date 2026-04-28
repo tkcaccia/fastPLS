@@ -1664,8 +1664,9 @@ List pls_model2_fast_gpu(
       adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
 
       bool stop_now = false;
-      for (int j = 0; j < k_block && a < max_ncomp; ++j, ++a) {
-        if (!fastpls_svd::cuda_simpls_fast_append_component_from_block(
+      for (int j = 0; j < k_block && a < max_ncomp;) {
+        bool used_retry_refresh = false;
+        bool appended = fastpls_svd::cuda_simpls_fast_append_component_from_block(
               n,
               p,
               m,
@@ -1675,7 +1676,61 @@ List pls_model2_fast_gpu(
               (reorth_v == 1),
               fit,
               !use_implicit_xprod
-            )) {
+            );
+        if (!appended) {
+          // A warm-started randomized refresh can occasionally land in a
+          // direction removed by SIMPLS deflation. Retry entirely on-device
+          // with fresh random starts instead of terminating the coefficient path.
+          const int max_gpu_refresh_retries = 8;
+          for (int retry = 0; retry < max_gpu_refresh_retries && !appended; ++retry) {
+            const int retry_l = std::min(
+              std::min(p, m),
+              std::max(2, std::min(32, k_block * (retry + 2)))
+            );
+            arma::vec retry_shat(1, arma::fill::zeros);
+            const unsigned int retry_seed =
+              static_cast<unsigned int>(seed + a + 7919 * (retry + 1));
+            const int retry_power_iters = std::min(power_iters_block + retry + 1, 8);
+            if (use_implicit_xprod) {
+              fastpls_svd::cuda_simpls_fast_refresh_block_implicit_resident(
+                n,
+                p,
+                m,
+                retry_l,
+                1,
+                a,
+                false,
+                retry_seed,
+                retry_power_iters,
+                retry_shat.memptr()
+              );
+            } else {
+              fastpls_svd::cuda_simpls_fast_refresh_block_resident(
+                p,
+                m,
+                retry_l,
+                1,
+                false,
+                retry_seed,
+                retry_power_iters,
+                retry_shat.memptr()
+              );
+            }
+            appended = fastpls_svd::cuda_simpls_fast_append_component_from_block(
+              n,
+              p,
+              m,
+              a,
+              0,
+              a,
+              (reorth_v == 1),
+              fit,
+              !use_implicit_xprod
+            );
+            used_retry_refresh = appended;
+          }
+        }
+        if (!appended) {
           stop_now = true;
           break;
         }
@@ -1692,10 +1747,27 @@ List pls_model2_fast_gpu(
           }
           ++i_out;
         }
+        ++a;
+        if (used_retry_refresh) {
+          break;
+        }
+        ++j;
       }
       if (stop_now) {
         break;
       }
+    }
+
+    while (i_out < length_ncomp) {
+      fastpls_svd::cuda_simpls_fast_copy_bcur(B.slice(i_out).memptr(), p, m);
+      if (fit) {
+        fastpls_svd::cuda_simpls_fast_copy_yfit(Yfit_cur.memptr(), n, m);
+        R2Y(i_out) = RQ(Ytrain, Yfit_cur);
+        arma::mat yf = Yfit_cur;
+        yf.each_row() += mY;
+        Yfit.slice(i_out) = yf;
+      }
+      ++i_out;
     }
 
     fastpls_svd::cuda_simpls_fast_copy_rr(RR.memptr(), p, max_ncomp);
