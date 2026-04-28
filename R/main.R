@@ -1505,8 +1505,8 @@ plssvd_gpu = function(Xtrain,
                       seed = 1L,
                       fit = FALSE,
                       proj = FALSE,
-                      gpu_qr = FALSE,
-                      gpu_eig = FALSE,
+                      gpu_qr = TRUE,
+                      gpu_eig = TRUE,
                       gpu_qless_qr = FALSE,
                       gpu_finalize_threshold = 32L) {
   if (!has_cuda()) {
