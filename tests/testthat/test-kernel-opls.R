@@ -11,7 +11,7 @@ test_that("kernel PLS R and C++ wrappers predict classification labels", {
     y[idx],
     ncomp = 1:2,
     kernel = "rbf",
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd"
   )
   fit_cpp <- kernel_pls_cpp(
@@ -21,7 +21,7 @@ test_that("kernel PLS R and C++ wrappers predict classification labels", {
     y[idx],
     ncomp = 1:2,
     kernel = "rbf",
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd"
   )
 
@@ -76,7 +76,7 @@ test_that("OPLS R and C++ wrappers predict regression matrices", {
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
     north = 1L,
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd"
   )
 

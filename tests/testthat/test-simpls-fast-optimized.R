@@ -11,7 +11,7 @@ with_fastpls_fast_optimized <- function(value, code) {
   force(code)
 }
 
-test_that("simpls_fast returns valid fit structure", {
+test_that("accelerated simpls returns valid fit structure", {
   set.seed(20260321)
   X <- matrix(rnorm(96 * 18), nrow = 96, ncol = 18)
   y <- factor(sample(c("A", "B", "C"), 96, replace = TRUE))
@@ -23,7 +23,7 @@ test_that("simpls_fast returns valid fit structure", {
     X[idx, , drop = FALSE],
     y[idx],
     ncomp = 1:4,
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd",
     fit = TRUE,
     seed = 77L
@@ -40,7 +40,7 @@ test_that("simpls_fast returns valid fit structure", {
   expect_equal(ncol(fit$Ypred), 4L)
 })
 
-test_that("simpls_fast stays close to legacy baseline on a controlled regression task", {
+test_that("accelerated simpls stays close to legacy baseline on a controlled regression task", {
   set.seed(20260321)
   n <- 120
   z1 <- rnorm(n)
@@ -61,7 +61,7 @@ test_that("simpls_fast stays close to legacy baseline on a controlled regression
     Xtest = X[idx, , drop = FALSE],
     Ytest = Y[idx, , drop = FALSE],
     ncomp = c(2L, 4L, 6L),
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd",
     fit = FALSE,
     seed = 123L
@@ -82,7 +82,7 @@ test_that("simpls_fast stays close to legacy baseline on a controlled regression
   expect_true(abs(opt_rmse - base_rmse) <= 0.05)
 })
 
-test_that("simpls_gpu returns valid structure and stays close to simpls_fast", {
+test_that("simpls_gpu returns valid structure and stays close to accelerated simpls", {
   skip_if_not(fastPLS::has_cuda(), "CUDA backend not available")
 
   set.seed(20260419)
@@ -103,7 +103,7 @@ test_that("simpls_gpu returns valid structure and stays close to simpls_fast", {
     Xtest = X[idx, , drop = FALSE],
     Ytest = Y[idx],
     ncomp = c(2L, 4L),
-    method = "simpls_fast",
+    method = "simpls",
     svd.method = "cpu_rsvd",
     fit = FALSE,
     seed = 91L

@@ -8,7 +8,7 @@ test_that("pls supports all declared method/backend combinations (smoke)", {
   back <- as.character(svd_methods()$method[svd_methods()$enabled])
   expect_true(length(back) >= 2L)
 
-  for (m in c("plssvd", "simpls", "simpls_fast")) {
+  for (m in c("plssvd", "simpls")) {
     for (s in back) {
       fit_reg <- pls(
         X[-idx, , drop = FALSE],
@@ -39,7 +39,7 @@ test_that("pls supports all declared method/backend combinations (smoke)", {
   }
 })
 
-test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
+test_that("optim.pls.cv and pls.double.cv support accelerated simpls", {
   set.seed(20260318)
   X <- matrix(rnorm(54 * 8), nrow = 54, ncol = 8)
   y_reg <- matrix(rnorm(54), ncol = 1)
@@ -50,7 +50,7 @@ test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
   if (!length(back)) back <- "cpu_rsvd"
 
   for (s in back) {
-    for (m in c("plssvd", "simpls", "simpls_fast")) {
+    for (m in c("plssvd", "simpls")) {
       cv_reg <- optim.pls.cv(
         Xdata = X,
         Ydata = y_reg,
@@ -102,7 +102,7 @@ test_that("optim.pls.cv and pls.double.cv support simpls_fast", {
   }
 })
 
-test_that("pls_r supports simpls_fast for regression and classification", {
+test_that("pls_r supports accelerated simpls for regression and classification", {
   set.seed(20260321)
   X <- matrix(rnorm(60 * 9), nrow = 60, ncol = 9)
   y_reg <- matrix(rnorm(60 * 2), ncol = 2)
@@ -116,7 +116,7 @@ test_that("pls_r supports simpls_fast for regression and classification", {
       X[idx, , drop = FALSE],
       y_reg[idx, , drop = FALSE],
       ncomp = 1:3,
-      method = "simpls_fast",
+      method = "simpls",
       svd.method = s,
       fit = TRUE
     )
@@ -130,7 +130,7 @@ test_that("pls_r supports simpls_fast for regression and classification", {
       X[idx, , drop = FALSE],
       y_cls[idx],
       ncomp = 1:2,
-      method = "simpls_fast",
+      method = "simpls",
       svd.method = s,
       fit = TRUE
     )

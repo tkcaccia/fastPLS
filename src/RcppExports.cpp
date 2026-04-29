@@ -338,13 +338,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_model1_rsvd_xprod_precision
-List pls_model1_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
-RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+List pls_model1_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -353,18 +353,18 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model1_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    rcpp_result_gen = Rcpp::wrap(pls_model1_rsvd_xprod_precision(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model2_fast_rsvd_xprod_precision
-List pls_model2_fast_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
-RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+List pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -373,7 +373,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_rsvd_xprod_precision(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
     return rcpp_result_gen;
 END_RCPP
 }

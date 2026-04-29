@@ -265,10 +265,11 @@ warmup_gpu_config_once <- function(dataset_id, analysis, analysis_value, cfg, ds
   if (!isTRUE(has_cuda()) || !identical(cfg$engine, "GPU")) return(invisible(FALSE))
   key <- paste(dataset_id, analysis, analysis_value, cfg$method_id, ncomp_run, sep = "::")
   if (isTRUE(gpu_config_warmup_done[[key]])) return(invisible(FALSE))
+  warmup_algorithm <- if (identical(cfg$algorithm, "simpls")) "simpls_fast" else cfg$algorithm
   invisible(gpu_fit_dispatch(
     Xtrain = ds$Xtrain,
     Ytrain = ds$Ytrain,
-    algorithm = cfg$algorithm,
+    algorithm = warmup_algorithm,
     Xtest = ds$Xtest,
     Ytest = ds$Ytest,
     ncomp = as.integer(ncomp_run),
@@ -389,7 +390,7 @@ start_memory_monitor <- function(track_gpu = FALSE) {
     "gpu=NA"
   }
   loop <- sprintf(
-    "printf 'rss_mb,gpu_mem_mb\\n' > %s; while :; do rss=$(awk '/VmRSS:/ {print $2/1024}' /proc/%d/status 2>/dev/null); if [ -z \"$rss\" ]; then rss=NA; fi; %s; printf '%%s,%%s\\n' \"$rss\" \"$gpu\" >> %s; sleep %.3f; done & echo $!",
+    "printf 'rss_mb,gpu_mem_mb\\n' > %s; (while :; do rss=$(awk '/VmRSS:/ {print $2/1024}' /proc/%d/status 2>/dev/null); if [ -z \"$rss\" ]; then rss=NA; fi; %s; printf '%%s,%%s\\n' \"$rss\" \"$gpu\" >> %s; sleep %.3f; done) >/dev/null 2>&1 & echo $!",
     shQuote(tmp),
     pid,
     nvidia_cmd,
@@ -808,36 +809,22 @@ subset_yvars <- function(ds, frac) {
 
 method_grid <- function(cuda_ok, include_r = FALSE) {
   svd <- c("irlba", "cpu_rsvd")
-  dt <- CJ(
-    engine = "Rcpp",
-    algorithm = c("simpls", "plssvd", "simpls_fast"),
-    svd_method = svd,
-    fast_profile = c("default", "default", "incdefl"),
-    unique = TRUE
-  )
-  dt <- dt[
-    (algorithm %in% c("simpls", "plssvd") & fast_profile == "default") |
-    (algorithm == "simpls_fast" & fast_profile == "incdefl")
-  ]
+  dt <- rbindlist(list(
+    data.table(engine = "Rcpp", algorithm = "plssvd", svd_method = svd, fast_profile = "default"),
+    data.table(engine = "Rcpp", algorithm = "simpls", svd_method = svd, fast_profile = "incdefl")
+  ), fill = TRUE)
   if (isTRUE(include_r)) {
     svd_r <- c("irlba", "cpu_rsvd")
-    dt_r <- CJ(
-      engine = "R",
-      algorithm = c("simpls", "plssvd", "simpls_fast"),
-      svd_method = svd_r,
-      fast_profile = c("default", "default", "incdefl"),
-      unique = TRUE
-    )
-    dt_r <- dt_r[
-      (algorithm %in% c("simpls", "plssvd") & fast_profile == "default") |
-      (algorithm == "simpls_fast" & fast_profile == "incdefl")
-    ]
+    dt_r <- rbindlist(list(
+      data.table(engine = "R", algorithm = "plssvd", svd_method = svd_r, fast_profile = "default"),
+      data.table(engine = "R", algorithm = "simpls", svd_method = svd_r, fast_profile = "incdefl")
+    ), fill = TRUE)
     dt <- rbind(dt, dt_r, fill = TRUE)
   }
   if (isTRUE(cuda_ok)) {
     dt_gpu <- data.table(
       engine = "GPU",
-      algorithm = c("plssvd", "simpls_fast"),
+      algorithm = c("plssvd", "simpls"),
       svd_method = "gpu_native",
       fast_profile = "gpu_native"
     )
@@ -993,7 +980,7 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
     irlba_svtol = as.numeric(irlba_svtol),
     rsvd_tol = as.numeric(rsvd_tol)
   )
-  if (identical(cfg$algorithm, "simpls_fast") && identical(cfg$fast_profile, "incdefl")) {
+  if (identical(cfg$algorithm, "simpls") && identical(cfg$fast_profile, "incdefl")) {
     args <- c(args, list(
       fast_incremental = TRUE,
       fast_inc_iters = 2L,
@@ -1009,7 +996,7 @@ fit_build <- function(ds, cfg, ncomp, param_cfg) {
     model <- gpu_fit_dispatch(
       Xtrain = ds$Xtrain,
       Ytrain = ds$Ytrain,
-      algorithm = cfg$algorithm,
+      algorithm = if (identical(cfg$algorithm, "simpls")) "simpls_fast" else cfg$algorithm,
       ncomp = as.integer(ncomp),
       Xtest = NULL,
       Ytest = NULL,

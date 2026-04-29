@@ -164,8 +164,7 @@
     FASTPLS_GPU_QR = Sys.getenv("FASTPLS_GPU_QR", unset = NA_character_),
     FASTPLS_GPU_EIG = Sys.getenv("FASTPLS_GPU_EIG", unset = NA_character_),
     FASTPLS_GPU_QLESS_QR = Sys.getenv("FASTPLS_GPU_QLESS_QR", unset = NA_character_),
-    FASTPLS_GPU_FINALIZE_THRESHOLD = Sys.getenv("FASTPLS_GPU_FINALIZE_THRESHOLD", unset = NA_character_),
-    FASTPLS_GPU_TRAIN_FP32 = Sys.getenv("FASTPLS_GPU_TRAIN_FP32", unset = NA_character_)
+    FASTPLS_GPU_FINALIZE_THRESHOLD = Sys.getenv("FASTPLS_GPU_FINALIZE_THRESHOLD", unset = NA_character_)
   )
   on.exit({
     for (nm in names(old)) {
@@ -177,8 +176,7 @@
     FASTPLS_GPU_QR = if (isTRUE(gpu_qr)) "1" else "0",
     FASTPLS_GPU_EIG = if (isTRUE(gpu_eig)) "1" else "0",
     FASTPLS_GPU_QLESS_QR = if (isTRUE(gpu_qless_qr)) "1" else "0",
-    FASTPLS_GPU_FINALIZE_THRESHOLD = as.character(as.integer(gpu_finalize_threshold)),
-    FASTPLS_GPU_TRAIN_FP32 = "0"
+    FASTPLS_GPU_FINALIZE_THRESHOLD = as.character(as.integer(gpu_finalize_threshold))
   )
   force(expr)
 }
@@ -206,6 +204,17 @@
   }
   s_mb <- p * q * 8 / 1024^2
   isTRUE(s_mb > 32) || (isTRUE(q >= 100) && isTRUE(ncomp <= 10))
+}
+
+.should_use_xprod_irlba_default <- function(p, q, ncomp) {
+  p <- as.numeric(p)
+  q <- as.numeric(q)
+  ncomp <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
+  if (!is.finite(p) || !is.finite(q) || !is.finite(ncomp)) {
+    return(FALSE)
+  }
+  s_mb <- p * q * 8 / 1024^2
+  isTRUE(s_mb > 32) && isTRUE(min(p, q) >= 1000)
 }
 
 .should_store_coefficients <- function(p, q, nslices = 1L, compact_prediction_available = TRUE) {
@@ -248,12 +257,11 @@
 }
 
 .normalize_pls_method <- function(method) {
-  method <- match.arg(method, c("simpls", "plssvd", "simpls_fast"))
+  method <- match.arg(method, c("simpls", "plssvd"))
   switch(
     method,
     plssvd = 1L,
-    simpls = 3L,
-    simpls_fast = 3L
+    simpls = 3L
   )
 }
 
@@ -542,29 +550,42 @@ pls.model1.rsvd.xprod.precision =
             rsvd_oversample = 10L,
             rsvd_power = 1L,
             svds_tol = 0,
+            irlba_work = 0L,
+            irlba_maxit = 1000L,
+            irlba_tol = 1e-5,
+            irlba_eps = 1e-9,
+            irlba_svtol = 1e-5,
             seed = 1L,
-            xprod_precision = c("implicit64", "double"))
+            xprod_precision = c("implicit64", "implicit_irlba", "double"))
   {
     xprod_precision <- match.arg(xprod_precision)
     precision_id <- switch(
       xprod_precision,
       double = 0L,
-      implicit64 = 3L
+      implicit64 = 3L,
+      implicit_irlba = 5L
     )
     Xtrain <- as.matrix(Xtrain)
     Ytrain <- as.matrix(Ytrain)
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
-    model <- pls_model1_rsvd_xprod_precision(
-      Xtrain,
-      Ytrain,
-      cap$ncomp,
-      scaling,
-      fit,
-      as.integer(rsvd_oversample),
-      as.integer(rsvd_power),
-      svds_tol,
-      as.integer(seed),
-      as.integer(precision_id)
+    model <- .with_irlba_options(
+      pls_model1_rsvd_xprod_precision(
+        Xtrain,
+        Ytrain,
+        cap$ncomp,
+        scaling,
+        fit,
+        as.integer(rsvd_oversample),
+        as.integer(rsvd_power),
+        svds_tol,
+        as.integer(seed),
+        as.integer(precision_id)
+      ),
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
     )
     model$pls_method <- "plssvd"
     model$predict_latent_ok <- TRUE
@@ -581,8 +602,13 @@ pls.model2.fast.rsvd.xprod.precision =
             rsvd_oversample = 10L,
             rsvd_power = 1L,
             svds_tol = 0,
+            irlba_work = 0L,
+            irlba_maxit = 1000L,
+            irlba_tol = 1e-5,
+            irlba_eps = 1e-9,
+            irlba_svtol = 1e-5,
             seed = 1L,
-            xprod_precision = c("implicit64", "double"),
+            xprod_precision = c("implicit64", "implicit_irlba", "double"),
             fast_block = 1L,
             fast_center_t = FALSE,
             fast_reorth_v = FALSE,
@@ -594,7 +620,8 @@ pls.model2.fast.rsvd.xprod.precision =
     precision_id <- switch(
       xprod_precision,
       double = 0L,
-      implicit64 = 3L
+      implicit64 = 3L,
+      implicit_irlba = 5L
     )
     profile <- .resolve_simpls_fast_profile(
       fast_block = fast_block,
@@ -612,17 +639,24 @@ pls.model2.fast.rsvd.xprod.precision =
       context = "pls.model2.fast.rsvd.xprod.precision"
     )
     model <- .with_fastpls_fast_options(
-      pls_model2_fast_rsvd_xprod_precision(
-        as.matrix(Xtrain),
-        as.matrix(Ytrain),
-        as.integer(ncomp),
-        scaling,
-        fit,
-        as.integer(rsvd_oversample),
-        as.integer(rsvd_power),
-        svds_tol,
-        as.integer(seed),
-        as.integer(precision_id)
+      .with_irlba_options(
+        pls_model2_fast_rsvd_xprod_precision(
+          as.matrix(Xtrain),
+          as.matrix(Ytrain),
+          as.integer(ncomp),
+          scaling,
+          fit,
+          as.integer(rsvd_oversample),
+          as.integer(rsvd_power),
+          svds_tol,
+          as.integer(seed),
+          as.integer(precision_id)
+        ),
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol
       ),
       fast_block = profile$fast_block,
       fast_center_t = profile$fast_center_t,
@@ -988,6 +1022,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
 #' @param gamma Kernel scale. Defaults to `1 / ncol(Xtrain)`.
 #' @param degree Polynomial kernel degree.
 #' @param coef0 Polynomial kernel offset.
+#' @param ... Additional arguments passed to the inner PLS fit.
 #' @return A `fastPLSKernel` object.
 #' @export
 kernel_pls_r <- function(Xtrain,
@@ -1000,7 +1035,7 @@ kernel_pls_r <- function(Xtrain,
                          gamma = NULL,
                          degree = 3L,
                          coef0 = 1,
-                         method = c("simpls", "simpls_fast"),
+                         method = "simpls",
                          svd.method = c("irlba", "cpu_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
@@ -1048,7 +1083,7 @@ kernel_pls_cpp <- function(Xtrain,
                            gamma = NULL,
                            degree = 3L,
                            coef0 = 1,
-                           method = c("simpls", "simpls_fast"),
+                           method = "simpls",
                            svd.method = c("irlba", "cpu_rsvd"),
                            rsvd_oversample = 10L,
                            rsvd_power = 1L,
@@ -1096,7 +1131,7 @@ kernel_pls_cuda <- function(Xtrain,
                             gamma = NULL,
                             degree = 3L,
                             coef0 = 1,
-                            method = c("simpls", "simpls_fast"),
+                            method = "simpls",
                             rsvd_oversample = 10L,
                             rsvd_power = 1L,
                             svds_tol = 0,
@@ -1132,19 +1167,19 @@ kernel_pls_cuda <- function(Xtrain,
 #' @rdname kernel_pls_r
 #' @export
 kernel_pls_fast_r <- function(...) {
-  .fastpls_call_fixed_method(kernel_pls_r, "simpls_fast", ...)
+  .fastpls_call_fixed_method(kernel_pls_r, "simpls", ...)
 }
 
 #' @rdname kernel_pls_r
 #' @export
 kernel_pls_fast_cpp <- function(...) {
-  .fastpls_call_fixed_method(kernel_pls_cpp, "simpls_fast", ...)
+  .fastpls_call_fixed_method(kernel_pls_cpp, "simpls", ...)
 }
 
 #' @rdname kernel_pls_r
 #' @export
 kernel_pls_fast_cuda <- function(...) {
-  .fastpls_call_fixed_method(kernel_pls_cuda, "simpls_fast", ...)
+  .fastpls_call_fixed_method(kernel_pls_cuda, "simpls", ...)
 }
 
 #' @export
@@ -1225,6 +1260,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
 #'
 #' @inheritParams pls
 #' @param north Number of orthogonal components to remove before PLS fitting.
+#' @param ... Additional arguments passed to the inner PLS fit.
 #' @return A `fastPLSOpls` object.
 #' @export
 opls_r <- function(Xtrain,
@@ -1234,7 +1270,7 @@ opls_r <- function(Xtrain,
                    ncomp = 2,
                    north = 1L,
                    scaling = c("centering", "autoscaling", "none"),
-                   method = c("simpls", "plssvd", "simpls_fast"),
+                   method = c("simpls", "plssvd"),
                    svd.method = c("irlba", "cpu_rsvd"),
                    rsvd_oversample = 10L,
                    rsvd_power = 1L,
@@ -1279,7 +1315,7 @@ opls_cpp <- function(Xtrain,
                      ncomp = 2,
                      north = 1L,
                      scaling = c("centering", "autoscaling", "none"),
-                     method = c("simpls", "plssvd", "simpls_fast"),
+                     method = c("simpls", "plssvd"),
                      svd.method = c("irlba", "cpu_rsvd"),
                      rsvd_oversample = 10L,
                      rsvd_power = 1L,
@@ -1324,7 +1360,7 @@ opls_cuda <- function(Xtrain,
                       ncomp = 2,
                       north = 1L,
                       scaling = c("centering", "autoscaling", "none"),
-                      method = c("plssvd", "simpls", "simpls_fast"),
+                      method = c("plssvd", "simpls"),
                       rsvd_oversample = 10L,
                       rsvd_power = 1L,
                       svds_tol = 0,
@@ -1345,7 +1381,7 @@ opls_cuda <- function(Xtrain,
         svds_tol = svds_tol,
         seed = seed
       ),
-      if (method %in% c("simpls", "simpls_fast")) list(fast_block = fast_block) else list(),
+      if (identical(method, "simpls")) list(fast_block = fast_block) else list(),
       list(...)
     )
   )
@@ -1354,19 +1390,19 @@ opls_cuda <- function(Xtrain,
 #' @rdname opls_r
 #' @export
 opls_fast_r <- function(...) {
-  .fastpls_call_fixed_method(opls_r, "simpls_fast", ...)
+  .fastpls_call_fixed_method(opls_r, "simpls", ...)
 }
 
 #' @rdname opls_r
 #' @export
 opls_fast_cpp <- function(...) {
-  .fastpls_call_fixed_method(opls_cpp, "simpls_fast", ...)
+  .fastpls_call_fixed_method(opls_cpp, "simpls", ...)
 }
 
 #' @rdname opls_r
 #' @export
 opls_fast_cuda <- function(...) {
-  .fastpls_call_fixed_method(opls_cuda, "simpls_fast", ...)
+  .fastpls_call_fixed_method(opls_cuda, "simpls", ...)
 }
 
 #' @export
@@ -1382,9 +1418,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   predict.fastPLS(object$inner_model, Xnew, Ytest = Ytest, proj = proj)
 }
 
-#' Experimental GPU-native SIMPLS-fast fit
+#' Experimental GPU-native SIMPLS fit
 #'
-#' Uses a separate CUDA-oriented `simpls_fast` engine that keeps the training
+#' Uses a CUDA-oriented `simpls` engine that keeps the training
 #' matrices and deflated cross-covariance resident on device throughout the fit.
 #'
 #' @param Xtrain Numeric training predictor matrix.
@@ -1399,6 +1435,17 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param seed Random seed.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param proj Return projected `Ttest` when `TRUE`.
+#' @param gpu_device_state Keep selected SIMPLS workspaces resident on the GPU when `TRUE`.
+#' @param gpu_qr Use GPU QR finalization when available.
+#' @param gpu_eig Use GPU eigensolver finalization when available.
+#' @param gpu_qless_qr Use the q-less GPU QR path when available.
+#' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
+#' @param fast_block Refresh block size for the fastPLS `simpls` core.
+#' @param fast_center_t Deprecated and ignored.
+#' @param fast_reorth_v Deprecated and ignored.
+#' @param fast_incremental Deprecated and ignored.
+#' @param fast_inc_iters Deprecated and ignored.
+#' @param fast_defl_cache Deprecated and ignored.
 #' @return A `fastPLS` object.
 #' @export
 simpls_gpu = function(Xtrain,
@@ -1505,11 +1552,6 @@ simpls_gpu = function(Xtrain,
   model
 }
 
-pls_gpu = function(...) {
-  .Deprecated("simpls_gpu", package = "fastPLS")
-  simpls_gpu(...)
-}
-
 #' Experimental GPU-native PLSSVD fit
 #'
 #' Uses a dedicated CUDA PLSSVD engine that keeps the cross-covariance SVD and
@@ -1528,6 +1570,10 @@ pls_gpu = function(...) {
 #' @param seed Random seed.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param proj Return projected `Ttest` when `TRUE`.
+#' @param gpu_qr Use GPU QR finalization when available.
+#' @param gpu_eig Use GPU eigensolver finalization when available.
+#' @param gpu_qless_qr Use the q-less GPU QR path when available.
+#' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
 #' @return A `fastPLS` object fitted with GPU PLSSVD.
 #' @export
 plssvd_gpu = function(Xtrain,
@@ -1658,7 +1704,7 @@ plssvd_gpu = function(Xtrain,
                              ncomp = 2L,
                              kfold = 10L,
                              scaling = c("centering", "autoscaling", "none"),
-                             method = c("plssvd", "simpls", "simpls_fast"),
+                             method = c("plssvd", "simpls"),
                              backend = c("cpp", "cuda"),
                              svd.method = c("cpu_rsvd", "irlba"),
                              rsvd_oversample = 10L,
@@ -1702,9 +1748,6 @@ plssvd_gpu = function(Xtrain,
   if (!identical(backend, "cuda")) {
     .guard_removed_hybrid_cuda(svd.method, "PLS CV")
     svd.method <- .normalize_svd_method(match.arg(svd.method))
-    if (identical(svd.method, "irlba")) {
-      xprod <- FALSE
-    }
     svdmeth <- .svd_method_id(svd.method)
   } else {
     svdmeth <- .svd_method_id("cuda_rsvd")
@@ -1734,7 +1777,7 @@ plssvd_gpu = function(Xtrain,
     )
   }
 
-  if (method %in% c("simpls", "simpls_fast")) {
+  if (identical(method, "simpls")) {
     profile <- .resolve_simpls_fast_profile(
       fast_block = 1L,
       fast_center_t = FALSE,
@@ -1767,7 +1810,7 @@ plssvd_gpu = function(Xtrain,
 
   if (identical(backend, "cuda")) {
     on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
-    if (method %in% c("simpls", "simpls_fast") && isTRUE(xprod)) {
+    if (identical(method, "simpls") && isTRUE(xprod)) {
       res <- .with_simpls_gpu_xprod(
         .with_gpu_native_options(
           run_cv_profiled(),
@@ -1781,7 +1824,7 @@ plssvd_gpu = function(Xtrain,
     } else {
       res <- .with_gpu_native_options(
         run_cv_profiled(),
-        gpu_device_state = method %in% c("simpls", "simpls_fast"),
+        gpu_device_state = identical(method, "simpls"),
         gpu_qr = gpu_qr,
         gpu_eig = gpu_eig,
         gpu_qless_qr = gpu_qless_qr,
@@ -1814,8 +1857,8 @@ plssvd_gpu = function(Xtrain,
 #' @param kfold Number of CV folds.
 #' @param scaling Scaling mode.
 #' @param svd.method CPU SVD backend for Cpp functions.
-#' @param xprod Use the matrix-free xprod backend where available. Ignored for
-#'   `svd.method = "irlba"`.
+#' @param xprod Use the matrix-free xprod backend where available, including
+#'   the bundled IRLBA operator path for `svd.method = "irlba"`.
 #' @param ... Additional backend tuning arguments.
 #' @return A list with `Ypred`, decoded `pred`, `metrics`, `fold`, and status.
 #' @export
@@ -1838,7 +1881,7 @@ simpls_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10
 simpls_fast_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                                scaling = c("centering", "autoscaling", "none"),
                                svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
-  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls_fast", "cpp", svd.method, xprod = xprod, ...)
+  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp", svd.method, xprod = xprod, ...)
 }
 
 #' @rdname plssvd_cv_cpp
@@ -1854,7 +1897,7 @@ plssvd_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 1
 simpls_fast_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                                 scaling = c("centering", "autoscaling", "none"),
                                 xprod = TRUE, ...) {
-  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls_fast", "cuda", xprod = xprod, ...)
+  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cuda", xprod = xprod, ...)
 }
 
 .svd_methods_internal <- c("irlba", "cpu_rsvd", "cuda_rsvd")
@@ -2056,6 +2099,7 @@ svd_benchmark <- function(A,
     if (!is.finite(work) || is.na(work) || work <= k) {
       work <- max(k + 7L, 8L)
     }
+    work <- min(work, max_rank)
     out <- tryCatch(
       IRLB(
         A,
@@ -2811,10 +2855,10 @@ svd_benchmark <- function(A,
 
 #' Pure-R PLS reference implementation
 #'
-#' Pure-R implementation of `plssvd`, `simpls`, and `simpls_fast` with CPU-only SVD choices.
+#' Pure-R implementation of `plssvd` and the fastPLS `simpls` core with CPU-only SVD choices.
 #'
 #' @inheritParams pls
-#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
+#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
 #' @param svd.method One of `"irlba"` or `"cpu_rsvd"`.
 #' @return A `fastPLS` object.
 #' @export
@@ -2824,7 +2868,7 @@ pls_r = function (Xtrain,
                   Ytest = NULL,
                   ncomp=2,
                   scaling = c("centering", "autoscaling","none"),
-                  method = c("simpls", "plssvd", "simpls_fast"),
+                  method = c("simpls", "plssvd"),
                   svd.method = c("irlba", "cpu_rsvd"),
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
@@ -2841,7 +2885,7 @@ pls_r = function (Xtrain,
   perm.test = FALSE,
   times = 100) {
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-  requested_method <- match.arg(method, c("simpls", "plssvd", "simpls_fast"))
+  requested_method <- match.arg(method, c("simpls", "plssvd"))
   meth <- .normalize_pls_method(requested_method)
   svdmeth <- .normalize_svd_method(svd.method)
   svdmeth <- match.arg(svdmeth, c("irlba", "cpu_rsvd"))
@@ -2969,25 +3013,30 @@ pls_r = function (Xtrain,
 #' @param Ytest Optional test response for `Q2Y`.
 #' @param ncomp Number of components (scalar or vector).
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
-#' @param method One of `"simpls"`, `"plssvd"`, `"simpls_fast"`.
+#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
 #' @param svd.method One of `"irlba"` or `"cpu_rsvd"`.
 #'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 #'   from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.
 #' @param rsvd_oversample RSVD oversampling.
 #' @param rsvd_power RSVD power iterations.
 #' @param svds_tol Reserved backend tolerance placeholder.
+#' @param irlba_work IRLBA work subspace size; `0` lets the backend choose.
+#' @param irlba_maxit Maximum IRLBA iterations.
+#' @param irlba_tol IRLBA convergence tolerance.
+#' @param irlba_eps IRLBA orthogonality threshold.
+#' @param irlba_svtol IRLBA singular-value convergence tolerance.
 #' @param seed RSVD seed.
-#' @param fast_block Refresh block size for `simpls_fast`; use `1L` for the
+#' @param fast_block Refresh block size for the fastPLS `simpls` core; use `1L` for the
 #'   most accuracy-stable per-component refresh.
-#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_center_t Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_reorth_v Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_incremental Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_inc_iters Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param proj Return projected `Ttest` when `TRUE`.
@@ -3001,7 +3050,7 @@ pls =  function (Xtrain,
                  Ytest = NULL,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"),
-                 method = c("simpls", "plssvd", "simpls_fast"),
+                 method = c("simpls", "plssvd"),
                  svd.method = c("irlba", "cpu_rsvd"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
@@ -3025,7 +3074,7 @@ pls =  function (Xtrain,
 {
 
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
-  requested_method <- match.arg(method, c("simpls", "plssvd", "simpls_fast"))
+  requested_method <- match.arg(method, c("simpls", "plssvd"))
   meth = .normalize_pls_method(requested_method)
   .guard_removed_hybrid_cuda(svd.method, "pls()")
   svd.method <- .normalize_svd_method(svd.method)
@@ -3079,10 +3128,13 @@ pls =  function (Xtrain,
     if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
   }
 
-  use_xprod_default <- identical(svd.method, "cpu_rsvd") &&
-    meth %in% c(1L, 3L) &&
-    .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
-  xprod_precision_default <- "implicit64"
+  use_xprod_default <- meth %in% c(1L, 3L) && (
+    (identical(svd.method, "cpu_rsvd") &&
+       .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)) ||
+      (identical(svd.method, "irlba") &&
+         .should_use_xprod_irlba_default(ncol(Xtrain), ncol(Ytrain), ncomp))
+  )
+  xprod_precision_default <- if (identical(svd.method, "irlba")) "implicit_irlba" else "implicit64"
 
   if(meth==1){
     cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
@@ -3097,6 +3149,11 @@ pls =  function (Xtrain,
         rsvd_oversample=rsvd_oversample,
         rsvd_power=rsvd_power,
         svds_tol=svds_tol,
+        irlba_work=irlba_work,
+        irlba_maxit=irlba_maxit,
+        irlba_tol=irlba_tol,
+        irlba_eps=irlba_eps,
+        irlba_svtol=irlba_svtol,
         seed=seed,
         xprod_precision=xprod_precision_default
       )
@@ -3150,6 +3207,11 @@ pls =  function (Xtrain,
         rsvd_oversample=rsvd_oversample,
         rsvd_power=rsvd_power,
         svds_tol=svds_tol,
+        irlba_work=irlba_work,
+        irlba_maxit=irlba_maxit,
+        irlba_tol=irlba_tol,
+        irlba_eps=irlba_eps,
+        irlba_svtol=irlba_svtol,
         seed=seed,
         xprod_precision=xprod_precision_default,
         fast_block=fast_block,
@@ -3319,18 +3381,18 @@ pls =  function (Xtrain,
 #' @param Ydata Response (numeric or factor).
 #' @param constrain Optional grouping vector for constrained splitting.
 #' @param kfold Number of folds.
-#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
-#' @param fast_block Refresh block size for `simpls_fast`; use `1L` for the
+#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
+#' @param fast_block Refresh block size for the fastPLS `simpls` core; use `1L` for the
 #'   most accuracy-stable per-component refresh.
-#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_center_t Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_reorth_v Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_incremental Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_inc_iters Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
 #' @return List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
 #' @export
@@ -3339,7 +3401,7 @@ optim.pls.cv =  function (Xdata,
                           ncomp=2,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
-                          method = c("simpls", "plssvd", "simpls_fast"),
+                          method = c("simpls", "plssvd"),
                           svd.method = c("irlba", "cpu_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
@@ -3468,18 +3530,18 @@ optim.pls.cv =  function (Xdata,
 #' @param runn Number of repeated runs.
 #' @param kfold_inner Inner-fold count.
 #' @param kfold_outer Outer-fold count.
-#' @param method One of `"simpls"`, `"plssvd"`, or `"simpls_fast"`.
-#' @param fast_block Refresh block size for `simpls_fast`; use `1L` for the
+#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
+#' @param fast_block Refresh block size for the fastPLS `simpls` core; use `1L` for the
 #'   most accuracy-stable per-component refresh.
-#' @param fast_center_t Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_center_t Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_reorth_v Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_reorth_v Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_incremental Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_incremental Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_inc_iters Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_inc_iters Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @param fast_defl_cache Deprecated and ignored. `simpls_fast` now permanently uses
+#' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
 #' @return List of nested CV outputs and summaries.
 #' @export
@@ -3488,7 +3550,7 @@ pls.double.cv = function(Xdata,
                          ncomp=2,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"),
-                         method = c("simpls", "plssvd", "simpls_fast"),
+                         method = c("simpls", "plssvd"),
                          svd.method = c("irlba", "cpu_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,

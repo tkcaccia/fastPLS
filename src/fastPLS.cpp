@@ -45,6 +45,17 @@ int env_int_or(const char* key, int fallback, int lo, int hi) {
   return static_cast<int>(v);
 }
 
+double env_double_or(const char* key, double fallback, double lo, double hi) {
+  const char* raw = std::getenv(key);
+  if (raw == nullptr) return fallback;
+  char* endptr = nullptr;
+  double v = std::strtod(raw, &endptr);
+  if (endptr == raw || !std::isfinite(v)) return fallback;
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
+  return v;
+}
+
 bool should_store_coefficients(
   const int p,
   const int m,
@@ -305,6 +316,114 @@ bool plssvd_use_small_exact_svd(const int max_rank) {
   return max_rank <= threshold;
 }
 
+arma::mat numeric_matrix_view(SEXP x, const char* name) {
+  if (!Rf_isReal(x) || !Rf_isMatrix(x)) {
+    Rcpp::stop("%s must be a numeric matrix", name);
+  }
+  Rcpp::NumericMatrix rx(x);
+  return arma::mat(
+    REAL(rx),
+    static_cast<arma::uword>(rx.nrow()),
+    static_cast<arma::uword>(rx.ncol()),
+    false,
+    true
+  );
+}
+
+arma::rowvec variance_nocopy(const arma::mat& x) {
+  const int nrow = static_cast<int>(x.n_rows);
+  const int ncol = static_cast<int>(x.n_cols);
+  arma::rowvec out(ncol);
+  for (int j = 0; j < ncol; ++j) {
+    double mean_j = 0.0;
+    double m2 = 0.0;
+    for (int i = 0; i < nrow; ++i) {
+      const double xx = x(i, j);
+      const double delta = xx - mean_j;
+      mean_j += delta / static_cast<double>(i + 1);
+      m2 += delta * (xx - mean_j);
+    }
+    out(j) = std::sqrt(m2 / static_cast<double>(std::max(nrow - 1, 1)));
+  }
+  return out;
+}
+
+struct CenterScaleMatrixView {
+  const arma::mat& X;
+  arma::rowvec center;
+  arma::rowvec scale;
+
+  arma::mat times(const arma::mat& M) const {
+    arma::mat Mscaled = M;
+    Mscaled.each_col() /= scale.t();
+    arma::mat out = X * Mscaled;
+    arma::rowvec offset = (center / scale) * M;
+    out.each_row() -= offset;
+    return out;
+  }
+
+  arma::vec times(const arma::vec& v) const {
+    arma::vec vscaled = v / scale.t();
+    arma::vec out = X * vscaled;
+    const double offset = arma::as_scalar((center / scale) * v);
+    out -= offset;
+    return out;
+  }
+
+  arma::mat t_times(const arma::mat& M) const {
+    arma::mat out = X.t() * M;
+    arma::rowvec sums = arma::sum(M, 0);
+    out -= center.t() * sums;
+    out.each_col() /= scale.t();
+    return out;
+  }
+
+  arma::vec t_times(const arma::vec& v) const {
+    arma::vec out = X.t() * v;
+    out -= center.t() * arma::sum(v);
+    out /= scale.t();
+    return out;
+  }
+};
+
+struct CenterOnlyMatrixView {
+  const arma::mat& Y;
+  arma::rowvec center;
+
+  arma::mat times(const arma::mat& M) const {
+    arma::mat out = Y * M;
+    arma::rowvec offset = center * M;
+    out.each_row() -= offset;
+    return out;
+  }
+
+  arma::vec times(const arma::vec& v) const {
+    arma::vec out = Y * v;
+    const double offset = arma::as_scalar(center * v);
+    out -= offset;
+    return out;
+  }
+
+  arma::mat t_times(const arma::mat& M) const {
+    arma::mat out = Y.t() * M;
+    arma::rowvec sums = arma::sum(M, 0);
+    out -= center.t() * sums;
+    return out;
+  }
+
+  arma::vec t_times(const arma::vec& v) const {
+    arma::vec out = Y.t() * v;
+    out -= center.t() * arma::sum(v);
+    return out;
+  }
+
+  arma::mat centered_copy() const {
+    arma::mat out = Y;
+    out.each_row() -= center;
+    return out;
+  }
+};
+
 fastpls_svd::SVDResult finalize_rsvd_from_q_b_double(
   const arma::mat& Q,
   const arma::mat& B,
@@ -344,6 +463,81 @@ fastpls_svd::SVDResult finalize_rsvd_from_q_b_double(
     out.Vt = V.cols(0, actual - 1).t();
   }
   return out;
+}
+
+fastpls_svd::SVDResult truncated_rsvd_crossprod_double_view(
+  const CenterScaleMatrixView& Xop,
+  const CenterOnlyMatrixView& Yop,
+  const int k,
+  const int rsvd_oversample,
+  const int rsvd_power,
+  const unsigned int seed,
+  const bool left_only,
+  const bool use_full_svd
+) {
+  const arma::uword p = Xop.X.n_cols;
+  const arma::uword m = Yop.Y.n_cols;
+  const arma::uword max_rank = std::min(p, m);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  const arma::uword l = std::min<arma::uword>(
+    max_rank,
+    target + static_cast<arma::uword>(std::max(rsvd_oversample, 0))
+  );
+
+  if (target == 0) {
+    return fastpls_svd::SVDResult();
+  }
+
+  if (use_full_svd || l >= max_rank) {
+    arma::mat S = Xop.t_times(Yop.centered_copy());
+    return compute_truncated_svd_dispatch(
+      S,
+      static_cast<int>(target),
+      fastpls_svd::SVD_METHOD_CPU_RSVD,
+      rsvd_oversample,
+      rsvd_power,
+      0.0,
+      seed,
+      left_only,
+      true
+    );
+  }
+
+  auto a_times = [&](const arma::mat& M) -> arma::mat {
+    return Xop.t_times(Yop.times(M));
+  };
+  auto at_times = [&](const arma::mat& M) -> arma::mat {
+    return Yop.t_times(Xop.times(M));
+  };
+
+  arma::mat Omega = gaussian_matrix_local(m, l, seed);
+  arma::mat Ysample = a_times(Omega);
+
+  const int power_iters = std::max(rsvd_power, 0);
+  if (power_iters == 1) {
+    Ysample = a_times(at_times(Ysample));
+  } else {
+    for (int i = 0; i < power_iters; ++i) {
+      arma::mat Z = at_times(Ysample);
+      arma::mat Qz;
+      arma::mat Rz;
+      arma::qr_econ(Qz, Rz, Z);
+      Ysample = a_times(Qz);
+    }
+  }
+
+  arma::mat Q;
+  arma::mat R;
+  arma::qr_econ(Q, R, Ysample);
+  if (Q.n_cols < 1) {
+    return fastpls_svd::SVDResult();
+  }
+
+  arma::mat B = Yop.t_times(Xop.times(Q)).t();
+  return finalize_rsvd_from_q_b_double(Q, B, static_cast<int>(target), left_only);
 }
 
 fastpls_svd::SVDResult truncated_rsvd_crossprod_double(
@@ -439,6 +633,299 @@ arma::mat project_deflated_left_double(
   return M;
 }
 
+void project_deflated_left_inplace(
+  arma::vec& x,
+  const arma::mat& V,
+  const int n_prev
+) {
+  if (n_prev <= 0 || V.n_cols < 1 || x.n_elem != V.n_rows) {
+    return;
+  }
+  const arma::uword cols = std::min<arma::uword>(
+    static_cast<arma::uword>(n_prev),
+    V.n_cols
+  );
+  if (cols > 0) {
+    arma::mat Vprev = V.cols(0, cols - 1);
+    x -= Vprev * (Vprev.t() * x);
+  }
+}
+
+struct CrossprodIrlbaOperatorData {
+  const arma::mat* X = nullptr;
+  const arma::mat* Y = nullptr;
+  const arma::mat* V = nullptr;
+  int n_prev = 0;
+  arma::vec sample_tmp;
+  arma::vec left_tmp;
+};
+
+void crossprod_irlba_mult(char transpose, int m, int n, void* data, double* b, double* c) {
+  CrossprodIrlbaOperatorData* op = static_cast<CrossprodIrlbaOperatorData*>(data);
+  if (op == nullptr || op->X == nullptr || op->Y == nullptr) {
+    return;
+  }
+  const arma::mat& X = *(op->X);
+  const arma::mat& Ymat = *(op->Y);
+  if (transpose == 't' || transpose == 'T') {
+    arma::vec lhs(b, static_cast<arma::uword>(m), false, true);
+    arma::vec out(c, static_cast<arma::uword>(n), false, true);
+    if (op->V != nullptr && op->n_prev > 0) {
+      op->left_tmp = lhs;
+      project_deflated_left_inplace(op->left_tmp, *(op->V), op->n_prev);
+      op->sample_tmp = X * op->left_tmp;
+    } else {
+      op->sample_tmp = X * lhs;
+    }
+    out = Ymat.t() * op->sample_tmp;
+  } else {
+    arma::vec rhs(b, static_cast<arma::uword>(n), false, true);
+    arma::vec out(c, static_cast<arma::uword>(m), false, true);
+    op->sample_tmp = Ymat * rhs;
+    out = X.t() * op->sample_tmp;
+    if (op->V != nullptr && op->n_prev > 0) {
+      project_deflated_left_inplace(out, *(op->V), op->n_prev);
+    }
+  }
+}
+
+fastpls_svd::SVDResult truncated_irlba_crossprod_double(
+  const arma::mat& X,
+  const arma::mat& Ymat,
+  const int k,
+  const bool left_only,
+  const bool use_full_svd
+) {
+  fastpls_svd::SVDResult out;
+
+  const arma::uword p = X.n_cols;
+  const arma::uword m = Ymat.n_cols;
+  const arma::uword max_rank = std::min(p, m);
+  const int rank = std::min<int>(std::max(k, 1), static_cast<int>(max_rank));
+  if (rank < 1) {
+    return out;
+  }
+
+  if (use_full_svd || max_rank < 6) {
+    arma::mat S = X.t() * Ymat;
+    return compute_truncated_svd_dispatch(
+      S,
+      rank,
+      fastpls_svd::SVD_METHOD_IRLBA,
+      0,
+      0,
+      0.0,
+      1U,
+      left_only,
+      true
+    );
+  }
+
+  int work = env_int_or("FASTPLS_IRLBA_WORK", 0, 0, static_cast<int>(max_rank));
+  if (work <= rank) {
+    work = std::max(rank + 7, 8);
+  }
+  if (work > static_cast<int>(max_rank)) {
+    work = static_cast<int>(max_rank);
+  }
+
+  const int maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 1000, 1, 10000000);
+  const double tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-5, 0.0, 1.0);
+  const double eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1.0);
+  const double svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-5, 0.0, 1.0);
+
+  int iter = 0;
+  int mprod = 0;
+  int lwork = 7 * work * (1 + work);
+
+  arma::vec s = arma::randn<arma::vec>(rank);
+  arma::mat U = arma::randn<arma::mat>(p, work);
+  arma::mat Vright = arma::randn<arma::mat>(m, work);
+  arma::mat V1 = arma::zeros<arma::mat>(m, work);
+  arma::mat U1 = arma::zeros<arma::mat>(p, work);
+  arma::mat W = arma::zeros<arma::mat>(p, work);
+  arma::vec F = arma::zeros<arma::vec>(m);
+  arma::mat B = arma::zeros<arma::mat>(work, work);
+  arma::mat BU = arma::zeros<arma::mat>(work, work);
+  arma::mat BV = arma::mat(work, work);
+  arma::vec BS = arma::zeros<arma::vec>(work);
+  arma::vec BW = arma::zeros<arma::vec>(lwork);
+  arma::vec res = arma::zeros<arma::vec>(work);
+  arma::vec T = arma::zeros<arma::vec>(lwork);
+  arma::vec svratio = arma::zeros<arma::vec>(work);
+
+  CrossprodIrlbaOperatorData data;
+  data.X = &X;
+  data.Y = &Ymat;
+  fastpls_irlba_operator op;
+  op.mult = &crossprod_irlba_mult;
+  op.data = &data;
+
+  irlb(
+    nullptr,
+    &op,
+    2,
+    static_cast<int>(p),
+    static_cast<int>(m),
+    rank,
+    work,
+    maxit,
+    0,
+    tol,
+    nullptr,
+    nullptr,
+    nullptr,
+    s.memptr(),
+    U.memptr(),
+    Vright.memptr(),
+    &iter,
+    &mprod,
+    eps,
+    lwork,
+    V1.memptr(),
+    U1.memptr(),
+    W.memptr(),
+    F.memptr(),
+    B.memptr(),
+    BU.memptr(),
+    BV.memptr(),
+    BS.memptr(),
+    BW.memptr(),
+    res.memptr(),
+    T.memptr(),
+    svtol,
+    svratio.memptr()
+  );
+
+  out.U = U.cols(0, static_cast<arma::uword>(rank - 1));
+  out.s = s.subvec(0, static_cast<arma::uword>(rank - 1));
+  if (!left_only) {
+    out.Vt = Vright.cols(0, static_cast<arma::uword>(rank - 1)).t();
+  }
+  return out;
+}
+
+bool refresh_deflated_crossprod_left_irlba_double(
+  const arma::mat& X,
+  const arma::mat& Ymat,
+  const arma::mat& V,
+  const int n_prev,
+  const int k_block,
+  arma::mat& Ublock,
+  arma::vec& shat
+) {
+  const arma::uword p = X.n_cols;
+  const arma::uword m = Ymat.n_cols;
+  if (p < 1 || m < 1 || k_block < 1) {
+    return false;
+  }
+
+  const arma::uword max_rank = std::min(p, m);
+  const int rank = std::min<int>(std::max(k_block, 1), static_cast<int>(max_rank));
+  if (rank < 1) {
+    return false;
+  }
+  if (max_rank < 6) {
+    arma::mat S = project_deflated_left_double(X.t() * Ymat, V, n_prev);
+    fastpls_svd::SVDResult res = compute_truncated_svd_dispatch(
+      S,
+      rank,
+      fastpls_svd::SVD_METHOD_IRLBA,
+      0,
+      0,
+      0.0,
+      1U,
+      true,
+      true
+    );
+    Ublock = res.U;
+    shat = res.s;
+    return Ublock.n_cols > 0;
+  }
+
+  int work = env_int_or("FASTPLS_IRLBA_WORK", 0, 0, static_cast<int>(max_rank));
+  if (work <= rank) {
+    work = std::max(rank + 7, 8);
+  }
+  if (work > static_cast<int>(max_rank)) {
+    work = static_cast<int>(max_rank);
+  }
+
+  const int maxit = env_int_or("FASTPLS_IRLBA_MAXIT", 1000, 1, 10000000);
+  const double tol = env_double_or("FASTPLS_IRLBA_TOL", 1e-5, 0.0, 1.0);
+  const double eps = env_double_or("FASTPLS_IRLBA_EPS", 1e-9, 0.0, 1.0);
+  const double svtol = env_double_or("FASTPLS_IRLBA_SVTOL", 1e-5, 0.0, 1.0);
+
+  int iter = 0;
+  int mprod = 0;
+  int lwork = 7 * work * (1 + work);
+
+  arma::vec s = arma::randn<arma::vec>(rank);
+  arma::mat U = arma::randn<arma::mat>(p, work);
+  arma::mat Vright = arma::randn<arma::mat>(m, work);
+  arma::mat V1 = arma::zeros<arma::mat>(m, work);
+  arma::mat U1 = arma::zeros<arma::mat>(p, work);
+  arma::mat W = arma::zeros<arma::mat>(p, work);
+  arma::vec F = arma::zeros<arma::vec>(m);
+  arma::mat B = arma::zeros<arma::mat>(work, work);
+  arma::mat BU = arma::zeros<arma::mat>(work, work);
+  arma::mat BV = arma::mat(work, work);
+  arma::vec BS = arma::zeros<arma::vec>(work);
+  arma::vec BW = arma::zeros<arma::vec>(lwork);
+  arma::vec res = arma::zeros<arma::vec>(work);
+  arma::vec T = arma::zeros<arma::vec>(lwork);
+  arma::vec svratio = arma::zeros<arma::vec>(work);
+
+  CrossprodIrlbaOperatorData data;
+  data.X = &X;
+  data.Y = &Ymat;
+  data.V = &V;
+  data.n_prev = n_prev;
+  fastpls_irlba_operator op;
+  op.mult = &crossprod_irlba_mult;
+  op.data = &data;
+
+  irlb(
+    nullptr,
+    &op,
+    2,
+    static_cast<int>(p),
+    static_cast<int>(m),
+    rank,
+    work,
+    maxit,
+    0,
+    tol,
+    nullptr,
+    nullptr,
+    nullptr,
+    s.memptr(),
+    U.memptr(),
+    Vright.memptr(),
+    &iter,
+    &mprod,
+    eps,
+    lwork,
+    V1.memptr(),
+    U1.memptr(),
+    W.memptr(),
+    F.memptr(),
+    B.memptr(),
+    BU.memptr(),
+    BV.memptr(),
+    BS.memptr(),
+    BW.memptr(),
+    res.memptr(),
+    T.memptr(),
+    svtol,
+    svratio.memptr()
+  );
+
+  Ublock = project_deflated_left_double(U.cols(0, static_cast<arma::uword>(rank - 1)), V, n_prev);
+  shat = s.subvec(0, static_cast<arma::uword>(rank - 1));
+  return Ublock.n_cols > 0;
+}
+
 bool refresh_deflated_crossprod_left_double(
   const arma::mat& X,
   const arma::mat& Ymat,
@@ -492,6 +979,72 @@ bool refresh_deflated_crossprod_left_double(
   }
 
   arma::mat Bsmall = (X * Q).t() * Ymat;
+  arma::mat Uhat;
+  arma::mat Vhat;
+  if (!finalize_left_block_from_bsmall(Bsmall, Uhat, shat, Vhat) || Uhat.n_cols < 1) {
+    return false;
+  }
+
+  Ublock = project_deflated_left_double(Q * Uhat, V, n_prev);
+  if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
+    Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
+  }
+  return (Ublock.n_cols > 0);
+}
+
+bool refresh_deflated_crossprod_left_double_view(
+  const CenterScaleMatrixView& Xop,
+  const CenterOnlyMatrixView& Yop,
+  const arma::mat& V,
+  const int n_prev,
+  const arma::vec* warm_start,
+  const int k_block,
+  const int power_iters,
+  const unsigned int seed,
+  arma::mat& Ublock,
+  arma::vec& shat
+) {
+  const arma::uword p = Xop.X.n_cols;
+  const arma::uword m = Yop.Y.n_cols;
+  if (p < 1 || m < 1 || k_block < 1) {
+    return false;
+  }
+
+  auto a_times = [&](const arma::mat& M) -> arma::mat {
+    return project_deflated_left_double(Xop.t_times(Yop.times(M)), V, n_prev);
+  };
+  auto at_times = [&](const arma::mat& M) -> arma::mat {
+    arma::mat Mp = project_deflated_left_double(M, V, n_prev);
+    return Yop.t_times(Xop.times(Mp));
+  };
+
+  arma::mat Ysample = gaussian_matrix_local(
+    p,
+    static_cast<arma::uword>(k_block),
+    seed
+  );
+  if (warm_start != nullptr && warm_start->n_elem == p) {
+    Ysample.col(0) = *warm_start;
+  }
+  Ysample = project_deflated_left_double(Ysample, V, n_prev);
+
+  for (int it = 0; it < std::max(power_iters, 0); ++it) {
+    Ysample = a_times(at_times(Ysample));
+  }
+
+  arma::mat Q;
+  arma::mat R;
+  arma::qr_econ(Q, R, Ysample);
+  if (Q.n_cols < 1) {
+    return false;
+  }
+  Q = project_deflated_left_double(Q, V, n_prev);
+  arma::qr_econ(Q, R, Q);
+  if (Q.n_cols < 1) {
+    return false;
+  }
+
+  arma::mat Bsmall = Yop.t_times(Xop.times(Q)).t();
   arma::mat Uhat;
   arma::mat Vhat;
   if (!finalize_left_block_from_bsmall(Bsmall, Uhat, shat, Vhat) || Uhat.n_cols < 1) {
@@ -2573,7 +3126,7 @@ List pls_model1(
   svd_u = svd_res.U;
   svd_s = svd_res.s;
   svd_v = svd_res.Vt.t();
-  
+
   const bool store_B = should_store_coefficients(p, m, length_ncomp, true);
   arma::cube B;
   if (store_B) {
@@ -2704,10 +3257,345 @@ List pls_model1(
   return out;
 }
 
+List pls_model1_rsvd_xprod_precision_view_impl(
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
+  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
+  const arma::mat Yview = numeric_matrix_view(YtrainSEXP, "Ytrain");
+  const int n = Xview.n_rows;
+  const int p = Xview.n_cols;
+  const int m = Yview.n_cols;
+  if (Yview.n_rows != static_cast<arma::uword>(n)) {
+    stop("Xtrain and Ytrain must have the same number of rows");
+  }
+
+  const int max_plssvd_rank = std::min(n, std::min(p, m));
+  const int length_ncomp = ncomp.n_elem;
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > max_plssvd_rank) ncomp(i) = max_plssvd_rank;
+    if (ncomp(i) < 1) ncomp(i) = 1;
+  }
+
+  const int max_ncomp = max(ncomp);
+  int max_ncomp_eff = std::min(max_ncomp, max_plssvd_rank);
+  if (max_ncomp_eff < 1) {
+    stop("plssvd effective rank is < 1");
+  }
+
+  arma::rowvec mX_row(p, fill::zeros);
+  if (scaling < 3) {
+    mX_row = mean(Xview, 0);
+  }
+  arma::rowvec vX_row(p, fill::ones);
+  if (scaling == 2) {
+    vX_row = variance_nocopy(Xview);
+  }
+  arma::rowvec mY_row = mean(Yview, 0);
+
+  CenterScaleMatrixView Xop{Xview, mX_row, vX_row};
+  CenterOnlyMatrixView Yop{Yview, mY_row};
+
+  fastpls_svd::SVDResult svd_res = truncated_rsvd_crossprod_double_view(
+    Xop,
+    Yop,
+    max_ncomp_eff,
+    rsvd_oversample,
+    rsvd_power,
+    static_cast<unsigned int>(seed),
+    false,
+    plssvd_use_small_exact_svd(max_plssvd_rank)
+  );
+
+  arma::mat svd_u = svd_res.U;
+  arma::vec svd_s = svd_res.s;
+  arma::mat svd_v = svd_res.Vt.t();
+
+  const bool store_B = should_store_coefficients(p, m, length_ncomp, true);
+  arma::cube B;
+  if (store_B) {
+    B.zeros(p, m, length_ncomp);
+  }
+  arma::cube Yfit;
+  if (fit) {
+    Yfit.set_size(n, m, length_ncomp);
+  }
+
+  max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_u.n_cols));
+  if (svd_v.n_cols > 0) {
+    max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_v.n_cols));
+  }
+  if (max_ncomp_eff < 1) {
+    stop("plssvd effective rank is < 1 after SVD");
+  }
+
+  svd_u = svd_u.cols(0, max_ncomp_eff - 1);
+  if (svd_v.n_cols > static_cast<arma::uword>(max_ncomp_eff)) {
+    svd_v = svd_v.cols(0, max_ncomp_eff - 1);
+  }
+
+  arma::mat T_eff = Xop.times(svd_u);
+  arma::mat G_full = T_eff.t() * T_eff;
+  arma::cube C_latent(max_ncomp_eff, max_ncomp_eff, length_ncomp, arma::fill::zeros);
+  arma::cube W_latent(max_ncomp_eff, m, length_ncomp, arma::fill::zeros);
+  arma::vec R2Y(length_ncomp, fill::zeros);
+  arma::mat Ycentered;
+  if (fit) {
+    Ycentered = Yop.centered_copy();
+  }
+
+  for (int a = 0; a < length_ncomp; ++a) {
+    const int mc_eff = std::min(static_cast<int>(ncomp(a)), max_ncomp_eff);
+    arma::mat svd_u_mc = svd_u.cols(0, mc_eff - 1);
+    arma::mat svd_v_mc = svd_v.cols(0, mc_eff - 1);
+    arma::mat T_a = T_eff.cols(0, mc_eff - 1);
+    arma::mat G_a = G_full.submat(0, 0, mc_eff - 1, mc_eff - 1);
+    arma::mat D_a(mc_eff, mc_eff, fill::zeros);
+    D_a.diag() = svd_s.subvec(0, mc_eff - 1);
+
+    arma::mat coeff_latent;
+    bool solved = arma::solve(coeff_latent, G_a, D_a, arma::solve_opts::likely_sympd);
+    if (!solved) solved = arma::solve(coeff_latent, G_a, D_a);
+    if (!solved) stop("plssvd latent solve failed");
+
+    C_latent.slice(a).submat(0, 0, mc_eff - 1, mc_eff - 1) = coeff_latent;
+    arma::mat W_a = coeff_latent * svd_v_mc.t();
+    W_latent.slice(a).submat(0, 0, mc_eff - 1, m - 1) = W_a;
+    if (store_B) {
+      B.slice(a) = svd_u_mc * W_a;
+    }
+    if (fit) {
+      arma::mat temp1 = T_a * W_a;
+      R2Y(a) = RQ(Ycentered, temp1);
+      temp1.each_row() += mY_row;
+      Yfit.slice(a) = temp1;
+    }
+  }
+
+  arma::mat mX(1, p); mX.row(0) = mX_row;
+  arma::mat vX(1, p); vX.row(0) = vX_row;
+  arma::mat mY(1, m); mY.row(0) = mY_row;
+  List out = List::create(
+    Named("C_latent") = C_latent,
+    Named("W_latent") = W_latent,
+    Named("Q")       = svd_v,
+    Named("Ttrain")  = T_eff,
+    Named("R")       = svd_u,
+    Named("mX")      = mX,
+    Named("vX")      = vX,
+    Named("mY")      = mY,
+    Named("p")       = p,
+    Named("m")       = m,
+    Named("ncomp")   = ncomp,
+    Named("Yfit")    = Yfit,
+    Named("R2Y")     = R2Y,
+    Named("xprod_precision") = 3,
+    Named("xprod_mode") = "implicit"
+  );
+  if (store_B) {
+    out["B"] = B;
+  }
+  annotate_coefficient_storage(out, store_B);
+  return out;
+}
+
+List pls_model2_fast_rsvd_xprod_precision_view_impl(
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int rsvd_power,
+  int seed
+) {
+  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
+  const arma::mat Yview = numeric_matrix_view(YtrainSEXP, "Ytrain");
+  const int n = Xview.n_rows;
+  const int p = Xview.n_cols;
+  const int m = Yview.n_cols;
+  if (Yview.n_rows != static_cast<arma::uword>(n)) {
+    stop("Xtrain and Ytrain must have the same number of rows");
+  }
+
+  if (ncomp.n_elem < 1) {
+    stop("ncomp must contain at least one value");
+  }
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) < 1) ncomp(i) = 1;
+  }
+
+  const int max_ncomp = max(ncomp);
+  const int length_ncomp = ncomp.n_elem;
+
+  arma::rowvec mX_row(p, fill::zeros);
+  if (scaling < 3) {
+    mX_row = mean(Xview, 0);
+  }
+  arma::rowvec vX_row(p, fill::ones);
+  if (scaling == 2) {
+    vX_row = variance_nocopy(Xview);
+  }
+  arma::rowvec mY_row = mean(Yview, 0);
+
+  CenterScaleMatrixView Xop{Xview, mX_row, vX_row};
+  CenterOnlyMatrixView Yop{Yview, mY_row};
+
+  arma::mat RR(p, max_ncomp, fill::zeros);
+  arma::mat QQ(m, max_ncomp, fill::zeros);
+  arma::mat VV(p, max_ncomp, fill::zeros);
+  const bool store_B = should_store_coefficients(p, m, length_ncomp, true);
+  arma::cube B;
+  if (store_B) {
+    B.zeros(p, m, length_ncomp);
+  }
+
+  arma::cube Yfit;
+  arma::vec R2Y(length_ncomp, fill::zeros);
+  arma::mat Yfit_cur;
+  arma::mat Ycentered;
+  if (fit) {
+    Yfit.set_size(n, m, length_ncomp);
+    Yfit_cur.zeros(n, m);
+    Ycentered = Yop.centered_copy();
+  }
+
+  arma::mat Bcur;
+  if (store_B) {
+    Bcur.zeros(p, m);
+  }
+  int i_out = 0;
+
+  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 1, 1, 16);
+  const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
+  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
+  const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
+  AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
+
+  arma::vec rr_prev;
+  bool has_rr_prev = false;
+  auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
+    arma::vec tt = Xop.times(rr);
+    if (center_t == 1) {
+      tt -= arma::mean(tt);
+    }
+    const double tnorm = arma::norm(tt, 2);
+    if (!std::isfinite(tnorm) || tnorm <= 0.0) return false;
+    tt /= tnorm;
+    rr /= tnorm;
+    arma::vec pp = Xop.t_times(tt);
+    arma::vec qq = Yop.t_times(tt);
+
+    rr_prev = rr;
+    has_rr_prev = true;
+
+    arma::vec vv = pp;
+    if (a_idx > 0) {
+      auto Vprev = VV.cols(0, a_idx - 1);
+      vv -= Vprev * (Vprev.t() * pp);
+      if (reorth_v == 1) {
+        vv -= Vprev * (Vprev.t() * vv);
+      }
+    }
+    const double vnorm = arma::norm(vv, 2);
+    if (!std::isfinite(vnorm) || vnorm <= 0.0) return false;
+    vv /= vnorm;
+
+    RR.col(a_idx) = rr;
+    QQ.col(a_idx) = qq;
+    VV.col(a_idx) = vv;
+    if (store_B) {
+      Bcur += rr * qq.t();
+    }
+
+    while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
+      if (store_B) {
+        B.slice(i_out) = Bcur;
+      }
+      if (fit) {
+        Yfit_cur += tt * qq.t();
+        R2Y(i_out) = RQ(Ycentered, Yfit_cur);
+        arma::mat yf = Yfit_cur;
+        yf.each_row() += mY_row;
+        Yfit.slice(i_out) = yf;
+      }
+      ++i_out;
+    }
+    return true;
+  };
+
+  int a = 0;
+  while (a < max_ncomp) {
+    const int remaining = max_ncomp - a;
+    const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
+    const int k_block = std::min(refresh_cfg.first, remaining);
+    const int power_iters_block = refresh_cfg.second;
+    arma::mat Ublock;
+    arma::vec shat_block;
+    const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
+    if (!refresh_deflated_crossprod_left_double_view(
+          Xop,
+          Yop,
+          VV,
+          a,
+          warm_start,
+          k_block,
+          power_iters_block,
+          static_cast<unsigned int>(seed + a),
+          Ublock,
+          shat_block
+        )) {
+      break;
+    }
+    adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
+    if (Ublock.n_cols < 1) break;
+
+    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
+    bool stop_now = false;
+    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
+      if (!append_component(Ublock.col(j), a)) {
+        stop_now = true;
+        break;
+      }
+    }
+    if (stop_now) break;
+  }
+
+  arma::mat mX(1, p); mX.row(0) = mX_row;
+  arma::mat vX(1, p); vX.row(0) = vX_row;
+  arma::mat mY(1, m); mY.row(0) = mY_row;
+  List out = List::create(
+    Named("P")       = arma::mat(),
+    Named("Q")       = QQ,
+    Named("Ttrain")  = arma::mat(),
+    Named("R")       = RR,
+    Named("mX")      = mX,
+    Named("vX")      = vX,
+    Named("mY")      = mY,
+    Named("p")       = p,
+    Named("m")       = m,
+    Named("ncomp")   = ncomp,
+    Named("Yfit")    = Yfit,
+    Named("R2Y")     = R2Y,
+    Named("xprod_precision") = 3,
+    Named("xprod_mode") = "implicit"
+  );
+  if (store_B) {
+    out["B"] = B;
+  }
+  annotate_coefficient_storage(out, store_B);
+  return out;
+}
+
 // [[Rcpp::export]]
 List pls_model1_rsvd_xprod_precision(
-  arma::mat Xtrain,
-  arma::mat Ytrain,
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
   arma::ivec ncomp,
   int scaling,
   bool fit,
@@ -2717,6 +3605,25 @@ List pls_model1_rsvd_xprod_precision(
   int seed,
   int xprod_precision
 ) {
+  if (xprod_precision == 3) {
+    return pls_model1_rsvd_xprod_precision_view_impl(
+      XtrainSEXP,
+      YtrainSEXP,
+      ncomp,
+      scaling,
+      fit,
+      rsvd_oversample,
+      rsvd_power,
+      seed
+    );
+  }
+  if (xprod_precision == 5) {
+    // IRLBA xprod keeps the bundled C IRLBA operator path, but is selected
+    // only by the stricter R-side threshold to avoid poor shapes.
+  }
+
+  arma::mat Xtrain = Rcpp::as<arma::mat>(XtrainSEXP);
+  arma::mat Ytrain = Rcpp::as<arma::mat>(YtrainSEXP);
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -2764,6 +3671,15 @@ List pls_model1_rsvd_xprod_precision(
       rsvd_oversample,
       rsvd_power,
       static_cast<unsigned int>(seed),
+      false,
+      plssvd_use_small_exact_svd(max_plssvd_rank)
+    );
+  } else if (xprod_precision == 5) {
+    // Matrix-free IRLBA for A = X'Y using the bundled C IRLBA operator API.
+    svd_res = truncated_irlba_crossprod_double(
+      Xtrain,
+      Ytrain,
+      max_ncomp_eff,
       false,
       plssvd_use_small_exact_svd(max_plssvd_rank)
     );
@@ -2858,7 +3774,7 @@ List pls_model1_rsvd_xprod_precision(
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y,
     Named("xprod_precision") = xprod_precision,
-    Named("xprod_mode") = (xprod_precision == 3 ? "implicit" : "materialized")
+    Named("xprod_mode") = (xprod_precision == 5 ? "implicit_irlba" : (xprod_precision == 3 ? "implicit" : "materialized"))
   );
   if (store_B) {
     out["B"] = B;
@@ -2869,8 +3785,8 @@ List pls_model1_rsvd_xprod_precision(
 
 // [[Rcpp::export]]
 List pls_model2_fast_rsvd_xprod_precision(
-  arma::mat Xtrain,
-  arma::mat Ytrain,
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
   arma::ivec ncomp,
   int scaling,
   bool fit,
@@ -2880,6 +3796,20 @@ List pls_model2_fast_rsvd_xprod_precision(
   int seed,
   int xprod_precision
 ) {
+  if (xprod_precision == 3) {
+    return pls_model2_fast_rsvd_xprod_precision_view_impl(
+      XtrainSEXP,
+      YtrainSEXP,
+      ncomp,
+      scaling,
+      fit,
+      rsvd_power,
+      seed
+    );
+  }
+
+  arma::mat Xtrain = Rcpp::as<arma::mat>(XtrainSEXP);
+  arma::mat Ytrain = Rcpp::as<arma::mat>(YtrainSEXP);
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -2914,7 +3844,8 @@ List pls_model2_fast_rsvd_xprod_precision(
   }
 
   const bool use_implicit_double_xprod = (xprod_precision == 3);
-  const bool use_implicit_xprod = use_implicit_double_xprod;
+  const bool use_implicit_irlba_xprod = (xprod_precision == 5);
+  const bool use_implicit_xprod = use_implicit_double_xprod || use_implicit_irlba_xprod;
 
   arma::mat Xt;
   arma::mat Yt;
@@ -3073,7 +4004,20 @@ List pls_model2_fast_rsvd_xprod_precision(
     const int power_iters_block = refresh_cfg.second;
     arma::mat Ublock;
     const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
-    if (use_implicit_double_xprod) {
+    if (use_implicit_irlba_xprod) {
+      if (!refresh_deflated_crossprod_left_irlba_double(
+            Xtrain,
+            Ytrain,
+            VV,
+            a,
+            k_block,
+            Ublock,
+            refresh_ws.shat
+          )) {
+        break;
+      }
+      adaptive_policy.update_from_spectrum(refresh_ws.shat, max_ncomp - (a + k_block));
+    } else if (use_implicit_double_xprod) {
       arma::vec shat_block;
       if (!refresh_deflated_crossprod_left_double(
             Xtrain,
@@ -3130,7 +4074,7 @@ List pls_model2_fast_rsvd_xprod_precision(
     Named("Yfit")    = Yfit,
     Named("R2Y")     = R2Y,
     Named("xprod_precision") = xprod_precision,
-    Named("xprod_mode") = use_implicit_double_xprod ? "implicit" : "materialized"
+    Named("xprod_mode") = use_implicit_irlba_xprod ? "implicit_irlba" : (use_implicit_double_xprod ? "implicit" : "materialized")
   );
   if (store_B) {
     out["B"] = B;
@@ -3369,10 +4313,6 @@ List pls_cv_predict_compiled(
   if (backend == 1 && !fastpls_svd::has_cuda_backend()) {
     stop("CUDA CV requires a CUDA-enabled fastPLS build");
   }
-  if (backend == 0 && svd_method == fastpls_svd::SVD_METHOD_IRLBA) {
-    xprod = false;
-  }
-
   if (method == 1) {
     const int max_plssvd_rank = std::min(
       nsamples,
@@ -3475,9 +4415,12 @@ List pls_cv_predict_compiled(
     } else {
       if (method == 1) {
         if (xprod) {
+          const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
+          Rcpp::NumericMatrix Xtrain_r = Rcpp::wrap(Xtrain);
+          Rcpp::NumericMatrix Ytrain_r = Rcpp::wrap(Ytrain);
           model = pls_model1_rsvd_xprod_precision(
-            Xtrain, Ytrain, ncomp, scaling, false,
-            rsvd_oversample, rsvd_power, svds_tol, seed + f, 3
+            Xtrain_r, Ytrain_r, ncomp, scaling, false,
+            rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model1(
@@ -3492,9 +4435,12 @@ List pls_cv_predict_compiled(
         );
       } else {
         if (xprod) {
+          const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
+          Rcpp::NumericMatrix Xtrain_r = Rcpp::wrap(Xtrain);
+          Rcpp::NumericMatrix Ytrain_r = Rcpp::wrap(Ytrain);
           model = pls_model2_fast_rsvd_xprod_precision(
-            Xtrain, Ytrain, ncomp, scaling, false,
-            rsvd_oversample, rsvd_power, svds_tol, seed + f, 3
+            Xtrain_r, Ytrain_r, ncomp, scaling, false,
+            rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model2_fast(

@@ -83,12 +83,12 @@ ok_sum <- ok[, .(
 ok_sum[, analysis_value_num := suppressWarnings(as.numeric(analysis_value))]
 ok_sum[, algorithm_panel := fifelse(
   algorithm == "simpls_fast" & fast_profile %in% c("incdefl", "gpu_native"),
-  "simpls_fast (incdefl)",
+  "simpls",
   algorithm
 )]
 ok_sum[, algorithm_panel := factor(
   algorithm_panel,
-  levels = c("plssvd", "simpls", "simpls_fast (incdefl)")
+  levels = c("plssvd", "simpls", "opls", "kernelpls")
 )]
 ok_sum[, svd_family := fifelse(
   grepl("rsvd", svd_method, ignore.case = TRUE),
@@ -260,14 +260,17 @@ plot_three_by_four <- function(dt, analysis_name, use_ncomp_x = FALSE) {
 
   p <- ggplot(long, aes_string(x = xvar, y = "value", color = "svd_family", shape = "engine_shape", group = "method_id")) +
     geom_line(linewidth = 0.7, alpha = 0.9, na.rm = TRUE) +
-    geom_point(size = 1.5, na.rm = TRUE) +
-    geom_text(
+    geom_point(size = 1.5, na.rm = TRUE)
+  if (nrow(missing_panels)) {
+    p <- p + geom_text(
       data = missing_panels,
       aes(x = ncomp, y = value, label = label),
       inherit.aes = FALSE,
       size = 3.5,
       color = "grey35"
-    ) +
+    )
+  }
+  p <- p +
     scale_color_manual(values = svd_palette, breaks = svd_levels, drop = FALSE) +
     scale_shape_manual(values = shape_values, breaks = shape_levels, drop = FALSE) +
     scale_x_continuous(breaks = sort(unique(long$ncomp))) +

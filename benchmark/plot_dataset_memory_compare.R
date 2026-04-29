@@ -49,8 +49,11 @@ dt[, implementation := fcase(
 )]
 
 metric_one <- function(col, label) {
-  dt[is.finite(get(col)), .(
-    value = as.numeric(median(get(col), na.rm = TRUE)),
+  values <- suppressWarnings(as.numeric(dt[[col]]))
+  d_metric <- copy(dt)
+  d_metric[, plot_value := values]
+  d_metric[is.finite(plot_value), .(
+    value = as.numeric(median(plot_value, na.rm = TRUE)),
     task_type = as.character(first(na.omit(task_type))),
     perf_name = as.character(first(na.omit(metric_name))),
     n_train = as.numeric(first(na.omit(n_train))),

@@ -81,10 +81,11 @@ Important implementation detail:
 
 This path supports the same SVD backend selector used by `plssvd`.
 
-### 2b) `simpls_fast` (optional speed-optimized SIMPLS)
+### 2b) Fast `simpls` profile
 
-`simpls_fast` is an additional optional method exposed in `pls()` that keeps the
-SIMPLS-style deflation model but adds performance-oriented controls:
+`simpls` now uses the accelerated profile that was formerly exposed as
+`simpls_fast`. It keeps the SIMPLS-style deflation model but adds
+performance-oriented controls:
 
 - block latent-direction refresh (`fast_block`)
 - optional score centering before normalization (`fast_center_t`)
@@ -132,7 +133,7 @@ str(pred_reg$Ypred)
 m_fast <- pls(
   Xtr, Ytr_reg,
   ncomp = 1:3,
-  method = "simpls_fast",
+  method = "simpls",
   svd.method = "cpu_rsvd",
   rsvd_oversample = 14L,
   rsvd_power = 1L,
@@ -231,10 +232,8 @@ str(vip)
 
 ## Practical Notes
 
-- Use `method = "simpls"` when you want robust default behavior across a wide
-  range of data shapes.
-- Use `method = "simpls_fast"` when you want additional speed controls for
-  model-building and are willing to tune numerical tradeoffs.
+- Use `method = "simpls"` when you want the accelerated SIMPLS implementation
+  with speed controls for model-building.
 - Use `plssvd` when you want direct control over rank-constrained latent
   structure; fastPLS automatically enforces the valid component cap.
 - For reproducible approximate SVD, keep `svd.method = "cpu_rsvd"` and set
