@@ -64,6 +64,8 @@ SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt);
 
 // Shared post-processing for randomized range finder outputs.
 SVDResult finalize_rsvd_from_sample(const Mat& A, const Mat& Y, int k, bool left_only);
+bool rsvd_block_krylov_enabled();
+int rsvd_block_krylov_blocks(int row_dim, int max_rank, int block_cols, int power_iters);
 
 bool has_cuda_build();
 bool has_cuda_backend();

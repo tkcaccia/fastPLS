@@ -108,6 +108,27 @@ SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   Mat Y = A * Omega;
 
   const int power_iters = std::max(opt.power_iters, 0);
+  const int krylov_blocks = rsvd_block_krylov_blocks(
+    static_cast<int>(A.n_rows),
+    static_cast<int>(max_rank),
+    static_cast<int>(l),
+    power_iters
+  );
+  if (krylov_blocks > 1) {
+    Mat K(A.n_rows, l * static_cast<arma::uword>(krylov_blocks));
+    K.cols(0, l - 1) = Y;
+    for (int i = 1; i < krylov_blocks; ++i) {
+      Mat Z = A.t() * Y;
+      Mat Qz;
+      Mat Rz;
+      arma::qr_econ(Qz, Rz, Z);
+      Y = A * Qz;
+      const arma::uword first = static_cast<arma::uword>(i) * l;
+      K.cols(first, first + l - 1) = Y;
+    }
+    return finalize_rsvd_from_sample(A, K, static_cast<int>(target), opt.left_only);
+  }
+
   if (power_iters == 1) {
     Y = A * (A.t() * Y);
   } else {
