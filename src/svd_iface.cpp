@@ -1,10 +1,7 @@
 #include "svd_iface.h"
 
 #include <algorithm>
-#include <cctype>
-#include <cstdlib>
 #include <stdexcept>
-#include <string>
 
 #ifdef FASTPLS_HAS_CUDA
 #include "svd_cuda_rsvd.h"
@@ -56,36 +53,6 @@ Backend backend_from_method_id(int svd_method) {
 
 bool method_is_legacy_irlba(int svd_method) {
   return (svd_method == SVD_METHOD_IRLBA);
-}
-
-bool rsvd_block_krylov_enabled() {
-  const char* flag = std::getenv("FASTPLS_RSVD_BLOCK_KRYLOV");
-  if (flag != nullptr) {
-    std::string value(flag);
-    for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (value == "1" || value == "true" || value == "yes" || value == "y") return true;
-    if (value == "0" || value == "false" || value == "no" || value == "n") return false;
-  }
-
-  const char* raw = std::getenv("FASTPLS_RSVD_VARIANT");
-  if (raw == nullptr) return false;
-  std::string value(raw);
-  for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  return (
-    value == "block_krylov" ||
-    value == "krylov" ||
-    value == "krylov_aware"
-  );
-}
-
-int rsvd_block_krylov_blocks(int row_dim, int max_rank, int block_cols, int power_iters) {
-  if (!rsvd_block_krylov_enabled() || power_iters <= 0 || row_dim <= 0 || max_rank <= 0 || block_cols <= 0) {
-    return 1;
-  }
-  const int requested = std::max(power_iters, 0) + 1;
-  const int by_rows = std::max(1, row_dim / block_cols);
-  const int by_rank = std::max(1, max_rank / block_cols);
-  return std::max(1, std::min(requested, std::min(by_rows, by_rank)));
 }
 
 SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend backend) {

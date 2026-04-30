@@ -517,26 +517,6 @@ fastpls_svd::SVDResult truncated_rsvd_crossprod_double_view(
   arma::mat Ysample = a_times(Omega);
 
   const int power_iters = std::max(rsvd_power, 0);
-  const int krylov_blocks = fastpls_svd::rsvd_block_krylov_blocks(
-    static_cast<int>(p),
-    static_cast<int>(max_rank),
-    static_cast<int>(l),
-    power_iters
-  );
-  if (krylov_blocks > 1) {
-    arma::mat K(p, l * static_cast<arma::uword>(krylov_blocks));
-    K.cols(0, l - 1) = Ysample;
-    for (int i = 1; i < krylov_blocks; ++i) {
-      arma::mat Z = at_times(Ysample);
-      arma::mat Qz;
-      arma::mat Rz;
-      arma::qr_econ(Qz, Rz, Z);
-      Ysample = a_times(Qz);
-      const arma::uword first = static_cast<arma::uword>(i) * l;
-      K.cols(first, first + l - 1) = Ysample;
-    }
-    Ysample = K;
-  } else
   if (power_iters == 1) {
     Ysample = a_times(at_times(Ysample));
   } else {
@@ -612,26 +592,6 @@ fastpls_svd::SVDResult truncated_rsvd_crossprod_double(
   arma::mat Ysample = a_times(Omega);
 
   const int power_iters = std::max(rsvd_power, 0);
-  const int krylov_blocks = fastpls_svd::rsvd_block_krylov_blocks(
-    static_cast<int>(p),
-    static_cast<int>(max_rank),
-    static_cast<int>(l),
-    power_iters
-  );
-  if (krylov_blocks > 1) {
-    arma::mat K(p, l * static_cast<arma::uword>(krylov_blocks));
-    K.cols(0, l - 1) = Ysample;
-    for (int i = 1; i < krylov_blocks; ++i) {
-      arma::mat Z = at_times(Ysample);
-      arma::mat Qz;
-      arma::mat Rz;
-      arma::qr_econ(Qz, Rz, Z);
-      Ysample = a_times(Qz);
-      const arma::uword first = static_cast<arma::uword>(i) * l;
-      K.cols(first, first + l - 1) = Ysample;
-    }
-    Ysample = K;
-  } else
   if (power_iters == 1) {
     Ysample = a_times(at_times(Ysample));
   } else {
@@ -1164,28 +1124,6 @@ struct SimplsFastRefreshWorkspace {
     }
 
     Y = Omega;
-    const int krylov_blocks = fastpls_svd::rsvd_block_krylov_blocks(
-      static_cast<int>(S.n_rows),
-      static_cast<int>(std::min(S.n_rows, S.n_cols)),
-      k_block,
-      power_iters
-    );
-    if (krylov_blocks > 1) {
-      arma::mat K(S.n_rows, static_cast<arma::uword>(k_block * krylov_blocks));
-      K.cols(0, static_cast<arma::uword>(k_block - 1)) = Y;
-      for (int it = 1; it < krylov_blocks; ++it) {
-        Z = S.t() * Y;
-        arma::mat Qz;
-        arma::mat Rz;
-        arma::qr_econ(Qz, Rz, Z);
-        Y = S * Qz;
-        const arma::uword first = static_cast<arma::uword>(it * k_block);
-        K.cols(first, first + static_cast<arma::uword>(k_block - 1)) = Y;
-      }
-      Y = K;
-      return;
-    }
-
     for (int it = 0; it < power_iters; ++it) {
       Z = S.t() * Y;
       Y = S * Z;

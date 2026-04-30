@@ -304,10 +304,7 @@ class CudaRSVDWorkspace {
     int power_iters,
     double* hSvals
   ) {
-    const int power = std::max(power_iters, 0);
-    const int krylov_blocks = rsvd_block_krylov_blocks(p, std::min(p, m), l, power);
-    const int l_work = l * krylov_blocks;
-    ensure_capacity(p, m, l_work);
+    ensure_capacity(p, m, l);
     check_curand(
       curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)),
       "curandSetPseudoRandomGeneratorSeed"
@@ -326,47 +323,32 @@ class CudaRSVDWorkspace {
     const double alpha = 1.0;
     const double beta = 0.0;
 
-    if (krylov_blocks > 1) {
-      for (int b = 1; b < krylov_blocks; ++b) {
-        double* prev = dY_ + static_cast<size_t>(b - 1) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        double* next = dY_ + static_cast<size_t>(b) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, prev, p, &beta, dZ_, m),
-          "cublasDgemm(S^T*Kblock)"
-        );
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, next, p),
-          "cublasDgemm(S*Kblock)"
-        );
-      }
-    } else {
-      for (int i = 0; i < power; ++i) {
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
-          "cublasDgemm(S^T*Y)"
-        );
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, dY_, p),
-          "cublasDgemm(S*Z)"
-        );
-      }
+    for (int i = 0; i < power_iters; ++i) {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
+        "cublasDgemm(S^T*Y)"
+      );
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, dY_, p),
+        "cublasDgemm(S*Z)"
+      );
     }
 
-    orthonormalize_qr_inplace(p, l_work);
+    orthonormalize_qr_inplace(p, l);
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l_work, m, p, &alpha, dY_, p, dA_, p, &beta, dBsmall_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, p, &alpha, dY_, p, dA_, p, &beta, dBsmall_, l),
       "cublasDgemm(Bsmall=Q^T*S)"
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l_work, l_work, m, &alpha, dBsmall_, l_work, dBsmall_, l_work, &beta, dGram_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &alpha, dBsmall_, l, dBsmall_, l, &beta, dGram_, l),
       "cublasDgemm(Bsmall*Bsmall^T)"
     );
 
-    finalize_left_block_from_gram_inplace(l_work, k);
-    copy_top_singular_values(l_work, k, hSvals);
+    finalize_left_block_from_gram_inplace(l, k);
+    copy_top_singular_values(l, k, hSvals);
 
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, l_work, &alpha, dY_, p, dOmega_, l_work, &beta, dQ_, p),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, l, &alpha, dY_, p, dOmega_, l, &beta, dQ_, p),
       "cublasDgemm(Ublock=Q*Uhat)"
     );
   }
@@ -383,10 +365,7 @@ class CudaRSVDWorkspace {
     int power_iters,
     double* hSvals
   ) {
-    const int power = std::max(power_iters, 0);
-    const int krylov_blocks = rsvd_block_krylov_blocks(p, std::min(p, m), l, power);
-    const int l_work = l * krylov_blocks;
-    ensure_matrix_free_capacity(p, m, l_work);
+    ensure_matrix_free_capacity(p, m, l);
     check_curand(
       curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)),
       "curandSetPseudoRandomGeneratorSeed"
@@ -402,84 +381,57 @@ class CudaRSVDWorkspace {
       );
     }
 
-    if (krylov_blocks > 1) {
-      for (int b = 1; b < krylov_blocks; ++b) {
-        double* prev = dY_ + static_cast<size_t>(b - 1) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        double* next = dY_ + static_cast<size_t>(b) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        implicit_at_times_mat_deflated(
-          n,
-          p,
-          m,
-          l,
-          prev,
-          dZ_,
-          prev_v_cols,
-          "implicit_SIMPLS_Krylov_SAT_times_Y"
-        );
-        implicit_a_times_mat_deflated(
-          n,
-          p,
-          m,
-          l,
-          dZ_,
-          next,
-          prev_v_cols,
-          "implicit_SIMPLS_Krylov_S_times_Z"
-        );
-      }
-    } else {
-      for (int i = 0; i < power; ++i) {
-        implicit_at_times_mat_deflated(
-          n,
-          p,
-          m,
-          l,
-          dY_,
-          dZ_,
-          prev_v_cols,
-          "implicit_SIMPLS_SAT_times_Y"
-        );
-        implicit_a_times_mat_deflated(
-          n,
-          p,
-          m,
-          l,
-          dZ_,
-          dY_,
-          prev_v_cols,
-          "implicit_SIMPLS_S_times_Z"
-        );
-      }
+    for (int i = 0; i < power_iters; ++i) {
+      implicit_at_times_mat_deflated(
+        n,
+        p,
+        m,
+        l,
+        dY_,
+        dZ_,
+        prev_v_cols,
+        "implicit_SIMPLS_SAT_times_Y"
+      );
+      implicit_a_times_mat_deflated(
+        n,
+        p,
+        m,
+        l,
+        dZ_,
+        dY_,
+        prev_v_cols,
+        "implicit_SIMPLS_S_times_Z"
+      );
     }
 
     subtract_left_projection_inplace(
       p,
-      l_work,
+      l,
       prev_v_cols,
       dY_,
       "implicit_SIMPLS_project_before_qr"
     );
-    orthonormalize_qr_inplace(p, l_work);
+    orthonormalize_qr_inplace(p, l);
     implicit_bsmall_from_deflated_basis(
       n,
       p,
       m,
-      l_work,
+      l,
       dY_,
       dBsmall_,
       prev_v_cols,
       "implicit_SIMPLS_Bsmall=QTA"
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l_work, l_work, m, &one_, dBsmall_, l_work, dBsmall_, l_work, &zero_, dGram_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &one_, dBsmall_, l, dBsmall_, l, &zero_, dGram_, l),
       "cublasDgemm(implicit_Bsmall*Bsmall^T)"
     );
 
-    finalize_left_block_from_gram_inplace(l_work, k);
-    copy_top_singular_values(l_work, k, hSvals);
+    finalize_left_block_from_gram_inplace(l, k);
+    copy_top_singular_values(l, k, hSvals);
 
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, l_work, &one_, dY_, p, dOmega_, l_work, &zero_, dQ_, p),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, k, l, &one_, dY_, p, dOmega_, l, &zero_, dQ_, p),
       "cublasDgemm(implicit_Ublock=Q*Uhat)"
     );
   }
@@ -819,11 +771,8 @@ class CudaRSVDWorkspace {
       throw std::runtime_error("cuda_plssvd_fit target rank is < 1");
     }
     const int l = std::min(max_rank, target + std::max(opt.oversample, 0));
-    const int power_iters = std::max(opt.power_iters, 0);
-    const int krylov_blocks = rsvd_block_krylov_blocks(p, max_rank, l, power_iters);
-    const int l_work = l * krylov_blocks;
 
-    ensure_capacity(p, m, l_work);
+    ensure_capacity(p, m, l);
     set_pls_training_matrices(Xtrain.memptr(), n, p, Ytrain.memptr(), m, fit);
     release_pls_ytrain_buffer();
     ensure_buffer(dRRmat_, bytes_for(n, target), bytes_RRmat_, "cudaMalloc(dRRmat)");
@@ -848,48 +797,33 @@ class CudaRSVDWorkspace {
       cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dOmega_, m, &beta, dY_, p),
       "cublasDgemm(S*Omega)"
     );
-    if (krylov_blocks > 1) {
-      for (int b = 1; b < krylov_blocks; ++b) {
-        double* prev = dY_ + static_cast<size_t>(b - 1) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        double* next = dY_ + static_cast<size_t>(b) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, prev, p, &beta, dZ_, m),
-          "cublasDgemm(S^T*Kblock)"
-        );
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, next, p),
-          "cublasDgemm(S*Kblock)"
-        );
-      }
-    } else {
-      for (int i = 0; i < power_iters; ++i) {
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
-          "cublasDgemm(S^T*Y)"
-        );
-        check_cublas(
-          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, dY_, p),
-          "cublasDgemm(S*Z)"
-        );
-      }
+    for (int i = 0; i < std::max(opt.power_iters, 0); ++i) {
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
+        "cublasDgemm(S^T*Y)"
+      );
+      check_cublas(
+        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, l, m, &alpha, dA_, p, dZ_, m, &beta, dY_, p),
+        "cublasDgemm(S*Z)"
+      );
     }
 
-    orthonormalize_qr_inplace(p, l_work);
+    orthonormalize_qr_inplace(p, l);
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l_work, m, p, &alpha, dY_, p, dA_, p, &beta, dBsmall_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, p, &alpha, dY_, p, dA_, p, &beta, dBsmall_, l),
       "cublasDgemm(Bsmall=Q^T*S)"
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l_work, l_work, m, &alpha, dBsmall_, l_work, dBsmall_, l_work, &beta, dGram_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &alpha, dBsmall_, l, dBsmall_, l, &beta, dGram_, l),
       "cublasDgemm(Bsmall*Bsmall^T)"
     );
-    finalize_left_block_from_gram_inplace(l_work, target);
+    finalize_left_block_from_gram_inplace(l, target);
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, target, l_work, &alpha, dY_, p, dOmega_, l_work, &beta, dQ_, p),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, target, l, &alpha, dY_, p, dOmega_, l, &beta, dQ_, p),
       "cublasDgemm(U=Q*Uhat)"
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, m, l_work, &alpha, dOmega_, l_work, dBsmall_, l_work, &beta, dZ_, target),
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, m, l, &alpha, dOmega_, l, dBsmall_, l, &beta, dZ_, target),
       "cublasDgemm(RHS=Uhat^T*Bsmall)"
     );
 
@@ -908,7 +842,7 @@ class CudaRSVDWorkspace {
     check_cuda(cudaMemcpy(out.Ttrain.memptr(), dRRmat_, bytes_for(n, target), cudaMemcpyDeviceToHost), "cudaMemcpy(T_plssvd)");
 
     arma::vec s_host(target, arma::fill::zeros);
-    copy_top_singular_values(l_work, target, s_host.memptr());
+    copy_top_singular_values(l, target, s_host.memptr());
     arma::mat rhs_host(static_cast<arma::uword>(target), static_cast<arma::uword>(m), arma::fill::zeros);
     check_cuda(cudaMemcpy(rhs_host.memptr(), dZ_, bytes_for(target, m), cudaMemcpyDeviceToHost), "cudaMemcpy(RHS_plssvd)");
     out.Q.set_size(static_cast<arma::uword>(m), static_cast<arma::uword>(target));
@@ -1014,13 +948,10 @@ class CudaRSVDWorkspace {
       throw std::runtime_error("cuda_plssvd_fit_implicit_xprod target rank is < 1");
     }
     const int l = std::min(max_rank, target + std::max(opt.oversample, 0));
-    const int power_iters = std::max(opt.power_iters, 0);
-    const int krylov_blocks = rsvd_block_krylov_blocks(p, max_rank, l, power_iters);
-    const int l_work = l * krylov_blocks;
 
-    ensure_matrix_free_capacity(p, m, l_work);
+    ensure_matrix_free_capacity(p, m, l);
     set_pls_training_matrices(Xtrain.memptr(), n, p, Ytrain.memptr(), m, fit, false);
-    ensure_matrix_free_capacity(p, m, l_work);
+    ensure_matrix_free_capacity(p, m, l);
 
     check_curand(
       curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(opt.seed)),
@@ -1035,35 +966,26 @@ class CudaRSVDWorkspace {
     const double beta = 0.0;
 
     implicit_a_times_mat(n, p, m, l, dOmega_, dY_, "implicit_A_times_Omega");
-    if (krylov_blocks > 1) {
-      for (int b = 1; b < krylov_blocks; ++b) {
-        double* prev = dY_ + static_cast<size_t>(b - 1) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        double* next = dY_ + static_cast<size_t>(b) * static_cast<size_t>(p) * static_cast<size_t>(l);
-        implicit_at_times_mat(n, p, m, l, prev, dZ_, "implicit_Krylov_AT_times_Y");
-        implicit_a_times_mat(n, p, m, l, dZ_, next, "implicit_Krylov_A_times_Z");
-      }
-    } else {
-      for (int i = 0; i < power_iters; ++i) {
-        implicit_at_times_mat(n, p, m, l, dY_, dZ_, "implicit_AT_times_Y");
-        implicit_a_times_mat(n, p, m, l, dZ_, dY_, "implicit_A_times_Z");
-      }
+    for (int i = 0; i < std::max(opt.power_iters, 0); ++i) {
+      implicit_at_times_mat(n, p, m, l, dY_, dZ_, "implicit_AT_times_Y");
+      implicit_a_times_mat(n, p, m, l, dZ_, dY_, "implicit_A_times_Z");
     }
 
-    orthonormalize_qr_inplace(p, l_work);
-    implicit_bsmall_from_basis(n, p, m, l_work, dY_, dBsmall_, "implicit_Bsmall=QTA");
+    orthonormalize_qr_inplace(p, l);
+    implicit_bsmall_from_basis(n, p, m, l, dY_, dBsmall_, "implicit_Bsmall=QTA");
     release_pls_ytrain_buffer();
 
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l_work, l_work, m, &alpha, dBsmall_, l_work, dBsmall_, l_work, &beta, dGram_, l_work),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_T, l, l, m, &alpha, dBsmall_, l, dBsmall_, l, &beta, dGram_, l),
       "cublasDgemm(Bsmall*Bsmall^T)"
     );
-    finalize_left_block_from_gram_inplace(l_work, target);
+    finalize_left_block_from_gram_inplace(l, target);
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, target, l_work, &alpha, dY_, p, dOmega_, l_work, &beta, dQ_, p),
+      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, target, l, &alpha, dY_, p, dOmega_, l, &beta, dQ_, p),
       "cublasDgemm(U=Q*Uhat)"
     );
     check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, m, l_work, &alpha, dOmega_, l_work, dBsmall_, l_work, &beta, dZ_, target),
+      cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, m, l, &alpha, dOmega_, l, dBsmall_, l, &beta, dZ_, target),
       "cublasDgemm(RHS=Uhat^T*Bsmall)"
     );
 
@@ -1087,7 +1009,7 @@ class CudaRSVDWorkspace {
     check_cuda(cudaMemcpy(out.Ttrain.memptr(), dRRmat_, bytes_for(n, target), cudaMemcpyDeviceToHost), "cudaMemcpy(T_plssvd)");
 
     arma::vec s_host(target, arma::fill::zeros);
-    copy_top_singular_values(l_work, target, s_host.memptr());
+    copy_top_singular_values(l, target, s_host.memptr());
     arma::mat rhs_host(static_cast<arma::uword>(target), static_cast<arma::uword>(m), arma::fill::zeros);
     check_cuda(cudaMemcpy(rhs_host.memptr(), dZ_, bytes_for(target, m), cudaMemcpyDeviceToHost), "cudaMemcpy(RHS_plssvd)");
     out.Q.set_size(static_cast<arma::uword>(m), static_cast<arma::uword>(target));
@@ -1361,44 +1283,6 @@ class CudaRSVDWorkspace {
     }
 
     check_cuda(cudaMemcpy(hY, dY_, bytes_for(m, l), cudaMemcpyDeviceToHost), "cudaMemcpy(Y)");
-  }
-
-  void sample_krylov(
-    const double* hA,
-    int m,
-    int n,
-    const double* hOmega,
-    int l,
-    int blocks,
-    double* hY
-  ) {
-    const int total_l = l * std::max(blocks, 1);
-    ensure_capacity(m, n, total_l);
-
-    check_cuda(cudaMemcpy(dA_, hA, bytes_for(m, n), cudaMemcpyHostToDevice), "cudaMemcpy(A)");
-    check_cuda(cudaMemcpy(dOmega_, hOmega, bytes_for(n, l), cudaMemcpyHostToDevice), "cudaMemcpy(Omega)");
-
-    const double alpha = 1.0;
-    const double beta = 0.0;
-    check_cublas(
-      cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA_, m, dOmega_, n, &beta, dY_, m),
-      "cublasDgemm(K0=A*Omega)"
-    );
-
-    for (int b = 1; b < blocks; ++b) {
-      double* prev = dY_ + static_cast<size_t>(b - 1) * static_cast<size_t>(m) * static_cast<size_t>(l);
-      double* next = dY_ + static_cast<size_t>(b) * static_cast<size_t>(m) * static_cast<size_t>(l);
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, prev, m, &beta, dZ_, n),
-        "cublasDgemm(Krylov A^T*Y)"
-      );
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA_, m, dZ_, n, &beta, next, m),
-        "cublasDgemm(Krylov A*Z)"
-      );
-    }
-
-    check_cuda(cudaMemcpy(hY, dY_, bytes_for(m, total_l), cudaMemcpyDeviceToHost), "cudaMemcpy(KrylovY)");
   }
 
   void set_matrix(const double* hA, int m, int n) {
@@ -2104,21 +1988,6 @@ void cuda_rsvd_sample_y(
   g_workspace.sample_y(hA, m, n, hOmega, l, power_iters, hY);
 }
 
-void cuda_rsvd_sample_krylov(
-  const double* hA,
-  int m,
-  int n,
-  const double* hOmega,
-  int l,
-  int blocks,
-  double* hY
-) {
-  if (!cuda_runtime_available()) {
-    throw std::runtime_error("CUDA runtime not available");
-  }
-  g_workspace.sample_krylov(hA, m, n, hOmega, l, blocks, hY);
-}
-
 void cuda_rsvd_set_resident_matrix(
   const double* hA,
   int m,
@@ -2586,47 +2455,26 @@ SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
     return truncated_svd_cpu_exact(A, static_cast<int>(target), exact_opt);
   }
 
-  const int power_iters = std::max(opt.power_iters, 0);
-  const int krylov_blocks = rsvd_block_krylov_blocks(
-    static_cast<int>(A.n_rows),
-    static_cast<int>(max_rank),
-    static_cast<int>(l),
-    power_iters
-  );
-
-  if (krylov_blocks == 1 && cuda_rsvd_use_resident_public(
+  if (cuda_rsvd_use_resident_public(
       static_cast<int>(A.n_rows),
       static_cast<int>(A.n_cols),
       static_cast<int>(l),
-      power_iters)) {
+      std::max(opt.power_iters, 0))) {
     return cuda_rsvd_resident_svd(A, static_cast<int>(target), opt);
   }
 
   Mat Omega = gaussian_matrix_local(A.n_cols, l, opt.seed);
-  const arma::uword sample_cols = l * static_cast<arma::uword>(krylov_blocks);
-  Mat Y(A.n_rows, sample_cols);
+  Mat Y(A.n_rows, l);
 
-  if (krylov_blocks > 1) {
-    cuda_rsvd_sample_krylov(
-      A.memptr(),
-      static_cast<int>(A.n_rows),
-      static_cast<int>(A.n_cols),
-      Omega.memptr(),
-      static_cast<int>(l),
-      krylov_blocks,
-      Y.memptr()
-    );
-  } else {
-    cuda_rsvd_sample_y(
-      A.memptr(),
-      static_cast<int>(A.n_rows),
-      static_cast<int>(A.n_cols),
-      Omega.memptr(),
-      static_cast<int>(l),
-      power_iters,
-      Y.memptr()
-    );
-  }
+  cuda_rsvd_sample_y(
+    A.memptr(),
+    static_cast<int>(A.n_rows),
+    static_cast<int>(A.n_cols),
+    Omega.memptr(),
+    static_cast<int>(l),
+    std::max(opt.power_iters, 0),
+    Y.memptr()
+  );
 
   return finalize_rsvd_from_sample(A, Y, static_cast<int>(target), opt.left_only);
 }
@@ -2685,18 +2533,6 @@ void cuda_reset_workspace() {
 }
 
 void cuda_rsvd_sample_y(
-  const double*,
-  int,
-  int,
-  const double*,
-  int,
-  int,
-  double*
-) {
-  throw std::runtime_error("CUDA backend not compiled");
-}
-
-void cuda_rsvd_sample_krylov(
   const double*,
   int,
   int,

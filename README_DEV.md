@@ -38,18 +38,6 @@ The default matrix-free `xprod` policy is implemented in `R/main.R`:
 The C++ implementation rejects removed FP32/mixed-precision `xprod_precision`
 values. The remaining implicit paths are double precision.
 
-An experimental paper-inspired randomized block-Krylov range finder is available
-for comparison with the standard rSVD path:
-
-```sh
-FASTPLS_RSVD_VARIANT=block_krylov
-```
-
-It keeps the intermediate Krylov blocks instead of using only the final
-power-iteration sample. This can slightly improve the sampled subspace, but it
-also increases the sketch width and therefore can be slower or use more temporary
-workspace. It is intentionally not the default.
-
 ## CUDA Paths
 
 GPU-native fitting wrappers:
