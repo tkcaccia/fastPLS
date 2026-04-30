@@ -11,7 +11,7 @@ pls.double.cv(
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -47,7 +47,7 @@ pls.double.cv(
 
 \item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
+\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.}
 

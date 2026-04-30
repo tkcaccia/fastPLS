@@ -192,6 +192,19 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_predict_flash_cuda
+List pls_predict_flash_cuda(List& model, arma::mat Xtest, bool proj);
+RcppExport SEXP _fastPLS_pls_predict_flash_cuda(SEXP modelSEXP, SEXP XtestSEXP, SEXP projSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_predict_flash_cuda(model, Xtest, proj));
+    return rcpp_result_gen;
+END_RCPP
+}
 // kernel_matrix_cpp
 arma::mat kernel_matrix_cpp(const arma::mat& X1, const arma::mat& X2, const int kernel, const double gamma, const int degree, const double coef0);
 RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP X1SEXP, SEXP X2SEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP) {
@@ -454,6 +467,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
     {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
+    {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
     {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
     {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
     {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},

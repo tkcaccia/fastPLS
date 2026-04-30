@@ -2597,6 +2597,146 @@ List pls_predict(List& model, arma::mat Xtest, bool proj) {
 }
 
 // [[Rcpp::export]]
+List pls_predict_flash_cuda(List& model, arma::mat Xtest, bool proj) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    Rcpp::stop("pls_predict_flash_cuda requires CUDA support");
+  }
+
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  std::string pls_method;
+  if (model.containsElementNamed("pls_method")) {
+    pls_method = Rcpp::as<std::string>(model["pls_method"]);
+  }
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with CUDA flash prediction");
+  }
+  const arma::mat RR(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  const int kmax = static_cast<int>(RR.n_cols);
+
+  arma::cube Wflash;
+  if ((pls_method == "simpls" || pls_method == "simpls_fast") &&
+      model.containsElementNamed("Q")) {
+    Rcpp::NumericVector Q_vec = model["Q"];
+    Rcpp::IntegerVector Q_dim = Q_vec.attr("dim");
+    if (Q_dim.size() != 2L || Q_dim[0] != m || Q_dim[1] < 1) {
+      Rcpp::stop("Model `Q` is not compatible with CUDA flash prediction");
+    }
+    const arma::mat QQ(
+      Q_vec.begin(),
+      static_cast<arma::uword>(Q_dim[0]),
+      static_cast<arma::uword>(Q_dim[1]),
+      false,
+      true
+    );
+    Wflash.zeros(kmax, m, length_ncomp);
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      int mc = ncomp(a);
+      if (mc < 1 || mc > kmax || mc > static_cast<int>(QQ.n_cols)) {
+        Rcpp::stop("ncomp exceeds latent rank for CUDA flash prediction");
+      }
+      Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1)) =
+        QQ.cols(0, static_cast<arma::uword>(mc - 1)).t();
+    }
+  } else if (pls_method == "plssvd" && model.containsElementNamed("W_latent")) {
+    Rcpp::NumericVector W_vec = model["W_latent"];
+    Rcpp::IntegerVector W_dim = W_vec.attr("dim");
+    if (W_dim.size() != 3L || W_dim[0] != kmax || W_dim[1] != m ||
+        W_dim[2] < static_cast<int>(length_ncomp)) {
+      Rcpp::stop("Model `W_latent` is not compatible with CUDA flash prediction");
+    }
+    const arma::cube WW(
+      W_vec.begin(),
+      static_cast<arma::uword>(W_dim[0]),
+      static_cast<arma::uword>(W_dim[1]),
+      static_cast<arma::uword>(W_dim[2]),
+      false,
+      true
+    );
+    Wflash = WW.slices(0, length_ncomp - 1);
+  } else if (pls_method == "plssvd" &&
+             model.containsElementNamed("C_latent") &&
+             model.containsElementNamed("Q")) {
+    Rcpp::NumericVector Q_vec = model["Q"];
+    Rcpp::NumericVector C_vec = model["C_latent"];
+    Rcpp::IntegerVector Q_dim = Q_vec.attr("dim");
+    Rcpp::IntegerVector C_dim = C_vec.attr("dim");
+    if (Q_dim.size() != 2L || C_dim.size() != 3L ||
+        Q_dim[0] != m || Q_dim[1] != kmax ||
+        C_dim[0] != kmax || C_dim[1] != kmax ||
+        C_dim[2] < static_cast<int>(length_ncomp)) {
+      Rcpp::stop("Model latent PLSSVD factors are not compatible with CUDA flash prediction");
+    }
+    const arma::mat QQ(
+      Q_vec.begin(),
+      static_cast<arma::uword>(Q_dim[0]),
+      static_cast<arma::uword>(Q_dim[1]),
+      false,
+      true
+    );
+    const arma::cube CC(
+      C_vec.begin(),
+      static_cast<arma::uword>(C_dim[0]),
+      static_cast<arma::uword>(C_dim[1]),
+      static_cast<arma::uword>(C_dim[2]),
+      false,
+      true
+    );
+    Wflash.zeros(kmax, m, length_ncomp);
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      int mc = ncomp(a);
+      if (mc < 1 || mc > kmax) {
+        Rcpp::stop("ncomp exceeds latent rank for CUDA flash prediction");
+      }
+      arma::mat Cmc = CC.slice(a).submat(0, 0, mc - 1, mc - 1);
+      Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1)) =
+        Cmc * QQ.cols(0, static_cast<arma::uword>(mc - 1)).t();
+    }
+  } else {
+    Rcpp::stop("CUDA flash prediction requires compact low-rank factors");
+  }
+
+  arma::cube Ypred = fastpls_svd::cuda_flash_lowrank_predict(
+    Xtest,
+    RR,
+    Wflash,
+    mY,
+    ncomp
+  );
+
+  arma::mat T_Xtest;
+  if (proj) {
+    T_Xtest = Xtest * RR;
+  }
+
+  return List::create(
+    Named("Ypred") = Ypred,
+    Named("Ttest") = T_Xtest,
+    Named("predict_backend") = "cuda_flash"
+  );
+}
+
+// [[Rcpp::export]]
 arma::mat kernel_matrix_cpp(
   const arma::mat& X1,
   const arma::mat& X2,

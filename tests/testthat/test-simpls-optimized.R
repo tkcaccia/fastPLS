@@ -1,4 +1,4 @@
-with_fastpls_fast_optimized <- function(value, code) {
+with_fastpls_simpls_optimized <- function(value, code) {
   old <- Sys.getenv("FASTPLS_FAST_OPTIMIZED", unset = NA_character_)
   on.exit({
     if (length(old) != 1L || is.na(old)) {
@@ -17,7 +17,7 @@ test_that("accelerated simpls returns valid fit structure", {
   y <- factor(sample(c("A", "B", "C"), 96, replace = TRUE))
   idx <- sample(seq_len(96), 20)
 
-  fit <- with_fastpls_fast_optimized(1, fastPLS::pls(
+  fit <- with_fastpls_simpls_optimized(1, fastPLS::pls(
     X[-idx, , drop = FALSE],
     y[-idx],
     X[idx, , drop = FALSE],
@@ -67,8 +67,8 @@ test_that("accelerated simpls stays close to legacy baseline on a controlled reg
     seed = 123L
   )
 
-  baseline <- with_fastpls_fast_optimized(0, do.call(fastPLS::pls, fit_args))
-  optimized <- with_fastpls_fast_optimized(1, do.call(fastPLS::pls, fit_args))
+  baseline <- with_fastpls_simpls_optimized(0, do.call(fastPLS::pls, fit_args))
+  optimized <- with_fastpls_simpls_optimized(1, do.call(fastPLS::pls, fit_args))
 
   base_pred <- baseline$Ypred[, , 3]
   opt_pred <- optimized$Ypred[, , 3]

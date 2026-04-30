@@ -6,7 +6,7 @@ importFrom("Rcpp", "evalCpp")
 import(Matrix)
 
 #exportPattern("^[[:alpha:]]+")
-export(optim.pls.cv,pls.double.cv,pls,pls_r,plssvd_cv_cpp,simpls_cv_cpp,simpls_fast_cv_cpp,plssvd_cv_cuda,simpls_fast_cv_cuda,simpls_gpu,plssvd_gpu,kernel_pls_r,kernel_pls_cpp,kernel_pls_cuda,kernel_pls_fast_r,kernel_pls_fast_cpp,kernel_pls_fast_cuda,opls_r,opls_cpp,opls_cuda,opls_fast_r,opls_fast_cpp,opls_fast_cuda,predict.fastPLS,transformy,fastcor,ViP,has_cuda,svd_methods,svd_run,svd_benchmark)
+export(optim.pls.cv,pls.double.cv,pls,pls_r,plssvd_cv_cpp,simpls_cv_cpp,plssvd_cv_cuda,simpls_cv_cuda,simpls_gpu,plssvd_gpu,plssvd_flash_gpu,simpls_flash_gpu,kernel_pls_r,kernel_pls_cpp,kernel_pls_cuda,kernel_pls_flash_gpu,kernel_pls_fast_r,kernel_pls_fast_cpp,kernel_pls_fast_cuda,opls_r,opls_cpp,opls_cuda,opls_flash_gpu,opls_fast_r,opls_fast_cpp,opls_fast_cuda,predict.fastPLS,transformy,fastcor,ViP,has_cuda,svd_methods,svd_run,svd_benchmark)
 
 
 S3method(predict,fastPLS)

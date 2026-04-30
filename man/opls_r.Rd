@@ -4,10 +4,11 @@
 \alias{opls_r}
 \alias{opls_cpp}
 \alias{opls_cuda}
+\alias{opls_flash_gpu}
 \alias{opls_fast_r}
 \alias{opls_fast_cpp}
 \alias{opls_fast_cuda}
-\title{Experimental orthogonal PLS}
+\title{Orthogonal PLS}
 \usage{
 opls_r(
   Xtrain,
@@ -18,7 +19,7 @@ opls_r(
   north = 1L,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -42,7 +43,7 @@ opls_cpp(
   north = 1L,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -76,6 +77,25 @@ opls_cuda(
   ...
 )
 
+opls_flash_gpu(
+  Xtrain,
+  Ytrain,
+  Xtest = NULL,
+  Ytest = NULL,
+  ncomp = 2,
+  north = 1L,
+  scaling = c("centering", "autoscaling", "none"),
+  method = c("simpls", "plssvd"),
+  rsvd_oversample = 10L,
+  rsvd_power = 1L,
+  svds_tol = 0,
+  seed = 1L,
+  fit = FALSE,
+  proj = FALSE,
+  fast_block = 1L,
+  ...
+)
+
 opls_fast_r(...)
 
 opls_fast_cpp(...)
@@ -99,7 +119,7 @@ opls_fast_cuda(...)
 
 \item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
+\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.}
 

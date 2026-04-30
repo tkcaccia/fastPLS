@@ -4,7 +4,14 @@
 \alias{predict.fastPLS}
 \title{Predict from a fitted fastPLS object}
 \usage{
-\method{predict}{fastPLS}(object, newdata, Ytest = NULL, proj = FALSE, ...)
+\method{predict}{fastPLS}(
+  object,
+  newdata,
+  Ytest = NULL,
+  proj = FALSE,
+  predict.backend = c("auto", "cpu", "cuda_flash"),
+  ...
+)
 }
 \arguments{
 \item{object}{A fitted `fastPLS` object.}
@@ -14,6 +21,10 @@
 \item{Ytest}{Optional observed response used to compute `Q2Y`.}
 
 \item{proj}{Logical; return projected `Ttest` when `TRUE`.}
+
+\item{predict.backend}{Prediction backend. `"auto"` uses CUDA flash
+low-rank prediction when the model was fitted by a `*_flash_gpu()`
+wrapper, otherwise CPU prediction is used.}
 
 \item{...}{Unused.}
 }

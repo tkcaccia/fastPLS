@@ -452,11 +452,20 @@ variant_specs <- function(task) {
     specs <- rbind(
       specs,
       data.table(
-        variant_name = c("gpu_plssvd_fp64", "gpu_simpls_fp64", "gpu_opls_fp64", "gpu_kernelpls_fp64"),
-        method_panel = c("plssvd", "simpls", "opls", "kernelpls"),
+        variant_name = c(
+          "gpu_plssvd_fp64", "gpu_simpls_fp64", "gpu_opls_fp64", "gpu_kernelpls_fp64",
+          "gpu_plssvd_flash_fp64", "gpu_simpls_flash_fp64", "gpu_opls_flash_fp64", "gpu_kernelpls_flash_fp64"
+        ),
+        method_panel = c(
+          "plssvd", "simpls", "opls", "kernelpls",
+          "plssvd", "simpls", "opls", "kernelpls"
+        ),
         engine = "GPU",
         implementation = "cuda",
-        backend_algorithm = "gpu_native"
+        backend_algorithm = c(
+          "gpu_native", "gpu_native", "gpu_native", "gpu_native",
+          "flash_svd", "flash_svd", "flash_svd", "flash_svd"
+        )
       ),
       fill = TRUE
     )
@@ -511,15 +520,27 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   fit_call <- function() {
     if (identical(spec$engine, "GPU")) {
       if (identical(spec$method_panel, "plssvd")) {
+        if (identical(spec$backend_algorithm, "flash_svd")) {
+          return(fastPLS::plssvd_flash_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
+        }
         return(fastPLS::plssvd_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "simpls")) {
+        if (identical(spec$backend_algorithm, "flash_svd")) {
+          return(fastPLS::simpls_flash_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
+        }
         return(fastPLS::simpls_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
+        if (identical(spec$backend_algorithm, "flash_svd")) {
+          return(fastPLS::opls_flash_gpu(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, north = opls_layout$north, method = "simpls", fit = FALSE, seed = as.integer(seed)))
+        }
         return(fastPLS::opls_cuda(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, north = opls_layout$north, method = "simpls", fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
+        if (identical(spec$backend_algorithm, "flash_svd")) {
+          return(fastPLS::kernel_pls_flash_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), kernel = "linear", method = "simpls", fit = FALSE, seed = as.integer(seed)))
+        }
         return(fastPLS::kernel_pls_cuda(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), kernel = "linear", method = "simpls", fit = FALSE, seed = as.integer(seed)))
       }
     }

@@ -24,6 +24,7 @@ if (!nrow(dt)) stop("No successful benchmark rows to plot")
 backend_cols <- c(
   irlba = "#1b9e77",
   rsvd = "#d95f02",
+  flash_svd = "#7570b3",
   pls_pkg = "#555555"
 )
 
@@ -38,6 +39,7 @@ dt[, backend_algorithm := fcase(
   backend == "pls_pkg", "pls_pkg",
   backend %in% c("cpu_rsvd", "gpu_native"), "rsvd",
   backend == "irlba", "irlba",
+  backend == "flash_svd", "flash_svd",
   default = backend
 )]
 

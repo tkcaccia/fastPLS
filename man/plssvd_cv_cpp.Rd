@@ -3,9 +3,8 @@
 \name{plssvd_cv_cpp}
 \alias{plssvd_cv_cpp}
 \alias{simpls_cv_cpp}
-\alias{simpls_fast_cv_cpp}
 \alias{plssvd_cv_cuda}
-\alias{simpls_fast_cv_cuda}
+\alias{simpls_cv_cuda}
 \title{Fast grouped PLS cross-validation for compiled backends}
 \usage{
 plssvd_cv_cpp(
@@ -28,17 +27,6 @@ simpls_cv_cpp(
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
   svd.method = c("cpu_rsvd", "irlba"),
-  ...
-)
-
-simpls_fast_cv_cpp(
-  Xdata,
-  Ydata,
-  constrain = NULL,
-  ncomp = 2L,
-  kfold = 10L,
-  scaling = c("centering", "autoscaling", "none"),
-  svd.method = c("cpu_rsvd", "irlba"),
   xprod = TRUE,
   ...
 )
@@ -54,7 +42,7 @@ plssvd_cv_cuda(
   ...
 )
 
-simpls_fast_cv_cuda(
+simpls_cv_cuda(
   Xdata,
   Ydata,
   constrain = NULL,

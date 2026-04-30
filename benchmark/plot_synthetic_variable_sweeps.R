@@ -27,6 +27,7 @@ ok[, backend_algorithm := fifelse(
 backend_cols <- c(
   irlba = "#1b9e77",
   rsvd = "#d95f02",
+  flash_svd = "#7570b3",
   pls_pkg = "#555555"
 )
 impl_lines <- c(

@@ -12,7 +12,7 @@ pls_r(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,

@@ -2,9 +2,36 @@
 % Please edit documentation in R/main.R
 \name{simpls_gpu}
 \alias{simpls_gpu}
-\title{Experimental GPU-native SIMPLS fit}
+\alias{simpls_flash_gpu}
+\title{GPU-native SIMPLS fit}
 \usage{
 simpls_gpu(
+  Xtrain,
+  Ytrain,
+  Xtest = NULL,
+  Ytest = NULL,
+  ncomp = 2,
+  scaling = c("centering", "autoscaling", "none"),
+  rsvd_oversample = 10L,
+  rsvd_power = 1L,
+  svds_tol = 0,
+  seed = 1L,
+  fit = FALSE,
+  proj = FALSE,
+  gpu_device_state = TRUE,
+  gpu_qr = FALSE,
+  gpu_eig = FALSE,
+  gpu_qless_qr = TRUE,
+  gpu_finalize_threshold = 32L,
+  fast_block = 1L,
+  fast_center_t = FALSE,
+  fast_reorth_v = FALSE,
+  fast_incremental = TRUE,
+  fast_inc_iters = 2L,
+  fast_defl_cache = TRUE
+)
+
+simpls_flash_gpu(
   Xtrain,
   Ytrain,
   Xtest = NULL,

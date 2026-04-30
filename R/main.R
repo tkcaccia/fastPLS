@@ -190,7 +190,7 @@
 
 .normalize_svd_method <- function(method) {
   if (length(method) == 1L && !is.na(method) && as.character(method) %in% c("arpack", "dc")) {
-    stop("svd.method='arpack' has been removed from fastPLS; use 'irlba' or 'cpu_rsvd'.", call. = FALSE)
+    stop("svd.method='arpack' has been removed from fastPLS; use 'exact', 'irlba', or 'cpu_rsvd'.", call. = FALSE)
   }
   method
 }
@@ -743,15 +743,36 @@ pls.model2.fast.gpu =
 #' @param newdata Numeric predictor matrix.
 #' @param Ytest Optional observed response used to compute `Q2Y`.
 #' @param proj Logical; return projected `Ttest` when `TRUE`.
+#' @param predict.backend Prediction backend. `"auto"` uses CUDA flash
+#'   low-rank prediction when the model was fitted by a `*_flash_gpu()`
+#'   wrapper, otherwise CPU prediction is used.
 #' @param ... Unused.
 #' @return A list containing `Ypred`, optional `Q2Y`, and optional `Ttest`.
 #' @export
-predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
+predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
+                           predict.backend = c("auto", "cpu", "cuda_flash"), ...) {
   if (!is(object, "fastPLS")) {
     stop("object is not a fastPLS object")
   }
-  Xtest=newdata
-  res=pls_predict(object, Xtest,proj)
+  predict.backend <- match.arg(predict.backend)
+  Xtest=as.matrix(newdata)
+  use_flash <- identical(predict.backend, "cuda_flash") ||
+    (identical(predict.backend, "auto") &&
+       identical(object$predict_backend, "cuda_flash") &&
+       isTRUE(has_cuda()))
+  res <- if (isTRUE(use_flash)) {
+    tryCatch(
+      pls_predict_flash_cuda(object, Xtest, proj),
+      error = function(e) {
+        if (identical(predict.backend, "cuda_flash")) {
+          stop(e)
+        }
+        pls_predict(object, Xtest, proj)
+      }
+    )
+  } else {
+    pls_predict(object, Xtest, proj)
+  }
   res$Q2Y=NULL
 
   if (!is.null(Ytest)) {
@@ -1012,7 +1033,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE, ...) {
   out
 }
 
-#' Experimental kernel PLS
+#' Kernel PLS
 #'
 #' Fits PLS on a centered training kernel. The CUDA variant uses the GPU PLS core
 #' after host-side kernel construction and centering.
@@ -1036,7 +1057,7 @@ kernel_pls_r <- function(Xtrain,
                          degree = 3L,
                          coef0 = 1,
                          method = "simpls",
-                         svd.method = c("irlba", "cpu_rsvd"),
+                         svd.method = c("irlba", "cpu_rsvd", "exact"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,
@@ -1050,7 +1071,7 @@ kernel_pls_r <- function(Xtrain,
                          fit = FALSE,
                          proj = FALSE) {
   method <- match.arg(method)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
   .kernel_pls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), match.arg(kernel),
     gamma, degree, coef0, fit, proj, "R", pls_r,
@@ -1084,7 +1105,7 @@ kernel_pls_cpp <- function(Xtrain,
                            degree = 3L,
                            coef0 = 1,
                            method = "simpls",
-                           svd.method = c("irlba", "cpu_rsvd"),
+                           svd.method = c("irlba", "cpu_rsvd", "exact"),
                            rsvd_oversample = 10L,
                            rsvd_power = 1L,
                            svds_tol = 0,
@@ -1098,7 +1119,7 @@ kernel_pls_cpp <- function(Xtrain,
                            fit = FALSE,
                            proj = FALSE) {
   method <- match.arg(method)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
   .kernel_pls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), match.arg(kernel),
     gamma, degree, coef0, fit, proj, "cpp", pls,
@@ -1253,7 +1274,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
   out
 }
 
-#' Experimental orthogonal PLS
+#' Orthogonal PLS
 #'
 #' Removes supervised orthogonal variation from `Xtrain`, then fits the requested
 #' PLS core. The CUDA variant uses the GPU PLS core after CPU-side OPLS filtering.
@@ -1271,7 +1292,7 @@ opls_r <- function(Xtrain,
                    north = 1L,
                    scaling = c("centering", "autoscaling", "none"),
                    method = c("simpls", "plssvd"),
-                   svd.method = c("irlba", "cpu_rsvd"),
+                   svd.method = c("irlba", "cpu_rsvd", "exact"),
                    rsvd_oversample = 10L,
                    rsvd_power = 1L,
                    svds_tol = 0,
@@ -1285,7 +1306,7 @@ opls_r <- function(Xtrain,
                    fit = FALSE,
                    proj = FALSE) {
   method <- match.arg(method)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
   .opls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north, fit, proj,
     "R", pls_r,
@@ -1316,7 +1337,7 @@ opls_cpp <- function(Xtrain,
                      north = 1L,
                      scaling = c("centering", "autoscaling", "none"),
                      method = c("simpls", "plssvd"),
-                     svd.method = c("irlba", "cpu_rsvd"),
+                     svd.method = c("irlba", "cpu_rsvd", "exact"),
                      rsvd_oversample = 10L,
                      rsvd_power = 1L,
                      svds_tol = 0,
@@ -1330,7 +1351,7 @@ opls_cpp <- function(Xtrain,
                      fit = FALSE,
                      proj = FALSE) {
   method <- match.arg(method)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
   .opls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north, fit, proj,
     "cpp", pls,
@@ -1418,7 +1439,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   predict.fastPLS(object$inner_model, Xnew, Ytest = Ytest, proj = proj)
 }
 
-#' Experimental GPU-native SIMPLS fit
+#' GPU-native SIMPLS fit
 #'
 #' Uses a CUDA-oriented `simpls` engine that keeps the training
 #' matrices and deflated cross-covariance resident on device throughout the fit.
@@ -1552,7 +1573,7 @@ simpls_gpu = function(Xtrain,
   model
 }
 
-#' Experimental GPU-native PLSSVD fit
+#' GPU-native PLSSVD fit
 #'
 #' Uses a dedicated CUDA PLSSVD engine that keeps the cross-covariance SVD and
 #' latent linear algebra on device, returning the standard `fastPLS` object
@@ -1653,6 +1674,131 @@ plssvd_gpu = function(Xtrain,
   }
 
   class(model) <- "fastPLS"
+  model
+}
+
+.predict_flash_attach <- function(model, Xtest, Ytest, proj) {
+  model$predict_backend <- "cuda_flash"
+  model$flash_svd <- TRUE
+  if (!is.null(Xtest)) {
+    res <- predict.fastPLS(
+      model,
+      as.matrix(Xtest),
+      Ytest = Ytest,
+      proj = proj,
+      predict.backend = "cuda_flash"
+    )
+    model <- c(model, res)
+  }
+  model
+}
+
+#' GPU PLSSVD with FlashSVD-style low-rank CUDA prediction
+#'
+#' Fits with the standard GPU PLSSVD backend and marks the model so prediction
+#' uses a CUDA low-rank path that applies `X %*% R %*% W` without materializing
+#' the full coefficient matrix `B`.
+#' @rdname plssvd_gpu
+#' @export
+plssvd_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
+                             ncomp = 2, scaling = c("centering", "autoscaling", "none"),
+                             rsvd_oversample = 10L, rsvd_power = 1L,
+                             svds_tol = 0, seed = 1L, fit = FALSE,
+                             proj = FALSE, gpu_qr = TRUE, gpu_eig = TRUE,
+                             gpu_qless_qr = FALSE, gpu_finalize_threshold = 32L) {
+  model <- plssvd_gpu(
+    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = NULL, Ytest = NULL,
+    ncomp = ncomp, scaling = scaling, rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power, svds_tol = svds_tol, seed = seed,
+    fit = fit, proj = FALSE, gpu_qr = gpu_qr, gpu_eig = gpu_eig,
+    gpu_qless_qr = gpu_qless_qr, gpu_finalize_threshold = gpu_finalize_threshold
+  )
+  .predict_flash_attach(model, Xtest, Ytest, proj)
+}
+
+#' GPU SIMPLS with FlashSVD-style low-rank CUDA prediction
+#' @rdname simpls_gpu
+#' @export
+simpls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
+                             ncomp = 2, scaling = c("centering", "autoscaling", "none"),
+                             rsvd_oversample = 10L, rsvd_power = 1L,
+                             svds_tol = 0, seed = 1L, fit = FALSE,
+                             proj = FALSE, gpu_device_state = TRUE,
+                             gpu_qr = FALSE, gpu_eig = FALSE,
+                             gpu_qless_qr = TRUE, gpu_finalize_threshold = 32L,
+                             fast_block = 1L, fast_center_t = FALSE,
+                             fast_reorth_v = FALSE, fast_incremental = TRUE,
+                             fast_inc_iters = 2L, fast_defl_cache = TRUE) {
+  model <- simpls_gpu(
+    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = NULL, Ytest = NULL,
+    ncomp = ncomp, scaling = scaling, rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power, svds_tol = svds_tol, seed = seed,
+    fit = fit, proj = FALSE, gpu_device_state = gpu_device_state,
+    gpu_qr = gpu_qr, gpu_eig = gpu_eig, gpu_qless_qr = gpu_qless_qr,
+    gpu_finalize_threshold = gpu_finalize_threshold, fast_block = fast_block,
+    fast_center_t = fast_center_t, fast_reorth_v = fast_reorth_v,
+    fast_incremental = fast_incremental, fast_inc_iters = fast_inc_iters,
+    fast_defl_cache = fast_defl_cache
+  )
+  .predict_flash_attach(model, Xtest, Ytest, proj)
+}
+
+#' GPU OPLS with FlashSVD-style low-rank CUDA prediction
+#' @rdname opls_r
+#' @export
+opls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
+                           ncomp = 2, north = 1L,
+                           scaling = c("centering", "autoscaling", "none"),
+                           method = c("simpls", "plssvd"),
+                           rsvd_oversample = 10L, rsvd_power = 1L,
+                           svds_tol = 0, seed = 1L, fit = FALSE,
+                           proj = FALSE, fast_block = 1L, ...) {
+  model <- opls_cuda(
+    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = NULL, Ytest = NULL,
+    ncomp = ncomp, north = north, scaling = scaling,
+    method = match.arg(method), rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power, svds_tol = svds_tol, seed = seed,
+    fit = fit, proj = FALSE, fast_block = fast_block, ...
+  )
+  model$inner_model$predict_backend <- "cuda_flash"
+  model$inner_model$flash_svd <- TRUE
+  model$flash_svd <- TRUE
+  if (!is.null(Xtest)) {
+    res <- predict(model, as.matrix(Xtest), Ytest = Ytest, proj = proj)
+    model <- c(model, res)
+    class(model) <- c("fastPLSOpls", "fastPLS")
+  }
+  model
+}
+
+#' GPU kernel PLS with FlashSVD-style low-rank CUDA prediction
+#' @rdname kernel_pls_r
+#' @export
+kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
+                                 ncomp = 2,
+                                 scaling = c("centering", "autoscaling", "none"),
+                                 kernel = c("linear", "rbf", "poly"),
+                                 gamma = NULL, degree = 3L, coef0 = 1,
+                                 method = "simpls",
+                                 rsvd_oversample = 10L, rsvd_power = 1L,
+                                 svds_tol = 0, seed = 1L, fast_block = 1L,
+                                 fit = FALSE, proj = FALSE, ...) {
+  model <- kernel_pls_cuda(
+    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = NULL, Ytest = NULL,
+    ncomp = ncomp, scaling = scaling, kernel = kernel, gamma = gamma,
+    degree = degree, coef0 = coef0, method = method,
+    rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
+    svds_tol = svds_tol, seed = seed, fast_block = fast_block,
+    fit = fit, proj = FALSE, ...
+  )
+  model$inner_model$predict_backend <- "cuda_flash"
+  model$inner_model$flash_svd <- TRUE
+  model$flash_svd <- TRUE
+  if (!is.null(Xtest)) {
+    res <- predict(model, as.matrix(Xtest), Ytest = Ytest, proj = proj)
+    model <- c(model, res)
+    class(model) <- c("fastPLSKernel", "fastPLS")
+  }
   model
 }
 
@@ -1872,16 +2018,14 @@ plssvd_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10
 #' @export
 simpls_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                           scaling = c("centering", "autoscaling", "none"),
-                          svd.method = c("cpu_rsvd", "irlba"), ...) {
-  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp", svd.method, xprod = TRUE, ...)
+                          svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
+  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp", svd.method, xprod = xprod, ...)
 }
 
-#' @rdname plssvd_cv_cpp
-#' @export
 simpls_fast_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                                scaling = c("centering", "autoscaling", "none"),
                                svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
-  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp", svd.method, xprod = xprod, ...)
+  simpls_cv_cpp(Xdata, Ydata, constrain, ncomp, kfold, scaling, svd.method, xprod = xprod, ...)
 }
 
 #' @rdname plssvd_cv_cpp
@@ -1894,21 +2038,28 @@ plssvd_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 1
 
 #' @rdname plssvd_cv_cpp
 #' @export
-simpls_fast_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
-                                scaling = c("centering", "autoscaling", "none"),
-                                xprod = TRUE, ...) {
+simpls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                           scaling = c("centering", "autoscaling", "none"),
+                           xprod = TRUE, ...) {
   .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cuda", xprod = xprod, ...)
 }
 
-.svd_methods_internal <- c("irlba", "cpu_rsvd", "cuda_rsvd")
-.svd_methods_public <- c("irlba", "cpu_rsvd")
-.svd_methods_cpu <- c("irlba", "cpu_rsvd")
+simpls_fast_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                                scaling = c("centering", "autoscaling", "none"),
+                                xprod = TRUE, ...) {
+  simpls_cv_cuda(Xdata, Ydata, constrain, ncomp, kfold, scaling, xprod = xprod, ...)
+}
+
+.svd_methods_internal <- c("exact", "irlba", "cpu_rsvd", "cuda_rsvd")
+.svd_methods_public <- c("exact", "irlba", "cpu_rsvd")
+.svd_methods_cpu <- c("exact", "irlba", "cpu_rsvd")
 
 .svd_method_id <- function(method) {
   method <- .normalize_svd_method(method)
   method <- match.arg(method, .svd_methods_internal)
   switch(
     method,
+    exact = 3L,
     irlba = 1L,
     cpu_rsvd = 4L,
     cuda_rsvd = 5L
@@ -1949,7 +2100,7 @@ svd_methods <- function() {
 #' @export
 svd_run <- function(A,
                     k,
-                    method = c("cpu_rsvd", "irlba"),
+                    method = c("cpu_rsvd", "irlba", "exact"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -2001,7 +2152,7 @@ svd_run <- function(A,
 #' @export
 svd_benchmark <- function(A,
                           k,
-                          methods = c("irlba", "cpu_rsvd"),
+                          methods = c("irlba", "cpu_rsvd", "exact"),
                           reps = 3L,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
@@ -2063,7 +2214,7 @@ svd_benchmark <- function(A,
 
 .truncated_svd_r <- function(A,
                              k,
-                             svd.method = c("irlba", "cpu_rsvd"),
+                             svd.method = c("irlba", "cpu_rsvd", "exact"),
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              svds_tol = 0,
@@ -2869,7 +3020,7 @@ pls_r = function (Xtrain,
                   ncomp=2,
                   scaling = c("centering", "autoscaling","none"),
                   method = c("simpls", "plssvd"),
-                  svd.method = c("irlba", "cpu_rsvd"),
+                  svd.method = c("irlba", "cpu_rsvd", "exact"),
                   rsvd_oversample = 10L,
                   rsvd_power = 1L,
                   svds_tol = 0,
@@ -2888,7 +3039,7 @@ pls_r = function (Xtrain,
   requested_method <- match.arg(method, c("simpls", "plssvd"))
   meth <- .normalize_pls_method(requested_method)
   svdmeth <- .normalize_svd_method(svd.method)
-  svdmeth <- match.arg(svdmeth, c("irlba", "cpu_rsvd"))
+  svdmeth <- match.arg(svdmeth, c("irlba", "cpu_rsvd", "exact"))
   Xtrain <- as.matrix(Xtrain)
 
   if (is.factor(Ytrain)) {
@@ -3014,7 +3165,7 @@ pls_r = function (Xtrain,
 #' @param ncomp Number of components (scalar or vector).
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
 #' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
-#' @param svd.method One of `"irlba"` or `"cpu_rsvd"`.
+#' @param svd.method One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 #'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 #'   from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.
 #' @param rsvd_oversample RSVD oversampling.
@@ -3051,7 +3202,7 @@ pls =  function (Xtrain,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"),
                  method = c("simpls", "plssvd"),
-                 svd.method = c("irlba", "cpu_rsvd"),
+                 svd.method = c("irlba", "cpu_rsvd", "exact"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
                  svds_tol = 0,
@@ -3080,7 +3231,6 @@ pls =  function (Xtrain,
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method)
   svdmeth <- .svd_method_id(svd.method)
-
   if (meth == 3L) {
     profile <- .resolve_simpls_fast_profile(
       fast_block = fast_block,
@@ -3106,6 +3256,7 @@ pls =  function (Xtrain,
   }
 
   Xtrain = as.matrix(Xtrain)
+
   if (is.factor(Ytrain)){
     classification=TRUE # classification
     lev = levels(Ytrain)
@@ -3402,7 +3553,7 @@ optim.pls.cv =  function (Xdata,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
                           method = c("simpls", "plssvd"),
-                          svd.method = c("irlba", "cpu_rsvd"),
+                          svd.method = c("irlba", "cpu_rsvd", "exact"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           svds_tol = 0,
@@ -3551,7 +3702,7 @@ pls.double.cv = function(Xdata,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"),
                          method = c("simpls", "plssvd"),
-                         svd.method = c("irlba", "cpu_rsvd"),
+                         svd.method = c("irlba", "cpu_rsvd", "exact"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,

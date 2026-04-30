@@ -254,11 +254,19 @@ result_row <- tryCatch({
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       fit = FALSE, seed = 123L + as.integer(replicate_id)
     ),
+    gpu_plssvd_flash_fp64 = function() fastPLS::plssvd_flash_gpu(
+      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
+      fit = FALSE, seed = 123L + as.integer(replicate_id)
+    ),
     cpp_simpls_cpu_rsvd = function() fastpls_fit("simpls", "cpu_rsvd"),
     cpp_simpls_irlba = function() fastpls_fit("simpls", "irlba"),
     r_simpls_cpu_rsvd = function() fastpls_fit_r("simpls", "cpu_rsvd"),
     r_simpls_irlba = function() fastpls_fit_r("simpls", "irlba"),
     gpu_simpls_fp64 = function() fastPLS::simpls_gpu(
+      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
+      fit = FALSE, seed = 123L + as.integer(replicate_id)
+    ),
+    gpu_simpls_flash_fp64 = function() fastPLS::simpls_flash_gpu(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       fit = FALSE, seed = 123L + as.integer(replicate_id)
     ),
@@ -268,12 +276,22 @@ result_row <- tryCatch({
     r_kernelpls_cpu_rsvd = function() kernel_fit_r("simpls", "cpu_rsvd"),
     r_kernelpls_irlba = function() kernel_fit_r("simpls", "irlba"),
     gpu_kernelpls_fp64 = function() kernel_fit_cuda("simpls"),
+    gpu_kernelpls_flash_fp64 = function() fastPLS::kernel_pls_flash_gpu(
+      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
+      kernel = "linear", method = "simpls", fit = FALSE, seed = 123L + as.integer(replicate_id)
+    ),
     pls_pkg_kernelpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "kernelpls"),
     cpp_opls_cpu_rsvd = function() opls_fit_cpp("simpls", "cpu_rsvd"),
     cpp_opls_irlba = function() opls_fit_cpp("simpls", "irlba"),
     r_opls_cpu_rsvd = function() opls_fit_r("simpls", "cpu_rsvd"),
     r_opls_irlba = function() opls_fit_r("simpls", "irlba"),
     gpu_opls_fp64 = function() opls_fit_cuda("simpls"),
+    gpu_opls_flash_fp64 = function() fastPLS::opls_flash_gpu(
+      Xtrain = task$Xtrain, Ytrain = task$Ytrain,
+      ncomp = as.integer(opls_layout$predictive_ncomp),
+      method = "simpls", north = as.integer(opls_layout$north),
+      fit = FALSE, seed = 123L + as.integer(replicate_id)
+    ),
     # `pls::oscorespls.fit()` does not expose `north`, so keep benchmark
     # parity by reserving one total component slot for the orthogonal part.
     pls_pkg_opls = function() pls_pkg_fit(task, effective_ncomp = opls_layout$predictive_ncomp, fit_method = "opls"),

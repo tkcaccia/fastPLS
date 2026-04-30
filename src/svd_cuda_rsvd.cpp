@@ -2278,6 +2278,166 @@ PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   return g_workspace.plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt);
 }
 
+arma::cube cuda_flash_lowrank_predict(
+  const Mat& Xtest,
+  const Mat& R,
+  const arma::cube& W_latent,
+  const arma::rowvec& mY,
+  const arma::ivec& ncomp
+) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Xtest.n_cols != R.n_rows) {
+    throw std::runtime_error("cuda_flash_lowrank_predict: Xtest and R dimensions do not match");
+  }
+  if (W_latent.n_slices < static_cast<arma::uword>(ncomp.n_elem)) {
+    throw std::runtime_error("cuda_flash_lowrank_predict: W_latent has too few slices");
+  }
+  if (mY.n_elem != W_latent.n_cols) {
+    throw std::runtime_error("cuda_flash_lowrank_predict: mY length does not match response dimension");
+  }
+
+  const int n = static_cast<int>(Xtest.n_rows);
+  const int p = static_cast<int>(Xtest.n_cols);
+  const int kmax = static_cast<int>(R.n_cols);
+  const int m = static_cast<int>(W_latent.n_cols);
+  const int nslices = static_cast<int>(ncomp.n_elem);
+  if (n < 1 || p < 1 || kmax < 1 || m < 1 || nslices < 1) {
+    throw std::runtime_error("cuda_flash_lowrank_predict: empty input");
+  }
+
+  cublasHandle_t handle = nullptr;
+  check_cublas(cublasCreate(&handle), "cublasCreate(cuda_flash_lowrank_predict)");
+
+  double* dX = nullptr;
+  double* dR = nullptr;
+  double* dScores = nullptr;
+  double* dW = nullptr;
+  double* dY = nullptr;
+  double* dMY = nullptr;
+  double* dOnes = nullptr;
+
+  auto cleanup = [&]() {
+    if (dX) cudaFree(dX);
+    if (dR) cudaFree(dR);
+    if (dScores) cudaFree(dScores);
+    if (dW) cudaFree(dW);
+    if (dY) cudaFree(dY);
+    if (dMY) cudaFree(dMY);
+    if (dOnes) cudaFree(dOnes);
+    if (handle) cublasDestroy(handle);
+  };
+
+  try {
+    const size_t bytes_X = static_cast<size_t>(n) * static_cast<size_t>(p) * sizeof(double);
+    const size_t bytes_R = static_cast<size_t>(p) * static_cast<size_t>(kmax) * sizeof(double);
+    const size_t bytes_scores = static_cast<size_t>(n) * static_cast<size_t>(kmax) * sizeof(double);
+    const size_t bytes_W = static_cast<size_t>(kmax) * static_cast<size_t>(m) * sizeof(double);
+    const size_t bytes_Y = static_cast<size_t>(n) * static_cast<size_t>(m) * sizeof(double);
+    const size_t bytes_mY = static_cast<size_t>(m) * sizeof(double);
+    const size_t bytes_ones = static_cast<size_t>(n) * sizeof(double);
+
+    check_cuda(cudaMalloc(&dX, bytes_X), "cudaMalloc(flash dX)");
+    check_cuda(cudaMalloc(&dR, bytes_R), "cudaMalloc(flash dR)");
+    check_cuda(cudaMalloc(&dScores, bytes_scores), "cudaMalloc(flash dScores)");
+    check_cuda(cudaMalloc(&dW, bytes_W), "cudaMalloc(flash dW)");
+    check_cuda(cudaMalloc(&dY, bytes_Y), "cudaMalloc(flash dY)");
+    check_cuda(cudaMalloc(&dMY, bytes_mY), "cudaMalloc(flash dMY)");
+    check_cuda(cudaMalloc(&dOnes, bytes_ones), "cudaMalloc(flash dOnes)");
+
+    check_cuda(cudaMemcpy(dX, Xtest.memptr(), bytes_X, cudaMemcpyHostToDevice), "cudaMemcpy(flash Xtest)");
+    check_cuda(cudaMemcpy(dR, R.memptr(), bytes_R, cudaMemcpyHostToDevice), "cudaMemcpy(flash R)");
+    check_cuda(cudaMemcpy(dMY, mY.memptr(), bytes_mY, cudaMemcpyHostToDevice), "cudaMemcpy(flash mY)");
+    std::vector<double> hOnes(static_cast<size_t>(n), 1.0);
+    check_cuda(cudaMemcpy(dOnes, hOnes.data(), bytes_ones, cudaMemcpyHostToDevice), "cudaMemcpy(flash ones)");
+
+    arma::cube Ypred(n, m, nslices, arma::fill::none);
+    const double one = 1.0;
+    const double zero = 0.0;
+
+    for (int s = 0; s < nslices; ++s) {
+      int mc = ncomp(s);
+      if (mc < 1) mc = 1;
+      if (mc > kmax) mc = kmax;
+      if (mc > static_cast<int>(W_latent.n_rows)) {
+        throw std::runtime_error("cuda_flash_lowrank_predict: ncomp exceeds W_latent rank");
+      }
+
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          mc,
+          p,
+          &one,
+          dX,
+          n,
+          dR,
+          p,
+          &zero,
+          dScores,
+          n
+        ),
+        "cublasDgemm(flash scores)"
+      );
+
+      arma::mat Wslice = W_latent.slice(static_cast<arma::uword>(s));
+      check_cuda(
+        cudaMemcpy(dW, Wslice.memptr(), bytes_W, cudaMemcpyHostToDevice),
+        "cudaMemcpy(flash W)"
+      );
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          m,
+          mc,
+          &one,
+          dScores,
+          n,
+          dW,
+          kmax,
+          &zero,
+          dY,
+          n
+        ),
+        "cublasDgemm(flash Y)"
+      );
+
+      check_cublas(
+        cublasDger(
+          handle,
+          n,
+          m,
+          &one,
+          dOnes,
+          1,
+          dMY,
+          1,
+          dY,
+          n
+        ),
+        "cublasDger(flash add mY)"
+      );
+      check_cuda(
+        cudaMemcpy(Ypred.slice(static_cast<arma::uword>(s)).memptr(), dY, bytes_Y, cudaMemcpyDeviceToHost),
+        "cudaMemcpy(flash Ypred)"
+      );
+    }
+
+    cleanup();
+    return Ypred;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+}
+
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
   const arma::uword target = std::min<arma::uword>(
@@ -2351,6 +2511,16 @@ PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   const arma::ivec&,
   bool,
   const SVDOptions&
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+arma::cube cuda_flash_lowrank_predict(
+  const Mat&,
+  const Mat&,
+  const arma::cube&,
+  const arma::rowvec&,
+  const arma::ivec&
 ) {
   throw std::runtime_error("CUDA backend not compiled");
 }

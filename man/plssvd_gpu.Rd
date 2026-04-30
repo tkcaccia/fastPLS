@@ -2,9 +2,29 @@
 % Please edit documentation in R/main.R
 \name{plssvd_gpu}
 \alias{plssvd_gpu}
-\title{Experimental GPU-native PLSSVD fit}
+\alias{plssvd_flash_gpu}
+\title{GPU-native PLSSVD fit}
 \usage{
 plssvd_gpu(
+  Xtrain,
+  Ytrain,
+  Xtest = NULL,
+  Ytest = NULL,
+  ncomp = 2,
+  scaling = c("centering", "autoscaling", "none"),
+  rsvd_oversample = 10L,
+  rsvd_power = 1L,
+  svds_tol = 0,
+  seed = 1L,
+  fit = FALSE,
+  proj = FALSE,
+  gpu_qr = TRUE,
+  gpu_eig = TRUE,
+  gpu_qless_qr = FALSE,
+  gpu_finalize_threshold = 32L
+)
+
+plssvd_flash_gpu(
   Xtrain,
   Ytrain,
   Xtest = NULL,

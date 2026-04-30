@@ -32,6 +32,13 @@ PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   bool fit,
   const SVDOptions& opt
 );
+arma::cube cuda_flash_lowrank_predict(
+  const Mat& Xtest,
+  const Mat& R,
+  const arma::cube& W_latent,
+  const arma::rowvec& mY,
+  const arma::ivec& ncomp
+);
 bool cuda_runtime_available();
 void cuda_reset_workspace();
 void cuda_rsvd_sample_y(

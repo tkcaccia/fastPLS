@@ -1,91 +1,135 @@
 # fastPLS
 
-`fastPLS` provides C++, GPU-native, and pure-R implementations of partial least
-squares (PLS) with interchangeable CPU SVD backends and compact latent
-prediction for large response spaces.
+`fastPLS` provides R, C++, and CUDA implementations of partial least squares
+models for high-dimensional regression and classification. The current standard
+pipeline compares four model families:
 
-## Implemented PLS Algorithms
+- `plssvd`
+- `simpls`
+- `opls`
+- `kernelpls`
 
-- `method = "plssvd"`:
-  single truncated SVD of cross-covariance `S = X^T Y`, then coefficient
-  reconstruction per requested component count.
-- `method = "simpls"`:
-  the optimized SIMPLS path formerly exposed as `simpls_fast`, using
-  incremental deflation and compact latent prediction when coefficient storage
-  would be large.
-- `method = "simpls_fast"`:
-  accepted as a legacy alias for `method = "simpls"`.
-- `opls_*()` and `kernel_pls_*()`:
-  OPLS filtering and kernel-PLS wrappers built on the same PLSSVD/SIMPLS cores.
+The `simpls` implementation is the optimized fastPLS SIMPLS core. Older
+low-level tuning arguments are kept only for source compatibility; new analyses
+should use `method = "simpls"`.
 
-## SVD Backends
+## Algorithms
 
-- `irlba`:
-  bundled internal IRLBA wrapper. Matrix-free xprod is intentionally disabled
-  for IRLBA routes; use `cpu_rsvd` for the xprod-enabled randomized path.
-- `cpu_rsvd`:
-  randomized SVD on CPU (Gaussian sketch + optional power iterations + reduced
-  exact SVD).
-- The former hybrid `cuda_rsvd` route through `pls()` has been removed.
-- GPU-native fitting is now exposed separately through:
-  - `simpls_gpu()`
-  - `plssvd_gpu()`
+- `plssvd`: computes the dominant subspace of the cross-covariance
+  `S = X^T Y` and reuses it for the requested component path.
+- `simpls`: optimized SIMPLS with compact latent prediction and automatic
+  matrix-free `xprod` selection when it reduces cross-covariance work.
+- `opls_*()`: supervised orthogonal filtering followed by the selected PLS core.
+- `kernel_pls_*()`: linear, RBF, or polynomial kernel construction followed by
+  the selected PLS core.
 
-Check runtime availability using `has_cuda()` and `svd_methods()`.
+For classification, factor responses are handled as PLS-DA responses. Large
+response spaces use compact prediction where possible so the full coefficient
+cube does not need to be stored.
 
-## Method/Backend Summary
+## Backends
 
-| Outer algorithm | Inner backend | Exact/approximate | Iterative/direct (inner) | CPU/GPU | Supported functions |
-|---|---|---|---|---|---|
-| `plssvd` | `irlba` | Truncated | Bundled IRLBA wrapper | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `plssvd` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `irlba` | Truncated | Bundled IRLBA wrapper inside optimized SIMPLS loop | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `simpls` | `cpu_rsvd` | Approximate | Iterative randomized range/power + reduced exact SVD inside optimized SIMPLS loop | CPU | `pls`, `pls_r`, `optim.pls.cv`, `pls.double.cv` |
-| `opls` / `kernel_pls` | `irlba` / `cpu_rsvd` | Depends on backend | Shared fastPLS core after OPLS filtering or kernel construction | CPU | `opls_*`, `kernel_pls_*` |
-| `plssvd` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `plssvd_gpu` |
-| `simpls` | GPU-native | Approximate | Dedicated CUDA path with device-resident training buffers | GPU | `simpls_gpu` |
+CPU backends:
 
-## Public API (current)
+- `irlba`: bundled internal IRLBA wrapper.
+- `cpu_rsvd`: randomized SVD with Gaussian sketching and optional power
+  iterations.
+- `exact`: exact dense SVD fallback, used automatically for very small SVD
+  inputs.
 
-Main modeling functions:
-- `pls()` (C++ backends)
-- `pls_r()` (pure-R reference path)
-- `simpls_gpu()` (GPU-native SIMPLS-fast)
-- `plssvd_gpu()` (GPU-native PLSSVD)
+CUDA backends:
+
+- `plssvd_gpu()`
+- `simpls_gpu()`
+- `opls_cuda()`
+- `kernel_pls_cuda()`
+
+FlashSVD-style CUDA prediction wrappers:
+
+- `plssvd_flash_gpu()`
+- `simpls_flash_gpu()`
+- `opls_flash_gpu()`
+- `kernel_pls_flash_gpu()`
+
+The flash wrappers use the same fitted GPU model as the standard CUDA functions,
+but apply predictions through low-rank CUDA products instead of materializing and
+multiplying by the full coefficient matrix. This primarily reduces prediction
+time; fit memory is still governed by the fitting backend.
+
+The removed hybrid `svd.method = "cuda_rsvd"` route through `pls()` is no longer
+supported. Use the GPU-native functions above for CUDA runs.
+
+## Current API
+
+Main model fitting:
+
+- `pls()`
+- `pls_r()`
+- `plssvd_gpu()`
+- `simpls_gpu()`
+- `opls_r()`, `opls_cpp()`, `opls_cuda()`
+- `kernel_pls_r()`, `kernel_pls_cpp()`, `kernel_pls_cuda()`
+
+Prediction and utilities:
+
 - `predict.fastPLS()`
-
-Model selection and diagnostics:
-- `optim.pls.cv()`
-- `pls.double.cv()`
+- `transformy()`
 - `ViP()`
 - `fastcor()`
-
-SVD utilities:
+- `has_cuda()`
 - `svd_methods()`
 - `svd_run()`
 - `svd_benchmark()`
-- `has_cuda()`
 
-## Notes for Reproducible Benchmarks
+Cross-validation:
 
-- For randomized backends (`cpu_rsvd`, `cuda_rsvd`), set `seed`,
-  `rsvd_oversample`, and `rsvd_power` explicitly.
-- For legacy `irlba` paths, tune `irlba_work`, `irlba_maxit`, `irlba_tol`,
-  `irlba_eps`, and `irlba_svtol` from the R API.
-- `simpls_fast` now permanently uses the former incremental-deflation
-  configuration. Legacy `fast_*` tuning arguments are accepted for backward
-  compatibility but are deprecated and ignored.
-- For high-dimensional multivariate responses, fastPLS can omit the full
-  coefficient cube `B` and predict from compact latent factors instead. Set
-  `FASTPLS_STORE_B=always` to force legacy coefficient storage,
-  `FASTPLS_STORE_B=never` to force compact storage, or tune the automatic
-  threshold with `FASTPLS_STORE_B_MAX_MB` (default: `256`).
-- The GPU-native APIs reset their CUDA workspace after each fit and keep
-  training buffers in double precision.
+- `optim.pls.cv()`
+- `pls.double.cv()`
+- `plssvd_cv_cpp()`, `simpls_cv_cpp()`
+- `plssvd_cv_cuda()`, `simpls_cv_cuda()`
+
+## Reproducible Benchmark Pipeline
+
+The standard real-dataset benchmark is:
+
+```sh
+scripts/remote_run_dataset_memory_compare.sh
+```
+
+It writes one raw row per run and regenerates 4x4 plots with:
+
+- columns: `plssvd`, `simpls`, `opls`, `kernelpls`
+- rows: total time, predictive metric, peak host RSS, peak GPU memory
+- color: SVD/backend (`irlba`, `rsvd`, `flash_svd`, `pls_pkg`)
+- line type: implementation (`R`, `cpp`, `cuda`, `pls_pkg`)
+
+The standard simulated variable-sweep benchmark is:
+
+```sh
+benchmark/workflow_synthetic_variable_sweeps.sh
+```
+
+or directly:
+
+```sh
+Rscript benchmark/benchmark_synthetic_variable_sweeps.R
+Rscript benchmark/plot_synthetic_variable_sweeps.R <results_dir>
+```
+
+Important environment controls:
+
+- `FASTPLS_RUN_TIMEOUT_SEC`: per-run timeout for real datasets.
+- `FASTPLS_COMPARE_REPS`: number of replicates for real datasets.
+- `FASTPLS_STORE_B`: `auto`, `always`, or `never`.
+- `FASTPLS_STORE_B_MAX_MB`: automatic coefficient-cube storage threshold.
+- `FASTPLS_SYNTH_VAR_TIMEOUT_SEC`: per-run timeout for simulated sweeps.
+- `FASTPLS_SYNTH_VAR_MAX_HOST_RSS_MB`: RAM cap for simulated sweeps.
 
 ## References
 
 - de Jong, S. (1993). SIMPLS. *Chemometrics and Intelligent Laboratory Systems*.
-- Halko, N., Martinsson, P.-G., Tropp, J. A. (2011). *SIAM Review*.
-- Musco, C., Musco, C. (2015). Randomized block Krylov SVD. *arXiv:1504.05477*.
-- Baglama, J., Reichel, L. (2005). IRLBA. *SIAM Journal on Scientific Computing*.
+- Baglama, J. and Reichel, L. (2005). IRLBA. *SIAM Journal on Scientific Computing*.
+- Halko, N., Martinsson, P.-G. and Tropp, J. A. (2011). Randomized algorithms
+  for matrix decompositions. *SIAM Review*.
+- Musco, C. and Musco, C. (2015). Randomized block Krylov methods for stronger
+  and faster approximate singular value decomposition.

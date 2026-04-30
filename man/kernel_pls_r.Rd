@@ -4,10 +4,11 @@
 \alias{kernel_pls_r}
 \alias{kernel_pls_cpp}
 \alias{kernel_pls_cuda}
+\alias{kernel_pls_flash_gpu}
 \alias{kernel_pls_fast_r}
 \alias{kernel_pls_fast_cpp}
 \alias{kernel_pls_fast_cuda}
-\title{Experimental kernel PLS}
+\title{Kernel PLS}
 \usage{
 kernel_pls_r(
   Xtrain,
@@ -21,7 +22,7 @@ kernel_pls_r(
   degree = 3L,
   coef0 = 1,
   method = "simpls",
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -48,7 +49,7 @@ kernel_pls_cpp(
   degree = 3L,
   coef0 = 1,
   method = "simpls",
-  svd.method = c("irlba", "cpu_rsvd"),
+  svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -64,6 +65,28 @@ kernel_pls_cpp(
 )
 
 kernel_pls_cuda(
+  Xtrain,
+  Ytrain,
+  Xtest = NULL,
+  Ytest = NULL,
+  ncomp = 2,
+  scaling = c("centering", "autoscaling", "none"),
+  kernel = c("linear", "rbf", "poly"),
+  gamma = NULL,
+  degree = 3L,
+  coef0 = 1,
+  method = "simpls",
+  rsvd_oversample = 10L,
+  rsvd_power = 1L,
+  svds_tol = 0,
+  seed = 1L,
+  fast_block = 1L,
+  fit = FALSE,
+  proj = FALSE,
+  ...
+)
+
+kernel_pls_flash_gpu(
   Xtrain,
   Ytrain,
   Xtest = NULL,
@@ -114,7 +137,7 @@ kernel_pls_fast_cuda(...)
 
 \item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
+\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.}
 

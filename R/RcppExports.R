@@ -52,6 +52,10 @@ pls_predict <- function(model, Xtest, proj) {
     .Call(`_fastPLS_pls_predict`, model, Xtest, proj)
 }
 
+pls_predict_flash_cuda <- function(model, Xtest, proj) {
+    .Call(`_fastPLS_pls_predict_flash_cuda`, model, Xtest, proj)
+}
+
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
     .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
 }
@@ -107,3 +111,4 @@ pls_model1_gpu_implicit_xprod <- function(Xtrain, Ytrain, ncomp, scaling, fit, r
 pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod) {
     .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod)
 }
+
