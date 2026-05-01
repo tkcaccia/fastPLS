@@ -4,10 +4,10 @@
 \alias{kernel_pls_r}
 \alias{kernel_pls_cpp}
 \alias{kernel_pls_cuda}
-\alias{kernel_pls_flash_gpu}
 \alias{kernel_pls_fast_r}
 \alias{kernel_pls_fast_cpp}
 \alias{kernel_pls_fast_cuda}
+\alias{kernel_pls_flash_gpu}
 \title{Kernel PLS}
 \usage{
 kernel_pls_r(
@@ -21,7 +21,7 @@ kernel_pls_r(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  method = "simpls",
+  method = c("simpls", "plssvd"),
   svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -33,6 +33,9 @@ kernel_pls_r(
   irlba_svtol = 1e-05,
   seed = 1L,
   fast_block = 1L,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed,
   fit = FALSE,
   proj = FALSE
 )
@@ -48,7 +51,7 @@ kernel_pls_cpp(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  method = "simpls",
+  method = c("simpls", "plssvd"),
   svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -60,6 +63,9 @@ kernel_pls_cpp(
   irlba_svtol = 1e-05,
   seed = 1L,
   fast_block = 1L,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed,
   fit = FALSE,
   proj = FALSE
 )
@@ -75,16 +81,25 @@ kernel_pls_cuda(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  method = "simpls",
+  method = c("simpls", "plssvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
   seed = 1L,
   fast_block = 1L,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed,
   fit = FALSE,
   proj = FALSE,
   ...
 )
+
+kernel_pls_fast_r(...)
+
+kernel_pls_fast_cpp(...)
+
+kernel_pls_fast_cuda(...)
 
 kernel_pls_flash_gpu(
   Xtrain,
@@ -107,12 +122,6 @@ kernel_pls_flash_gpu(
   proj = FALSE,
   ...
 )
-
-kernel_pls_fast_r(...)
-
-kernel_pls_fast_cpp(...)
-
-kernel_pls_fast_cuda(...)
 }
 \arguments{
 \item{Xtrain}{Numeric training predictor matrix.}
@@ -161,6 +170,16 @@ from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.}
 
 \item{fast_block}{Refresh block size for the fastPLS `simpls` core; use `1L` for the
 most accuracy-stable per-component refresh.}
+
+\item{gaussian_y}{Logical; when `TRUE`, fit PLS to a Gaussian random
+low-dimensional response sketch and decode predictions back to the original
+response scale or class labels. The default is `FALSE`.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
+the default is `min(ncol(Xtrain), 100)`.}
+
+\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
+sketch.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 

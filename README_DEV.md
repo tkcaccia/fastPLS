@@ -38,6 +38,45 @@ The default matrix-free `xprod` policy is implemented in `R/main.R`:
 The C++ implementation rejects removed FP32/mixed-precision `xprod_precision`
 values. The remaining implicit paths are double precision.
 
+## Gaussian Response Compression
+
+The user-facing option is `gaussian_y = TRUE`, with
+`gaussian_y_dim = NULL` resolving to `min(ncol(Xtrain), 100)`. This option must
+remain opt-in. Do not make it part of the default benchmark unless the benchmark
+is explicitly testing response compression.
+
+Implementation location:
+
+- R orchestration and decoding helpers live in `R/main.R`.
+- CUDA matrix multiplication helpers are exported internally from
+  `src/svd_cuda_rsvd.cpp` through `src/fastPLS.cpp`.
+- Tests for regression, classification, R, C++, OPLS, and kernelPLS coverage are
+  in `tests/testthat/test-gaussian-y.R`.
+
+Regression path:
+
+- center `Y`
+- draw a Gaussian projection with `gaussian_y_seed`
+- fit the PLS model to `Y_centered %*% G`
+- store a small ridge decoder from compressed predictions back to the original
+  response columns
+- decode `Yfit` and `Ypred` before reporting metrics
+
+Classification path:
+
+- avoid dense one-hot `transformy()` when `gaussian_y = TRUE`
+- generate reproducible Gaussian class codes
+- fit to the per-sample class code matrix
+- decode predictions by nearest-code scores and return the original factor
+  levels
+
+CUDA path:
+
+- regression projection and decoder RHS use the CUDA matrix-multiply helper when
+  CUDA is available
+- classification codebook construction stays on the host because the codebook is
+  small and the expensive PLS fit remains GPU-native
+
 ## CUDA Paths
 
 GPU-native fitting wrappers:
@@ -47,18 +86,13 @@ GPU-native fitting wrappers:
 - `opls_cuda()`
 - `kernel_pls_cuda()`
 
-FlashSVD-style prediction wrappers:
-
-- `plssvd_flash_gpu()`
-- `simpls_flash_gpu()`
-- `opls_flash_gpu()`
-- `kernel_pls_flash_gpu()`
-
-The flash wrappers keep fitting identical to the GPU-native wrappers and replace
-prediction with low-rank CUDA products. This is expected to improve prediction
-time most visibly when `q`, `ncomp`, or the number of requested component slices
-is large. It is not expected to reduce fit peak memory unless fit workspaces are
-changed separately.
+FlashSVD-style prediction is integrated into the standard compact prediction
+path instead of being treated as a separate benchmark algorithm. It keeps
+fitting identical to the selected model family and applies predictions with
+streamed low-rank products when compact factors are available. This is expected
+to improve prediction time most visibly when `q`, `ncomp`, or the number of
+requested component slices is large. It is not expected to reduce fit peak
+memory unless fit workspaces are changed separately.
 
 ## Standard Benchmark Files
 

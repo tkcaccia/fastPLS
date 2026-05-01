@@ -101,6 +101,29 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// cuda_matrix_multiply
+arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B);
+RcppExport SEXP _fastPLS_cuda_matrix_multiply(SEXP ASEXP, SEXP BSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_matrix_multiply(A, B));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_thin_qr
+arma::mat cuda_thin_qr(const arma::mat& A);
+RcppExport SEXP _fastPLS_cuda_thin_qr(SEXP ASEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_thin_qr(A));
+    return rcpp_result_gen;
+END_RCPP
+}
 // truncated_svd_debug
 Rcpp::List truncated_svd_debug(const arma::mat& A, int k, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool left_only);
 RcppExport SEXP _fastPLS_truncated_svd_debug(SEXP ASEXP, SEXP kSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
@@ -202,6 +225,20 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
     Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
     rcpp_result_gen = Rcpp::wrap(pls_predict_flash_cuda(model, Xtest, proj));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_predict_flash_cpu
+List pls_predict_flash_cpu(List& model, arma::mat Xtest, bool proj, int block_size);
+RcppExport SEXP _fastPLS_pls_predict_flash_cpu(SEXP modelSEXP, SEXP XtestSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
+    Rcpp::traits::input_parameter< int >::type block_size(block_sizeSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_predict_flash_cpu(model, Xtest, proj, block_size));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -462,12 +499,15 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
+    {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
+    {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
     {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
     {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
+    {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},
     {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
     {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
     {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},

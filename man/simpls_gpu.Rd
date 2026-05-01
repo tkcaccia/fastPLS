@@ -28,7 +28,10 @@ simpls_gpu(
   fast_reorth_v = FALSE,
   fast_incremental = TRUE,
   fast_inc_iters = 2L,
-  fast_defl_cache = TRUE
+  fast_defl_cache = TRUE,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed
 )
 
 simpls_flash_gpu(
@@ -103,6 +106,16 @@ simpls_flash_gpu(
 \item{fast_inc_iters}{Deprecated and ignored.}
 
 \item{fast_defl_cache}{Deprecated and ignored.}
+
+\item{gaussian_y}{Logical; when `TRUE`, fit to a Gaussian random response
+sketch and decode predictions back to the original response scale or class
+labels. The default is `FALSE`.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
+the default is `min(ncol(Xtrain), 100)`.}
+
+\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
+sketch.}
 }
 \value{
 A `fastPLS` object.

@@ -95,6 +95,49 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
   expect_false(isTRUE(all.equal(fit1$B, fit3$B)))
 })
 
+test_that("CPU FlashSVD prediction is the default for compiled and R PLS", {
+  set.seed(17)
+  X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)
+  Y <- matrix(rnorm(70 * 5), nrow = 70, ncol = 5)
+  idx <- 1:12
+
+  for (impl in c("cpp", "R")) {
+    fit_fun <- if (identical(impl, "R")) pls_r else pls
+    for (method in c("plssvd", "simpls")) {
+      ref <- fit_fun(
+      X[-idx, ],
+      Y[-idx, ],
+      ncomp = 1:4,
+      method = method,
+      svd.method = "cpu_rsvd",
+      rsvd_oversample = 8L,
+      rsvd_power = 1L,
+      seed = 17L
+    )
+      flash <- fit_fun(
+        X[-idx, ],
+        Y[-idx, ],
+        ncomp = 1:4,
+        method = method,
+        svd.method = "cpu_rsvd",
+        rsvd_oversample = 8L,
+        rsvd_power = 1L,
+        seed = 17L
+      )
+      pred_ref <- predict(ref, X[idx, , drop = FALSE], predict.backend = "cpu")
+      pred_flash <- predict(flash, X[idx, , drop = FALSE])
+
+      expect_s3_class(flash, "fastPLS")
+      expect_true(isTRUE(flash$flash_svd))
+      expect_identical(flash$flash_svd_backend, "cpu")
+      expect_identical(flash$predict_backend, "cpu_flash")
+      expect_identical(flash$flash_svd_mode, "streamed_low_rank_prediction")
+      expect_equal(flash$B, ref$B)
+      expect_equal(pred_flash$Ypred, pred_ref$Ypred, tolerance = 1e-10)
+    }
+  }
+})
+
 test_that("has_cuda returns scalar logical and hybrid cuda path is removed from pls", {
   flag <- has_cuda()
   expect_type(flag, "logical")

@@ -1946,6 +1946,164 @@ void cuda_reset_workspace() {
   g_workspace.reset();
 }
 
+Mat cuda_matrix_multiply(const Mat& A, const Mat& B) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (A.n_cols != B.n_rows) {
+    throw std::runtime_error("cuda_matrix_multiply: non-conformable matrices");
+  }
+  if (A.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      A.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      B.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_matrix_multiply: matrix dimension exceeds CUDA int limits");
+  }
+
+  const int m = static_cast<int>(A.n_rows);
+  const int k = static_cast<int>(A.n_cols);
+  const int n = static_cast<int>(B.n_cols);
+  if (m < 1 || k < 1 || n < 1) {
+    return Mat(A.n_rows, B.n_cols, arma::fill::zeros);
+  }
+
+  double* dA = nullptr;
+  double* dB = nullptr;
+  double* dC = nullptr;
+  cublasHandle_t handle = nullptr;
+
+  auto cleanup = [&]() {
+    if (dA) cudaFree(dA);
+    if (dB) cudaFree(dB);
+    if (dC) cudaFree(dC);
+    if (handle) cublasDestroy(handle);
+  };
+
+  try {
+    const size_t bytes_A = sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(k);
+    const size_t bytes_B = sizeof(double) * static_cast<size_t>(k) * static_cast<size_t>(n);
+    const size_t bytes_C = sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
+    Mat C(A.n_rows, B.n_cols, arma::fill::none);
+
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_matrix_multiply)");
+    check_cuda(cudaMalloc(&dA, bytes_A), "cudaMalloc(cuda_matrix_multiply A)");
+    check_cuda(cudaMalloc(&dB, bytes_B), "cudaMalloc(cuda_matrix_multiply B)");
+    check_cuda(cudaMalloc(&dC, bytes_C), "cudaMalloc(cuda_matrix_multiply C)");
+    check_cuda(cudaMemcpy(dA, A.memptr(), bytes_A, cudaMemcpyHostToDevice), "cudaMemcpy(cuda_matrix_multiply A)");
+    check_cuda(cudaMemcpy(dB, B.memptr(), bytes_B, cudaMemcpyHostToDevice), "cudaMemcpy(cuda_matrix_multiply B)");
+
+    const double one = 1.0;
+    const double zero = 0.0;
+    check_cublas(
+      cublasDgemm(
+        handle,
+        CUBLAS_OP_N,
+        CUBLAS_OP_N,
+        m,
+        n,
+        k,
+        &one,
+        dA,
+        m,
+        dB,
+        k,
+        &zero,
+        dC,
+        m
+      ),
+      "cublasDgemm(cuda_matrix_multiply)"
+    );
+    check_cuda(cudaMemcpy(C.memptr(), dC, bytes_C, cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_matrix_multiply C)");
+
+    cleanup();
+    return C;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+}
+
+Mat cuda_thin_qr(const Mat& A) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (A.n_rows < A.n_cols) {
+    throw std::runtime_error("cuda_thin_qr: expected nrow(A) >= ncol(A)");
+  }
+  if (A.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      A.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_thin_qr: matrix dimension exceeds CUDA int limits");
+  }
+
+  const int m = static_cast<int>(A.n_rows);
+  const int n = static_cast<int>(A.n_cols);
+  if (m < 1 || n < 1) {
+    return Mat(A.n_rows, A.n_cols, arma::fill::zeros);
+  }
+
+  double* dA = nullptr;
+  double* dTau = nullptr;
+  double* dWork = nullptr;
+  int* dInfo = nullptr;
+  cusolverDnHandle_t solver = nullptr;
+
+  auto cleanup = [&]() {
+    if (dA) cudaFree(dA);
+    if (dTau) cudaFree(dTau);
+    if (dWork) cudaFree(dWork);
+    if (dInfo) cudaFree(dInfo);
+    if (solver) cusolverDnDestroy(solver);
+  };
+
+  try {
+    const size_t bytes_A = sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
+    Mat Q(A.n_rows, A.n_cols, arma::fill::none);
+    check_cusolver(cusolverDnCreate(&solver), "cusolverDnCreate(cuda_thin_qr)");
+    check_cuda(cudaMalloc(&dA, bytes_A), "cudaMalloc(cuda_thin_qr A)");
+    check_cuda(cudaMalloc(&dTau, sizeof(double) * static_cast<size_t>(n)), "cudaMalloc(cuda_thin_qr tau)");
+    check_cuda(cudaMalloc(&dInfo, sizeof(int)), "cudaMalloc(cuda_thin_qr info)");
+    check_cuda(cudaMemcpy(dA, A.memptr(), bytes_A, cudaMemcpyHostToDevice), "cudaMemcpy(cuda_thin_qr A)");
+
+    int lwork_geqrf = 0;
+    int lwork_orgqr = 0;
+    check_cusolver(
+      cusolverDnDgeqrf_bufferSize(solver, m, n, dA, m, &lwork_geqrf),
+      "cusolverDnDgeqrf_bufferSize(cuda_thin_qr)"
+    );
+    check_cusolver(
+      cusolverDnDorgqr_bufferSize(solver, m, n, n, dA, m, dTau, &lwork_orgqr),
+      "cusolverDnDorgqr_bufferSize(cuda_thin_qr)"
+    );
+    const int lwork = std::max(lwork_geqrf, lwork_orgqr);
+    check_cuda(cudaMalloc(&dWork, sizeof(double) * static_cast<size_t>(std::max(lwork, 1))), "cudaMalloc(cuda_thin_qr work)");
+
+    check_cusolver(
+      cusolverDnDgeqrf(solver, m, n, dA, m, dTau, dWork, lwork, dInfo),
+      "cusolverDnDgeqrf(cuda_thin_qr)"
+    );
+    int info = 0;
+    check_cuda(cudaMemcpy(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr geqrf info)");
+    if (info != 0) {
+      throw std::runtime_error("cuda_thin_qr: geqrf failed");
+    }
+
+    check_cusolver(
+      cusolverDnDorgqr(solver, m, n, n, dA, m, dTau, dWork, lwork, dInfo),
+      "cusolverDnDorgqr(cuda_thin_qr)"
+    );
+    check_cuda(cudaMemcpy(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr orgqr info)");
+    if (info != 0) {
+      throw std::runtime_error("cuda_thin_qr: orgqr failed");
+    }
+    check_cuda(cudaMemcpy(Q.memptr(), dA, bytes_A, cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr Q)");
+
+    cleanup();
+    return Q;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+}
+
 bool cuda_rsvd_prefer_block_gpu(int m, int n, int l, int power_iters) {
   if (!cuda_runtime_available()) {
     return false;
@@ -2522,6 +2680,14 @@ arma::cube cuda_flash_lowrank_predict(
   const arma::rowvec&,
   const arma::ivec&
 ) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+Mat cuda_matrix_multiply(const Mat&, const Mat&) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+Mat cuda_thin_qr(const Mat&) {
   throw std::runtime_error("CUDA backend not compiled");
 }
 

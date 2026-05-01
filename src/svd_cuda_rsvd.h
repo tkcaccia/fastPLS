@@ -39,6 +39,8 @@ arma::cube cuda_flash_lowrank_predict(
   const arma::rowvec& mY,
   const arma::ivec& ncomp
 );
+Mat cuda_matrix_multiply(const Mat& A, const Mat& B);
+Mat cuda_thin_qr(const Mat& A);
 bool cuda_runtime_available();
 void cuda_reset_workspace();
 void cuda_rsvd_sample_y(

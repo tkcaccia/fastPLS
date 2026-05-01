@@ -23,6 +23,9 @@ pls_r(
   irlba_svtol = 1e-05,
   seed = 1L,
   fast_block = 1L,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed,
   fit = FALSE,
   proj = FALSE,
   perm.test = FALSE,
@@ -66,6 +69,16 @@ pls_r(
 
 \item{fast_block}{Refresh block size for the fastPLS `simpls` core; use `1L` for the
 most accuracy-stable per-component refresh.}
+
+\item{gaussian_y}{Logical; when `TRUE`, fit PLS to a Gaussian random
+low-dimensional response sketch and decode predictions back to the original
+response scale or class labels. The default is `FALSE`.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
+the default is `min(ncol(Xtrain), 100)`.}
+
+\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
+sketch.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 

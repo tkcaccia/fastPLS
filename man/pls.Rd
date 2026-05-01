@@ -28,6 +28,9 @@ pls(
   fast_incremental = TRUE,
   fast_inc_iters = 2L,
   fast_defl_cache = TRUE,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed,
   fit = FALSE,
   proj = FALSE,
   perm.test = FALSE,
@@ -88,6 +91,16 @@ the former incdefl profile.}
 
 \item{fast_defl_cache}{Deprecated and ignored. `simpls` now permanently uses
 the former incdefl profile.}
+
+\item{gaussian_y}{Logical; when `TRUE`, fit PLS to a Gaussian random
+low-dimensional response sketch and decode predictions back to the original
+response scale or class labels. The default is `FALSE`.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
+the default is `min(ncol(Xtrain), 100)`.}
+
+\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
+sketch.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 

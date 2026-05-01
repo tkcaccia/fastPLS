@@ -27,6 +27,50 @@ For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient
 cube does not need to be stored.
 
+## Gaussian Response Compression
+
+All four model families can optionally fit a compressed Gaussian representation
+of the response by setting `gaussian_y = TRUE`. This is available through the R,
+compiled C++, and CUDA entry points for `plssvd`, `simpls`, `opls`, and
+`kernelpls`. The option is disabled by default, so existing analyses are
+unchanged unless it is requested explicitly.
+
+When `gaussian_y_dim = NULL`, fastPLS uses `min(ncol(Xtrain), 100)` compressed
+response dimensions. A positive integer can be passed to `gaussian_y_dim` to
+test a smaller or larger sketch. The projection is reproducible through
+`gaussian_y_seed`, which defaults to the model `seed`.
+
+For regression, the centered response matrix is multiplied by a Gaussian random
+projection before fitting. The fitted model stores a small ridge decoder that
+maps predictions from the compressed response space back to the original
+response columns, so `predict()` and in-fit predictions still return values on
+the original scale.
+
+For classification, Gaussian compression avoids fitting to a dense one-hot
+response when requested. Class labels are represented by reproducible Gaussian
+class codes, the PLS model is fit to those codes, and predictions are decoded by
+nearest-code scores back to the original factor levels.
+
+CUDA wrappers use the CUDA matrix-multiply helper for the regression projection
+and decoder construction when CUDA is available. The classification codebook is
+small and is built on the host before the GPU-native PLS fit.
+
+Example:
+
+```r
+fit <- pls(
+  Xtrain,
+  Ytrain,
+  Xtest,
+  Ytest,
+  method = "simpls",
+  svd.method = "cpu_rsvd",
+  ncomp = 50,
+  gaussian_y = TRUE,
+  gaussian_y_dim = 50
+)
+```
+
 ## Backends
 
 CPU backends:
@@ -44,17 +88,12 @@ CUDA backends:
 - `opls_cuda()`
 - `kernel_pls_cuda()`
 
-FlashSVD-style CUDA prediction wrappers:
-
-- `plssvd_flash_gpu()`
-- `simpls_flash_gpu()`
-- `opls_flash_gpu()`
-- `kernel_pls_flash_gpu()`
-
-The flash wrappers use the same fitted GPU model as the standard CUDA functions,
-but apply predictions through low-rank CUDA products instead of materializing and
+FlashSVD-style low-rank prediction is integrated into the standard prediction
+path. When compact latent factors are available, `predict.fastPLS()` can apply
+predictions through streamed low-rank products instead of materializing and
 multiplying by the full coefficient matrix. This primarily reduces prediction
-time; fit memory is still governed by the fitting backend.
+time and RAM pressure during prediction; fit memory is still governed by the
+fitting backend.
 
 The removed hybrid `svd.method = "cuda_rsvd"` route through `pls()` is no longer
 supported. Use the GPU-native functions above for CUDA runs.
@@ -100,7 +139,7 @@ It writes one raw row per run and regenerates 4x4 plots with:
 
 - columns: `plssvd`, `simpls`, `opls`, `kernelpls`
 - rows: total time, predictive metric, peak host RSS, peak GPU memory
-- color: SVD/backend (`irlba`, `rsvd`, `flash_svd`, `pls_pkg`)
+- color: SVD/backend (`irlba`, `rsvd`, `pls_pkg`)
 - line type: implementation (`R`, `cpp`, `cuda`, `pls_pkg`)
 
 The standard simulated variable-sweep benchmark is:

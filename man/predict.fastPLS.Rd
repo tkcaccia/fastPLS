@@ -9,7 +9,8 @@
   newdata,
   Ytest = NULL,
   proj = FALSE,
-  predict.backend = c("auto", "cpu", "cuda_flash"),
+  predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
+  flash.block_size = NULL,
   ...
 )
 }
@@ -22,9 +23,11 @@
 
 \item{proj}{Logical; return projected `Ttest` when `TRUE`.}
 
-\item{predict.backend}{Prediction backend. `"auto"` uses CUDA flash
-low-rank prediction when the model was fitted by a `*_flash_gpu()`
-wrapper, otherwise CPU prediction is used.}
+\item{predict.backend}{Prediction backend. `"auto"` uses FlashSVD-style
+low-rank prediction when compact factors are available and the low-rank
+application is expected to be beneficial.}
+
+\item{flash.block_size}{Row block size for `"cpu_flash"` prediction.}
 
 \item{...}{Unused.}
 }

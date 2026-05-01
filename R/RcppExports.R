@@ -32,6 +32,14 @@ cuda_reset_workspace <- function() {
     invisible(.Call(`_fastPLS_cuda_reset_workspace`))
 }
 
+cuda_matrix_multiply <- function(A, B) {
+    .Call(`_fastPLS_cuda_matrix_multiply`, A, B)
+}
+
+cuda_thin_qr <- function(A) {
+    .Call(`_fastPLS_cuda_thin_qr`, A)
+}
+
 truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only) {
     .Call(`_fastPLS_truncated_svd_debug`, A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only)
 }
@@ -54,6 +62,10 @@ pls_predict <- function(model, Xtest, proj) {
 
 pls_predict_flash_cuda <- function(model, Xtest, proj) {
     .Call(`_fastPLS_pls_predict_flash_cuda`, model, Xtest, proj)
+}
+
+pls_predict_flash_cpu <- function(model, Xtest, proj, block_size) {
+    .Call(`_fastPLS_pls_predict_flash_cpu`, model, Xtest, proj, block_size)
 }
 
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {

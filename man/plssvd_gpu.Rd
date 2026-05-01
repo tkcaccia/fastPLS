@@ -21,7 +21,10 @@ plssvd_gpu(
   gpu_qr = TRUE,
   gpu_eig = TRUE,
   gpu_qless_qr = FALSE,
-  gpu_finalize_threshold = 32L
+  gpu_finalize_threshold = 32L,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  gaussian_y_seed = seed
 )
 
 plssvd_flash_gpu(
@@ -75,6 +78,16 @@ plssvd_flash_gpu(
 \item{gpu_qless_qr}{Use the q-less GPU QR path when available.}
 
 \item{gpu_finalize_threshold}{Component threshold controlling GPU-side finalization.}
+
+\item{gaussian_y}{Logical; when `TRUE`, fit to a Gaussian random response
+sketch and decode predictions back to the original response scale or class
+labels. The default is `FALSE`.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
+the default is `min(ncol(Xtrain), 100)`.}
+
+\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
+sketch.}
 }
 \value{
 A `fastPLS` object fitted with GPU PLSSVD.
@@ -83,4 +96,8 @@ A `fastPLS` object fitted with GPU PLSSVD.
 Uses a dedicated CUDA PLSSVD engine that keeps the cross-covariance SVD and
 latent linear algebra on device, returning the standard `fastPLS` object
 structure for prediction and plotting.
+
+Fits with the standard GPU PLSSVD backend and marks the model so prediction
+uses a CUDA low-rank path that applies `X %*% R %*% W` without materializing
+the full coefficient matrix `B`.
 }
