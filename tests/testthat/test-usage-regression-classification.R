@@ -152,6 +152,34 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
   expect_true("acc_tot" %in% names(dcv_cls))
 })
 
+test_that("compiled CV reports the prediction backend", {
+  set.seed(10041)
+  X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
+  y <- factor(sample(c("A", "B", "C"), 48, replace = TRUE))
+
+  cpu_cv <- plssvd_cv_cpp(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 2,
+    kfold = 3,
+    svd.method = "cpu_rsvd",
+    seed = 123L
+  )
+  expect_identical(cpu_cv$backend, "cpp")
+  expect_identical(cpu_cv$prediction_backend, "cpu")
+
+  skip_if_not(has_cuda(), "CUDA backend unavailable")
+  cuda_cv <- plssvd_cv_cuda(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 2,
+    kfold = 3,
+    seed = 123L
+  )
+  expect_identical(cuda_cv$backend, "cuda")
+  expect_identical(cuda_cv$prediction_backend, "cuda_flash")
+})
+
 test_that("SVD utilities and helper functions are usable in practice", {
   set.seed(1005)
   A <- matrix(rnorm(70 * 14), nrow = 70, ncol = 14)

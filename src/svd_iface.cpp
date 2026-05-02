@@ -61,7 +61,8 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
   }
 
   const arma::uword min_dim = std::min(A.n_rows, A.n_cols);
-  if (opt.use_full_svd || min_dim < 6) {
+  const bool force_exact = opt.use_full_svd && opt.method != Method::IRLBA;
+  if (force_exact || min_dim < 6) {
     SVDOptions full_opt = opt;
     full_opt.method = Method::EXACT;
     full_opt.use_full_svd = true;

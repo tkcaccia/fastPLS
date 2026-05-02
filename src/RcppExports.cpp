@@ -388,13 +388,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_model1_rsvd_xprod_precision
-List pls_model1_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+List pls_model1_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
 RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -403,18 +403,18 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model1_rsvd_xprod_precision(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    rcpp_result_gen = Rcpp::wrap(pls_model1_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model2_fast_rsvd_xprod_precision
-List pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
+List pls_model2_fast_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
 RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -423,7 +423,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< int >::type xprod_precision(xprod_precisionSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_rsvd_xprod_precision(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_rsvd_xprod_precision(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -466,8 +466,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_cv_predict_compiled
-List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, bool xprod);
-RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP xprodSEXP) {
+List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes);
+RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP n_responseSEXP, SEXP xprodSEXP, SEXP opls_northSEXP, SEXP return_scoresSEXP, SEXP class_codesSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -485,8 +485,12 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     Rcpp::traits::input_parameter< bool >::type classification(classificationSEXP);
+    Rcpp::traits::input_parameter< int >::type n_response(n_responseSEXP);
     Rcpp::traits::input_parameter< bool >::type xprod(xprodSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_cv_predict_compiled(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, xprod));
+    Rcpp::traits::input_parameter< int >::type opls_north(opls_northSEXP);
+    Rcpp::traits::input_parameter< bool >::type return_scores(return_scoresSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type class_codes(class_codesSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_cv_predict_compiled(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -521,7 +525,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 9},
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
-    {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 15},
+    {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 19},
     {NULL, NULL, 0}
 };
 

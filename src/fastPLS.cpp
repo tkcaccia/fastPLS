@@ -7,6 +7,7 @@
 #include <cctype>
 #include <limits>
 #include <random>
+#include <vector>
 
 #include "fastPLS.h"
 #include "svd_iface.h"
@@ -311,7 +312,10 @@ fastpls_svd::SVDResult compute_truncated_svd_dispatch(
   return fastpls_svd::truncated_svd(S, k, opt, backend);
 }
 
-bool plssvd_use_small_exact_svd(const int max_rank) {
+bool plssvd_use_small_exact_svd(const int max_rank, const int svd_method) {
+  if (svd_method == fastpls_svd::SVD_METHOD_IRLBA) {
+    return max_rank < 6;
+  }
   const int threshold = env_int_or("FASTPLS_PLSSVD_SMALL_EXACT_MAX_RANK", 32, 5, 512);
   return max_rank <= threshold;
 }
@@ -706,7 +710,7 @@ fastpls_svd::SVDResult truncated_irlba_crossprod_double(
     return out;
   }
 
-  if (use_full_svd || max_rank < 6) {
+  if (max_rank < 6) {
     arma::mat S = X.t() * Ymat;
     return compute_truncated_svd_dispatch(
       S,
@@ -2896,6 +2900,305 @@ List pls_predict_flash_cpu(List& model, arma::mat Xtest, bool proj, int block_si
   );
 }
 
+arma::cube compact_prediction_weights(List& model, const int m, const arma::ivec& ncomp) {
+  std::string pls_method;
+  if (model.containsElementNamed("pls_method")) {
+    pls_method = Rcpp::as<std::string>(model["pls_method"]);
+  }
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with compact class prediction");
+  }
+  const int kmax = R_dim[1];
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+  arma::cube Wflash(static_cast<arma::uword>(kmax), static_cast<arma::uword>(m), length_ncomp, arma::fill::zeros);
+
+  if ((pls_method == "simpls" || pls_method == "simpls_fast") &&
+      model.containsElementNamed("Q")) {
+    Rcpp::NumericVector Q_vec = model["Q"];
+    Rcpp::IntegerVector Q_dim = Q_vec.attr("dim");
+    if (Q_dim.size() != 2L || Q_dim[0] != m || Q_dim[1] < 1) {
+      Rcpp::stop("Model `Q` is not compatible with compact class prediction");
+    }
+    const arma::mat QQ(
+      Q_vec.begin(),
+      static_cast<arma::uword>(Q_dim[0]),
+      static_cast<arma::uword>(Q_dim[1]),
+      false,
+      true
+    );
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      const int mc = ncomp(a);
+      if (mc < 1 || mc > kmax || mc > static_cast<int>(QQ.n_cols)) {
+        Rcpp::stop("ncomp exceeds latent rank for compact class prediction");
+      }
+      Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1)) =
+        QQ.cols(0, static_cast<arma::uword>(mc - 1)).t();
+    }
+    return Wflash;
+  }
+
+  if (pls_method == "plssvd" && model.containsElementNamed("W_latent")) {
+    Rcpp::NumericVector W_vec = model["W_latent"];
+    Rcpp::IntegerVector W_dim = W_vec.attr("dim");
+    if (W_dim.size() != 3L || W_dim[0] != kmax || W_dim[1] != m ||
+        W_dim[2] < static_cast<int>(length_ncomp)) {
+      Rcpp::stop("Model `W_latent` is not compatible with compact class prediction");
+    }
+    const arma::cube WW(
+      W_vec.begin(),
+      static_cast<arma::uword>(W_dim[0]),
+      static_cast<arma::uword>(W_dim[1]),
+      static_cast<arma::uword>(W_dim[2]),
+      false,
+      true
+    );
+    return WW.slices(0, length_ncomp - 1);
+  }
+
+  if (pls_method == "plssvd" &&
+      model.containsElementNamed("C_latent") &&
+      model.containsElementNamed("Q")) {
+    Rcpp::NumericVector Q_vec = model["Q"];
+    Rcpp::NumericVector C_vec = model["C_latent"];
+    Rcpp::IntegerVector Q_dim = Q_vec.attr("dim");
+    Rcpp::IntegerVector C_dim = C_vec.attr("dim");
+    if (Q_dim.size() != 2L || C_dim.size() != 3L ||
+        Q_dim[0] != m || Q_dim[1] != kmax ||
+        C_dim[0] != kmax || C_dim[1] != kmax ||
+        C_dim[2] < static_cast<int>(length_ncomp)) {
+      Rcpp::stop("Model latent PLSSVD factors are not compatible with compact class prediction");
+    }
+    const arma::mat QQ(
+      Q_vec.begin(),
+      static_cast<arma::uword>(Q_dim[0]),
+      static_cast<arma::uword>(Q_dim[1]),
+      false,
+      true
+    );
+    const arma::cube CC(
+      C_vec.begin(),
+      static_cast<arma::uword>(C_dim[0]),
+      static_cast<arma::uword>(C_dim[1]),
+      static_cast<arma::uword>(C_dim[2]),
+      false,
+      true
+    );
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      const int mc = ncomp(a);
+      if (mc < 1 || mc > kmax) {
+        Rcpp::stop("ncomp exceeds latent rank for compact class prediction");
+      }
+      arma::mat Cmc = CC.slice(a).submat(0, 0, mc - 1, mc - 1);
+      Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1)) =
+        Cmc * QQ.cols(0, static_cast<arma::uword>(mc - 1)).t();
+    }
+    return Wflash;
+  }
+
+  Rcpp::stop("Compact class prediction requires compact low-rank factors");
+}
+
+arma::imat pls_predict_classes_compact_cpu(List& model, arma::mat Xtest) {
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with compact class prediction");
+  }
+  const arma::mat RR(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  const int kmax = static_cast<int>(RR.n_cols);
+  arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+
+  const arma::uword ntest = Xtest.n_rows;
+  arma::imat class_pred(ntest, length_ncomp, arma::fill::zeros);
+  arma::uword bs = static_cast<arma::uword>(env_int_or("FASTPLS_COMPACT_CLASS_BLOCK_SIZE", 4096, 128, 1048576));
+  if (bs == 0 || bs > ntest) bs = ntest;
+
+  for (arma::uword start = 0; start < ntest; start += bs) {
+    const arma::uword stop = std::min(start + bs - 1, ntest - 1);
+    const arma::mat Xblock = Xtest.rows(start, stop);
+    const arma::mat scores = Xblock * RR;
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      const int mc = ncomp(a);
+      if (mc < 1 || mc > kmax) {
+        Rcpp::stop("ncomp exceeds latent rank for compact class prediction");
+      }
+      arma::mat yblock =
+        scores.cols(0, static_cast<arma::uword>(mc - 1)) *
+        Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1));
+      yblock.each_row() += mY;
+      for (arma::uword i = 0; i < yblock.n_rows; ++i) {
+        class_pred(start + i, a) = static_cast<int>(yblock.row(i).index_max()) + 1;
+      }
+    }
+  }
+  return class_pred;
+}
+
+arma::imat pls_predict_classes_compact_cuda(List& model, arma::mat Xtest) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    Rcpp::stop("CUDA compact class prediction requires CUDA support");
+  }
+
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with CUDA compact class prediction");
+  }
+  const arma::mat RR(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+  return fastpls_svd::cuda_flash_lowrank_predict_classes(Xtest, RR, Wflash, mY, ncomp);
+}
+
+arma::ivec nearest_code_classes(const arma::mat& Z, const arma::mat& class_codes) {
+  if (class_codes.n_rows < 1 || class_codes.n_cols != Z.n_cols) {
+    Rcpp::stop("Class codebook is not compatible with predicted code dimensions");
+  }
+  arma::mat score = 2.0 * (Z * class_codes.t());
+  arma::rowvec code_norm = arma::sum(class_codes % class_codes, 1).t();
+  score.each_row() -= code_norm;
+  arma::ivec out(Z.n_rows);
+  for (arma::uword i = 0; i < Z.n_rows; ++i) {
+    out(i) = static_cast<int>(score.row(i).index_max()) + 1;
+  }
+  return out;
+}
+
+arma::imat pls_predict_code_classes_compact_cpu(List& model, arma::mat Xtest, const arma::mat& class_codes) {
+  const int m = Rcpp::as<int>(model["m"]);
+  if (m != static_cast<int>(class_codes.n_cols)) {
+    Rcpp::stop("Model response dimension does not match class codebook");
+  }
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with compact code prediction");
+  }
+  const arma::mat RR(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  const int kmax = static_cast<int>(RR.n_cols);
+  arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+
+  const arma::uword ntest = Xtest.n_rows;
+  arma::imat class_pred(ntest, length_ncomp, arma::fill::zeros);
+  arma::uword bs = static_cast<arma::uword>(env_int_or("FASTPLS_COMPACT_CLASS_BLOCK_SIZE", 4096, 128, 1048576));
+  if (bs == 0 || bs > ntest) bs = ntest;
+
+  for (arma::uword start = 0; start < ntest; start += bs) {
+    const arma::uword stop = std::min(start + bs - 1, ntest - 1);
+    const arma::mat Xblock = Xtest.rows(start, stop);
+    const arma::mat scores = Xblock * RR;
+    for (arma::uword a = 0; a < length_ncomp; ++a) {
+      const int mc = ncomp(a);
+      if (mc < 1 || mc > kmax) {
+        Rcpp::stop("ncomp exceeds latent rank for compact code prediction");
+      }
+      arma::mat zblock =
+        scores.cols(0, static_cast<arma::uword>(mc - 1)) *
+        Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1));
+      zblock.each_row() += mY;
+      arma::ivec fold_class = nearest_code_classes(zblock, class_codes);
+      class_pred.submat(start, a, stop, a) = fold_class;
+    }
+  }
+  return class_pred;
+}
+
+arma::imat pls_predict_code_classes_compact_cuda(List& model, arma::mat Xtest, const arma::mat& class_codes) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    Rcpp::stop("CUDA compact code prediction requires CUDA support");
+  }
+  const int m = Rcpp::as<int>(model["m"]);
+  if (m != static_cast<int>(class_codes.n_cols)) {
+    Rcpp::stop("Model response dimension does not match class codebook");
+  }
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+    Rcpp::stop("Model `R` is not compatible with CUDA compact code prediction");
+  }
+  const arma::mat RR(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+  arma::cube Zpred = fastpls_svd::cuda_flash_lowrank_predict(Xtest, RR, Wflash, mY, ncomp);
+  arma::imat class_pred(Zpred.n_rows, Zpred.n_slices, arma::fill::zeros);
+  for (arma::uword s = 0; s < Zpred.n_slices; ++s) {
+    class_pred.col(s) = nearest_code_classes(Zpred.slice(s), class_codes);
+  }
+  return class_pred;
+}
+
 // [[Rcpp::export]]
 arma::mat kernel_matrix_cpp(
   const arma::mat& X1,
@@ -3421,7 +3724,7 @@ List pls_model1(
     svds_tol,
     static_cast<unsigned int>(seed),
     false,
-    plssvd_use_small_exact_svd(max_plssvd_rank)
+    plssvd_use_small_exact_svd(max_plssvd_rank, svd_method)
   );
   svd_u = svd_res.U;
   svd_s = svd_res.s;
@@ -3610,7 +3913,7 @@ List pls_model1_rsvd_xprod_precision_view_impl(
     rsvd_power,
     static_cast<unsigned int>(seed),
     false,
-    plssvd_use_small_exact_svd(max_plssvd_rank)
+    plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_CPU_RSVD)
   );
 
   arma::mat svd_u = svd_res.U;
@@ -3894,8 +4197,8 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
 
 // [[Rcpp::export]]
 List pls_model1_rsvd_xprod_precision(
-  SEXP XtrainSEXP,
-  SEXP YtrainSEXP,
+  arma::mat Xtrain,
+  arma::mat Ytrain,
   arma::ivec ncomp,
   int scaling,
   bool fit,
@@ -3905,25 +4208,11 @@ List pls_model1_rsvd_xprod_precision(
   int seed,
   int xprod_precision
 ) {
-  if (xprod_precision == 3) {
-    return pls_model1_rsvd_xprod_precision_view_impl(
-      XtrainSEXP,
-      YtrainSEXP,
-      ncomp,
-      scaling,
-      fit,
-      rsvd_oversample,
-      rsvd_power,
-      seed
-    );
-  }
   if (xprod_precision == 5) {
     // IRLBA xprod keeps the bundled C IRLBA operator path, but is selected
     // only by the stricter R-side threshold to avoid poor shapes.
   }
 
-  arma::mat Xtrain = Rcpp::as<arma::mat>(XtrainSEXP);
-  arma::mat Ytrain = Rcpp::as<arma::mat>(YtrainSEXP);
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -3972,7 +4261,7 @@ List pls_model1_rsvd_xprod_precision(
       rsvd_power,
       static_cast<unsigned int>(seed),
       false,
-      plssvd_use_small_exact_svd(max_plssvd_rank)
+      plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_CPU_RSVD)
     );
   } else if (xprod_precision == 5) {
     // Matrix-free IRLBA for A = X'Y using the bundled C IRLBA operator API.
@@ -3981,7 +4270,7 @@ List pls_model1_rsvd_xprod_precision(
       Ytrain,
       max_ncomp_eff,
       false,
-      plssvd_use_small_exact_svd(max_plssvd_rank)
+      plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_IRLBA)
     );
   } else {
     arma::mat S = Xtrain.t() * Ytrain;
@@ -3994,7 +4283,7 @@ List pls_model1_rsvd_xprod_precision(
       svds_tol,
       static_cast<unsigned int>(seed),
       false,
-      plssvd_use_small_exact_svd(max_plssvd_rank)
+      plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_CPU_RSVD)
     );
   }
 
@@ -4085,8 +4374,8 @@ List pls_model1_rsvd_xprod_precision(
 
 // [[Rcpp::export]]
 List pls_model2_fast_rsvd_xprod_precision(
-  SEXP XtrainSEXP,
-  SEXP YtrainSEXP,
+  arma::mat Xtrain,
+  arma::mat Ytrain,
   arma::ivec ncomp,
   int scaling,
   bool fit,
@@ -4096,20 +4385,6 @@ List pls_model2_fast_rsvd_xprod_precision(
   int seed,
   int xprod_precision
 ) {
-  if (xprod_precision == 3) {
-    return pls_model2_fast_rsvd_xprod_precision_view_impl(
-      XtrainSEXP,
-      YtrainSEXP,
-      ncomp,
-      scaling,
-      fit,
-      rsvd_power,
-      seed
-    );
-  }
-
-  arma::mat Xtrain = Rcpp::as<arma::mat>(XtrainSEXP);
-  arma::mat Ytrain = Rcpp::as<arma::mat>(YtrainSEXP);
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -4592,10 +4867,29 @@ List pls_cv_predict_compiled(
   double svds_tol,
   int seed,
   bool classification,
-  bool xprod
+  int n_response,
+  bool xprod,
+  int opls_north,
+  bool return_scores,
+  arma::mat class_codes
 ) {
   const int nsamples = Xdata.n_rows;
-  const int ncolY = Ydata.n_cols;
+  const bool label_classification = classification && Ydata.n_cols == 1;
+  const bool use_class_codes =
+    classification && label_classification && class_codes.n_rows > 0 && class_codes.n_cols > 0;
+  const int n_classes = label_classification ?
+    std::max(n_response, 1) :
+    static_cast<int>(Ydata.n_cols);
+  int ncolY = static_cast<int>(Ydata.n_cols);
+  if (use_class_codes) {
+    if (class_codes.n_rows != static_cast<arma::uword>(n_classes)) {
+      stop("class_codes must have one row for each response class");
+    }
+    ncolY = static_cast<int>(class_codes.n_cols);
+  }
+  if (label_classification) {
+    ncolY = use_class_codes ? ncolY : n_classes;
+  }
   if (nsamples < 2) stop("Xdata must contain at least two samples");
   if (Ydata.n_rows != static_cast<arma::uword>(nsamples)) {
     stop("Ydata must have the same number of rows as Xdata");
@@ -4605,7 +4899,9 @@ List pls_cv_predict_compiled(
   }
   if (ncomp.n_elem < 1) stop("ncomp must contain at least one value");
   if (kfold < 2) kfold = 2;
-  if (method < 1 || method > 3) stop("method must be 1=plssvd, 2=simpls, or 3=simpls_fast");
+  if (method < 1 || method > 5) {
+    stop("method must be 1=plssvd, 2=simpls, 3=simpls_fast, 4=opls, or 5=kernelpls");
+  }
   if (backend < 0 || backend > 1) stop("backend must be 0=cpp or 1=cuda");
   if (backend == 1 && method == 2) {
     stop("CUDA classic SIMPLS is not implemented; use simpls_fast CUDA instead");
@@ -4628,6 +4924,24 @@ List pls_cv_predict_compiled(
     }
   }
 
+  auto class_label_at_sample = [&](const arma::uword i) -> int {
+    if (label_classification) {
+      return static_cast<int>(std::round(Ydata(i, 0)));
+    }
+    if (classification) {
+      arma::uword best = 0;
+      double best_val = Ydata(i, 0);
+      for (arma::uword c = 1; c < Ydata.n_cols; ++c) {
+        if (Ydata(i, c) > best_val) {
+          best_val = Ydata(i, c);
+          best = c;
+        }
+      }
+      return static_cast<int>(best) + 1;
+    }
+    return 1;
+  };
+
   arma::ivec unique_groups = arma::unique(constrain);
   arma::ivec constrain2 = constrain;
   for (arma::uword j = 0; j < unique_groups.n_elem; ++j) {
@@ -4636,20 +4950,73 @@ List pls_cv_predict_compiled(
   }
 
   const int ngroups = unique_groups.n_elem;
-  IntegerVector frame = seq_len(ngroups);
-  IntegerVector perm = samplewithoutreplace(frame, ngroups);
+  arma::ivec group_fold(ngroups, arma::fill::zeros);
+  if (classification && n_classes > 1) {
+    std::vector<std::vector<int> > groups_by_class(static_cast<std::size_t>(n_classes));
+    for (int j = 0; j < ngroups; ++j) {
+      arma::uvec ind = arma::find(constrain2 == (j + 1));
+      if (ind.n_elem < 1) continue;
+      int cls = class_label_at_sample(ind(0));
+      if (cls < 1) cls = 1;
+      if (cls > n_classes) cls = n_classes;
+      groups_by_class[static_cast<std::size_t>(cls - 1)].push_back(j);
+    }
+    for (int cls = 0; cls < n_classes; ++cls) {
+      const int n_class_groups = static_cast<int>(groups_by_class[static_cast<std::size_t>(cls)].size());
+      if (n_class_groups < 1) continue;
+      IntegerVector frame = seq_len(n_class_groups);
+      IntegerVector perm = samplewithoutreplace(frame, n_class_groups);
+      for (int pos = 0; pos < n_class_groups; ++pos) {
+        const int perm_pos = perm[pos] - 1;
+        const int group_idx = groups_by_class[static_cast<std::size_t>(cls)][static_cast<std::size_t>(perm_pos)];
+        group_fold(group_idx) = pos % kfold;
+      }
+    }
+  } else {
+    IntegerVector frame = seq_len(ngroups);
+    IntegerVector perm = samplewithoutreplace(frame, ngroups);
+    for (int j = 0; j < ngroups; ++j) {
+      group_fold(j) = (perm[j] - 1) % kfold;
+    }
+  }
   arma::ivec fold(nsamples);
   for (int i = 0; i < nsamples; ++i) {
     const int group_idx = constrain2(i) - 1;
-    fold(i) = (perm[group_idx] - 1) % kfold;
+    fold(i) = group_fold(group_idx);
   }
 
   const int length_ncomp = ncomp.n_elem;
-  arma::cube Ypred(nsamples, ncolY, length_ncomp, arma::fill::zeros);
+  const bool store_score_predictions = (!classification) || return_scores;
+  arma::cube Ypred;
+  if (store_score_predictions) {
+    Ypred.zeros(nsamples, ncolY, length_ncomp);
+  }
+  arma::imat class_pred;
+  if (classification) {
+    class_pred.zeros(nsamples, length_ncomp);
+  }
   arma::ivec status(kfold, arma::fill::zeros);
 
   const std::string method_name =
-    (method == 1) ? "plssvd" : ((method == 2) ? "simpls" : "simpls_fast");
+    (method == 1) ? "plssvd" :
+    ((method == 2) ? "simpls" :
+    ((method == 4) ? "opls" :
+    ((method == 5) ? "kernelpls" : "simpls_fast")));
+
+  auto response_rows = [&](const arma::uvec& idx) -> arma::mat {
+    arma::mat out(idx.n_elem, static_cast<arma::uword>(ncolY), arma::fill::zeros);
+    for (arma::uword ii = 0; ii < idx.n_elem; ++ii) {
+      const int cls = static_cast<int>(std::round(Ydata(idx(ii), 0)));
+      if (use_class_codes) {
+        if (cls >= 1 && cls <= n_classes) {
+          out.row(ii) = class_codes.row(static_cast<arma::uword>(cls - 1));
+        }
+      } else if (cls >= 1 && cls <= ncolY) {
+        out(ii, static_cast<arma::uword>(cls - 1)) = 1.0;
+      }
+    }
+    return out;
+  };
 
   for (int f = 0; f < kfold; ++f) {
     Rcpp::checkUserInterrupt();
@@ -4661,7 +5028,20 @@ List pls_cv_predict_compiled(
     }
     if (train_idx.n_elem == 0) {
       for (int s = 0; s < length_ncomp; ++s) {
-        Ypred.slice(s).rows(test_idx) = Ydata.rows(test_idx);
+        if (classification) {
+          for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
+            class_pred(test_idx(ii), s) = class_label_at_sample(test_idx(ii));
+          }
+          if (store_score_predictions) {
+            if (label_classification) {
+              Ypred.slice(s).rows(test_idx) = response_rows(test_idx);
+            } else {
+              Ypred.slice(s).rows(test_idx) = Ydata.rows(test_idx);
+            }
+          }
+        } else {
+          Ypred.slice(s).rows(test_idx) = Ydata.rows(test_idx);
+        }
       }
       status(f) = 3; // no training data
       continue;
@@ -4669,21 +5049,37 @@ List pls_cv_predict_compiled(
 
     arma::mat Xtrain = Xdata.rows(train_idx);
     arma::mat Xtest = Xdata.rows(test_idx);
-    arma::mat Ytrain = Ydata.rows(train_idx);
+    arma::mat Ytrain = label_classification ? response_rows(train_idx) : Ydata.rows(train_idx);
 
     if (classification) {
-      arma::rowvec class_counts = arma::sum(Ytrain, 0);
+      arma::rowvec class_counts(n_classes, arma::fill::zeros);
+      for (arma::uword ii = 0; ii < train_idx.n_elem; ++ii) {
+        int cls = class_label_at_sample(train_idx(ii));
+        if (cls >= 1 && cls <= n_classes) {
+          class_counts(static_cast<arma::uword>(cls - 1)) += 1.0;
+        }
+      }
       arma::uvec active = arma::find(class_counts > 0.5);
       if (active.n_elem <= 1) {
         arma::rowvec fallback(ncolY, arma::fill::zeros);
         if (active.n_elem == 1) {
-          fallback(active(0)) = 1.0;
+          if (use_class_codes) {
+            fallback = class_codes.row(active(0));
+          } else {
+            fallback(active(0)) = 1.0;
+          }
         } else {
-          fallback = arma::mean(Ydata, 0);
+          fallback = label_classification ? arma::mean(response_rows(train_idx), 0) : arma::mean(Ydata, 0);
         }
+        const int fallback_class = (active.n_elem == 1) ?
+          static_cast<int>(active(0)) + 1 :
+          static_cast<int>(nearest_code_classes(fallback, use_class_codes ? class_codes : arma::eye(ncolY, ncolY))(0));
         for (int s = 0; s < length_ncomp; ++s) {
           for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
-            Ypred.slice(s).row(test_idx(ii)) = fallback;
+            class_pred(test_idx(ii), s) = fallback_class;
+            if (store_score_predictions) {
+              Ypred.slice(s).row(test_idx(ii)) = fallback;
+            }
           }
         }
         status(f) = 4; // degenerate classification fold
@@ -4691,85 +5087,154 @@ List pls_cv_predict_compiled(
       }
     }
 
+    int fit_method = method;
+    int fit_scaling = scaling;
+    if (method == 4) {
+      const int north_eff = std::max(opls_north, 0);
+      List filt = opls_filter_cpp(Xtrain, Ytrain, north_eff, scaling);
+      Xtrain = Rcpp::as<arma::mat>(filt["X"]);
+      arma::rowvec mX = Rcpp::as<arma::rowvec>(filt["mX"]);
+      arma::rowvec vX = Rcpp::as<arma::rowvec>(filt["vX"]);
+      arma::mat W_orth = Rcpp::as<arma::mat>(filt["W_orth"]);
+      arma::mat P_orth = Rcpp::as<arma::mat>(filt["P_orth"]);
+      Xtest = opls_apply_filter_cpp(Xtest, mX, vX, W_orth, P_orth);
+      fit_method = 3;
+      fit_scaling = 3;
+    } else if (method == 5) {
+      // Linear kernelPLS is algebraically the direct SIMPLS core. Nonlinear
+      // kernels still use the ordinary kernel_pls_* fit wrappers.
+      fit_method = 3;
+    }
+
     List model;
     if (backend == 1) {
-      if (method == 1) {
+      if (fit_method == 1) {
         if (xprod) {
           model = pls_model1_gpu_implicit_xprod(
-            Xtrain, Ytrain, ncomp, scaling, false,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         } else {
           model = pls_model1_gpu(
-            Xtrain, Ytrain, ncomp, scaling, false,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
       } else {
         model = pls_model2_fast_gpu(
-          Xtrain, Ytrain, ncomp, scaling, false,
+          std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
           fastpls_svd::SVD_METHOD_CUDA_RSVD,
           rsvd_oversample, rsvd_power, svds_tol, seed + f
         );
       }
     } else {
-      if (method == 1) {
+      if (fit_method == 1) {
         if (xprod) {
           const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
-          Rcpp::NumericMatrix Xtrain_r = Rcpp::wrap(Xtrain);
-          Rcpp::NumericMatrix Ytrain_r = Rcpp::wrap(Ytrain);
           model = pls_model1_rsvd_xprod_precision(
-            Xtrain_r, Ytrain_r, ncomp, scaling, false,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model1(
-            Xtrain, Ytrain, ncomp, scaling, false, svd_method,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
-      } else if (method == 2) {
+      } else if (fit_method == 2) {
         model = pls_model2(
-          Xtrain, Ytrain, ncomp, scaling, false, svd_method,
+          std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
           rsvd_oversample, rsvd_power, svds_tol, seed + f
         );
       } else {
         if (xprod) {
           const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
-          Rcpp::NumericMatrix Xtrain_r = Rcpp::wrap(Xtrain);
-          Rcpp::NumericMatrix Ytrain_r = Rcpp::wrap(Ytrain);
           model = pls_model2_fast_rsvd_xprod_precision(
-            Xtrain_r, Ytrain_r, ncomp, scaling, false,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model2_fast(
-            Xtrain, Ytrain, ncomp, scaling, false, svd_method,
+            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
       }
     }
 
-    model["pls_method"] = method_name;
+    const std::string fit_method_name =
+      (fit_method == 1) ? "plssvd" : ((fit_method == 2) ? "simpls" : "simpls_fast");
+    model["pls_method"] = fit_method_name;
     model["predict_latent_ok"] = true;
 
-    List pred = pls_predict(model, Xtest, false);
-    arma::cube fold_pred = pred["Ypred"];
-    const int ncopy = std::min(length_ncomp, static_cast<int>(fold_pred.n_slices));
-    for (int s = 0; s < ncopy; ++s) {
-      Ypred.slice(s).rows(test_idx) = fold_pred.slice(s);
+    if (classification && !store_score_predictions) {
+      arma::imat fold_class_pred;
+      if (use_class_codes) {
+        fold_class_pred = (backend == 1) ?
+          pls_predict_code_classes_compact_cuda(model, std::move(Xtest), class_codes) :
+          pls_predict_code_classes_compact_cpu(model, std::move(Xtest), class_codes);
+      } else {
+        fold_class_pred = (backend == 1) ?
+          pls_predict_classes_compact_cuda(model, std::move(Xtest)) :
+          pls_predict_classes_compact_cpu(model, std::move(Xtest));
+      }
+      const int ncopy = std::min(length_ncomp, static_cast<int>(fold_class_pred.n_cols));
+      for (int s = 0; s < ncopy; ++s) {
+        for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
+          class_pred(test_idx(ii), s) = fold_class_pred(ii, s);
+        }
+      }
+    } else {
+      List pred = (backend == 1) ?
+        pls_predict_flash_cuda(model, std::move(Xtest), false) :
+        pls_predict(model, std::move(Xtest), false);
+      arma::cube fold_pred = pred["Ypred"];
+      const int ncopy = std::min(length_ncomp, static_cast<int>(fold_pred.n_slices));
+      for (int s = 0; s < ncopy; ++s) {
+        if (classification) {
+          if (use_class_codes) {
+            arma::ivec fold_class = nearest_code_classes(fold_pred.slice(s), class_codes);
+            for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
+              class_pred(test_idx(ii), s) = fold_class(ii);
+            }
+          } else {
+            for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
+              arma::uword best = 0;
+              double best_val = fold_pred(ii, 0, s);
+              for (arma::uword c = 1; c < fold_pred.n_cols; ++c) {
+                if (fold_pred(ii, c, s) > best_val) {
+                  best_val = fold_pred(ii, c, s);
+                  best = c;
+                }
+              }
+              class_pred(test_idx(ii), s) = static_cast<int>(best) + 1;
+            }
+          }
+          Ypred.slice(s).rows(test_idx) = fold_pred.slice(s);
+        } else {
+          Ypred.slice(s).rows(test_idx) = fold_pred.slice(s);
+        }
+      }
     }
     status(f) = 1; // ok
   }
 
-  return List::create(
-    Named("Ypred") = Ypred,
+  List out = List::create(
     Named("fold") = fold + 1,
     Named("status") = status,
     Named("ncomp") = ncomp,
     Named("method") = method_name,
     Named("backend") = (backend == 1 ? "cuda" : "cpp"),
-    Named("xprod") = xprod
+    Named("prediction_backend") = (backend == 1 ? "cuda_flash" : "cpu"),
+    Named("xprod") = xprod,
+    Named("stratified_folds") = classification,
+    Named("score_predictions_stored") = store_score_predictions
   );
+  if (store_score_predictions) {
+    out["Ypred"] = Ypred;
+  }
+  if (classification) {
+    out["class_pred"] = class_pred;
+  }
+  return out;
 }

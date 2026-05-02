@@ -106,6 +106,26 @@ test_that("IRLBA xprod default does not trigger for medium-n synthetic reg_q sha
   expect_true(should_use(n = 10000, p = 1000, q = 5000, ncomp = 50))
 })
 
+test_that("xprod default threshold matches the benchmark rule", {
+  should_use_rsvd <- get(".should_use_xprod_default", envir = asNamespace("fastPLS"))
+  should_use_irlba <- get(".should_use_xprod_irlba_default", envir = asNamespace("fastPLS"))
+
+  # singlecell-like shape: q is large, but ncomp is not small and X'Y is tiny.
+  expect_false(should_use_rsvd(p = 50, q = 133, ncomp = 50))
+  expect_false(should_use_irlba(n = 23822, p = 50, q = 133, ncomp = 50))
+
+  # CIFAR-like classification uses xprod for rSVD only at small component counts.
+  expect_true(should_use_rsvd(p = 2048, q = 100, ncomp = 10))
+  expect_false(should_use_rsvd(p = 2048, q = 100, ncomp = 20))
+  expect_false(should_use_irlba(n = 50000, p = 2048, q = 100, ncomp = 10))
+
+  # Large cross-response products use xprod for rSVD, and only large enough
+  # n/min(p,q) cases use the IRLBA operator path.
+  expect_true(should_use_rsvd(p = 5000, q = 1000, ncomp = 50))
+  expect_false(should_use_irlba(n = 5000, p = 5000, q = 1000, ncomp = 50))
+  expect_true(should_use_irlba(n = 10000, p = 5000, q = 1000, ncomp = 50))
+})
+
 test_that("CPU FlashSVD prediction is the default for compiled and R PLS", {
   set.seed(17)
   X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)

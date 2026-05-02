@@ -3,8 +3,16 @@
 \name{plssvd_cv_cpp}
 \alias{plssvd_cv_cpp}
 \alias{simpls_cv_cpp}
+\alias{kodama_cpp_simpls_rsvd}
+\alias{opls_cv_cpp}
+\alias{kernelpls_cv_cpp}
+\alias{kernel_pls_cv_cpp}
 \alias{plssvd_cv_cuda}
 \alias{simpls_cv_cuda}
+\alias{kodama_cuda_simpls_rsvd}
+\alias{opls_cv_cuda}
+\alias{kernelpls_cv_cuda}
+\alias{kernel_pls_cv_cuda}
 \title{Fast grouped PLS cross-validation for compiled backends}
 \usage{
 plssvd_cv_cpp(
@@ -15,7 +23,7 @@ plssvd_cv_cpp(
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
   svd.method = c("cpu_rsvd", "irlba"),
-  xprod = TRUE,
+  xprod = NULL,
   ...
 )
 
@@ -27,7 +35,45 @@ simpls_cv_cpp(
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
   svd.method = c("cpu_rsvd", "irlba"),
-  xprod = TRUE,
+  xprod = NULL,
+  ...
+)
+
+kodama_cpp_simpls_rsvd(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  scaling = c("centering", "autoscaling", "none"),
+  gaussian_y_seed = seed,
+  seed = 1L,
+  xprod = NULL,
+  ...
+)
+
+opls_cv_cpp(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  north = 1L,
+  scaling = c("centering", "autoscaling", "none"),
+  svd.method = c("cpu_rsvd", "irlba"),
+  xprod = NULL,
+  ...
+)
+
+kernelpls_cv_cpp(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  scaling = c("centering", "autoscaling", "none"),
+  svd.method = c("cpu_rsvd", "irlba"),
+  xprod = NULL,
   ...
 )
 
@@ -38,7 +84,7 @@ plssvd_cv_cuda(
   ncomp = 2L,
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
-  xprod = TRUE,
+  xprod = NULL,
   ...
 )
 
@@ -49,7 +95,43 @@ simpls_cv_cuda(
   ncomp = 2L,
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
-  xprod = TRUE,
+  xprod = NULL,
+  ...
+)
+
+kodama_cuda_simpls_rsvd(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  scaling = c("centering", "autoscaling", "none"),
+  gaussian_y_seed = seed,
+  seed = 1L,
+  xprod = NULL,
+  ...
+)
+
+opls_cv_cuda(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  north = 1L,
+  scaling = c("centering", "autoscaling", "none"),
+  xprod = NULL,
+  ...
+)
+
+kernelpls_cv_cuda(
+  Xdata,
+  Ydata,
+  constrain = NULL,
+  ncomp = 2L,
+  kfold = 10L,
+  scaling = c("centering", "autoscaling", "none"),
+  xprod = NULL,
   ...
 )
 }
@@ -64,12 +146,19 @@ simpls_cv_cuda(
 
 \item{kfold}{Number of CV folds.}
 
+\item{north}{Number of orthogonal components for OPLS CV.}
+
 \item{scaling}{Scaling mode.}
 
 \item{svd.method}{CPU SVD backend for Cpp functions.}
 
-\item{xprod}{Use the matrix-free xprod backend where available, including
-the bundled IRLBA operator path for `svd.method = "irlba"`.}
+\item{xprod}{Use the matrix-free xprod backend where available. The default
+`NULL` applies the same size thresholds used by \link[=pls]{pls()}; `TRUE` forces the
+route and `FALSE` disables it.}
+
+\item{gaussian_y_seed}{Seed used to generate KODAMA Gaussian class codes.}
+
+\item{seed}{Seed used for folds and randomized SVD.}
 
 \item{...}{Additional backend tuning arguments.}
 }

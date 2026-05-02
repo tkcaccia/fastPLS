@@ -506,11 +506,13 @@
 }
 
 .normalize_pls_method <- function(method) {
-  method <- match.arg(method, c("simpls", "plssvd"))
+  method <- match.arg(method, c("simpls", "plssvd", "opls", "kernelpls"))
   switch(
     method,
     plssvd = 1L,
-    simpls = 3L
+    simpls = 3L,
+    opls = 4L,
+    kernelpls = 5L
   )
 }
 
@@ -2165,6 +2167,9 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
 }
 
 .decode_cv_predictions <- function(Ypred, Ydata, classification, lev) {
+  if (classification && is.null(Ypred)) {
+    stop("Classification CV output is missing both class predictions and score predictions", call. = FALSE)
+  }
   dims <- dim(Ypred)
   if (length(dims) != 3L) stop("Internal CV prediction output must be a 3D array")
   out <- vector("list", dims[[3L]])
@@ -2194,20 +2199,44 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
   )
 }
 
+.decode_cv_class_predictions <- function(class_pred, Ydata, lev) {
+  pred_mat <- as.matrix(class_pred)
+  out <- vector("list", ncol(pred_mat))
+  metrics <- data.frame(
+    ncomp_index = seq_len(ncol(pred_mat)),
+    metric_name = rep("accuracy", ncol(pred_mat)),
+    metric_value = numeric(ncol(pred_mat)),
+    stringsAsFactors = FALSE
+  )
+  for (i in seq_len(ncol(pred_mat))) {
+    idx <- as.integer(pred_mat[, i])
+    ok <- is.finite(idx) & idx >= 1L & idx <= length(lev)
+    pred <- rep(NA_character_, length(idx))
+    pred[ok] <- lev[idx[ok]]
+    pred <- factor(pred, levels = lev)
+    out[[i]] <- pred
+    metrics$metric_value[[i]] <- mean(as.character(pred) == as.character(Ydata), na.rm = TRUE)
+  }
+  list(pred = out, metrics = metrics)
+}
+
 .pls_cv_compiled <- function(Xdata,
                              Ydata,
                              constrain = NULL,
                              ncomp = 2L,
                              kfold = 10L,
                              scaling = c("centering", "autoscaling", "none"),
-                             method = c("plssvd", "simpls"),
+                             method = c("plssvd", "simpls", "opls", "kernelpls"),
                              backend = c("cpp", "cuda"),
                              svd.method = c("cpu_rsvd", "irlba"),
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              svds_tol = 0,
                              seed = 1L,
-                             xprod = FALSE,
+                             xprod = NULL,
+                             north = 1L,
+                             return_scores = FALSE,
+                             kodama_class_codes = NULL,
                              gpu_qr = TRUE,
                              gpu_eig = TRUE,
                              gpu_qless_qr = FALSE,
@@ -2224,16 +2253,30 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
     classification <- TRUE
     lev <- levels(Ydata)
     Yoriginal <- Ydata
-    Ymat <- transformy(as.integer(Ydata))
+    Ymat <- matrix(as.integer(Ydata), ncol = 1L)
+    q_response <- length(lev)
   } else {
     classification <- FALSE
     lev <- NULL
     Yoriginal <- as.matrix(Ydata)
     Ymat <- as.matrix(Ydata)
+    q_response <- ncol(Ymat)
+  }
+  class_codes <- matrix(numeric(0), nrow = 0L, ncol = 0L)
+  q_backend <- q_response
+  if (!is.null(kodama_class_codes)) {
+    if (!classification) {
+      stop("KODAMA Gaussian class-code CV is only available for classification factors.", call. = FALSE)
+    }
+    class_codes <- as.matrix(kodama_class_codes)
+    if (nrow(class_codes) != q_response || ncol(class_codes) < 1L) {
+      stop("kodama_class_codes must have one row per class and at least one column.", call. = FALSE)
+    }
+    q_backend <- ncol(class_codes)
   }
 
   if (identical(method, "plssvd")) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), ncol(Ymat), warn = TRUE)
+    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), q_response, warn = TRUE)
     ncomp <- cap$ncomp
   }
 
@@ -2247,6 +2290,19 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
     svdmeth <- .svd_method_id(svd.method)
   } else {
     svdmeth <- .svd_method_id("cuda_rsvd")
+  }
+  if (is.null(xprod)) {
+    xprod <- if (identical(backend, "cuda")) {
+      .should_use_xprod_default(ncol(Xdata), q_backend, ncomp)
+    } else if (identical(svd.method, "irlba")) {
+      .should_use_xprod_irlba_default(nrow(Xdata), ncol(Xdata), q_backend, ncomp)
+    } else if (identical(svd.method, "cpu_rsvd")) {
+      .should_use_xprod_default(ncol(Xdata), q_backend, ncomp)
+    } else {
+      FALSE
+    }
+  } else {
+    xprod <- isTRUE(xprod)
   }
 
   meth <- .normalize_pls_method(method)
@@ -2269,11 +2325,15 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
       svds_tol = svds_tol,
       seed = as.integer(seed),
       classification = classification,
-      xprod = isTRUE(xprod)
+      n_response = as.integer(q_response),
+      xprod = isTRUE(xprod),
+      opls_north = as.integer(north),
+      return_scores = isTRUE(return_scores),
+      class_codes = class_codes
     )
   }
 
-  if (identical(method, "simpls")) {
+  if (method %in% c("simpls", "opls", "kernelpls")) {
     profile <- .resolve_simpls_fast_profile(
       fast_block = 1L,
       fast_center_t = FALSE,
@@ -2306,7 +2366,8 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
 
   if (identical(backend, "cuda")) {
     on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
-    if (identical(method, "simpls") && isTRUE(xprod)) {
+    cuda_simpls_family <- method %in% c("simpls", "opls", "kernelpls")
+    if (cuda_simpls_family && isTRUE(xprod)) {
       res <- .with_simpls_gpu_xprod(
         .with_gpu_native_options(
           run_cv_profiled(),
@@ -2320,7 +2381,7 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
     } else {
       res <- .with_gpu_native_options(
         run_cv_profiled(),
-        gpu_device_state = identical(method, "simpls"),
+        gpu_device_state = cuda_simpls_family,
         gpu_qr = gpu_qr,
         gpu_eig = gpu_eig,
         gpu_qless_qr = gpu_qless_qr,
@@ -2332,7 +2393,11 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
     res <- run_cv_profiled()
   }
 
-  decoded <- .decode_cv_predictions(res$Ypred, Yoriginal, classification, lev)
+  decoded <- if (classification && !is.null(res$class_pred)) {
+    .decode_cv_class_predictions(res$class_pred, Yoriginal, lev)
+  } else {
+    .decode_cv_predictions(res$Ypred, Yoriginal, classification, lev)
+  }
   res$pred <- decoded$pred
   res$metrics <- decoded$metrics
   res$classification <- classification
@@ -2353,14 +2418,15 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
 #' @param kfold Number of CV folds.
 #' @param scaling Scaling mode.
 #' @param svd.method CPU SVD backend for Cpp functions.
-#' @param xprod Use the matrix-free xprod backend where available, including
-#'   the bundled IRLBA operator path for `svd.method = "irlba"`.
+#' @param xprod Use the matrix-free xprod backend where available. The default
+#'   `NULL` applies the same size thresholds used by [pls()]; `TRUE` forces the
+#'   route and `FALSE` disables it.
 #' @param ... Additional backend tuning arguments.
 #' @return A list with `Ypred`, decoded `pred`, `metrics`, `fold`, and status.
 #' @export
 plssvd_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                           scaling = c("centering", "autoscaling", "none"),
-                          svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
+                          svd.method = c("cpu_rsvd", "irlba"), xprod = NULL, ...) {
   .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "plssvd", "cpp", svd.method, xprod = xprod, ...)
 }
 
@@ -2368,21 +2434,66 @@ plssvd_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10
 #' @export
 simpls_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                           scaling = c("centering", "autoscaling", "none"),
-                          svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
+                          svd.method = c("cpu_rsvd", "irlba"), xprod = NULL, ...) {
   .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp", svd.method, xprod = xprod, ...)
 }
 
 simpls_fast_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                                scaling = c("centering", "autoscaling", "none"),
-                               svd.method = c("cpu_rsvd", "irlba"), xprod = TRUE, ...) {
+                               svd.method = c("cpu_rsvd", "irlba"), xprod = NULL, ...) {
   simpls_cv_cpp(Xdata, Ydata, constrain, ncomp, kfold, scaling, svd.method, xprod = xprod, ...)
 }
 
 #' @rdname plssvd_cv_cpp
 #' @export
+kodama_cpp_simpls_rsvd <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                                   scaling = c("centering", "autoscaling", "none"),
+                                   gaussian_y_seed = seed,
+                                   seed = 1L,
+                                   xprod = NULL, ...) {
+  if (!is.factor(Ydata)) {
+    stop("kodama_cpp_simpls_rsvd only supports classification factors.", call. = FALSE)
+  }
+  lev <- levels(Ydata)
+  codes <- NULL
+  if (length(lev) > 50L) {
+    codes <- .gaussian_y_class_codes(lev, 50L, gaussian_y_seed)
+  }
+  res <- .pls_cv_compiled(
+    Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cpp",
+    svd.method = "cpu_rsvd", seed = seed, xprod = xprod,
+    kodama_class_codes = codes, ...
+  )
+  res$kodama_gaussian_y <- !is.null(codes)
+  res$kodama_gaussian_y_dim <- if (is.null(codes)) length(lev) else ncol(codes)
+  res
+}
+
+#' @rdname plssvd_cv_cpp
+#' @export
+opls_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                        north = 1L,
+                        scaling = c("centering", "autoscaling", "none"),
+                        svd.method = c("cpu_rsvd", "irlba"), xprod = NULL, ...) {
+  pred_ncomp <- pmax(1L, as.integer(ncomp) - as.integer(north))
+  .pls_cv_compiled(Xdata, Ydata, constrain, pred_ncomp, kfold, scaling, "opls", "cpp", svd.method, xprod = xprod, north = north, ...)
+}
+
+#' @rdname plssvd_cv_cpp
+#' @export
+kernelpls_cv_cpp <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                             scaling = c("centering", "autoscaling", "none"),
+                             svd.method = c("cpu_rsvd", "irlba"), xprod = NULL, ...) {
+  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "kernelpls", "cpp", svd.method, xprod = xprod, ...)
+}
+
+kernel_pls_cv_cpp <- kernelpls_cv_cpp
+
+#' @rdname plssvd_cv_cpp
+#' @export
 plssvd_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                            scaling = c("centering", "autoscaling", "none"),
-                           xprod = TRUE, ...) {
+                           xprod = NULL, ...) {
   .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "plssvd", "cuda", xprod = xprod, ...)
 }
 
@@ -2390,15 +2501,59 @@ plssvd_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 1
 #' @export
 simpls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                            scaling = c("centering", "autoscaling", "none"),
-                           xprod = TRUE, ...) {
+                           xprod = NULL, ...) {
   .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cuda", xprod = xprod, ...)
 }
 
 simpls_fast_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
                                 scaling = c("centering", "autoscaling", "none"),
-                                xprod = TRUE, ...) {
+                                xprod = NULL, ...) {
   simpls_cv_cuda(Xdata, Ydata, constrain, ncomp, kfold, scaling, xprod = xprod, ...)
 }
+
+#' @rdname plssvd_cv_cpp
+#' @export
+kodama_cuda_simpls_rsvd <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                                    scaling = c("centering", "autoscaling", "none"),
+                                    gaussian_y_seed = seed,
+                                    seed = 1L,
+                                    xprod = NULL, ...) {
+  if (!is.factor(Ydata)) {
+    stop("kodama_cuda_simpls_rsvd only supports classification factors.", call. = FALSE)
+  }
+  lev <- levels(Ydata)
+  codes <- NULL
+  if (length(lev) > 50L) {
+    codes <- .gaussian_y_class_codes(lev, 50L, gaussian_y_seed)
+  }
+  res <- .pls_cv_compiled(
+    Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cuda",
+    seed = seed, xprod = xprod, kodama_class_codes = codes, ...
+  )
+  res$kodama_gaussian_y <- !is.null(codes)
+  res$kodama_gaussian_y_dim <- if (is.null(codes)) length(lev) else ncol(codes)
+  res
+}
+
+#' @rdname plssvd_cv_cpp
+#' @export
+opls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                         north = 1L,
+                         scaling = c("centering", "autoscaling", "none"),
+                         xprod = NULL, ...) {
+  pred_ncomp <- pmax(1L, as.integer(ncomp) - as.integer(north))
+  .pls_cv_compiled(Xdata, Ydata, constrain, pred_ncomp, kfold, scaling, "opls", "cuda", xprod = xprod, north = north, ...)
+}
+
+#' @rdname plssvd_cv_cpp
+#' @export
+kernelpls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                              scaling = c("centering", "autoscaling", "none"),
+                              xprod = NULL, ...) {
+  .pls_cv_compiled(Xdata, Ydata, constrain, ncomp, kfold, scaling, "kernelpls", "cuda", xprod = xprod, ...)
+}
+
+kernel_pls_cv_cuda <- kernelpls_cv_cuda
 
 .svd_methods_internal <- c("exact", "irlba", "cpu_rsvd", "cuda_rsvd")
 .svd_methods_public <- c("exact", "irlba", "cpu_rsvd")
@@ -2595,32 +2750,26 @@ svd_benchmark <- function(A,
     return(full_svd())
   }
 
-  if (svd.method == "irlba" && k < max_rank) {
+  if (svd.method == "irlba") {
     work <- as.integer(irlba_work)
     if (!is.finite(work) || is.na(work) || work <= k) {
       work <- max(k + 7L, 8L)
     }
     work <- min(work, max_rank)
-    out <- tryCatch(
-      IRLB(
-        A,
-        nu = k,
-        work = work,
-        maxit = as.integer(irlba_maxit),
-        tol = as.numeric(irlba_tol),
-        eps = as.numeric(irlba_eps),
-        svtol = as.numeric(irlba_svtol)
-      ),
-      error = function(e) NULL
+    out <- IRLB(
+      A,
+      nu = k,
+      work = work,
+      maxit = as.integer(irlba_maxit),
+      tol = as.numeric(irlba_tol),
+      eps = as.numeric(irlba_eps),
+      svtol = as.numeric(irlba_svtol)
     )
-    if (!is.null(out)) {
-      return(list(
-        u = out$u[, seq_len(k), drop = FALSE],
-        d = out$d[seq_len(k)],
-        v = out$v[, seq_len(k), drop = FALSE]
-      ))
-    }
-    return(full_svd())
+    return(list(
+      u = out$u[, seq_len(k), drop = FALSE],
+      d = out$d[seq_len(k)],
+      v = out$v[, seq_len(k), drop = FALSE]
+    ))
   }
 
   if (svd.method != "cpu_rsvd") {
