@@ -2,11 +2,15 @@
 
 #include <RcppArmadillo.h>
 #include <R_ext/Rdynload.h>
+#include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <cctype>
+#include <future>
 #include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "fastPLS.h"
@@ -3197,6 +3201,445 @@ arma::imat pls_predict_code_classes_compact_cuda(List& model, arma::mat Xtest, c
     class_pred.col(s) = nearest_code_classes(Zpred.slice(s), class_codes);
   }
   return class_pred;
+}
+
+struct CudaSimplsCompactModel {
+  arma::mat R;
+  arma::mat Q;
+  arma::rowvec mX;
+  arma::rowvec vX;
+  arma::rowvec mY;
+  arma::ivec ncomp;
+};
+
+struct CudaBatchedFoldResult {
+  arma::uvec test_idx;
+  arma::ivec pred;
+  double fit_ms = NA_REAL;
+  double predict_ms = NA_REAL;
+  int status = 0;
+  std::string error;
+};
+
+arma::mat response_rows_from_labels(
+  const arma::ivec& labels,
+  const arma::uvec& idx,
+  const int n_classes,
+  const arma::mat& class_codes
+) {
+  const bool use_codes = class_codes.n_rows > 0 && class_codes.n_cols > 0;
+  const int m = use_codes ? static_cast<int>(class_codes.n_cols) : n_classes;
+  arma::mat out(idx.n_elem, static_cast<arma::uword>(m), arma::fill::zeros);
+  for (arma::uword i = 0; i < idx.n_elem; ++i) {
+    const int cls = labels(idx(i));
+    if (cls < 1 || cls > n_classes) continue;
+    if (use_codes) {
+      out.row(i) = class_codes.row(static_cast<arma::uword>(cls - 1));
+    } else {
+      out(i, static_cast<arma::uword>(cls - 1)) = 1.0;
+    }
+  }
+  return out;
+}
+
+CudaSimplsCompactModel fit_simpls_cuda_compact_model(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  const int requested_ncomp,
+  const int scaling,
+  const int seed,
+  const int rsvd_power,
+  const bool xprod
+) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    throw std::runtime_error("CUDA backend is not available");
+  }
+  const int n = static_cast<int>(Xtrain.n_rows);
+  const int p = static_cast<int>(Xtrain.n_cols);
+  const int m = static_cast<int>(Ytrain.n_cols);
+  if (n < 2 || p < 1 || m < 1) {
+    throw std::runtime_error("Invalid training dimensions for CUDA SIMPLS batched CV");
+  }
+
+  const int max_ncomp = std::max(1, std::min(requested_ncomp, std::min(n - 1, p)));
+  CudaSimplsCompactModel model;
+  model.ncomp.set_size(1);
+  model.ncomp(0) = max_ncomp;
+
+  model.mX.zeros(static_cast<arma::uword>(p));
+  if (scaling < 3) {
+    model.mX = arma::mean(Xtrain, 0);
+    Xtrain.each_row() -= model.mX;
+  }
+
+  model.vX.ones(static_cast<arma::uword>(p));
+  if (scaling == 2) {
+    model.vX = variance(Xtrain);
+    for (arma::uword j = 0; j < model.vX.n_elem; ++j) {
+      if (!std::isfinite(model.vX(j)) || model.vX(j) == 0.0) {
+        model.vX(j) = 1.0;
+      }
+    }
+    Xtrain.each_row() /= model.vX;
+  }
+
+  model.mY = arma::mean(Ytrain, 0);
+  Ytrain.each_row() -= model.mY;
+
+  const int power_iters = env_int_or(
+    "FASTPLS_FAST_INC_ITERS",
+    std::max(rsvd_power, 1),
+    1,
+    8
+  );
+  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
+
+  fastpls_svd::cuda_simpls_fast_set_training_matrices(
+    Xtrain.memptr(),
+    n,
+    p,
+    Ytrain.memptr(),
+    m,
+    false,
+    !xprod
+  );
+  fastpls_svd::cuda_simpls_fast_begin_device_loop(n, p, m, max_ncomp, false);
+
+  bool has_rr_prev = false;
+  int a = 0;
+  while (a < max_ncomp) {
+    arma::vec shat(1, arma::fill::zeros);
+    if (xprod) {
+      fastpls_svd::cuda_simpls_fast_refresh_block_implicit_resident(
+        n,
+        p,
+        m,
+        1,
+        1,
+        a,
+        has_rr_prev,
+        static_cast<unsigned int>(seed + a),
+        power_iters,
+        shat.memptr()
+      );
+    } else {
+      fastpls_svd::cuda_simpls_fast_refresh_block_resident(
+        p,
+        m,
+        1,
+        1,
+        has_rr_prev,
+        static_cast<unsigned int>(seed + a),
+        power_iters,
+        shat.memptr()
+      );
+    }
+
+    bool appended = fastpls_svd::cuda_simpls_fast_append_component_from_block(
+      n,
+      p,
+      m,
+      a,
+      0,
+      a,
+      (reorth_v == 1),
+      false,
+      !xprod
+    );
+
+    for (int retry = 0; retry < 8 && !appended; ++retry) {
+      const int retry_l = std::min(
+        std::min(p, m),
+        std::max(2, std::min(32, retry + 2))
+      );
+      arma::vec retry_shat(1, arma::fill::zeros);
+      const unsigned int retry_seed =
+        static_cast<unsigned int>(seed + a + 7919 * (retry + 1));
+      const int retry_power = std::min(power_iters + retry + 1, 8);
+      if (xprod) {
+        fastpls_svd::cuda_simpls_fast_refresh_block_implicit_resident(
+          n,
+          p,
+          m,
+          retry_l,
+          1,
+          a,
+          false,
+          retry_seed,
+          retry_power,
+          retry_shat.memptr()
+        );
+      } else {
+        fastpls_svd::cuda_simpls_fast_refresh_block_resident(
+          p,
+          m,
+          retry_l,
+          1,
+          false,
+          retry_seed,
+          retry_power,
+          retry_shat.memptr()
+        );
+      }
+      appended = fastpls_svd::cuda_simpls_fast_append_component_from_block(
+        n,
+        p,
+        m,
+        a,
+        0,
+        a,
+        (reorth_v == 1),
+        false,
+        !xprod
+      );
+    }
+
+    if (!appended) {
+      break;
+    }
+    has_rr_prev = true;
+    ++a;
+  }
+
+  const int used = std::max(1, a);
+  if (model.ncomp(0) > used) {
+    model.ncomp(0) = used;
+  }
+  model.R.zeros(static_cast<arma::uword>(p), static_cast<arma::uword>(used));
+  model.Q.zeros(static_cast<arma::uword>(m), static_cast<arma::uword>(used));
+  fastpls_svd::cuda_simpls_fast_copy_rr(model.R.memptr(), p, used);
+  fastpls_svd::cuda_simpls_fast_copy_qq(model.Q.memptr(), m, used);
+  fastpls_svd::cuda_reset_workspace();
+  return model;
+}
+
+arma::cube simpls_compact_weights_from_model(const CudaSimplsCompactModel& model) {
+  const int mc = model.ncomp(0);
+  arma::cube Wflash(
+    static_cast<arma::uword>(model.R.n_cols),
+    static_cast<arma::uword>(model.Q.n_rows),
+    1,
+    arma::fill::zeros
+  );
+  Wflash.slice(0).rows(0, static_cast<arma::uword>(mc - 1)) =
+    model.Q.cols(0, static_cast<arma::uword>(mc - 1)).t();
+  return Wflash;
+}
+
+arma::ivec predict_simpls_cuda_compact_classes(
+  const CudaSimplsCompactModel& model,
+  arma::mat Xtest,
+  const arma::mat& class_codes
+) {
+  if (Xtest.n_cols != model.mX.n_elem) {
+    throw std::runtime_error("Xtest columns do not match CUDA SIMPLS batched model");
+  }
+  Xtest.each_row() -= model.mX;
+  Xtest.each_row() /= model.vX;
+
+  arma::cube Wflash = simpls_compact_weights_from_model(model);
+  if (class_codes.n_rows > 0 && class_codes.n_cols > 0) {
+    arma::cube Zpred = fastpls_svd::cuda_flash_lowrank_predict(
+      Xtest,
+      model.R,
+      Wflash,
+      model.mY,
+      model.ncomp
+    );
+    return nearest_code_classes(Zpred.slice(0), class_codes);
+  }
+
+  arma::imat pred = fastpls_svd::cuda_flash_lowrank_predict_classes(
+    Xtest,
+    model.R,
+    Wflash,
+    model.mY,
+    model.ncomp
+  );
+  return pred.col(0);
+}
+
+arma::ivec make_stratified_folds_cpp(
+  const arma::ivec& labels,
+  const arma::ivec& constrain,
+  const int n_classes,
+  const int kfold,
+  const int seed
+) {
+  const int n = static_cast<int>(labels.n_elem);
+  arma::ivec groups = arma::unique(constrain);
+  arma::ivec constrain2 = constrain;
+  for (arma::uword g = 0; g < groups.n_elem; ++g) {
+    arma::uvec idx = arma::find(constrain == groups(g));
+    constrain2.elem(idx).fill(static_cast<int>(g) + 1);
+  }
+
+  std::vector<std::vector<int> > groups_by_class(static_cast<std::size_t>(n_classes));
+  for (arma::uword g = 0; g < groups.n_elem; ++g) {
+    arma::uvec idx = arma::find(constrain2 == static_cast<int>(g) + 1);
+    if (idx.n_elem == 0) continue;
+    int cls = labels(idx(0));
+    if (cls < 1) cls = 1;
+    if (cls > n_classes) cls = n_classes;
+    groups_by_class[static_cast<std::size_t>(cls - 1)].push_back(static_cast<int>(g));
+  }
+
+  arma::ivec group_fold(groups.n_elem, arma::fill::zeros);
+  std::mt19937 rng(static_cast<unsigned int>(seed));
+  for (int cls = 0; cls < n_classes; ++cls) {
+    std::vector<int>& gvec = groups_by_class[static_cast<std::size_t>(cls)];
+    std::shuffle(gvec.begin(), gvec.end(), rng);
+    for (std::size_t pos = 0; pos < gvec.size(); ++pos) {
+      group_fold(static_cast<arma::uword>(gvec[pos])) = static_cast<int>(pos % static_cast<std::size_t>(kfold));
+    }
+  }
+
+  arma::ivec fold(n, arma::fill::zeros);
+  for (int i = 0; i < n; ++i) {
+    const int group_idx = constrain2(i) - 1;
+    fold(i) = group_fold(static_cast<arma::uword>(group_idx));
+  }
+  return fold;
+}
+
+// [[Rcpp::export]]
+Rcpp::List simpls_cv_cuda_batched_classes(
+  arma::mat Xdata,
+  arma::ivec labels,
+  arma::ivec constrain,
+  int ncomp,
+  int scaling,
+  int kfold,
+  int n_response,
+  arma::mat class_codes,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed,
+  int max_parallel,
+  bool xprod
+) {
+  (void)rsvd_oversample;
+  (void)svds_tol;
+  if (!fastpls_svd::has_cuda_backend()) {
+    Rcpp::stop("CUDA batched SIMPLS CV requires CUDA support");
+  }
+  if (Xdata.n_rows != labels.n_elem || labels.n_elem != constrain.n_elem) {
+    Rcpp::stop("Xdata, labels, and constrain must have the same number of rows");
+  }
+  if (ncomp < 1) ncomp = 1;
+  if (kfold < 2) kfold = 2;
+  if (n_response < 2) {
+    Rcpp::stop("Batched CUDA classification CV requires at least two classes");
+  }
+  if (class_codes.n_elem > 0 &&
+      (class_codes.n_rows != static_cast<arma::uword>(n_response) || class_codes.n_cols < 1)) {
+    Rcpp::stop("class_codes must have one row per class");
+  }
+
+  const int n = static_cast<int>(Xdata.n_rows);
+  max_parallel = std::max(1, std::min(max_parallel, kfold));
+  arma::ivec fold = make_stratified_folds_cpp(labels, constrain, n_response, kfold, seed);
+  arma::imat class_pred(n, 1, arma::fill::zeros);
+  arma::ivec status(kfold, arma::fill::zeros);
+  std::vector<double> fit_ms(static_cast<std::size_t>(kfold), NA_REAL);
+  std::vector<double> predict_ms(static_cast<std::size_t>(kfold), NA_REAL);
+  std::vector<std::string> errors(static_cast<std::size_t>(kfold));
+
+  auto run_fold = [&](const int f) -> CudaBatchedFoldResult {
+    CudaBatchedFoldResult out;
+    out.test_idx = arma::find(fold == f);
+    arma::uvec train_idx = arma::find(fold != f);
+    if (out.test_idx.n_elem == 0 || train_idx.n_elem == 0) {
+      out.status = 2;
+      return out;
+    }
+    try {
+      arma::mat Xtrain = Xdata.rows(train_idx);
+      arma::mat Ytrain = response_rows_from_labels(labels, train_idx, n_response, class_codes);
+      arma::mat Xtest = Xdata.rows(out.test_idx);
+
+      const auto t0 = std::chrono::steady_clock::now();
+      CudaSimplsCompactModel model = fit_simpls_cuda_compact_model(
+        std::move(Xtrain),
+        std::move(Ytrain),
+        ncomp,
+        scaling,
+        seed + f,
+        rsvd_power,
+        xprod
+      );
+      const auto t1 = std::chrono::steady_clock::now();
+      out.pred = predict_simpls_cuda_compact_classes(model, std::move(Xtest), class_codes);
+      const auto t2 = std::chrono::steady_clock::now();
+      out.fit_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+      out.predict_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+      out.status = 1;
+    } catch (const std::exception& e) {
+      out.status = 9;
+      out.error = e.what();
+      try {
+        fastpls_svd::cuda_reset_workspace();
+      } catch (...) {
+      }
+    }
+    return out;
+  };
+
+  std::vector<std::future<CudaBatchedFoldResult> > active;
+  active.reserve(static_cast<std::size_t>(max_parallel));
+  auto consume_one = [&](std::future<CudaBatchedFoldResult>& fut) {
+    CudaBatchedFoldResult res = fut.get();
+    const int fold_id = res.test_idx.n_elem > 0 ? fold(res.test_idx(0)) : -1;
+    if (fold_id >= 0 && fold_id < kfold) {
+      status(fold_id) = res.status;
+      fit_ms[static_cast<std::size_t>(fold_id)] = res.fit_ms;
+      predict_ms[static_cast<std::size_t>(fold_id)] = res.predict_ms;
+      errors[static_cast<std::size_t>(fold_id)] = res.error;
+    }
+    if (res.status == 1) {
+      for (arma::uword i = 0; i < res.test_idx.n_elem; ++i) {
+        class_pred(res.test_idx(i), 0) = res.pred(i);
+      }
+    }
+  };
+
+  for (int f = 0; f < kfold; ++f) {
+    active.emplace_back(std::async(std::launch::async, run_fold, f));
+    if (static_cast<int>(active.size()) >= max_parallel) {
+      consume_one(active.front());
+      active.erase(active.begin());
+    }
+  }
+  for (auto& fut : active) {
+    consume_one(fut);
+  }
+
+  Rcpp::CharacterVector error_vec(kfold);
+  Rcpp::NumericVector fit_vec(kfold);
+  Rcpp::NumericVector pred_vec(kfold);
+  for (int f = 0; f < kfold; ++f) {
+    error_vec[f] = errors[static_cast<std::size_t>(f)];
+    fit_vec[f] = fit_ms[static_cast<std::size_t>(f)];
+    pred_vec[f] = predict_ms[static_cast<std::size_t>(f)];
+  }
+
+  arma::ivec out_ncomp(1);
+  out_ncomp(0) = ncomp;
+
+  return Rcpp::List::create(
+    Rcpp::Named("fold") = fold + 1,
+    Rcpp::Named("status") = status,
+    Rcpp::Named("ncomp") = out_ncomp,
+    Rcpp::Named("class_pred") = class_pred,
+    Rcpp::Named("fit_time_ms_by_fold") = fit_vec,
+    Rcpp::Named("predict_time_ms_by_fold") = pred_vec,
+    Rcpp::Named("errors") = error_vec,
+    Rcpp::Named("backend") = "cuda_batched",
+    Rcpp::Named("method") = "simpls",
+    Rcpp::Named("parallel_folds") = max_parallel,
+    Rcpp::Named("xprod") = xprod
+  );
 }
 
 // [[Rcpp::export]]

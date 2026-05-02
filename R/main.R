@@ -188,6 +188,13 @@
   force(expr)
 }
 
+.with_cuda_workspace_streams <- function(expr, enable = FALSE) {
+  old <- Sys.getenv("FASTPLS_CUDA_WORKSPACE_STREAMS", unset = NA_character_)
+  on.exit(.restore_env_scalar("FASTPLS_CUDA_WORKSPACE_STREAMS", old), add = TRUE)
+  Sys.setenv(FASTPLS_CUDA_WORKSPACE_STREAMS = if (isTRUE(enable)) "1" else "0")
+  force(expr)
+}
+
 .enable_flash_prediction <- function(model, backend = c("cpu", "cuda"), block_size = 4096L) {
   backend <- match.arg(backend)
   model$predict_backend <- if (identical(backend, "cuda")) "cuda_flash" else "cpu_flash"
@@ -2529,6 +2536,141 @@ kodama_cuda_simpls_rsvd <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, 
   res <- .pls_cv_compiled(
     Xdata, Ydata, constrain, ncomp, kfold, scaling, "simpls", "cuda",
     seed = seed, xprod = xprod, kodama_class_codes = codes, ...
+  )
+  res$kodama_gaussian_y <- !is.null(codes)
+  res$kodama_gaussian_y_dim <- if (is.null(codes)) length(lev) else ncol(codes)
+  res
+}
+
+.simpls_cv_cuda_batched <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                                    scaling = c("centering", "autoscaling", "none"),
+                                    seed = 1L,
+                                    xprod = NULL,
+                                    max_parallel = 2L,
+                                    rsvd_oversample = 10L,
+                                    rsvd_power = 1L,
+                                    svds_tol = 0,
+                                    class_codes = NULL,
+                                    workspace_streams = TRUE,
+                                    gpu_qr = TRUE,
+                                    gpu_eig = TRUE,
+                                    gpu_qless_qr = FALSE,
+                                    gpu_finalize_threshold = 32L) {
+  if (!is.factor(Ydata)) {
+    stop("Batched CUDA SIMPLS CV currently supports classification factors only.", call. = FALSE)
+  }
+  if (!has_cuda()) {
+    stop("Batched CUDA SIMPLS CV requires a CUDA-enabled fastPLS build.", call. = FALSE)
+  }
+  Xdata <- as.matrix(Xdata)
+  lev <- levels(Ydata)
+  labels <- as.integer(Ydata)
+  if (anyNA(labels)) {
+    stop("Ydata contains labels not present in its factor levels.", call. = FALSE)
+  }
+  if (is.null(constrain)) {
+    constrain <- seq_len(nrow(Xdata))
+  }
+  constrain <- as.integer(as.factor(constrain))
+  if (length(labels) != nrow(Xdata) || length(constrain) != nrow(Xdata)) {
+    stop("Xdata, Ydata, and constrain must have the same number of rows.", call. = FALSE)
+  }
+  ncomp <- as.integer(ncomp)[1L]
+  kfold <- as.integer(kfold)[1L]
+  max_parallel <- as.integer(max_parallel)[1L]
+  scal <- pmatch(match.arg(scaling), c("centering", "autoscaling", "none"))[1L]
+
+  codes <- if (is.null(class_codes)) {
+    matrix(numeric(0), nrow = 0L, ncol = 0L)
+  } else {
+    as.matrix(class_codes)
+  }
+  q_backend <- if (nrow(codes) > 0L && ncol(codes) > 0L) ncol(codes) else length(lev)
+  if (is.null(xprod)) {
+    xprod <- .should_use_xprod_default(ncol(Xdata), q_backend, ncomp)
+  } else {
+    xprod <- isTRUE(xprod)
+  }
+
+  run_batched <- function() {
+    simpls_cv_cuda_batched_classes(
+      Xdata = Xdata,
+      labels = labels,
+      constrain = constrain,
+      ncomp = ncomp,
+      scaling = scal,
+      kfold = kfold,
+      n_response = length(lev),
+      class_codes = codes,
+      rsvd_oversample = as.integer(rsvd_oversample),
+      rsvd_power = as.integer(rsvd_power),
+      svds_tol = as.numeric(svds_tol),
+      seed = as.integer(seed),
+      max_parallel = max_parallel,
+      xprod = isTRUE(xprod)
+    )
+  }
+
+  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
+  res <- .with_fastpls_fast_options(
+    .with_cuda_workspace_streams(
+      .with_gpu_native_options(
+        if (isTRUE(xprod)) .with_simpls_gpu_xprod(run_batched()) else run_batched(),
+        gpu_device_state = TRUE,
+        gpu_qr = gpu_qr,
+        gpu_eig = gpu_eig,
+        gpu_qless_qr = gpu_qless_qr,
+        gpu_finalize_threshold = gpu_finalize_threshold
+      ),
+      enable = workspace_streams
+    ),
+    fast_block = 1L,
+    fast_center_t = FALSE,
+    fast_reorth_v = FALSE,
+    fast_incremental = TRUE,
+    fast_inc_iters = 2L,
+    fast_defl_cache = TRUE
+  )
+  cuda_reset_workspace()
+  decoded <- .decode_cv_class_predictions(res$class_pred, Ydata, lev)
+  res$pred <- decoded$pred
+  res$metrics <- decoded$metrics
+  res$classification <- TRUE
+  res$levels <- lev
+  res$xprod_default <- isTRUE(xprod)
+  res$workspace_streams <- isTRUE(workspace_streams)
+  res
+}
+
+kodama_cuda_simpls_rsvd_batched <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold = 10L,
+                                            scaling = c("centering", "autoscaling", "none"),
+                                            gaussian_y_seed = seed,
+                                            seed = 1L,
+                                            xprod = NULL,
+                                            max_parallel = 2L,
+                                            workspace_streams = TRUE,
+                                            ...) {
+  if (!is.factor(Ydata)) {
+    stop("kodama_cuda_simpls_rsvd_batched only supports classification factors.", call. = FALSE)
+  }
+  lev <- levels(Ydata)
+  codes <- NULL
+  if (length(lev) > 50L) {
+    codes <- .gaussian_y_class_codes(lev, 50L, gaussian_y_seed)
+  }
+  res <- .simpls_cv_cuda_batched(
+    Xdata = Xdata,
+    Ydata = Ydata,
+    constrain = constrain,
+    ncomp = ncomp,
+    kfold = kfold,
+    scaling = scaling,
+    seed = seed,
+    xprod = xprod,
+    max_parallel = max_parallel,
+    class_codes = codes,
+    workspace_streams = workspace_streams,
+    ...
   )
   res$kodama_gaussian_y <- !is.null(codes)
   res$kodama_gaussian_y_dim <- if (is.null(codes)) length(lev) else ncol(codes)
