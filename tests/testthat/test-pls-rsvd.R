@@ -1,3 +1,5 @@
+library(fastPLS)
+
 test_that("default svd.method behavior remains unchanged", {
   set.seed(42)
   X <- matrix(rnorm(70 * 18), nrow = 70, ncol = 18)
@@ -93,6 +95,15 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
 
   expect_equal(fit1$B, fit2$B)
   expect_false(isTRUE(all.equal(fit1$B, fit3$B)))
+})
+
+test_that("IRLBA xprod default does not trigger for medium-n synthetic reg_q shape", {
+  should_use <- get(".should_use_xprod_irlba_default", envir = asNamespace("fastPLS"))
+
+  expect_false(should_use(n = 5000, p = 1000, q = 101, ncomp = 50))
+  expect_false(should_use(n = 5000, p = 1000, q = 1000, ncomp = 50))
+  expect_false(should_use(n = 5000, p = 1000, q = 10000, ncomp = 50))
+  expect_true(should_use(n = 10000, p = 1000, q = 5000, ncomp = 50))
 })
 
 test_that("CPU FlashSVD prediction is the default for compiled and R PLS", {

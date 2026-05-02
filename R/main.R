@@ -241,15 +241,16 @@
   isTRUE(s_mb > 32) || (isTRUE(q >= 100) && isTRUE(ncomp <= 10))
 }
 
-.should_use_xprod_irlba_default <- function(p, q, ncomp) {
+.should_use_xprod_irlba_default <- function(n, p, q, ncomp) {
+  n <- as.numeric(n)
   p <- as.numeric(p)
   q <- as.numeric(q)
   ncomp <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
-  if (!is.finite(p) || !is.finite(q) || !is.finite(ncomp)) {
+  if (!is.finite(n) || !is.finite(p) || !is.finite(q) || !is.finite(ncomp)) {
     return(FALSE)
   }
   s_mb <- p * q * 8 / 1024^2
-  isTRUE(s_mb > 32) && isTRUE(min(p, q) >= 1000)
+  isTRUE(s_mb > 32) && isTRUE(n >= 10000) && isTRUE(min(p, q) >= 1000)
 }
 
 .should_store_coefficients <- function(p, q, nslices = 1L, compact_prediction_available = TRUE) {
@@ -3652,7 +3653,7 @@ pls =  function (Xtrain,
     (identical(svd.method, "cpu_rsvd") &&
        .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)) ||
       (identical(svd.method, "irlba") &&
-         .should_use_xprod_irlba_default(ncol(Xtrain), ncol(Ytrain), ncomp))
+         .should_use_xprod_irlba_default(nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), ncomp))
   )
   xprod_precision_default <- if (identical(svd.method, "irlba")) "implicit_irlba" else "implicit64"
 

@@ -33,7 +33,9 @@ The default matrix-free `xprod` policy is implemented in `R/main.R`:
 - `cpu_rsvd`: use `xprod` when `X^T Y` would exceed 32 MB, or when
   `q >= 100` and `max(ncomp) <= 10`.
 - `irlba`: use `xprod` only for much larger response spaces, currently when
-  `X^T Y` would exceed 32 MB and `min(p, q) >= 1000`.
+  `X^T Y` would exceed 32 MB, `n >= 10000`, and `min(p, q) >= 1000`.
+  This intentionally keeps medium-size synthetic response sweeps such as
+  `n = 5000`, `p = 1000`, and `q > 100` on the explicit cross-product route.
 
 The C++ implementation rejects removed FP32/mixed-precision `xprod_precision`
 values. The remaining implicit paths are double precision.
