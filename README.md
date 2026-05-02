@@ -164,6 +164,10 @@ Important environment controls:
 - `FASTPLS_SYNTH_VAR_TIMEOUT_SEC`: per-run timeout for simulated sweeps.
 - `FASTPLS_SYNTH_VAR_MAX_HOST_RSS_MB`: RAM cap for simulated sweeps.
 
+By default, simulated sweeps vary sample size, predictor dimension, and response
+dimension/classes. Noise sweeps are not part of the standard simulated
+benchmark.
+
 ## References
 
 - de Jong, S. (1993). SIMPLS. *Chemometrics and Intelligent Laboratory Systems*.

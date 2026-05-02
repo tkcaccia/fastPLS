@@ -111,6 +111,8 @@ Simulated variable sweeps:
 
 These scripts generate the current 4x4 plots and CSV summaries. New benchmark
 work should extend these scripts instead of adding one-off benchmark files.
+The standard simulated families are `reg_n`, `reg_p`, `reg_q`, `class_n`, and
+`class_p`; noise sweeps are intentionally excluded from the default workflow.
 
 ## Build Hygiene
 

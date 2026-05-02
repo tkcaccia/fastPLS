@@ -128,7 +128,7 @@ proc_tree_rss_mb <- function(pid) {
 
 families <- chr_list_env(
   "FASTPLS_SYNTH_VAR_FAMILIES",
-  c("reg_n", "reg_p", "reg_q", "reg_noise", "class_n", "class_p", "class_noise")
+  c("reg_n", "reg_p", "reg_q", "class_n", "class_p")
 )
 if (!isTRUE(include_classification)) {
   families <- families[!grepl("^class_", families)]
