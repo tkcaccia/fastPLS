@@ -181,12 +181,19 @@ class CudaRSVDWorkspace {
   }
 
   void ensure_capacity(int m, int n, int l) {
+    ensure_stream();
     if (!handle_ready_) {
       check_cublas(cublasCreate(&handle_), "cublasCreate");
+      if (stream_ready_) {
+        check_cublas(cublasSetStream(handle_, stream_), "cublasSetStream");
+      }
       handle_ready_ = true;
     }
     if (!solver_ready_) {
       check_cusolver(cusolverDnCreate(&solver_), "cusolverDnCreate");
+      if (stream_ready_) {
+        check_cusolver(cusolverDnSetStream(solver_, stream_), "cusolverDnSetStream");
+      }
       solver_ready_ = true;
     }
 
@@ -203,17 +210,27 @@ class CudaRSVDWorkspace {
 
     if (!rng_ready_) {
       check_curand(curandCreateGenerator(&rng_, CURAND_RNG_PSEUDO_DEFAULT), "curandCreateGenerator");
+      if (stream_ready_) {
+        check_curand(curandSetStream(rng_, stream_), "curandSetStream");
+      }
       rng_ready_ = true;
     }
   }
 
   void ensure_matrix_free_capacity(int m, int n, int l) {
+    ensure_stream();
     if (!handle_ready_) {
       check_cublas(cublasCreate(&handle_), "cublasCreate");
+      if (stream_ready_) {
+        check_cublas(cublasSetStream(handle_, stream_), "cublasSetStream");
+      }
       handle_ready_ = true;
     }
     if (!solver_ready_) {
       check_cusolver(cusolverDnCreate(&solver_), "cusolverDnCreate");
+      if (stream_ready_) {
+        check_cusolver(cusolverDnSetStream(solver_, stream_), "cusolverDnSetStream");
+      }
       solver_ready_ = true;
     }
 
@@ -229,6 +246,9 @@ class CudaRSVDWorkspace {
 
     if (!rng_ready_) {
       check_curand(curandCreateGenerator(&rng_, CURAND_RNG_PSEUDO_DEFAULT), "curandCreateGenerator");
+      if (stream_ready_) {
+        check_curand(curandSetStream(rng_, stream_), "curandSetStream");
+      }
       rng_ready_ = true;
     }
   }
@@ -1578,6 +1598,19 @@ class CudaRSVDWorkspace {
   }
 
  private:
+  void ensure_stream() {
+    if (env_int_or("FASTPLS_CUDA_WORKSPACE_STREAMS", 0, 0, 1) == 0) {
+      return;
+    }
+    if (!stream_ready_) {
+      check_cuda(
+        cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking),
+        "cudaStreamCreateWithFlags"
+      );
+      stream_ready_ = true;
+    }
+  }
+
   static size_t bytes_for(int m, int n) {
     return sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
   }
@@ -1798,6 +1831,9 @@ class CudaRSVDWorkspace {
   }
 
   void release() {
+    if (stream_ready_) {
+      cudaStreamSynchronize(stream_);
+    }
     if (dX_ != nullptr) cudaFree(dX_);
     if (dYtrain_ != nullptr) cudaFree(dYtrain_);
     if (dA_ != nullptr) cudaFree(dA_);
@@ -1867,6 +1903,11 @@ class CudaRSVDWorkspace {
       curandDestroyGenerator(rng_);
       rng_ready_ = false;
     }
+    if (stream_ready_) {
+      cudaStreamDestroy(stream_);
+      stream_ready_ = false;
+      stream_ = nullptr;
+    }
   }
 
   double* dX_ = nullptr;
@@ -1925,6 +1966,8 @@ class CudaRSVDWorkspace {
   bool solver_ready_ = false;
   curandGenerator_t rng_ = nullptr;
   bool rng_ready_ = false;
+  cudaStream_t stream_ = nullptr;
+  bool stream_ready_ = false;
   int hInfo_ = 0;
   const double one_ = 1.0;
   const double zero_ = 0.0;
