@@ -68,10 +68,6 @@ pls_predict_flash_cpu <- function(model, Xtest, proj, block_size) {
     .Call(`_fastPLS_pls_predict_flash_cpu`, model, Xtest, proj, block_size)
 }
 
-simpls_cv_cuda_batched_classes <- function(Xdata, labels, constrain, ncomp, scaling, kfold, n_response, class_codes, rsvd_oversample, rsvd_power, svds_tol, seed, max_parallel, xprod) {
-    .Call(`_fastPLS_simpls_cv_cuda_batched_classes`, Xdata, labels, constrain, ncomp, scaling, kfold, n_response, class_codes, rsvd_oversample, rsvd_power, svds_tol, seed, max_parallel, xprod)
-}
-
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
     .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
 }
