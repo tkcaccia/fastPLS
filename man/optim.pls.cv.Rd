@@ -43,9 +43,9 @@ optim.pls.cv(
 
 \item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
 
-\item{svd.method}{One of \code{"exact"}, \code{"irlba"} or \code{"cpu_rsvd"}.
-The former hybrid CUDA route via \code{svd.method = "cuda_rsvd"} has been removed
-from \code{pls()}; use \code{pls(..., backend = "cuda")} for GPU-native fits.}
+\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
+The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
+from `pls()`; use `backend = "cuda"` for GPU-native fits.}
 
 \item{rsvd_oversample}{RSVD oversampling.}
 

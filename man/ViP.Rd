@@ -7,7 +7,7 @@
 ViP(model)
 }
 \arguments{
-\item{model}{Fitted \code{fastPLS} model.}
+\item{model}{Fitted `fastPLS` model.}
 }
 \value{
 Numeric matrix (single response) or list of matrices (multi-response).

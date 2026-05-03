@@ -16,48 +16,35 @@
   ...
 )
 
-\method{predict}{fastPLSKernel}(
-  object,
-  newdata,
-  Ytest = NULL,
-  proj = FALSE,
-  ...
-)
+\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 
-\method{predict}{fastPLSOpls}(
-  object,
-  newdata,
-  Ytest = NULL,
-  proj = FALSE,
-  ...
-)
+\method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
-\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or
-\code{fastPLSOpls} object.}
+\item{object}{A fitted `fastPLS`, `fastPLSKernel`, or `fastPLSOpls` object.}
 
 \item{newdata}{Numeric predictor matrix.}
 
-\item{Ytest}{Optional observed response used to compute \code{Q2Y}.}
+\item{Ytest}{Optional observed response used to compute `Q2Y`.}
 
-\item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
+\item{proj}{Logical; return projected `Ttest` when `TRUE`.}
 
-\item{predict.backend}{Prediction backend. \code{"auto"} uses FlashSVD-style
+\item{predict.backend}{Prediction backend. `"auto"` uses FlashSVD-style
 low-rank prediction when compact factors are available and the low-rank
 application is expected to be beneficial.}
 
-\item{flash.block_size}{Row block size for \code{"cpu_flash"} prediction.}
+\item{flash.block_size}{Row block size for `"cpu_flash"` prediction.}
 
 \item{...}{Unused.}
 }
 \value{
-A list containing \code{Ypred}, optional \code{Q2Y}, and optional
-\code{Ttest}.
+A list containing `Ypred`, optional `Q2Y`, optional `Ttest`, and
+  optional LDA scores for LDA classification models.
 }
 \description{
 Applies stored preprocessing and coefficient factors to produce test
 predictions. For kernel PLS and OPLS fits, the corresponding preprocessing or
-filtering step is applied before dispatching to the inner \code{fastPLS}
+filtering step is applied before dispatching to the inner `fastPLS`
 predictor. For classification models, response scores are converted to labels
-by argmax over response columns.
+by argmax over response columns unless an LDA classifier was fitted.
 }

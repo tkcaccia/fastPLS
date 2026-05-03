@@ -2,7 +2,7 @@
 % Please edit documentation in R/main.R
 \name{pls}
 \alias{pls}
-\title{Partial Least Squares with selectable outer algorithm and SVD backend}
+\title{Partial Least Squares with selectable model family and backend}
 \usage{
 pls(
   Xtrain,
@@ -118,21 +118,24 @@ the default is `min(ncol(Xtrain), 100)`.}
 \item{gaussian_y_seed}{Random seed used to generate the Gaussian response
 sketch.}
 
-\item{classifier}{Classification decision rule. `"argmax"` keeps the standard
-PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier on the PLS
-latent scores with compiled C++ code. `"lda_cuda"` uses the same LDA model and
-CUDA matrix multiplication for latent projection and discriminant scoring when
-CUDA is available. The experimental fused CUDA PLS+LDA path can be enabled with
-`FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard CUDA LDA route remains
-the default.}
+\item{classifier}{Classification decision rule. `"argmax"` keeps the
+standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
+on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
+same LDA model and CUDA matrix multiplication for latent projection and
+discriminant scoring when CUDA is available. For high-throughput PLS-DA on
+GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
+and `classifier = "lda_cuda"`; the compiled CPU fallback is
+`classifier = "lda_cpp"`. The experimental fused
+CUDA PLS+LDA path can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the
+optimized standard CUDA LDA route remains the default.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
-\item{regression_head}{Regression prediction head. `"standard"` keeps the usual
-PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary least-squares
-linear model on the latent scores with compiled C++ code. `"linear_cuda"` uses
-CUDA matrix multiplication for latent projection and prediction when CUDA is
-available.}
+\item{regression_head}{Regression prediction head. `"standard"` keeps the
+usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
+least-squares linear model on the latent scores with compiled C++ code.
+`"linear_cuda"` uses CUDA matrix multiplication for latent projection and
+prediction when CUDA is available.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 
@@ -176,5 +179,5 @@ A `fastPLS` object.
 \description{
 `pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
 and kernel PLS through the selected CPU, pure-R, or CUDA backend while keeping
-the low-level implementation functions internal.
+low-level implementation functions internal.
 }

@@ -95,6 +95,41 @@ fit_cls <- pls(
 head(fit_cls$Ypred)
 ```
 
+For PLS-DA with an LDA prediction head, use the `classifier` argument. The
+recommended GPU route is PLSSVD followed by native CUDA LDA:
+
+```{r eval = FALSE}
+fit_cls_lda_gpu <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 50,
+  method = "plssvd",
+  backend = "cuda",
+  classifier = "lda_cuda"
+)
+```
+
+When CUDA is unavailable, the compiled CPU fallback is:
+
+```{r}
+fit_cls_lda_cpp <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "plssvd",
+  backend = "cpp",
+  svd.method = "cpu_rsvd",
+  classifier = "lda_cpp",
+  seed = 100
+)
+
+head(fit_cls_lda_cpp$Ypred)
+```
+
 ## OPLS and Kernel PLS
 
 OPLS and kernel PLS are accessed through the same `pls()` function. The
@@ -246,6 +281,17 @@ if (has_cuda()) {
     method = "simpls",
     backend = "cuda"
   )
+
+  fit_gpu_lda <- pls(
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "plssvd",
+    backend = "cuda",
+    classifier = "lda_cuda"
+  )
 }
 ```
 
@@ -263,4 +309,3 @@ dim(C)
 vip <- ViP(fit_reg)
 dim(vip)
 ```
-

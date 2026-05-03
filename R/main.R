@@ -1779,13 +1779,15 @@ pls.model2.fast.gpu =
   }
 
 
-#' Predict from a fitted fastPLS object
+#' Predict from fitted fastPLS models
 #'
-#' Applies stored preprocessing (`mX`, `vX`) and coefficient slices (`B`) to
-#' produce test predictions. For classification models, one-hot predictions are
-#' converted to labels by argmax over response columns.
+#' Applies stored preprocessing and coefficient factors to produce test
+#' predictions. For kernel PLS and OPLS fits, the corresponding preprocessing or
+#' filtering step is applied before dispatching to the inner `fastPLS`
+#' predictor. For classification models, response scores are converted to labels
+#' by argmax over response columns unless an LDA classifier was fitted.
 #'
-#' @param object A fitted `fastPLS` object.
+#' @param object A fitted `fastPLS`, `fastPLSKernel`, or `fastPLSOpls` object.
 #' @param newdata Numeric predictor matrix.
 #' @param Ytest Optional observed response used to compute `Q2Y`.
 #' @param proj Logical; return projected `Ttest` when `TRUE`.
@@ -1794,7 +1796,8 @@ pls.model2.fast.gpu =
 #'   application is expected to be beneficial.
 #' @param flash.block_size Row block size for `"cpu_flash"` prediction.
 #' @param ... Unused.
-#' @return A list containing `Ypred`, optional `Q2Y`, and optional `Ttest`.
+#' @return A list containing `Ypred`, optional `Q2Y`, optional `Ttest`, and
+#'   optional LDA scores for LDA classification models.
 #' @export
 predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
@@ -2370,6 +2373,7 @@ kernel_pls_fast_cuda <- function(...) {
   .fastpls_call_fixed_method(kernel_pls_cuda, "simpls", ...)
 }
 
+#' @rdname predict.fastPLS
 #' @export
 predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, ...) {
   if (!is(object, "fastPLSKernel")) {
@@ -2627,6 +2631,7 @@ opls_fast_cuda <- function(...) {
   .fastpls_call_fixed_method(opls_cuda, "simpls", ...)
 }
 
+#' @rdname predict.fastPLS
 #' @export
 predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...) {
   if (!is(object, "fastPLSOpls")) {
@@ -5083,10 +5088,11 @@ pls_r = function (Xtrain,
 
 
 
-#' Partial Least Squares with selectable outer algorithm and SVD backend
+#' Partial Least Squares with selectable model family and backend
 #'
-#' Outer algorithm (`method`) and inner linear algebra backend (`svd.method`) are
-#' configurable independently.
+#' `pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
+#' and kernel PLS through the selected CPU, pure-R, or CUDA backend while keeping
+#' low-level implementation functions internal.
 #'
 #' @param Xtrain Numeric training predictor matrix.
 #' @param Ytrain Training response (numeric or factor).
@@ -5094,7 +5100,8 @@ pls_r = function (Xtrain,
 #' @param Ytest Optional test response for `Q2Y`.
 #' @param ncomp Number of components (scalar or vector).
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
-#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
+#' @param method One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
+#'   `simpls` uses the fastPLS accelerated SIMPLS core.
 #' @param svd.method One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 #'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 #'   from `pls()`; use `backend = "cuda"` for GPU-native fits.
@@ -5120,7 +5127,10 @@ pls_r = function (Xtrain,
 #'   standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
 #'   on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
 #'   same LDA model and CUDA matrix multiplication for latent projection and
-#'   discriminant scoring when CUDA is available. The experimental fused
+#'   discriminant scoring when CUDA is available. For high-throughput PLS-DA on
+#'   GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
+#'   and `classifier = "lda_cuda"`; the compiled CPU fallback is
+#'   `classifier = "lda_cpp"`. The experimental fused
 #'   CUDA PLS+LDA path can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the
 #'   optimized standard CUDA LDA route remains the default.
 #' @param lda_ridge Relative diagonal ridge added to the pooled LDA covariance.
@@ -5143,6 +5153,22 @@ pls_r = function (Xtrain,
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param perm.test Run permutation test.
 #' @param times Number of permutations.
+#' @param backend Implementation backend: `"cpp"` for compiled CPU, `"r"` for
+#'   the matched pure-R reference path, or `"cuda"` for GPU-native fitting.
+#' @param inner.method Inner PLS core used by `method = "opls"` or
+#'   `method = "kernelpls"`.
+#' @param north Number of orthogonal components removed by OPLS.
+#' @param kernel Kernel type for kernel PLS: `"linear"`, `"rbf"`, or `"poly"`.
+#' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.
+#' @param degree Polynomial kernel degree.
+#' @param coef0 Polynomial kernel offset.
+#' @param gpu_device_state Keep selected SIMPLS GPU workspaces resident when
+#'   using `backend = "cuda"`.
+#' @param gpu_qr Use GPU QR finalization when available.
+#' @param gpu_eig Use GPU eigensolver finalization when available.
+#' @param gpu_qless_qr Use the q-less GPU QR path when available.
+#' @param gpu_finalize_threshold Component threshold controlling GPU-side
+#'   finalization.
 #' @return A `fastPLS` object.
 #' @export
 pls =  function (Xtrain,

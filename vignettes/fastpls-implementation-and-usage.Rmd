@@ -122,6 +122,11 @@ the selected PLS core in kernel space. Both are accessed through `pls()`:
 - `pls(..., backend = "cuda")` uses GPU-native fits where available.
 - for classification, factor `Y` is converted internally to one-hot encoding and
   class labels are returned by `predict.fastPLS()`.
+- for PLS-DA with LDA classification, the recommended high-throughput route is
+  `method = "plssvd"`, `backend = "cuda"`, and `classifier = "lda_cuda"`.
+  This keeps the standard CUDA PLS fit and applies native CUDA latent projection
+  and LDA discriminant scoring. Use `classifier = "lda_cpp"` as the compiled CPU
+  fallback when CUDA is unavailable.
 
 ## Regression Workflow
 
@@ -174,6 +179,33 @@ m_cls <- pls(
 pred_cls <- predict(m_cls, Xte, Ytest = yte_cls)
 head(pred_cls$Ypred)
 table(pred_cls$Ypred[[2]], yte_cls)
+```
+
+The default classification rule is the classical PLS-DA argmax over predicted
+response scores. For difficult multi-class problems, an LDA head fitted on the
+PLS latent scores can improve accuracy. On a CUDA build, the recommended PLS-LDA
+configuration is:
+
+```{r eval = FALSE}
+m_lda_gpu <- pls(
+  Xtr, ytr_cls, Xte, yte_cls,
+  ncomp = 50,
+  method = "plssvd",
+  backend = "cuda",
+  classifier = "lda_cuda"
+)
+```
+
+The equivalent compiled CPU fallback is:
+
+```{r eval = FALSE}
+m_lda_cpp <- pls(
+  Xtr, ytr_cls, Xte, yte_cls,
+  ncomp = 50,
+  method = "plssvd",
+  backend = "cpp",
+  classifier = "lda_cpp"
+)
 ```
 
 ## Pure-R Workflow
@@ -247,6 +279,8 @@ str(vip)
   standard CPU implementation, and `backend = "cuda"` for GPU-native fitting.
 - Use `plssvd` when you want direct control over rank-constrained latent
   structure; fastPLS automatically enforces the valid component cap.
+- For PLS-DA with LDA prediction, prefer `method = "plssvd"`,
+  `backend = "cuda"`, and `classifier = "lda_cuda"` when CUDA is available.
 - For reproducible approximate SVD, keep `svd.method = "cpu_rsvd"` and set
   `seed` (and optionally `rsvd_power`).
 - Use `has_cuda()` to check whether CUDA-native execution is available in your

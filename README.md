@@ -58,10 +58,12 @@ CUDA wrappers use the CUDA matrix-multiply helper for the regression projection
 and decoder construction when CUDA is available. The classification codebook is
 small and is built on the host before the GPU-native PLS fit.
 
-For PLS-DA with LDA classification, the recommended GPU configuration is
-`backend = "cuda", classifier = "lda_cuda"`. This uses the optimized standard
-CUDA path for latent projection, LDA training, and discriminant scoring. An
-experimental fused CUDA PLS+LDA path is available with
+For PLS-DA with LDA classification, the recommended high-accuracy/high-speed
+configuration is `method = "plssvd", backend = "cuda", classifier = "lda_cuda"`.
+This uses the optimized standard CUDA path for latent projection, LDA training,
+and discriminant scoring. If CUDA is unavailable, use
+`method = "plssvd", backend = "cpp", classifier = "lda_cpp"` as the compiled CPU
+fallback. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
