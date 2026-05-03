@@ -1,4 +1,4 @@
-test_that("plssvd_gpu requires CUDA or returns fastPLS output", {
+test_that("pls backend='cuda' requires CUDA or returns fastPLS output", {
   set.seed(20260419)
   X <- matrix(rnorm(90 * 16), nrow = 90, ncol = 16)
   y <- factor(sample(letters[1:6], 90, replace = TRUE))
@@ -6,16 +6,22 @@ test_that("plssvd_gpu requires CUDA or returns fastPLS output", {
 
   if (!has_cuda()) {
     expect_error(
-      plssvd_gpu(X[-idx, , drop = FALSE], y[-idx], X[idx, , drop = FALSE], y[idx], ncomp = 1:3),
+      pls(
+        X[-idx, , drop = FALSE], y[-idx],
+        X[idx, , drop = FALSE], y[idx],
+        ncomp = 1:3, method = "plssvd", backend = "cuda"
+      ),
       "CUDA-enabled"
     )
   } else {
-    gpu_fit <- plssvd_gpu(
+    gpu_fit <- pls(
       X[-idx, , drop = FALSE],
       y[-idx],
       X[idx, , drop = FALSE],
       y[idx],
       ncomp = 1:3,
+      method = "plssvd",
+      backend = "cuda",
       fit = TRUE,
       seed = 77L
     )

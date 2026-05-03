@@ -119,6 +119,71 @@ void check_cusolver(cusolverStatus_t code, const char* where) {
   }
 }
 
+#ifdef FASTPLS_HAS_CUDA_KERNELS
+extern "C" {
+void fastpls_cuda_lda_means(double* means,
+                            const double* counts,
+                            int kmax,
+                            int n_classes,
+                            cudaStream_t stream);
+void fastpls_cuda_lda_label_sums(const double* T,
+                                 const int* y,
+                                 int n,
+                                 int kmax,
+                                 int n_classes,
+                                 double* sums,
+                                 cudaStream_t stream);
+void fastpls_cuda_lda_subtract_offsets(double* T,
+                                       const double* offsets,
+                                       int n,
+                                       int kmax,
+                                       cudaStream_t stream);
+void fastpls_cuda_lda_pooled(double* pooled,
+                             const double* means,
+                             const double* counts,
+                             int n,
+                             int kmax,
+                             int n_classes,
+                             cudaStream_t stream);
+void fastpls_cuda_lda_copy_cov(const double* pooled,
+                               double* cov,
+                               int kmax,
+                               int kk,
+                               cudaStream_t stream);
+void fastpls_cuda_lda_add_ridge(double* cov,
+                                int kk,
+                                double ridge,
+                                double* lambda_out,
+                                cudaStream_t stream);
+void fastpls_cuda_lda_means_to_rhs(const double* means,
+                                   double* rhs,
+                                   int kmax,
+                                   int kk,
+                                   int n_classes,
+                                   cudaStream_t stream);
+void fastpls_cuda_lda_finalize_linear(const double* rhs,
+                                      const double* means,
+                                      const double* counts,
+                                      double* linear,
+                                      double* constants,
+                                      int n,
+                                      int kmax,
+                                      int kk,
+                                      int n_classes,
+                                      cudaStream_t stream);
+void fastpls_cuda_lda_score_argmax(double* scores,
+                                   const double* constants,
+                                   int* pred,
+                                   int n,
+                                   int n_classes,
+                                   cudaStream_t stream);
+}
+
+void check_kernel_launch(const char* where) {
+  check_cuda(cudaPeekAtLastError(), where);
+}
+#endif
+
 arma::mat inv_sqrt_psd(const arma::mat& G) {
   arma::vec evals;
   arma::mat evecs;
@@ -2771,6 +2836,885 @@ arma::imat cuda_flash_lowrank_predict_classes(
   }
 }
 
+bool cuda_lda_native_available() {
+#ifdef FASTPLS_HAS_CUDA_KERNELS
+  return cuda_runtime_available();
+#else
+  return false;
+#endif
+}
+
+std::vector<LDAGPUModel> cuda_lda_train_prefix(
+  const Mat& Ttrain,
+  const arma::ivec& y,
+  int n_classes,
+  const arma::ivec& ncomp,
+  double ridge
+) {
+#ifndef FASTPLS_HAS_CUDA_KERNELS
+  (void)Ttrain;
+  (void)y;
+  (void)n_classes;
+  (void)ncomp;
+  (void)ridge;
+  throw std::runtime_error("CUDA LDA kernels not compiled");
+#else
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
+    throw std::runtime_error("cuda_lda_train_prefix requires a non-empty score matrix");
+  }
+  if (static_cast<arma::uword>(y.n_elem) != Ttrain.n_rows) {
+    throw std::runtime_error("cuda_lda_train_prefix requires one label per training row");
+  }
+  if (n_classes < 2) {
+    throw std::runtime_error("cuda_lda_train_prefix requires at least two classes");
+  }
+  if (ncomp.n_elem < 1) {
+    throw std::runtime_error("cuda_lda_train_prefix requires at least one component count");
+  }
+  if (Ttrain.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Ttrain.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      n_classes > std::numeric_limits<int>::max()) {
+    throw std::runtime_error("cuda_lda_train_prefix matrix dimension exceeds CUDA int limits");
+  }
+
+  int kmax = 0;
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > kmax) kmax = ncomp(i);
+  }
+  if (kmax < 1 || kmax > static_cast<int>(Ttrain.n_cols)) {
+    throw std::runtime_error("cuda_lda_train_prefix component counts must be in 1..ncol(Ttrain)");
+  }
+
+  const int n = static_cast<int>(Ttrain.n_rows);
+  const int C = n_classes;
+  const size_t bytes_T = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(kmax);
+  const size_t bytes_y = sizeof(int) * static_cast<size_t>(n);
+  const size_t bytes_counts = sizeof(double) * static_cast<size_t>(C);
+  const size_t bytes_means = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kmax);
+  const size_t bytes_pooled = sizeof(double) * static_cast<size_t>(kmax) * static_cast<size_t>(kmax);
+  const size_t bytes_rhs_max = sizeof(double) * static_cast<size_t>(kmax) * static_cast<size_t>(C);
+  const size_t bytes_linear_max = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kmax);
+
+  double* dT = nullptr;
+  int* dLabels = nullptr;
+  double* dCounts = nullptr;
+  double* dMeans = nullptr;
+  double* dPooled = nullptr;
+  double* dCov = nullptr;
+  double* dRhs = nullptr;
+  double* dLinear = nullptr;
+  double* dConstants = nullptr;
+  double* dLambda = nullptr;
+  double* dWork = nullptr;
+  int* dInfo = nullptr;
+  cublasHandle_t handle = nullptr;
+  cusolverDnHandle_t solver = nullptr;
+  cudaStream_t stream = nullptr;
+
+  auto cleanup = [&]() {
+    if (dT) cudaFree(dT);
+    if (dLabels) cudaFree(dLabels);
+    if (dCounts) cudaFree(dCounts);
+    if (dMeans) cudaFree(dMeans);
+    if (dPooled) cudaFree(dPooled);
+    if (dCov) cudaFree(dCov);
+    if (dRhs) cudaFree(dRhs);
+    if (dLinear) cudaFree(dLinear);
+    if (dConstants) cudaFree(dConstants);
+    if (dLambda) cudaFree(dLambda);
+    if (dWork) cudaFree(dWork);
+    if (dInfo) cudaFree(dInfo);
+    if (solver) cusolverDnDestroy(solver);
+    if (handle) cublasDestroy(handle);
+    if (stream) cudaStreamDestroy(stream);
+  };
+
+  try {
+    check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_lda_train_prefix)");
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_lda_train_prefix)");
+    check_cublas(cublasSetStream(handle, stream), "cublasSetStream(cuda_lda_train_prefix)");
+    check_cusolver(cusolverDnCreate(&solver), "cusolverDnCreate(cuda_lda_train_prefix)");
+    check_cusolver(cusolverDnSetStream(solver, stream), "cusolverDnSetStream(cuda_lda_train_prefix)");
+
+    check_cuda(cudaMalloc(&dT, bytes_T), "cudaMalloc(cuda_lda T)");
+    check_cuda(cudaMalloc(&dLabels, bytes_y), "cudaMalloc(cuda_lda labels)");
+    check_cuda(cudaMalloc(&dCounts, bytes_counts), "cudaMalloc(cuda_lda counts)");
+    check_cuda(cudaMalloc(&dMeans, bytes_means), "cudaMalloc(cuda_lda means)");
+    check_cuda(cudaMalloc(&dPooled, bytes_pooled), "cudaMalloc(cuda_lda pooled)");
+    check_cuda(cudaMalloc(&dCov, bytes_pooled), "cudaMalloc(cuda_lda cov)");
+    check_cuda(cudaMalloc(&dRhs, bytes_rhs_max), "cudaMalloc(cuda_lda rhs)");
+    check_cuda(cudaMalloc(&dLinear, bytes_linear_max), "cudaMalloc(cuda_lda linear)");
+    check_cuda(cudaMalloc(&dConstants, bytes_counts), "cudaMalloc(cuda_lda constants)");
+    check_cuda(cudaMalloc(&dLambda, sizeof(double)), "cudaMalloc(cuda_lda lambda)");
+    check_cuda(cudaMalloc(&dInfo, sizeof(int)), "cudaMalloc(cuda_lda info)");
+
+    check_cuda(cudaMemcpyAsync(dT, Ttrain.memptr(), bytes_T, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda T)");
+    std::vector<int> labels_host(static_cast<size_t>(n));
+    arma::vec counts_host(C, arma::fill::zeros);
+    for (int i = 0; i < n; ++i) {
+      const int cls = y(static_cast<arma::uword>(i)) - 1;
+      if (cls < 0 || cls >= C) {
+        throw std::runtime_error("cuda_lda_train_prefix labels must be encoded as 1..n_classes");
+      }
+      labels_host[static_cast<size_t>(i)] = cls + 1;
+      counts_host(cls) += 1.0;
+    }
+    for (int c = 0; c < C; ++c) {
+      if (counts_host(c) <= 0.0) {
+        throw std::runtime_error("cuda_lda_train_prefix received an empty class");
+      }
+    }
+    check_cuda(cudaMemcpyAsync(dLabels, labels_host.data(), bytes_y, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda labels)");
+    check_cuda(cudaMemcpyAsync(dCounts, counts_host.memptr(), bytes_counts, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda counts)");
+
+    const double one = 1.0;
+    const double zero = 0.0;
+    fastpls_cuda_lda_label_sums(dT, dLabels, n, kmax, C, dMeans, stream);
+    check_kernel_launch("fastpls_cuda_lda_label_sums");
+    fastpls_cuda_lda_means(dMeans, dCounts, kmax, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_means");
+
+    check_cublas(
+      cublasDgemm(
+        handle,
+        CUBLAS_OP_T,
+        CUBLAS_OP_N,
+        kmax,
+        kmax,
+        n,
+        &one,
+        dT,
+        n,
+        dT,
+        n,
+        &zero,
+        dPooled,
+        kmax
+      ),
+      "cublasDgemm(cuda_lda TtT)"
+    );
+    fastpls_cuda_lda_pooled(dPooled, dMeans, dCounts, n, kmax, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_pooled");
+
+    arma::mat means_host(C, kmax, arma::fill::zeros);
+    check_cuda(cudaMemcpyAsync(means_host.memptr(), dMeans, bytes_means, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda means_host)");
+    check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda means)");
+
+    std::vector<LDAGPUModel> out;
+    out.reserve(static_cast<size_t>(ncomp.n_elem));
+    for (arma::uword idx = 0; idx < ncomp.n_elem; ++idx) {
+      const int kk = ncomp(idx);
+      if (kk < 1 || kk > kmax) {
+        throw std::runtime_error("cuda_lda_train_prefix component counts must be in 1..max(ncomp)");
+      }
+      fastpls_cuda_lda_copy_cov(dPooled, dCov, kmax, kk, stream);
+      check_kernel_launch("fastpls_cuda_lda_copy_cov");
+      fastpls_cuda_lda_add_ridge(dCov, kk, ridge, dLambda, stream);
+      check_kernel_launch("fastpls_cuda_lda_add_ridge");
+      fastpls_cuda_lda_means_to_rhs(dMeans, dRhs, kmax, kk, C, stream);
+      check_kernel_launch("fastpls_cuda_lda_means_to_rhs");
+
+      int lwork = 0;
+      check_cusolver(
+        cusolverDnDpotrf_bufferSize(
+          solver,
+          CUBLAS_FILL_MODE_LOWER,
+          kk,
+          dCov,
+          kk,
+          &lwork
+        ),
+        "cusolverDnDpotrf_bufferSize(cuda_lda)"
+      );
+      if (dWork) {
+        check_cuda(cudaFree(dWork), "cudaFree(cuda_lda old work)");
+        dWork = nullptr;
+      }
+      check_cuda(cudaMalloc(&dWork, sizeof(double) * static_cast<size_t>(std::max(lwork, 1))), "cudaMalloc(cuda_lda work)");
+      check_cusolver(
+        cusolverDnDpotrf(
+          solver,
+          CUBLAS_FILL_MODE_LOWER,
+          kk,
+          dCov,
+          kk,
+          dWork,
+          lwork,
+          dInfo
+        ),
+        "cusolverDnDpotrf(cuda_lda)"
+      );
+      int info = 0;
+      check_cuda(cudaMemcpyAsync(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda potrf info)");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda potrf)");
+      if (info != 0) {
+        throw std::runtime_error("cusolverDnDpotrf(cuda_lda) returned non-zero info");
+      }
+      check_cusolver(
+        cusolverDnDpotrs(
+          solver,
+          CUBLAS_FILL_MODE_LOWER,
+          kk,
+          C,
+          dCov,
+          kk,
+          dRhs,
+          kk,
+          dInfo
+        ),
+        "cusolverDnDpotrs(cuda_lda)"
+      );
+      check_cuda(cudaMemcpyAsync(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda potrs info)");
+      fastpls_cuda_lda_finalize_linear(dRhs, dMeans, dCounts, dLinear, dConstants, n, kmax, kk, C, stream);
+      check_kernel_launch("fastpls_cuda_lda_finalize_linear");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda solve/finalize)");
+      if (info != 0) {
+        throw std::runtime_error("cusolverDnDpotrs(cuda_lda) returned non-zero info");
+      }
+
+      LDAGPUModel model;
+      model.means = means_host.cols(0, kk - 1);
+      model.linear.set_size(C, kk);
+      model.constants.set_size(C);
+      model.priors = counts_host / static_cast<double>(n);
+      check_cuda(cudaMemcpy(model.linear.memptr(), dLinear, sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kk), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda linear)");
+      check_cuda(cudaMemcpy(model.constants.memptr(), dConstants, bytes_counts, cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda constants)");
+      check_cuda(cudaMemcpy(&model.ridge, dLambda, sizeof(double), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda lambda)");
+      out.push_back(model);
+    }
+
+    cleanup();
+    return out;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
+}
+
+std::vector<LDAGPUModel> cuda_lda_project_train_prefix(
+  const Mat& Xtrain,
+  const Mat& R,
+  const arma::rowvec& offset,
+  const arma::ivec& y,
+  int n_classes,
+  const arma::ivec& ncomp,
+  double ridge
+) {
+#ifndef FASTPLS_HAS_CUDA_KERNELS
+  (void)Xtrain;
+  (void)R;
+  (void)offset;
+  (void)y;
+  (void)n_classes;
+  (void)ncomp;
+  (void)ridge;
+  throw std::runtime_error("CUDA LDA kernels not compiled");
+#else
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Xtrain.n_rows == 0 || Xtrain.n_cols == 0 || R.n_rows == 0 || R.n_cols == 0) {
+    throw std::runtime_error("cuda_lda_project_train_prefix requires non-empty X and projection matrices");
+  }
+  if (Xtrain.n_cols != R.n_rows) {
+    throw std::runtime_error("cuda_lda_project_train_prefix X columns do not match projection rows");
+  }
+  if (static_cast<arma::uword>(y.n_elem) != Xtrain.n_rows) {
+    throw std::runtime_error("cuda_lda_project_train_prefix requires one label per training row");
+  }
+  if (n_classes < 2) {
+    throw std::runtime_error("cuda_lda_project_train_prefix requires at least two classes");
+  }
+  if (ncomp.n_elem < 1) {
+    throw std::runtime_error("cuda_lda_project_train_prefix requires at least one component count");
+  }
+  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
+    throw std::runtime_error("cuda_lda_project_train_prefix offset length is smaller than projection dimension");
+  }
+  if (Xtrain.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Xtrain.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      R.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      n_classes > std::numeric_limits<int>::max()) {
+    throw std::runtime_error("cuda_lda_project_train_prefix matrix dimension exceeds CUDA int limits");
+  }
+
+  int kmax = 0;
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > kmax) kmax = ncomp(i);
+  }
+  if (kmax < 1 || kmax > static_cast<int>(R.n_cols)) {
+    throw std::runtime_error("cuda_lda_project_train_prefix component counts must be in 1..ncol(R)");
+  }
+
+  const int n = static_cast<int>(Xtrain.n_rows);
+  const int p = static_cast<int>(Xtrain.n_cols);
+  const int C = n_classes;
+  const size_t bytes_X = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(p);
+  const size_t bytes_R = sizeof(double) * static_cast<size_t>(p) * static_cast<size_t>(kmax);
+  const size_t bytes_T = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(kmax);
+  const size_t bytes_y = sizeof(int) * static_cast<size_t>(n);
+  const size_t bytes_counts = sizeof(double) * static_cast<size_t>(C);
+  const size_t bytes_means = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kmax);
+  const size_t bytes_pooled = sizeof(double) * static_cast<size_t>(kmax) * static_cast<size_t>(kmax);
+  const size_t bytes_rhs_max = sizeof(double) * static_cast<size_t>(kmax) * static_cast<size_t>(C);
+  const size_t bytes_linear_max = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kmax);
+  const size_t bytes_offsets = sizeof(double) * static_cast<size_t>(kmax);
+
+  double* dX = nullptr;
+  double* dR = nullptr;
+  double* dT = nullptr;
+  double* dOffsets = nullptr;
+  int* dLabels = nullptr;
+  double* dCounts = nullptr;
+  double* dMeans = nullptr;
+  double* dPooled = nullptr;
+  double* dCov = nullptr;
+  double* dRhs = nullptr;
+  double* dLinear = nullptr;
+  double* dConstants = nullptr;
+  double* dLambda = nullptr;
+  double* dWork = nullptr;
+  int* dInfo = nullptr;
+  cublasHandle_t handle = nullptr;
+  cusolverDnHandle_t solver = nullptr;
+  cudaStream_t stream = nullptr;
+
+  auto cleanup = [&]() {
+    if (dX) cudaFree(dX);
+    if (dR) cudaFree(dR);
+    if (dT) cudaFree(dT);
+    if (dOffsets) cudaFree(dOffsets);
+    if (dLabels) cudaFree(dLabels);
+    if (dCounts) cudaFree(dCounts);
+    if (dMeans) cudaFree(dMeans);
+    if (dPooled) cudaFree(dPooled);
+    if (dCov) cudaFree(dCov);
+    if (dRhs) cudaFree(dRhs);
+    if (dLinear) cudaFree(dLinear);
+    if (dConstants) cudaFree(dConstants);
+    if (dLambda) cudaFree(dLambda);
+    if (dWork) cudaFree(dWork);
+    if (dInfo) cudaFree(dInfo);
+    if (solver) cusolverDnDestroy(solver);
+    if (handle) cublasDestroy(handle);
+    if (stream) cudaStreamDestroy(stream);
+  };
+
+  try {
+    check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_lda_project_train_prefix)");
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_lda_project_train_prefix)");
+    check_cublas(cublasSetStream(handle, stream), "cublasSetStream(cuda_lda_project_train_prefix)");
+    check_cusolver(cusolverDnCreate(&solver), "cusolverDnCreate(cuda_lda_project_train_prefix)");
+    check_cusolver(cusolverDnSetStream(solver, stream), "cusolverDnSetStream(cuda_lda_project_train_prefix)");
+
+    check_cuda(cudaMalloc(&dX, bytes_X), "cudaMalloc(cuda_lda_project X)");
+    check_cuda(cudaMalloc(&dR, bytes_R), "cudaMalloc(cuda_lda_project R)");
+    check_cuda(cudaMalloc(&dT, bytes_T), "cudaMalloc(cuda_lda_project T)");
+    check_cuda(cudaMalloc(&dOffsets, bytes_offsets), "cudaMalloc(cuda_lda_project offsets)");
+    check_cuda(cudaMalloc(&dLabels, bytes_y), "cudaMalloc(cuda_lda_project labels)");
+    check_cuda(cudaMalloc(&dCounts, bytes_counts), "cudaMalloc(cuda_lda_project counts)");
+    check_cuda(cudaMalloc(&dMeans, bytes_means), "cudaMalloc(cuda_lda_project means)");
+    check_cuda(cudaMalloc(&dPooled, bytes_pooled), "cudaMalloc(cuda_lda_project pooled)");
+    check_cuda(cudaMalloc(&dCov, bytes_pooled), "cudaMalloc(cuda_lda_project cov)");
+    check_cuda(cudaMalloc(&dRhs, bytes_rhs_max), "cudaMalloc(cuda_lda_project rhs)");
+    check_cuda(cudaMalloc(&dLinear, bytes_linear_max), "cudaMalloc(cuda_lda_project linear)");
+    check_cuda(cudaMalloc(&dConstants, bytes_counts), "cudaMalloc(cuda_lda_project constants)");
+    check_cuda(cudaMalloc(&dLambda, sizeof(double)), "cudaMalloc(cuda_lda_project lambda)");
+    check_cuda(cudaMalloc(&dInfo, sizeof(int)), "cudaMalloc(cuda_lda_project info)");
+
+    check_cuda(cudaMemcpyAsync(dX, Xtrain.memptr(), bytes_X, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project X)");
+    check_cuda(cudaMemcpyAsync(dR, R.memptr(), bytes_R, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project R)");
+    arma::rowvec offset_host(kmax, arma::fill::zeros);
+    if (offset.n_elem >= static_cast<arma::uword>(kmax)) {
+      offset_host = offset.subvec(0, static_cast<arma::uword>(kmax) - 1);
+    }
+    check_cuda(cudaMemcpyAsync(dOffsets, offset_host.memptr(), bytes_offsets, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project offsets)");
+
+    const double one = 1.0;
+    const double zero = 0.0;
+    check_cublas(
+      cublasDgemm(
+        handle,
+        CUBLAS_OP_N,
+        CUBLAS_OP_N,
+        n,
+        kmax,
+        p,
+        &one,
+        dX,
+        n,
+        dR,
+        p,
+        &zero,
+        dT,
+        n
+      ),
+      "cublasDgemm(cuda_lda_project latent)"
+    );
+    fastpls_cuda_lda_subtract_offsets(dT, dOffsets, n, kmax, stream);
+    check_kernel_launch("fastpls_cuda_lda_subtract_offsets");
+
+    std::vector<int> labels_host(static_cast<size_t>(n));
+    arma::vec counts_host(C, arma::fill::zeros);
+    for (int i = 0; i < n; ++i) {
+      const int cls = y(static_cast<arma::uword>(i)) - 1;
+      if (cls < 0 || cls >= C) {
+        throw std::runtime_error("cuda_lda_project_train_prefix labels must be encoded as 1..n_classes");
+      }
+      labels_host[static_cast<size_t>(i)] = cls + 1;
+      counts_host(cls) += 1.0;
+    }
+    for (int c = 0; c < C; ++c) {
+      if (counts_host(c) <= 0.0) {
+        throw std::runtime_error("cuda_lda_project_train_prefix received an empty class");
+      }
+    }
+    check_cuda(cudaMemcpyAsync(dLabels, labels_host.data(), bytes_y, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project labels)");
+    check_cuda(cudaMemcpyAsync(dCounts, counts_host.memptr(), bytes_counts, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project counts)");
+
+    fastpls_cuda_lda_label_sums(dT, dLabels, n, kmax, C, dMeans, stream);
+    check_kernel_launch("fastpls_cuda_lda_label_sums(project)");
+    fastpls_cuda_lda_means(dMeans, dCounts, kmax, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_means(project)");
+
+    check_cublas(
+      cublasDgemm(
+        handle,
+        CUBLAS_OP_T,
+        CUBLAS_OP_N,
+        kmax,
+        kmax,
+        n,
+        &one,
+        dT,
+        n,
+        dT,
+        n,
+        &zero,
+        dPooled,
+        kmax
+      ),
+      "cublasDgemm(cuda_lda_project TtT)"
+    );
+    fastpls_cuda_lda_pooled(dPooled, dMeans, dCounts, n, kmax, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_pooled(project)");
+
+    arma::mat means_host(C, kmax, arma::fill::zeros);
+    check_cuda(cudaMemcpyAsync(means_host.memptr(), dMeans, bytes_means, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_project means_host)");
+    check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_project means)");
+
+    std::vector<LDAGPUModel> out;
+    out.reserve(static_cast<size_t>(ncomp.n_elem));
+    for (arma::uword idx = 0; idx < ncomp.n_elem; ++idx) {
+      const int kk = ncomp(idx);
+      if (kk < 1 || kk > kmax) {
+        throw std::runtime_error("cuda_lda_project_train_prefix component counts must be in 1..max(ncomp)");
+      }
+      fastpls_cuda_lda_copy_cov(dPooled, dCov, kmax, kk, stream);
+      check_kernel_launch("fastpls_cuda_lda_copy_cov(project)");
+      fastpls_cuda_lda_add_ridge(dCov, kk, ridge, dLambda, stream);
+      check_kernel_launch("fastpls_cuda_lda_add_ridge(project)");
+      fastpls_cuda_lda_means_to_rhs(dMeans, dRhs, kmax, kk, C, stream);
+      check_kernel_launch("fastpls_cuda_lda_means_to_rhs(project)");
+
+      int lwork = 0;
+      check_cusolver(
+        cusolverDnDpotrf_bufferSize(solver, CUBLAS_FILL_MODE_LOWER, kk, dCov, kk, &lwork),
+        "cusolverDnDpotrf_bufferSize(cuda_lda_project)"
+      );
+      if (dWork) {
+        check_cuda(cudaFree(dWork), "cudaFree(cuda_lda_project old work)");
+        dWork = nullptr;
+      }
+      check_cuda(cudaMalloc(&dWork, sizeof(double) * static_cast<size_t>(std::max(lwork, 1))), "cudaMalloc(cuda_lda_project work)");
+      check_cusolver(
+        cusolverDnDpotrf(solver, CUBLAS_FILL_MODE_LOWER, kk, dCov, kk, dWork, lwork, dInfo),
+        "cusolverDnDpotrf(cuda_lda_project)"
+      );
+      int info = 0;
+      check_cuda(cudaMemcpyAsync(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_project potrf info)");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_project potrf)");
+      if (info != 0) {
+        throw std::runtime_error("cusolverDnDpotrf(cuda_lda_project) returned non-zero info");
+      }
+      check_cusolver(
+        cusolverDnDpotrs(solver, CUBLAS_FILL_MODE_LOWER, kk, C, dCov, kk, dRhs, kk, dInfo),
+        "cusolverDnDpotrs(cuda_lda_project)"
+      );
+      check_cuda(cudaMemcpyAsync(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_project potrs info)");
+      fastpls_cuda_lda_finalize_linear(dRhs, dMeans, dCounts, dLinear, dConstants, n, kmax, kk, C, stream);
+      check_kernel_launch("fastpls_cuda_lda_finalize_linear(project)");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_project solve/finalize)");
+      if (info != 0) {
+        throw std::runtime_error("cusolverDnDpotrs(cuda_lda_project) returned non-zero info");
+      }
+
+      LDAGPUModel model;
+      model.means = means_host.cols(0, kk - 1);
+      model.linear.set_size(C, kk);
+      model.constants.set_size(C);
+      model.priors = counts_host / static_cast<double>(n);
+      check_cuda(cudaMemcpy(model.linear.memptr(), dLinear, sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(kk), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda_project linear)");
+      check_cuda(cudaMemcpy(model.constants.memptr(), dConstants, bytes_counts, cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda_project constants)");
+      check_cuda(cudaMemcpy(&model.ridge, dLambda, sizeof(double), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_lda_project lambda)");
+      out.push_back(model);
+    }
+
+    cleanup();
+    return out;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
+}
+
+Rcpp::List cuda_lda_predict(
+  const Mat& Ttest,
+  const Mat& linear,
+  const arma::rowvec& constants,
+  bool return_scores
+) {
+#ifndef FASTPLS_HAS_CUDA_KERNELS
+  (void)Ttest;
+  (void)linear;
+  (void)constants;
+  (void)return_scores;
+  throw std::runtime_error("CUDA LDA kernels not compiled");
+#else
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    throw std::runtime_error("cuda_lda_predict requires a non-empty score matrix");
+  }
+  if (Ttest.n_cols != linear.n_cols) {
+    throw std::runtime_error("cuda_lda_predict score dimension does not match LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    throw std::runtime_error("cuda_lda_predict has inconsistent LDA constants");
+  }
+  if (Ttest.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Ttest.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      linear.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_lda_predict matrix dimension exceeds CUDA int limits");
+  }
+
+  const int n = static_cast<int>(Ttest.n_rows);
+  const int k = static_cast<int>(Ttest.n_cols);
+  const int C = static_cast<int>(linear.n_rows);
+  const size_t bytes_T = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(k);
+  const size_t bytes_linear = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(k);
+  const size_t bytes_constants = sizeof(double) * static_cast<size_t>(C);
+  const size_t bytes_scores = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(C);
+  const size_t bytes_pred = sizeof(int) * static_cast<size_t>(n);
+
+  double* dT = nullptr;
+  double* dLinear = nullptr;
+  double* dConstants = nullptr;
+  double* dScores = nullptr;
+  int* dPred = nullptr;
+  cublasHandle_t handle = nullptr;
+  cudaStream_t stream = nullptr;
+
+  auto cleanup = [&]() {
+    if (dT) cudaFree(dT);
+    if (dLinear) cudaFree(dLinear);
+    if (dConstants) cudaFree(dConstants);
+    if (dScores) cudaFree(dScores);
+    if (dPred) cudaFree(dPred);
+    if (handle) cublasDestroy(handle);
+    if (stream) cudaStreamDestroy(stream);
+  };
+
+  try {
+    check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_lda_predict)");
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_lda_predict)");
+    check_cublas(cublasSetStream(handle, stream), "cublasSetStream(cuda_lda_predict)");
+    check_cuda(cudaMalloc(&dT, bytes_T), "cudaMalloc(cuda_lda_predict T)");
+    check_cuda(cudaMalloc(&dLinear, bytes_linear), "cudaMalloc(cuda_lda_predict linear)");
+    check_cuda(cudaMalloc(&dConstants, bytes_constants), "cudaMalloc(cuda_lda_predict constants)");
+    check_cuda(cudaMalloc(&dScores, bytes_scores), "cudaMalloc(cuda_lda_predict scores)");
+    check_cuda(cudaMalloc(&dPred, bytes_pred), "cudaMalloc(cuda_lda_predict pred)");
+    check_cuda(cudaMemcpyAsync(dT, Ttest.memptr(), bytes_T, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_predict T)");
+    check_cuda(cudaMemcpyAsync(dLinear, linear.memptr(), bytes_linear, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_predict linear)");
+    check_cuda(cudaMemcpyAsync(dConstants, constants.memptr(), bytes_constants, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_predict constants)");
+
+    const double one = 1.0;
+    const double zero = 0.0;
+    check_cublas(
+      cublasDgemm(
+        handle,
+        CUBLAS_OP_N,
+        CUBLAS_OP_T,
+        n,
+        C,
+        k,
+        &one,
+        dT,
+        n,
+        dLinear,
+        C,
+        &zero,
+        dScores,
+        n
+      ),
+      "cublasDgemm(cuda_lda_predict scores)"
+    );
+    fastpls_cuda_lda_score_argmax(dScores, dConstants, dPred, n, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_score_argmax");
+
+    Rcpp::IntegerVector pred(n);
+    check_cuda(cudaMemcpyAsync(INTEGER(pred), dPred, bytes_pred, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_predict pred)");
+    if (return_scores) {
+      arma::mat scores(Ttest.n_rows, linear.n_rows, arma::fill::none);
+      check_cuda(cudaMemcpyAsync(scores.memptr(), dScores, bytes_scores, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_predict scores)");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_predict)");
+      cleanup();
+      return Rcpp::List::create(
+        Rcpp::Named("pred") = pred,
+        Rcpp::Named("scores") = scores
+      );
+    }
+    check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_predict labels)");
+    cleanup();
+    return Rcpp::List::create(
+      Rcpp::Named("pred") = pred
+    );
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
+}
+
+Rcpp::List cuda_lda_project_predict(
+  const Mat& Xtest,
+  const Mat& R,
+  const arma::rowvec& offset,
+  const Mat& linear,
+  const arma::rowvec& constants,
+  bool return_scores
+) {
+#ifndef FASTPLS_HAS_CUDA_KERNELS
+  (void)Xtest;
+  (void)R;
+  (void)offset;
+  (void)linear;
+  (void)constants;
+  (void)return_scores;
+  throw std::runtime_error("CUDA LDA kernels not compiled");
+#else
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Xtest.n_rows == 0 || Xtest.n_cols == 0 || R.n_rows == 0 || R.n_cols == 0) {
+    throw std::runtime_error("cuda_lda_project_predict requires non-empty X and projection matrices");
+  }
+  if (Xtest.n_cols != R.n_rows) {
+    throw std::runtime_error("cuda_lda_project_predict X columns do not match projection rows");
+  }
+  if (R.n_cols != linear.n_cols) {
+    throw std::runtime_error("cuda_lda_project_predict projection dimension does not match LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    throw std::runtime_error("cuda_lda_project_predict has inconsistent LDA constants");
+  }
+  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
+    throw std::runtime_error("cuda_lda_project_predict offset length is smaller than projection dimension");
+  }
+  if (Xtest.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Xtest.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      R.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      linear.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_lda_project_predict matrix dimension exceeds CUDA int limits");
+  }
+
+  const int n = static_cast<int>(Xtest.n_rows);
+  const int p = static_cast<int>(Xtest.n_cols);
+  const int k = static_cast<int>(R.n_cols);
+  const int C = static_cast<int>(linear.n_rows);
+  const size_t bytes_X = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(p);
+  const size_t bytes_R = sizeof(double) * static_cast<size_t>(p) * static_cast<size_t>(k);
+  const size_t bytes_T = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(k);
+  const size_t bytes_linear = sizeof(double) * static_cast<size_t>(C) * static_cast<size_t>(k);
+  const size_t bytes_direct = sizeof(double) * static_cast<size_t>(p) * static_cast<size_t>(C);
+  const size_t bytes_constants = sizeof(double) * static_cast<size_t>(C);
+  const size_t bytes_scores = sizeof(double) * static_cast<size_t>(n) * static_cast<size_t>(C);
+  const size_t bytes_pred = sizeof(int) * static_cast<size_t>(n);
+  const double latent_ops = static_cast<double>(n) * static_cast<double>(k) *
+    (static_cast<double>(p) + static_cast<double>(C));
+  const double direct_ops = static_cast<double>(n) * static_cast<double>(p) *
+    static_cast<double>(C);
+  const bool use_direct = std::isfinite(latent_ops) &&
+    std::isfinite(direct_ops) &&
+    direct_ops < latent_ops;
+
+  arma::rowvec adjusted_constants = constants;
+  if (offset.n_elem >= R.n_cols) {
+    const arma::rowvec offset_k = offset.subvec(0, R.n_cols - 1);
+    adjusted_constants -= offset_k * linear.t();
+  }
+
+  double* dX = nullptr;
+  double* dR = nullptr;
+  double* dT = nullptr;
+  double* dLinear = nullptr;
+  double* dDirect = nullptr;
+  double* dConstants = nullptr;
+  double* dScores = nullptr;
+  int* dPred = nullptr;
+  cublasHandle_t handle = nullptr;
+  cudaStream_t stream = nullptr;
+
+  auto cleanup = [&]() {
+    if (dX) cudaFree(dX);
+    if (dR) cudaFree(dR);
+    if (dT) cudaFree(dT);
+    if (dLinear) cudaFree(dLinear);
+    if (dDirect) cudaFree(dDirect);
+    if (dConstants) cudaFree(dConstants);
+    if (dScores) cudaFree(dScores);
+    if (dPred) cudaFree(dPred);
+    if (handle) cublasDestroy(handle);
+    if (stream) cudaStreamDestroy(stream);
+  };
+
+  try {
+    check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_lda_project_predict)");
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_lda_project_predict)");
+    check_cublas(cublasSetStream(handle, stream), "cublasSetStream(cuda_lda_project_predict)");
+    check_cuda(cudaMalloc(&dX, bytes_X), "cudaMalloc(cuda_lda_project_predict X)");
+    if (use_direct) {
+      check_cuda(cudaMalloc(&dR, bytes_R), "cudaMalloc(cuda_lda_project_predict R)");
+      check_cuda(cudaMalloc(&dLinear, bytes_linear), "cudaMalloc(cuda_lda_project_predict linear)");
+      check_cuda(cudaMalloc(&dDirect, bytes_direct), "cudaMalloc(cuda_lda_project_predict direct)");
+    } else {
+      check_cuda(cudaMalloc(&dR, bytes_R), "cudaMalloc(cuda_lda_project_predict R)");
+      check_cuda(cudaMalloc(&dT, bytes_T), "cudaMalloc(cuda_lda_project_predict T)");
+      check_cuda(cudaMalloc(&dLinear, bytes_linear), "cudaMalloc(cuda_lda_project_predict linear)");
+    }
+    check_cuda(cudaMalloc(&dConstants, bytes_constants), "cudaMalloc(cuda_lda_project_predict constants)");
+    check_cuda(cudaMalloc(&dScores, bytes_scores), "cudaMalloc(cuda_lda_project_predict scores)");
+    check_cuda(cudaMalloc(&dPred, bytes_pred), "cudaMalloc(cuda_lda_project_predict pred)");
+
+    check_cuda(cudaMemcpyAsync(dX, Xtest.memptr(), bytes_X, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict X)");
+    check_cuda(cudaMemcpyAsync(dConstants, adjusted_constants.memptr(), bytes_constants, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict constants)");
+
+    const double one = 1.0;
+    const double zero = 0.0;
+    if (use_direct) {
+      check_cuda(cudaMemcpyAsync(dR, R.memptr(), bytes_R, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict R)");
+      check_cuda(cudaMemcpyAsync(dLinear, linear.memptr(), bytes_linear, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict linear)");
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_T,
+          p,
+          C,
+          k,
+          &one,
+          dR,
+          p,
+          dLinear,
+          C,
+          &zero,
+          dDirect,
+          p
+        ),
+        "cublasDgemm(cuda_lda_project_predict direct weights)"
+      );
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          C,
+          p,
+          &one,
+          dX,
+          n,
+          dDirect,
+          p,
+          &zero,
+          dScores,
+          n
+        ),
+        "cublasDgemm(cuda_lda_project_predict direct scores)"
+      );
+    } else {
+      check_cuda(cudaMemcpyAsync(dR, R.memptr(), bytes_R, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict R)");
+      check_cuda(cudaMemcpyAsync(dLinear, linear.memptr(), bytes_linear, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_lda_project_predict linear)");
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          k,
+          p,
+          &one,
+          dX,
+          n,
+          dR,
+          p,
+          &zero,
+          dT,
+          n
+        ),
+        "cublasDgemm(cuda_lda_project_predict latent)"
+      );
+      check_cublas(
+        cublasDgemm(
+          handle,
+          CUBLAS_OP_N,
+          CUBLAS_OP_T,
+          n,
+          C,
+          k,
+          &one,
+          dT,
+          n,
+          dLinear,
+          C,
+          &zero,
+          dScores,
+          n
+        ),
+        "cublasDgemm(cuda_lda_project_predict scores)"
+      );
+    }
+    fastpls_cuda_lda_score_argmax(dScores, dConstants, dPred, n, C, stream);
+    check_kernel_launch("fastpls_cuda_lda_score_argmax(project)");
+
+    Rcpp::IntegerVector pred(n);
+    check_cuda(cudaMemcpyAsync(INTEGER(pred), dPred, bytes_pred, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_project_predict pred)");
+    if (return_scores) {
+      arma::mat scores(Xtest.n_rows, linear.n_rows, arma::fill::none);
+      check_cuda(cudaMemcpyAsync(scores.memptr(), dScores, bytes_scores, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_lda_project_predict scores)");
+      check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_project_predict)");
+      cleanup();
+      return Rcpp::List::create(
+        Rcpp::Named("pred") = pred,
+        Rcpp::Named("scores") = scores
+      );
+    }
+    check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_lda_project_predict labels)");
+    cleanup();
+    return Rcpp::List::create(Rcpp::Named("pred") = pred);
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
+}
+
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
   const arma::uword target = std::min<arma::uword>(
@@ -2874,6 +3818,52 @@ Mat cuda_matrix_multiply(const Mat&, const Mat&) {
 
 Mat cuda_thin_qr(const Mat&) {
   throw std::runtime_error("CUDA backend not compiled");
+}
+
+std::vector<LDAGPUModel> cuda_lda_train_prefix(
+  const Mat&,
+  const arma::ivec&,
+  int,
+  const arma::ivec&,
+  double
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+std::vector<LDAGPUModel> cuda_lda_project_train_prefix(
+  const Mat&,
+  const Mat&,
+  const arma::rowvec&,
+  const arma::ivec&,
+  int,
+  const arma::ivec&,
+  double
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+Rcpp::List cuda_lda_predict(
+  const Mat&,
+  const Mat&,
+  const arma::rowvec&,
+  bool
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+Rcpp::List cuda_lda_project_predict(
+  const Mat&,
+  const Mat&,
+  const arma::rowvec&,
+  const Mat&,
+  const arma::rowvec&,
+  bool
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+bool cuda_lda_native_available() {
+  return false;
 }
 
 bool cuda_runtime_available() {

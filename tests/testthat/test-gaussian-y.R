@@ -57,13 +57,14 @@ test_that("Gaussian response compression decodes regression predictions", {
   expect_equal(default_small_y$gaussian_y_dim, min(ncol(X), 100L))
   expect_equal(dim(default_small_y$Ypred), c(nrow(Xtest), ncol(small_y), 1L))
 
-  r_fit <- pls_r(
+  r_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
     method = "simpls",
+    backend = "r",
     svd.method = "cpu_rsvd",
     gaussian_y = TRUE,
     gaussian_y_dim = 7,
@@ -107,52 +108,62 @@ test_that("Gaussian response compression is available through OPLS and kernelPLS
   Xtest <- matrix(rnorm(8 * 10), nrow = 8, ncol = 10)
   Ytest <- matrix(rnorm(8 * 18), nrow = 8, ncol = 18)
 
-  opls_fit <- opls_cpp(
+  opls_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
+    method = "opls",
+    backend = "cpp",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  opls_r_fit <- opls_r(
+  opls_r_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
+    method = "opls",
+    backend = "r",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  kernel_fit <- kernel_pls_cpp(
+  kernel_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
+    method = "kernelpls",
+    backend = "cpp",
     kernel = "linear",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  kernel_r_fit <- kernel_pls_r(
+  kernel_r_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
+    method = "kernelpls",
+    backend = "r",
     kernel = "linear",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  kernel_svd_fit <- kernel_pls_cpp(
+  kernel_svd_fit <- pls(
     X,
     Y,
     Xtest,
     Ytest,
     ncomp = 2,
+    method = "kernelpls",
+    backend = "cpp",
     kernel = "linear",
-    method = "plssvd",
+    inner.method = "plssvd",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )

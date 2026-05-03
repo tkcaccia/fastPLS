@@ -56,20 +56,21 @@ test_that("pls and predict support classification workflow", {
   expect_length(pr$Q2Y, 2L)
 })
 
-test_that("pls_r supports regression and classification workflows", {
+test_that("pls backend='r' supports regression and classification workflows", {
   set.seed(1003)
   X <- matrix(rnorm(84 * 9), nrow = 84, ncol = 9)
   Y <- matrix(rnorm(84 * 2), nrow = 84, ncol = 2)
   y <- factor(sample(c("ctrl", "case"), 84, replace = TRUE))
   idx <- sample(seq_len(84), 18)
 
-  reg_fit <- pls_r(
+  reg_fit <- pls(
     X[-idx, , drop = FALSE],
     Y[-idx, , drop = FALSE],
     X[idx, , drop = FALSE],
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
     method = "plssvd",
+    backend = "r",
     svd.method = "cpu_rsvd",
     fit = TRUE
   )
@@ -77,13 +78,14 @@ test_that("pls_r supports regression and classification workflows", {
   expect_true(is.array(reg_fit$Ypred))
   expect_length(reg_fit$Q2Y, 2L)
 
-  cls_fit <- pls_r(
+  cls_fit <- pls(
     X[-idx, , drop = FALSE],
     y[-idx],
     X[idx, , drop = FALSE],
     y[idx],
     ncomp = 1:2,
     method = "plssvd",
+    backend = "r",
     svd.method = "cpu_rsvd",
     seed = 123L,
     fit = TRUE
@@ -157,11 +159,13 @@ test_that("compiled CV reports the prediction backend", {
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   y <- factor(sample(c("A", "B", "C"), 48, replace = TRUE))
 
-  cpu_cv <- plssvd_cv_cpp(
+  cpu_cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
     kfold = 3,
+    method = "plssvd",
+    backend = "cpp",
     svd.method = "cpu_rsvd",
     seed = 123L
   )
@@ -169,11 +173,13 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cpu_cv$prediction_backend, "cpu")
 
   skip_if_not(has_cuda(), "CUDA backend unavailable")
-  cuda_cv <- plssvd_cv_cuda(
+  cuda_cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
     kfold = 3,
+    method = "plssvd",
+    backend = "cuda",
     seed = 123L
   )
   expect_identical(cuda_cv$backend, "cuda")
@@ -184,29 +190,21 @@ test_that("SVD utilities and helper functions are usable in practice", {
   set.seed(1005)
   A <- matrix(rnorm(70 * 14), nrow = 70, ncol = 14)
 
-  sm <- svd_methods()
-  expect_true(is.data.frame(sm))
-  expect_equal(colnames(sm), c("method", "enabled"))
-  expect_true(all(c("irlba", "cpu_rsvd") %in% sm$method))
-  expect_false("arpack" %in% sm$method)
-  expect_false("cuda_rsvd" %in% sm$method)
-
-  sr <- svd_run(A, k = 4, method = "cpu_rsvd")
+  sr <- fastsvd(A, ncomp = 4, method = "cpu_rsvd")
   expect_true(is.list(sr))
-  expect_true(all(c("U", "s", "Vt", "method", "elapsed") %in% names(sr)))
-  expect_equal(ncol(sr$U), 4L)
-  expect_equal(length(sr$s), 4L)
+  expect_true(all(c("u", "d", "v", "method", "elapsed") %in% names(sr)))
+  expect_equal(ncol(sr$u), 4L)
+  expect_equal(length(sr$d), 4L)
 
-  sb <- svd_benchmark(A, k = 4, methods = c("irlba", "cpu_rsvd"), reps = 2L)
-  expect_true(is.data.frame(sb))
-  expect_equal(nrow(sb), 4L)
-  expect_true(all(c("method", "rep", "elapsed", "status") %in% names(sb)))
-  expect_true(all(sb$status %in% c("ok", "error", "unavailable")))
+  pc <- pca(A, ncomp = 3, svd.method = "cpu_rsvd")
+  expect_s3_class(pc, "fastPLSPCA")
+  expect_equal(ncol(pc$scores), 3L)
 
-  x <- factor(c("a", "b", "a", "c", "b", "a"))
-  tx <- transformy(x)
-  expect_true(is.matrix(tx))
-  expect_equal(nrow(tx), length(x))
+  y <- factor(sample(c("a", "b", "c"), nrow(A), replace = TRUE))
+  cls_model <- pls(A, y, ncomp = 1:2, method = "plssvd", svd.method = "cpu_rsvd")
+  cls_pred <- predict(cls_model, A[1:5, , drop = FALSE])
+  expect_true(is.data.frame(cls_pred$Ypred))
+  expect_equal(nrow(cls_pred$Ypred), 5L)
 
   C1 <- fastcor(A, byrow = FALSE, diag = FALSE)
   expect_true(is.matrix(C1))
@@ -216,12 +214,19 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_true(is.numeric(C2))
   expect_equal(length(C2), 5L)
 
-  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd")
+  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
   vip_uni <- ViP(model_uni)
   expect_true(is.matrix(vip_uni))
 
-  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd")
+  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
   vip_multi <- ViP(model_multi)
   expect_true(is.list(vip_multi))
   expect_equal(length(vip_multi), 2L)
+})
+
+test_that("legacy KODAMA-specific helpers are not user-accessible", {
+  expect_error(fastPLS::kodama_cpp_simpls_rsvd, "not an exported object")
+  expect_error(fastPLS::kodama_cuda_simpls_rsvd, "not an exported object")
+  expect_false(exists("kodama_cpp_simpls_rsvd", envir = asNamespace("fastPLS"), inherits = FALSE))
+  expect_false(exists("kodama_cuda_simpls_rsvd", envir = asNamespace("fastPLS"), inherits = FALSE))
 })

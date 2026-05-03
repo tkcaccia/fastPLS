@@ -182,11 +182,11 @@ fit_predict_one <- function(task, variant, response_mode, rep_id, codes = NULL) 
 
   fit_call <- switch(
     variant,
-    cpp_rsvd = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
-    cpp_irlba = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
-    r_rsvd = function() fastPLS::pls_r(task$Xtrain, Yfit, ncomp = ncomp, method = method, svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
-    r_irlba = function() fastPLS::pls_r(task$Xtrain, Yfit, ncomp = ncomp, method = method, svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
-    cuda = function() fastPLS::simpls_gpu(task$Xtrain, Yfit, ncomp = ncomp, fit = FALSE, seed = 1000L + rep_id),
+    cpp_rsvd = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "cpp", svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
+    cpp_irlba = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "cpp", svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
+    r_rsvd = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "r", svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
+    r_irlba = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "r", svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
+    cuda = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = "simpls", backend = "cuda", fit = FALSE, seed = 1000L + rep_id),
     stop("Unknown variant: ", variant)
   )
 

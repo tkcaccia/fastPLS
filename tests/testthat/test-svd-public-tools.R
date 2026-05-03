@@ -1,56 +1,51 @@
-test_that("svd_methods returns expected methods", {
-  x <- svd_methods()
-  expect_true(is.data.frame(x))
-  expect_true(all(c("method", "enabled") %in% colnames(x)))
-  expect_true(all(c("irlba", "cpu_rsvd") %in% x$method))
-  expect_false("arpack" %in% x$method)
-  expect_false("cuda_rsvd" %in% x$method)
-})
-
-test_that("svd_run returns decomposition outputs", {
+test_that("fastsvd returns decomposition outputs from public backends", {
   set.seed(1)
   A <- matrix(rnorm(120 * 20), 120, 20)
-  out <- svd_run(A, k = 5, method = "cpu_rsvd")
+  out <- fastsvd(A, ncomp = 5, method = "cpu_rsvd")
   expect_true(is.list(out))
-  expect_true(all(c("U", "s", "Vt", "method", "elapsed") %in% names(out)))
-  expect_equal(ncol(out$U), 5)
-  expect_equal(length(out$s), 5)
-  expect_equal(nrow(out$Vt), 5)
+  expect_true(all(c("u", "d", "v", "method", "elapsed") %in% names(out)))
+  expect_equal(ncol(out$u), 5)
+  expect_equal(length(out$d), 5)
+  expect_equal(ncol(out$v), 5)
 })
 
-test_that("removed arpack and dc labels are rejected", {
+test_that("removed arpack and dc labels are rejected by fastsvd", {
   set.seed(11)
   A <- matrix(rnorm(80 * 12), 80, 12)
-  expect_error(svd_run(A, k = 4, method = "arpack"), "removed")
-  expect_error(svd_run(A, k = 4, method = "dc"), "removed")
+  expect_error(fastsvd(A, ncomp = 4, method = "arpack"), "removed")
+  expect_error(fastsvd(A, ncomp = 4, method = "dc"), "removed")
 })
 
-test_that("svd_benchmark returns rows per method and rep", {
-  set.seed(2)
-  A <- matrix(rnorm(100 * 30), 100, 30)
-  b <- svd_benchmark(A, k = 4, methods = c("irlba", "cpu_rsvd"), reps = 2)
-  expect_true(is.data.frame(b))
-  expect_equal(nrow(b), 4)
-  expect_true(all(c("method", "rep", "elapsed", "status") %in% colnames(b)))
-  expect_true(all(b$status %in% c("ok", "error", "unavailable")))
-})
-
-test_that("small SVD inputs use exact fallback for every backend", {
+test_that("small SVD inputs use exact fallback for iterative public backends", {
   set.seed(42)
   A <- matrix(rnorm(40 * 5), 40, 5)
-  ref <- svd(A, nu = 3, nv = 3)
+  ref <- base::svd(A, nu = 3, nv = 3)
 
   for (method in c("irlba", "cpu_rsvd")) {
-    out <- svd_run(
+    out <- fastsvd(
       A,
-      k = 3,
+      ncomp = 3,
       method = method,
       rsvd_oversample = 0L,
       rsvd_power = 0L,
       seed = 99L
     )
-    expect_equal(out$s, ref$d[1:3], tolerance = 1e-8)
-    expect_equal(abs(out$U), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
-    expect_equal(abs(t(out$Vt)), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)
+    expect_equal(out$d, ref$d[1:3], tolerance = 1e-8)
+    expect_equal(abs(out$u), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
+    expect_equal(abs(out$v), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)
   }
+})
+
+test_that("pca uses public SVD backends and returns plottable scores", {
+  set.seed(9)
+  X <- matrix(rnorm(60 * 8), 60, 8)
+  fit <- pca(X, ncomp = 3, svd.method = "cpu_rsvd", seed = 12)
+  expect_s3_class(fit, "fastPLSPCA")
+  expect_equal(dim(fit$scores), c(60L, 3L))
+  expect_equal(dim(fit$loadings), c(8L, 3L))
+  expect_true(all(is.finite(fit$variance_explained)))
+})
+
+test_that("fastPLS does not mask base svd", {
+  expect_identical(svd, base::svd)
 })

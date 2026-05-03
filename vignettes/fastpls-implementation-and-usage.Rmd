@@ -16,24 +16,27 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 `fastPLS` implements Partial Least Squares (PLS) for both regression and
 classification with:
 
-- two algorithms: `plssvd` and `simpls`
-- multiple CPU SVD backends (`irlba`, `cpu_rsvd`) plus separate GPU-native
-  wrappers where CUDA is available
-- Rcpp and pure-R interfaces (`pls()` and `pls_r()`)
-- cross-validation helpers (`optim.pls.cv()`, `pls.double.cv()`)
+- four model families: `plssvd`, `simpls`, `opls`, and `kernelpls`
+- multiple CPU SVD backends (`exact`, `irlba`, `cpu_rsvd`) plus GPU-native
+  execution through `pls(..., backend = "cuda")` where CUDA is available
+- compiled C++, pure-R, and CUDA backends selected through `pls()`
+- cross-validation helpers (`pls.single.cv()`, `optim.pls.cv()`,
+  `pls.double.cv()`)
 
 This vignette explains how each algorithm is implemented and shows complete
 usage patterns in both regression and classification contexts.
 
 ## Core API
 
-- `pls()`: Rcpp-backed main model fitting function.
-- `pls_r()`: pure-R fallback implementation (no CUDA backend).
-- `predict.fastPLS()`: prediction for fitted `fastPLS` models.
+- `pls()`: main model fitting function for C++, R, and CUDA backends.
+- `predict()`: prediction for fitted `fastPLS` models.
+- `plot()`: PCA/PLS score plots with optional confidence or Hotelling T2 ellipses.
+- `pca()`: PCA through the same SVD backend selector.
+- `fastsvd()`: stand-alone SVD through exact, IRLBA, CPU rSVD, or CUDA rSVD backends.
+- `pls.single.cv()`: fixed-component grouped cross-validation.
 - `optim.pls.cv()`: component selection with cross-validation.
 - `pls.double.cv()`: double cross-validation workflow.
-- `svd_methods()`, `svd_run()`, `svd_benchmark()`: SVD backend inspection and benchmarking.
-- `transformy()`, `fastcor()`, `ViP()`: helper tools.
+- `fastcor()`, `ViP()`, `has_cuda()`: helper tools.
 
 ## Data Setup
 
@@ -97,18 +100,26 @@ These controls are implemented in compiled code and are meant for benchmarking
 and high-throughput fitting; default values keep behavior close to standard
 SIMPLS while improving throughput on large matrices.
 
-### 3) SVD Backends
+### 3) OPLS and kernel PLS
+
+`opls` first removes supervised orthogonal variation and then fits the selected
+PLS core. `kernelpls` constructs a linear, RBF, or polynomial kernel and applies
+the selected PLS core in kernel space. Both are accessed through `pls()`:
+`method = "opls"` or `method = "kernelpls"`.
+
+### 4) SVD Backends
 
 - `irlba`: bundled truncated SVD route.
 - `cpu_rsvd`: randomized CPU SVD with `rsvd_oversample`, `rsvd_power`, and `seed`.
-- GPU execution is exposed through GPU-native wrappers such as `plssvd_gpu()`
-  and `simpls_gpu()`, not through `pls(..., svd.method = "cuda_rsvd")`.
+- `exact`: exact dense SVD, used automatically for very small SVD inputs.
+- GPU PLS execution is exposed through `pls(..., backend = "cuda")`, not through
+  `pls(..., svd.method = "cuda_rsvd")`.
 
-### 4) `pls()` vs `pls_r()`
+### 5) Public API vs Internal Backends
 
-- `pls()` calls compiled code paths for performance.
-- `pls_r()` mirrors the same user API in pure R and supports `irlba` and
-  `cpu_rsvd`.
+- `pls(..., backend = "cpp")` calls compiled CPU code paths for performance.
+- `pls(..., backend = "r")` uses the matched pure-R reference path.
+- `pls(..., backend = "cuda")` uses GPU-native fits where available.
 - for classification, factor `Y` is converted internally to one-hot encoding and
   class labels are returned by `predict.fastPLS()`.
 
@@ -165,13 +176,14 @@ head(pred_cls$Ypred)
 table(pred_cls$Ypred[[2]], yte_cls)
 ```
 
-## Pure-R Workflow (`pls_r`)
+## Pure-R Workflow
 
 ```{r}
-m_r <- pls_r(
+m_r <- pls(
   Xtr, ytr_cls, Xte, yte_cls,
   ncomp = 1:2,
   method = "simpls",
+  backend = "r",
   svd.method = "cpu_rsvd",
   seed = 123
 )
@@ -212,17 +224,14 @@ names(cv2)
 ## SVD Utilities
 
 ```{r}
-svd_methods()
-svd_run(Xtr, k = 3, method = "irlba")
-svd_benchmark(Xtr, k = 3, methods = c("irlba", "cpu_rsvd"), reps = 2)
+s <- fastsvd(Xtr, ncomp = 3, method = "irlba")
+pc <- pca(Xtr, ncomp = 3, svd.method = "cpu_rsvd")
+plot(pc)
 ```
 
 ## Additional Helpers
 
 ```{r}
-Y_onehot <- transformy(ytr_cls)
-dim(Y_onehot)
-
 C <- fastcor(Xtr, byrow = FALSE, diag = FALSE)
 dim(C)
 
@@ -234,11 +243,13 @@ str(vip)
 
 - Use `method = "simpls"` when you want the accelerated SIMPLS implementation
   with speed controls for model-building.
+- Use `backend = "r"` for reference validation, `backend = "cpp"` for the
+  standard CPU implementation, and `backend = "cuda"` for GPU-native fitting.
 - Use `plssvd` when you want direct control over rank-constrained latent
   structure; fastPLS automatically enforces the valid component cap.
 - For reproducible approximate SVD, keep `svd.method = "cpu_rsvd"` and set
   `seed` (and optionally `rsvd_power`).
-- Use `has_cuda()` to check whether GPU-native wrappers are available in your
+- Use `has_cuda()` to check whether CUDA-native execution is available in your
   session.
 
 ## References

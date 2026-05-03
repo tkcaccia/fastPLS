@@ -11,7 +11,7 @@ pls(
   Ytest = NULL,
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
+  method = c("simpls", "plssvd", "opls", "kernelpls"),
   svd.method = c("irlba", "cpu_rsvd", "exact"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
@@ -31,10 +31,25 @@ pls(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
+  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+  lda_ridge = 1e-08,
+  regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
   proj = FALSE,
   perm.test = FALSE,
-  times = 100
+  times = 100,
+  backend = c("cpp", "r", "cuda"),
+  inner.method = c("simpls", "plssvd"),
+  north = 1L,
+  kernel = c("linear", "rbf", "poly"),
+  gamma = NULL,
+  degree = 3L,
+  coef0 = 1,
+  gpu_device_state = TRUE,
+  gpu_qr = TRUE,
+  gpu_eig = TRUE,
+  gpu_qless_qr = FALSE,
+  gpu_finalize_threshold = 32L
 )
 }
 \arguments{
@@ -50,11 +65,12 @@ pls(
 
 \item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
 
-\item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
+\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
+`simpls` uses the fastPLS accelerated SIMPLS core.}
 
 \item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
-from `pls()`; use [simpls_gpu()] for the experimental GPU-native fit.}
+from `pls()`; use `backend = "cuda"` for GPU-native fits.}
 
 \item{rsvd_oversample}{RSVD oversampling.}
 
@@ -102,6 +118,22 @@ the default is `min(ncol(Xtrain), 100)`.}
 \item{gaussian_y_seed}{Random seed used to generate the Gaussian response
 sketch.}
 
+\item{classifier}{Classification decision rule. `"argmax"` keeps the standard
+PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier on the PLS
+latent scores with compiled C++ code. `"lda_cuda"` uses the same LDA model and
+CUDA matrix multiplication for latent projection and discriminant scoring when
+CUDA is available. The experimental fused CUDA PLS+LDA path can be enabled with
+`FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard CUDA LDA route remains
+the default.}
+
+\item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+
+\item{regression_head}{Regression prediction head. `"standard"` keeps the usual
+PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary least-squares
+linear model on the latent scores with compiled C++ code. `"linear_cuda"` uses
+CUDA matrix multiplication for latent projection and prediction when CUDA is
+available.}
+
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 
 \item{proj}{Return projected `Ttest` when `TRUE`.}
@@ -109,11 +141,40 @@ sketch.}
 \item{perm.test}{Run permutation test.}
 
 \item{times}{Number of permutations.}
+
+\item{backend}{Implementation backend: `"cpp"` for compiled CPU, `"r"` for
+the matched pure-R reference path, or `"cuda"` for GPU-native fitting.}
+
+\item{inner.method}{Inner PLS core used by `method = "opls"` or
+`method = "kernelpls"`.}
+
+\item{north}{Number of orthogonal components removed by OPLS.}
+
+\item{kernel}{Kernel type for kernel PLS: `"linear"`, `"rbf"`, or `"poly"`.}
+
+\item{gamma}{Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.}
+
+\item{degree}{Polynomial kernel degree.}
+
+\item{coef0}{Polynomial kernel offset.}
+
+\item{gpu_device_state}{Keep selected SIMPLS GPU workspaces resident when
+using `backend = "cuda"`.}
+
+\item{gpu_qr}{Use GPU QR finalization when available.}
+
+\item{gpu_eig}{Use GPU eigensolver finalization when available.}
+
+\item{gpu_qless_qr}{Use the q-less GPU QR path when available.}
+
+\item{gpu_finalize_threshold}{Component threshold controlling GPU-side
+finalization.}
 }
 \value{
 A `fastPLS` object.
 }
 \description{
-Outer algorithm (`method`) and inner linear algebra backend (`svd.method`) are
-configurable independently.
+`pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
+and kernel PLS through the selected CPU, pure-R, or CUDA backend while keeping
+the low-level implementation functions internal.
 }

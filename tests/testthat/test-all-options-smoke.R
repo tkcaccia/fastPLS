@@ -5,8 +5,7 @@ test_that("pls supports all declared method/backend combinations (smoke)", {
   y_cls <- factor(sample(c("A", "B", "C"), 72, replace = TRUE))
   idx <- sample(seq_len(72), 18)
 
-  back <- as.character(svd_methods()$method[svd_methods()$enabled])
-  expect_true(length(back) >= 2L)
+  back <- c("exact", "irlba", "cpu_rsvd")
 
   for (m in c("plssvd", "simpls")) {
     for (s in back) {
@@ -42,12 +41,10 @@ test_that("pls supports all declared method/backend combinations (smoke)", {
 test_that("optim.pls.cv and pls.double.cv support accelerated simpls", {
   set.seed(20260318)
   X <- matrix(rnorm(54 * 8), nrow = 54, ncol = 8)
-  y_reg <- matrix(rnorm(54), ncol = 1)
+  y_reg <- matrix(rnorm(54 * 2), ncol = 2)
   y_cls <- factor(sample(c("L", "M", "H"), 54, replace = TRUE))
 
-  back <- as.character(svd_methods()$method[svd_methods()$enabled])
-  back <- setdiff(back, "cuda_rsvd")
-  if (!length(back)) back <- "cpu_rsvd"
+  back <- c("exact", "irlba", "cpu_rsvd")
 
   for (s in back) {
     for (m in c("plssvd", "simpls")) {
@@ -102,7 +99,7 @@ test_that("optim.pls.cv and pls.double.cv support accelerated simpls", {
   }
 })
 
-test_that("pls_r supports accelerated simpls for regression and classification", {
+test_that("pls backend='r' supports accelerated simpls for regression and classification", {
   set.seed(20260321)
   X <- matrix(rnorm(60 * 9), nrow = 60, ncol = 9)
   y_reg <- matrix(rnorm(60 * 2), ncol = 2)
@@ -110,13 +107,14 @@ test_that("pls_r supports accelerated simpls for regression and classification",
   idx <- sample(seq_len(60), 15)
 
   for (s in c("irlba", "cpu_rsvd")) {
-    fit_reg <- pls_r(
+    fit_reg <- pls(
       X[-idx, , drop = FALSE],
       y_reg[-idx, , drop = FALSE],
       X[idx, , drop = FALSE],
       y_reg[idx, , drop = FALSE],
       ncomp = 1:3,
       method = "simpls",
+      backend = "r",
       svd.method = s,
       fit = TRUE
     )
@@ -124,13 +122,14 @@ test_that("pls_r supports accelerated simpls for regression and classification",
     expect_true("Ypred" %in% names(fit_reg))
     expect_equal(dim(fit_reg$B), c(ncol(X), ncol(y_reg), 3L))
 
-    fit_cls <- pls_r(
+    fit_cls <- pls(
       X[-idx, , drop = FALSE],
       y_cls[-idx],
       X[idx, , drop = FALSE],
       y_cls[idx],
       ncomp = 1:2,
       method = "simpls",
+      backend = "r",
       svd.method = s,
       fit = TRUE
     )

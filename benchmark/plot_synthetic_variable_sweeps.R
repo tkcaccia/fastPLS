@@ -18,6 +18,8 @@ summary_file <- file.path(results_dir, "synthetic_variable_sweeps_summary.csv")
 raw <- fread(raw_file)
 ok <- raw[status == "ok"]
 if (!nrow(ok)) stop("No successful synthetic variable-sweep rows to plot")
+if (!"classifier" %in% names(ok)) ok[, classifier := "argmax"]
+ok[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
 ok[, backend_algorithm := fifelse(
   backend_algorithm == "gpu_native",
   "rsvd",
@@ -36,6 +38,10 @@ impl_lines <- c(
   cuda = "dotdash",
   pls_pkg = "dotted"
 )
+classifier_shapes <- c(
+  argmax = 16,
+  LDA = 17
+)
 method_levels <- c("plssvd", "simpls", "opls", "kernelpls")
 method_labels <- c(
   plssvd = "plssvd",
@@ -49,7 +55,8 @@ backend_breaks <- intersect(names(backend_cols), unique(as.character(ok$backend_
 impl_breaks <- intersect(names(impl_lines), unique(as.character(ok$implementation)))
 ok[, backend_algorithm := factor(backend_algorithm, backend_breaks)]
 ok[, implementation := factor(implementation, impl_breaks)]
-ok[, line_id := interaction(variant_name, implementation, backend_algorithm, drop = TRUE)]
+ok[, classifier_label := factor(classifier_label, names(classifier_shapes))]
+ok[, line_id := interaction(variant_name, implementation, backend_algorithm, classifier_label, drop = TRUE)]
 
 summ <- ok[, .(
   fit_time_ms_median = median(fit_time_ms, na.rm = TRUE),
@@ -64,13 +71,14 @@ summ <- ok[, .(
   n_ok = .N
 ), by = .(
   family, task_type, swept_variable, x_value, x_label,
-  variant_name, method_panel, engine, implementation, backend_algorithm,
+  variant_name, method_panel, engine, implementation, backend_algorithm, classifier, classifier_label,
   requested_ncomp, effective_ncomp, n_train, n_test, p, q, n_classes, noise, rank_true, metric_name
 )]
 summ[, method_panel := factor(method_panel, method_levels)]
 summ[, backend_algorithm := factor(backend_algorithm, backend_breaks)]
 summ[, implementation := factor(implementation, impl_breaks)]
-summ[, line_id := interaction(variant_name, implementation, backend_algorithm, drop = TRUE)]
+summ[, classifier_label := factor(classifier_label, names(classifier_shapes))]
+summ[, line_id := interaction(variant_name, implementation, backend_algorithm, classifier_label, drop = TRUE)]
 fwrite(summ, summary_file)
 
 expand_limits <- function(x, log_y = FALSE) {
@@ -139,25 +147,25 @@ long_for_family <- function(d) {
     d[is.finite(total_time_ms_median), .(
       value = total_time_ms_median,
       metric = "Total time (ms)",
-      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, line_id,
+      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, classifier_label, line_id,
       n_train, n_test, p, q, n_classes, noise, rank_true, requested_ncomp, effective_ncomp
     )],
     d[is.finite(metric_value_median), .(
       value = metric_value_median,
       metric = perf,
-      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, line_id,
+      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, classifier_label, line_id,
       n_train, n_test, p, q, n_classes, noise, rank_true, requested_ncomp, effective_ncomp
     )],
     d[is.finite(peak_host_rss_mb_median), .(
       value = peak_host_rss_mb_median,
       metric = "Peak host RSS (MB)",
-      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, line_id,
+      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, classifier_label, line_id,
       n_train, n_test, p, q, n_classes, noise, rank_true, requested_ncomp, effective_ncomp
     )],
     d[is.finite(peak_gpu_mem_mb_median), .(
       value = peak_gpu_mem_mb_median,
       metric = "Peak GPU memory (MB)",
-      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, line_id,
+      family, task_type, swept_variable, x_value, x_label, method_panel, variant_name, implementation, backend_algorithm, classifier_label, line_id,
       n_train, n_test, p, q, n_classes, noise, rank_true, requested_ncomp, effective_ncomp
     )]
   ), fill = TRUE)
@@ -182,9 +190,11 @@ plot_family <- function(fam) {
     scale_x_continuous(breaks = x_breaks, labels = scales::label_number()),
     scale_color_manual(values = backend_cols[backend_breaks], breaks = backend_breaks, name = "SVD/backend", drop = FALSE),
     scale_linetype_manual(values = impl_lines[impl_breaks], breaks = impl_breaks, name = "Implementation", drop = FALSE),
+    scale_shape_manual(values = classifier_shapes, breaks = names(classifier_shapes), name = "Classifier", drop = FALSE),
     guides(
       color = guide_legend(nrow = 1, byrow = TRUE, override.aes = list(linewidth = 1.1, size = 2.5)),
-      linetype = guide_legend(nrow = 1, byrow = TRUE)
+      linetype = guide_legend(nrow = 1, byrow = TRUE),
+      shape = guide_legend(nrow = 1, byrow = TRUE)
     )
   )
 
@@ -199,7 +209,8 @@ plot_family <- function(fam) {
         y = value,
         group = line_id,
         color = backend_algorithm,
-        linetype = implementation
+        linetype = implementation,
+        shape = classifier_label
       )
     ) +
       geom_line(linewidth = 0.85, na.rm = TRUE) +

@@ -128,7 +128,7 @@ proc_tree_rss_mb <- function(pid) {
 
 families <- chr_list_env(
   "FASTPLS_SYNTH_VAR_FAMILIES",
-  c("reg_n", "reg_p", "reg_q", "class_n", "class_p")
+  c("reg_n", "reg_p", "reg_q", "class_n", "class_p", "class_q")
 )
 if (!isTRUE(include_classification)) {
   families <- families[!grepl("^class_", families)]
@@ -141,6 +141,7 @@ grids <- list(
   reg_noise = num_list_env("FASTPLS_SYNTH_VAR_GRID_REG_NOISE", c(0.10, 0.25, 0.50, 1.00, 2.00, 4.00, 8.00, 16.00, 32.00)),
   class_n = num_list_env("FASTPLS_SYNTH_VAR_GRID_CLASS_N", c(200, 500, 1000, 2000, 5000, 10000, 20000, 30000, 50000)),
   class_p = num_list_env("FASTPLS_SYNTH_VAR_GRID_CLASS_P", c(100, 500, 1000, 2000, 5000, 10000, 20000, 30000, 50000)),
+  class_q = num_list_env("FASTPLS_SYNTH_VAR_GRID_CLASS_Q", c(2, 5, 10, 20, 50, 100, 200)),
   class_noise = num_list_env("FASTPLS_SYNTH_VAR_GRID_CLASS_NOISE", c(0.10, 0.25, 0.50, 1.00, 2.00, 4.00, 8.00, 16.00, 32.00))
 )
 
@@ -151,6 +152,7 @@ family_meta <- list(
   reg_noise = list(task_type = "regression", variable = "noise", x_label = "Noise SD", base_n = 5000L, base_p = 1000L, base_q = 100L, base_noise = 0.50),
   class_n = list(task_type = "classification", variable = "n_train", x_label = "Training samples", base_n = 800L, base_p = 1000L, base_k = 5L, base_noise = 0.50),
   class_p = list(task_type = "classification", variable = "p", x_label = "X variables (p)", base_n = 5000L, base_p = 1000L, base_k = 5L, base_noise = 0.50),
+  class_q = list(task_type = "classification", variable = "n_classes", x_label = "Classes / Y levels (q)", base_n = 5000L, base_p = 1000L, base_k = 20L, base_noise = 0.50),
   class_noise = list(task_type = "classification", variable = "noise", x_label = "Noise SD", base_n = 5000L, base_p = 1000L, base_k = 5L, base_noise = 0.50)
 )
 
@@ -239,6 +241,8 @@ make_classification_task <- function(family, x_value, seed) {
     ntest <- max(100L, as.integer(round(0.25 * ntrain)))
   } else if (identical(cfg$variable, "p")) {
     p <- as.integer(x_value)
+  } else if (identical(cfg$variable, "n_classes")) {
+    k <- as.integer(x_value)
   } else if (identical(cfg$variable, "noise")) {
     noise <- as.numeric(x_value)
   }
@@ -270,7 +274,7 @@ make_classification_task <- function(family, x_value, seed) {
     n_train = ntrain,
     n_test = ntest,
     p = p,
-    q = 1L,
+    q = k,
     n_classes = k,
     noise = noise,
     rank_true = rank_true
@@ -489,6 +493,15 @@ variant_specs <- function(task) {
       fill = TRUE
     )
   }
+  specs[, classifier := "argmax"]
+  if (identical(task$task_type, "classification")) {
+    lda_specs <- copy(specs[implementation %in% c("R", "cpp", "cuda")])
+    if (nrow(lda_specs)) {
+      lda_specs[, variant_name := paste0(variant_name, "_lda")]
+      lda_specs[, classifier := ifelse(implementation == "cuda", "lda_cuda", "lda_cpp")]
+      specs <- rbind(specs, lda_specs, fill = TRUE)
+    }
+  }
   specs[]
 }
 
@@ -524,33 +537,31 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   }
 
   fit_call <- function() {
-    if (identical(spec$engine, "GPU")) {
+  if (identical(spec$engine, "GPU")) {
       if (identical(spec$method_panel, "plssvd")) {
-        return(fastPLS::plssvd_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = "cuda", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "simpls")) {
-        return(fastPLS::simpls_gpu(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = "cuda", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
-        return(fastPLS::opls_cuda(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, north = opls_layout$north, method = "simpls", fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", inner.method = "simpls", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
-        return(fastPLS::kernel_pls_cuda(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), kernel = "linear", method = "simpls", fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", inner.method = "simpls", kernel = "linear", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
       }
     }
 
-    fn <- if (identical(spec$implementation, "R")) fastPLS::pls_r else fastPLS::pls
+    backend <- if (identical(spec$implementation, "R")) "r" else "cpp"
     svd_method <- if (identical(spec$backend_algorithm, "rsvd")) "cpu_rsvd" else "irlba"
     if (identical(spec$method_panel, "plssvd") || identical(spec$method_panel, "simpls")) {
-      return(fn(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, svd.method = svd_method, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "opls")) {
-      ofn <- if (identical(spec$implementation, "R")) fastPLS::opls_r else fastPLS::opls_cpp
-      return(ofn(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, north = opls_layout$north, method = "simpls", svd.method = svd_method, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = backend, inner.method = "simpls", north = opls_layout$north, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "kernelpls")) {
-      kfn <- if (identical(spec$implementation, "R")) fastPLS::kernel_pls_r else fastPLS::kernel_pls_cpp
-      return(kfn(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), kernel = "linear", method = "simpls", svd.method = svd_method, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = backend, inner.method = "simpls", kernel = "linear", svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
     }
     stop("Unsupported method panel: ", spec$method_panel)
   }
@@ -701,6 +712,7 @@ for (family in families) {
           engine = spec$engine,
           implementation = spec$implementation,
           backend_algorithm = spec$backend_algorithm,
+          classifier = spec$classifier,
           requested_ncomp = as.integer(ncomp),
           effective_ncomp = as.integer(ncomp_eff),
           n_train = as.integer(task$n_train),
@@ -749,6 +761,7 @@ summary_dt <- raw[status == "ok", .(
 ), by = .(
   family, task_type, swept_variable, x_value, x_label,
   variant_name, method_panel, engine, implementation, backend_algorithm,
+  classifier,
   requested_ncomp, effective_ncomp, n_train, n_test, p, q, n_classes, noise, rank_true, metric_name
 )]
 fwrite(summary_dt, summary_file)

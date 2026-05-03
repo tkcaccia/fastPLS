@@ -7,6 +7,7 @@
 ^\.git$
 ^benchmark$
 ^benchmark_results_local$
+^chiamaka_plot_check_
 ^scripts$
 ^fastPLS[.]Rcheck$
 ^fastPLS-src[.]Rcheck$
@@ -17,5 +18,6 @@
 ^PACKAGES$
 ^PACKAGES[.]gz$
 ^PACKAGES[.]rds$
+^[^/]+[.]csv$
 ^Library$
 ^Outputs$

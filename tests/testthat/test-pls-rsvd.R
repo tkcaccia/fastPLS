@@ -132,24 +132,25 @@ test_that("CPU FlashSVD prediction is the default for compiled and R PLS", {
   Y <- matrix(rnorm(70 * 5), nrow = 70, ncol = 5)
   idx <- 1:12
 
-  for (impl in c("cpp", "R")) {
-    fit_fun <- if (identical(impl, "R")) pls_r else pls
+  for (impl in c("cpp", "r")) {
     for (method in c("plssvd", "simpls")) {
-      ref <- fit_fun(
-      X[-idx, ],
-      Y[-idx, ],
-      ncomp = 1:4,
-      method = method,
-      svd.method = "cpu_rsvd",
-      rsvd_oversample = 8L,
-      rsvd_power = 1L,
-      seed = 17L
-    )
-      flash <- fit_fun(
+      ref <- pls(
         X[-idx, ],
         Y[-idx, ],
         ncomp = 1:4,
         method = method,
+        backend = impl,
+        svd.method = "cpu_rsvd",
+        rsvd_oversample = 8L,
+        rsvd_power = 1L,
+        seed = 17L
+      )
+      flash <- pls(
+        X[-idx, ],
+        Y[-idx, ],
+        ncomp = 1:4,
+        method = method,
+        backend = impl,
         svd.method = "cpu_rsvd",
         rsvd_oversample = 8L,
         rsvd_power = 1L,

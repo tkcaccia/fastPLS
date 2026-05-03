@@ -7,6 +7,7 @@
 #include <cctype>
 #include <limits>
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "fastPLS.h"
@@ -1386,6 +1387,11 @@ bool has_cuda() {
 }
 
 // [[Rcpp::export]]
+bool lda_cuda_native_available() {
+  return fastpls_svd::cuda_lda_native_available();
+}
+
+// [[Rcpp::export]]
 void cuda_reset_workspace() {
   fastpls_svd::cuda_reset_workspace();
 }
@@ -1398,6 +1404,619 @@ arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B) {
 // [[Rcpp::export]]
 arma::mat cuda_thin_qr(const arma::mat& A) {
   return fastpls_svd::cuda_thin_qr(A);
+}
+
+static Rcpp::IntegerVector lda_labels_from_scores(const arma::mat& scores,
+                                                  const arma::rowvec& constants) {
+  Rcpp::IntegerVector pred(scores.n_rows);
+  for (arma::uword i = 0; i < scores.n_rows; ++i) {
+    arma::uword best = 0;
+    double best_val = scores(i, 0) + constants(0);
+    for (arma::uword c = 1; c < scores.n_cols; ++c) {
+      const double val = scores(i, c) + constants(c);
+      if (val > best_val) {
+        best_val = val;
+        best = c;
+      }
+    }
+    pred[i] = static_cast<int>(best) + 1;
+  }
+  return pred;
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_train_cpp(const arma::mat& Ttrain,
+                         const Rcpp::IntegerVector& y,
+                         int n_classes,
+                         double ridge) {
+  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
+    stop("lda_train_cpp requires a non-empty score matrix");
+  }
+  if (static_cast<R_xlen_t>(Ttrain.n_rows) != y.size()) {
+    stop("lda_train_cpp requires one class label per training row");
+  }
+  if (n_classes < 2) {
+    stop("lda_train_cpp requires at least two classes");
+  }
+
+  const arma::uword n = Ttrain.n_rows;
+  const arma::uword k = Ttrain.n_cols;
+  arma::vec counts(n_classes, arma::fill::zeros);
+  arma::mat means(n_classes, k, arma::fill::zeros);
+
+  for (arma::uword i = 0; i < n; ++i) {
+    const int cls = y[i] - 1;
+    if (cls < 0 || cls >= n_classes) {
+      stop("lda_train_cpp labels must be encoded as 1..n_classes");
+    }
+    counts(cls) += 1.0;
+    means.row(cls) += Ttrain.row(i);
+  }
+
+  for (int c = 0; c < n_classes; ++c) {
+    if (counts(c) <= 0.0) {
+      stop("lda_train_cpp received an empty class");
+    }
+    means.row(c) /= counts(c);
+  }
+
+  arma::mat pooled = arma::symmatu(Ttrain.t() * Ttrain);
+  for (int c = 0; c < n_classes; ++c) {
+    pooled -= counts(c) * (means.row(c).t() * means.row(c));
+  }
+  const double df = std::max<double>(1.0, static_cast<double>(n) - static_cast<double>(n_classes));
+  pooled /= df;
+
+  double ridge_scale = arma::trace(pooled) / std::max<arma::uword>(1, k);
+  if (!std::isfinite(ridge_scale) || ridge_scale <= 0.0) {
+    ridge_scale = 1.0;
+  }
+  double lambda = ridge;
+  if (!std::isfinite(lambda) || lambda < 0.0) {
+    lambda = 1e-8;
+  }
+  lambda *= ridge_scale;
+  pooled.diag() += lambda;
+
+  arma::mat inv_cov;
+  bool ok = arma::inv_sympd(inv_cov, pooled);
+  if (!ok) {
+    ok = arma::inv(inv_cov, pooled);
+  }
+  if (!ok) {
+    inv_cov = arma::pinv(pooled);
+  }
+
+  arma::mat linear = means * inv_cov;
+  arma::rowvec constants(n_classes, arma::fill::zeros);
+  for (int c = 0; c < n_classes; ++c) {
+    const double prior = std::max(counts(c) / static_cast<double>(n), std::numeric_limits<double>::min());
+    constants(c) = -0.5 * arma::as_scalar(means.row(c) * linear.row(c).t()) + std::log(prior);
+  }
+
+  return Rcpp::List::create(
+    Rcpp::Named("means") = means,
+    Rcpp::Named("inv_cov") = inv_cov,
+    Rcpp::Named("linear") = linear,
+    Rcpp::Named("constants") = constants,
+    Rcpp::Named("priors") = counts / static_cast<double>(n),
+    Rcpp::Named("ridge") = lambda
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
+                                const Rcpp::IntegerVector& y,
+                                int n_classes,
+                                const Rcpp::IntegerVector& ncomp,
+                                double ridge) {
+  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
+    stop("lda_train_prefix_cpp requires a non-empty score matrix");
+  }
+  if (static_cast<R_xlen_t>(Ttrain.n_rows) != y.size()) {
+    stop("lda_train_prefix_cpp requires one class label per training row");
+  }
+  if (n_classes < 2) {
+    stop("lda_train_prefix_cpp requires at least two classes");
+  }
+  if (ncomp.size() < 1) {
+    stop("lda_train_prefix_cpp requires at least one component count");
+  }
+
+  int kmax_i = 0;
+  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
+    if (ncomp[i] > kmax_i) kmax_i = ncomp[i];
+  }
+  if (kmax_i < 1 || kmax_i > static_cast<int>(Ttrain.n_cols)) {
+    stop("lda_train_prefix_cpp component counts must be in 1..ncol(Ttrain)");
+  }
+
+  const arma::uword n = Ttrain.n_rows;
+  const arma::uword kmax = static_cast<arma::uword>(kmax_i);
+  arma::mat Tk_storage;
+  const arma::mat* Tk_ptr = &Ttrain;
+  if (kmax < Ttrain.n_cols) {
+    Tk_storage = Ttrain.cols(0, kmax - 1);
+    Tk_ptr = &Tk_storage;
+  }
+  const arma::mat& Tk = *Tk_ptr;
+  arma::vec counts(n_classes, arma::fill::zeros);
+  arma::mat means(n_classes, kmax, arma::fill::zeros);
+
+  for (arma::uword i = 0; i < n; ++i) {
+    const int cls = y[i] - 1;
+    if (cls < 0 || cls >= n_classes) {
+      stop("lda_train_prefix_cpp labels must be encoded as 1..n_classes");
+    }
+    counts(cls) += 1.0;
+    means.row(cls) += Tk.row(i);
+  }
+  for (int c = 0; c < n_classes; ++c) {
+    if (counts(c) <= 0.0) {
+      stop("lda_train_prefix_cpp received an empty class");
+    }
+    means.row(c) /= counts(c);
+  }
+
+  arma::mat pooled_full = arma::symmatu(Tk.t() * Tk);
+  for (int c = 0; c < n_classes; ++c) {
+    pooled_full -= counts(c) * (means.row(c).t() * means.row(c));
+  }
+  const double df = std::max<double>(1.0, static_cast<double>(n) - static_cast<double>(n_classes));
+  pooled_full /= df;
+
+  Rcpp::List models(ncomp.size());
+  Rcpp::CharacterVector model_names(ncomp.size());
+  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
+    const int kk_i = ncomp[idx];
+    if (kk_i < 1 || kk_i > kmax_i) {
+      stop("lda_train_prefix_cpp component counts must be in 1..max(ncomp)");
+    }
+    const arma::uword kk = static_cast<arma::uword>(kk_i);
+    arma::mat pooled = pooled_full.submat(0, 0, kk - 1, kk - 1);
+    arma::mat means_k = means.cols(0, kk - 1);
+
+    double ridge_scale = arma::trace(pooled) / std::max<arma::uword>(1, kk);
+    if (!std::isfinite(ridge_scale) || ridge_scale <= 0.0) {
+      ridge_scale = 1.0;
+    }
+    double lambda = ridge;
+    if (!std::isfinite(lambda) || lambda < 0.0) {
+      lambda = 1e-8;
+    }
+    lambda *= ridge_scale;
+    pooled.diag() += lambda;
+
+    arma::mat inv_cov;
+    bool ok = arma::inv_sympd(inv_cov, pooled);
+    if (!ok) {
+      ok = arma::inv(inv_cov, pooled);
+    }
+    if (!ok) {
+      inv_cov = arma::pinv(pooled);
+    }
+
+    arma::mat linear = means_k * inv_cov;
+    arma::rowvec constants(n_classes, arma::fill::zeros);
+    for (int c = 0; c < n_classes; ++c) {
+      const double prior = std::max(counts(c) / static_cast<double>(n), std::numeric_limits<double>::min());
+      constants(c) = -0.5 * arma::as_scalar(means_k.row(c) * linear.row(c).t()) + std::log(prior);
+    }
+
+    models[idx] = Rcpp::List::create(
+      Rcpp::Named("means") = means_k,
+      Rcpp::Named("inv_cov") = inv_cov,
+      Rcpp::Named("linear") = linear,
+      Rcpp::Named("constants") = constants,
+      Rcpp::Named("priors") = counts / static_cast<double>(n),
+      Rcpp::Named("ridge") = lambda
+    );
+    model_names[idx] = std::to_string(kk_i);
+  }
+  models.attr("names") = model_names;
+  return models;
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_project_train_prefix_cpp(const arma::mat& Xtrain,
+                                        const arma::mat& R,
+                                        const arma::rowvec& offset,
+                                        const Rcpp::IntegerVector& y,
+                                        int n_classes,
+                                        const Rcpp::IntegerVector& ncomp,
+                                        double ridge) {
+  if (Xtrain.n_rows == 0 || Xtrain.n_cols == 0) {
+    stop("lda_project_train_prefix_cpp requires a non-empty predictor matrix");
+  }
+  if (R.n_rows != Xtrain.n_cols || R.n_cols == 0) {
+    stop("lda_project_train_prefix_cpp projection matrix has incompatible dimensions");
+  }
+  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
+    stop("lda_project_train_prefix_cpp offset is shorter than the projection dimension");
+  }
+  arma::mat Ttrain = Xtrain * R;
+  if (offset.n_elem >= R.n_cols) {
+    Ttrain.each_row() -= offset.subvec(0, R.n_cols - 1);
+  }
+  Rcpp::List models = lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge);
+  for (R_xlen_t i = 0; i < models.size(); ++i) {
+    Rcpp::List model = models[i];
+    model["backend"] = "cpp_project";
+    models[i] = model;
+  }
+  return models;
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_train_prefix_cuda(const arma::mat& Ttrain,
+                                 const Rcpp::IntegerVector& y,
+                                 int n_classes,
+                                 const Rcpp::IntegerVector& ncomp,
+                                 double ridge) {
+  if (!fastpls_svd::cuda_lda_native_available()) {
+    return lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge);
+  }
+  arma::ivec y_arma(y.size());
+  for (R_xlen_t i = 0; i < y.size(); ++i) {
+    y_arma(static_cast<arma::uword>(i)) = y[i];
+  }
+  arma::ivec ncomp_arma(ncomp.size());
+  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
+    ncomp_arma(static_cast<arma::uword>(i)) = ncomp[i];
+  }
+  std::vector<fastpls_svd::LDAGPUModel> gpu_models =
+    fastpls_svd::cuda_lda_train_prefix(Ttrain, y_arma, n_classes, ncomp_arma, ridge);
+
+  Rcpp::List models(ncomp.size());
+  Rcpp::CharacterVector model_names(ncomp.size());
+  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
+    models[idx] = Rcpp::List::create(
+      Rcpp::Named("means") = gpu_models[static_cast<size_t>(idx)].means,
+      Rcpp::Named("inv_cov") = arma::mat(),
+      Rcpp::Named("linear") = gpu_models[static_cast<size_t>(idx)].linear,
+      Rcpp::Named("constants") = gpu_models[static_cast<size_t>(idx)].constants,
+      Rcpp::Named("priors") = gpu_models[static_cast<size_t>(idx)].priors,
+      Rcpp::Named("ridge") = gpu_models[static_cast<size_t>(idx)].ridge,
+      Rcpp::Named("backend") = "cuda_native"
+    );
+    model_names[idx] = std::to_string(ncomp[idx]);
+  }
+  models.attr("names") = model_names;
+  return models;
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_project_train_prefix_cuda(const arma::mat& Xtrain,
+                                         const arma::mat& R,
+                                         const arma::rowvec& offset,
+                                         const Rcpp::IntegerVector& y,
+                                         int n_classes,
+                                         const Rcpp::IntegerVector& ncomp,
+                                         double ridge) {
+  if (!fastpls_svd::cuda_lda_native_available()) {
+    arma::mat Ttrain = Xtrain * R;
+    if (offset.n_elem >= R.n_cols) {
+      Ttrain.each_row() -= offset.subvec(0, R.n_cols - 1);
+    }
+    return lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge);
+  }
+  arma::ivec y_arma(y.size());
+  for (R_xlen_t i = 0; i < y.size(); ++i) {
+    y_arma(static_cast<arma::uword>(i)) = y[i];
+  }
+  arma::ivec ncomp_arma(ncomp.size());
+  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
+    ncomp_arma(static_cast<arma::uword>(i)) = ncomp[i];
+  }
+  std::vector<fastpls_svd::LDAGPUModel> gpu_models =
+    fastpls_svd::cuda_lda_project_train_prefix(Xtrain, R, offset, y_arma, n_classes, ncomp_arma, ridge);
+
+  Rcpp::List models(ncomp.size());
+  Rcpp::CharacterVector model_names(ncomp.size());
+  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
+    models[idx] = Rcpp::List::create(
+      Rcpp::Named("means") = gpu_models[static_cast<size_t>(idx)].means,
+      Rcpp::Named("inv_cov") = arma::mat(),
+      Rcpp::Named("linear") = gpu_models[static_cast<size_t>(idx)].linear,
+      Rcpp::Named("constants") = gpu_models[static_cast<size_t>(idx)].constants,
+      Rcpp::Named("priors") = gpu_models[static_cast<size_t>(idx)].priors,
+      Rcpp::Named("ridge") = gpu_models[static_cast<size_t>(idx)].ridge,
+      Rcpp::Named("backend") = "cuda_native_project"
+    );
+    model_names[idx] = std::to_string(ncomp[idx]);
+  }
+  models.attr("names") = model_names;
+  return models;
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_predict_cpp(const arma::mat& Ttest,
+                           const Rcpp::List& lda) {
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("lda_predict_cpp requires a non-empty score matrix");
+  }
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  if (Ttest.n_cols != linear.n_cols) {
+    stop("lda_predict_cpp score dimension does not match the LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    stop("lda_predict_cpp has inconsistent LDA constants");
+  }
+
+  arma::mat scores = Ttest * linear.t();
+  scores.each_row() += constants;
+
+  Rcpp::IntegerVector pred(scores.n_rows);
+  for (arma::uword i = 0; i < scores.n_rows; ++i) {
+    arma::uword best = 0;
+    double best_val = scores(i, 0);
+    for (arma::uword c = 1; c < scores.n_cols; ++c) {
+      if (scores(i, c) > best_val) {
+        best_val = scores(i, c);
+        best = c;
+      }
+    }
+    pred[i] = static_cast<int>(best) + 1;
+  }
+
+  return Rcpp::List::create(
+    Rcpp::Named("pred") = pred,
+    Rcpp::Named("scores") = scores
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::IntegerVector lda_predict_labels_cpp(const arma::mat& Ttest,
+                                           const Rcpp::List& lda) {
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("lda_predict_labels_cpp requires a non-empty score matrix");
+  }
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  if (Ttest.n_cols != linear.n_cols) {
+    stop("lda_predict_labels_cpp score dimension does not match the LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    stop("lda_predict_labels_cpp has inconsistent LDA constants");
+  }
+
+  arma::mat scores = Ttest * linear.t();
+  Rcpp::IntegerVector pred = lda_labels_from_scores(scores, constants);
+
+  return pred;
+}
+
+// [[Rcpp::export]]
+Rcpp::IntegerVector lda_project_predict_labels_cpp(const arma::mat& Xtest,
+                                                   const arma::mat& R,
+                                                   const arma::rowvec& offset,
+                                                   const Rcpp::List& lda) {
+  if (Xtest.n_rows == 0 || Xtest.n_cols == 0) {
+    stop("lda_project_predict_labels_cpp requires a non-empty predictor matrix");
+  }
+  if (R.n_rows != Xtest.n_cols || R.n_cols == 0) {
+    stop("lda_project_predict_labels_cpp projection matrix has incompatible dimensions");
+  }
+  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
+    stop("lda_project_predict_labels_cpp offset is shorter than the projection dimension");
+  }
+
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  if (R.n_cols != linear.n_cols) {
+    stop("lda_project_predict_labels_cpp projection dimension does not match the LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    stop("lda_project_predict_labels_cpp has inconsistent LDA constants");
+  }
+
+  const double n = static_cast<double>(Xtest.n_rows);
+  const double p = static_cast<double>(Xtest.n_cols);
+  const double k = static_cast<double>(R.n_cols);
+  const double n_classes = static_cast<double>(linear.n_rows);
+  const double latent_ops = n * k * (p + n_classes);
+  const double direct_ops = n * p * n_classes;
+
+  if (std::isfinite(latent_ops) && std::isfinite(direct_ops) &&
+      direct_ops < 0.5 * latent_ops) {
+    arma::mat W = R * linear.t();
+    arma::rowvec constants_adj = constants;
+    if (offset.n_elem >= R.n_cols) {
+      constants_adj -= offset.subvec(0, R.n_cols - 1) * linear.t();
+    }
+    arma::mat scores = Xtest * W;
+    return lda_labels_from_scores(scores, constants_adj);
+  }
+
+  arma::mat Ttest = Xtest * R;
+  if (offset.n_elem >= R.n_cols) {
+    Ttest.each_row() -= offset.subvec(0, R.n_cols - 1);
+  }
+  arma::mat scores = Ttest * linear.t();
+  return lda_labels_from_scores(scores, constants);
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_predict_cuda(const arma::mat& Ttest,
+                            const Rcpp::List& lda) {
+  if (!fastpls_svd::cuda_lda_native_available()) {
+    return lda_predict_cpp(Ttest, lda);
+  }
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("lda_predict_cuda requires a non-empty score matrix");
+  }
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  if (Ttest.n_cols != linear.n_cols) {
+    stop("lda_predict_cuda score dimension does not match the LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    stop("lda_predict_cuda has inconsistent LDA constants");
+  }
+  return fastpls_svd::cuda_lda_predict(Ttest, linear, constants, true);
+}
+
+// [[Rcpp::export]]
+Rcpp::IntegerVector lda_predict_labels_cuda(const arma::mat& Ttest,
+                                            const Rcpp::List& lda) {
+  if (!fastpls_svd::cuda_lda_native_available()) {
+    return lda_predict_labels_cpp(Ttest, lda);
+  }
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("lda_predict_labels_cuda requires a non-empty score matrix");
+  }
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  if (Ttest.n_cols != linear.n_cols) {
+    stop("lda_predict_labels_cuda score dimension does not match the LDA model");
+  }
+  if (constants.n_elem != linear.n_rows) {
+    stop("lda_predict_labels_cuda has inconsistent LDA constants");
+  }
+  Rcpp::List pred = fastpls_svd::cuda_lda_predict(Ttest, linear, constants, false);
+  return pred["pred"];
+}
+
+// [[Rcpp::export]]
+Rcpp::List lda_project_predict_cuda(const arma::mat& Xtest,
+                                    const arma::mat& R,
+                                    const arma::rowvec& offset,
+                                    const Rcpp::List& lda,
+                                    bool return_scores = false) {
+  if (!fastpls_svd::cuda_lda_native_available()) {
+    arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+    arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+    if (offset.n_elem >= R.n_cols) {
+      constants -= offset.subvec(0, R.n_cols - 1) * linear.t();
+    }
+    arma::mat scores = (Xtest * R) * linear.t();
+    scores.each_row() += constants;
+    Rcpp::IntegerVector pred(scores.n_rows);
+    for (arma::uword i = 0; i < scores.n_rows; ++i) {
+      arma::uword best = 0;
+      double best_val = scores(i, 0);
+      for (arma::uword c = 1; c < scores.n_cols; ++c) {
+        if (scores(i, c) > best_val) {
+          best_val = scores(i, c);
+          best = c;
+        }
+      }
+      pred[i] = static_cast<int>(best) + 1;
+    }
+    if (return_scores) {
+      return Rcpp::List::create(Rcpp::Named("pred") = pred, Rcpp::Named("scores") = scores);
+    }
+    return Rcpp::List::create(Rcpp::Named("pred") = pred);
+  }
+  if (Xtest.n_rows == 0 || Xtest.n_cols == 0 || R.n_rows == 0 || R.n_cols == 0) {
+    stop("lda_project_predict_cuda requires non-empty X and projection matrices");
+  }
+  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
+  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
+  return fastpls_svd::cuda_lda_project_predict(Xtest, R, offset, linear, constants, return_scores);
+}
+
+// [[Rcpp::export]]
+Rcpp::List linear_train_prefix_cpp(const arma::mat& Ttrain,
+                                   const arma::mat& Ytrain,
+                                   const Rcpp::IntegerVector& ncomp) {
+  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
+    stop("linear_train_prefix_cpp requires a non-empty score matrix");
+  }
+  if (Ytrain.n_rows != Ttrain.n_rows || Ytrain.n_cols == 0) {
+    stop("linear_train_prefix_cpp requires one response row per training score row");
+  }
+  if (ncomp.size() < 1) {
+    stop("linear_train_prefix_cpp requires at least one component count");
+  }
+
+  int kmax_i = 0;
+  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
+    if (ncomp[i] > kmax_i) kmax_i = ncomp[i];
+  }
+  if (kmax_i < 1 || kmax_i > static_cast<int>(Ttrain.n_cols)) {
+    stop("linear_train_prefix_cpp component counts must be in 1..ncol(Ttrain)");
+  }
+
+  const arma::uword n = Ttrain.n_rows;
+  const arma::uword kmax = static_cast<arma::uword>(kmax_i);
+  arma::mat Tk = Ttrain.cols(0, kmax - 1);
+  arma::rowvec mean_t = arma::mean(Tk, 0);
+  arma::rowvec mean_y = arma::mean(Ytrain, 0);
+  arma::mat cross_tt = arma::symmatu(Tk.t() * Tk);
+  arma::mat cross_ty = Tk.t() * Ytrain;
+
+  Rcpp::List models(ncomp.size());
+  Rcpp::CharacterVector model_names(ncomp.size());
+  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
+    const int kk_i = ncomp[idx];
+    if (kk_i < 1 || kk_i > kmax_i) {
+      stop("linear_train_prefix_cpp component counts must be in 1..max(ncomp)");
+    }
+    const arma::uword kk = static_cast<arma::uword>(kk_i);
+    arma::rowvec mt = mean_t.cols(0, kk - 1);
+    arma::mat xtx = cross_tt.submat(0, 0, kk - 1, kk - 1) -
+      static_cast<double>(n) * (mt.t() * mt);
+    arma::mat xty = cross_ty.rows(0, kk - 1) -
+      static_cast<double>(n) * (mt.t() * mean_y);
+
+    arma::mat coef;
+    bool ok = arma::solve(coef, xtx, xty, arma::solve_opts::likely_sympd);
+    if (!ok || !coef.is_finite()) {
+      coef = arma::pinv(xtx) * xty;
+    }
+    arma::rowvec intercept = mean_y - mt * coef;
+
+    models[idx] = Rcpp::List::create(
+      Rcpp::Named("coef") = coef,
+      Rcpp::Named("intercept") = intercept
+    );
+    model_names[idx] = std::to_string(kk_i);
+  }
+  models.attr("names") = model_names;
+  return models;
+}
+
+// [[Rcpp::export]]
+arma::mat linear_predict_cpp(const arma::mat& Ttest,
+                             const Rcpp::List& linear_model) {
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("linear_predict_cpp requires a non-empty score matrix");
+  }
+  arma::mat coef = Rcpp::as<arma::mat>(linear_model["coef"]);
+  arma::rowvec intercept = Rcpp::as<arma::rowvec>(linear_model["intercept"]);
+  if (Ttest.n_cols != coef.n_rows) {
+    stop("linear_predict_cpp score dimension does not match the linear model");
+  }
+  if (intercept.n_elem != coef.n_cols) {
+    stop("linear_predict_cpp has inconsistent intercept length");
+  }
+  arma::mat pred = Ttest * coef;
+  pred.each_row() += intercept;
+  return pred;
+}
+
+// [[Rcpp::export]]
+arma::mat linear_predict_cuda(const arma::mat& Ttest,
+                              const Rcpp::List& linear_model) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    return linear_predict_cpp(Ttest, linear_model);
+  }
+  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
+    stop("linear_predict_cuda requires a non-empty score matrix");
+  }
+  arma::mat coef = Rcpp::as<arma::mat>(linear_model["coef"]);
+  arma::rowvec intercept = Rcpp::as<arma::rowvec>(linear_model["intercept"]);
+  if (Ttest.n_cols != coef.n_rows) {
+    stop("linear_predict_cuda score dimension does not match the linear model");
+  }
+  if (intercept.n_elem != coef.n_cols) {
+    stop("linear_predict_cuda has inconsistent intercept length");
+  }
+  arma::mat pred = fastpls_svd::cuda_matrix_multiply(Ttest, coef);
+  pred.each_row() += intercept;
+  return pred;
 }
 
 // [[Rcpp::export]]
@@ -1710,6 +2329,7 @@ List pls_model2_fast(
   const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
   const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
   const int fast_crossprod_min_n_to_p_ratio = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024);
+  const bool return_ttrain = env_int_or("FASTPLS_RETURN_TTRAIN", 0, 0, 1) == 1;
   const int top1_rsvd_oversample = env_int_or(
     "FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE",
     std::min(std::max(rsvd_oversample, 0), 2),
@@ -1724,6 +2344,10 @@ List pls_model2_fast(
   );
   arma::vec rr_prev;
   bool has_rr_prev = false;
+  arma::mat TT;
+  if (return_ttrain) {
+    TT.zeros(n, max_ncomp);
+  }
   const bool use_crossprod_cache =
     (fast_optimized == 1) &&
     (center_t == 0) &&
@@ -1750,7 +2374,7 @@ List pls_model2_fast(
       rr /= tnorm;
       pp /= tnorm;
       qq = Sxy_cache.t() * rr;
-      if (fit) {
+      if (fit || return_ttrain) {
         tt = Xtrain * rr;
       }
     } else {
@@ -1808,6 +2432,9 @@ List pls_model2_fast(
     RR.col(a_idx) = rr;
     QQ.col(a_idx) = qq;
     VV.col(a_idx) = vv;
+    if (return_ttrain && tt.n_elem == static_cast<arma::uword>(n)) {
+      TT.col(a_idx) = tt;
+    }
     if (store_B) {
       Bcur += rr * qq.t();
     }
@@ -1925,7 +2552,7 @@ List pls_model2_fast(
   List out = List::create(
     Named("P")       = arma::mat(),
     Named("Q")       = QQ,
-    Named("Ttrain")  = arma::mat(),
+    Named("Ttrain")  = return_ttrain ? TT : arma::mat(),
     Named("R")       = RR,
     Named("mX")      = mX,
     Named("vX")      = vX,
@@ -4467,6 +5094,7 @@ List pls_model2_fast_rsvd_xprod_precision(
   const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
   const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
   const int fast_crossprod_min_n_to_p_ratio = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024);
+  const bool return_ttrain = env_int_or("FASTPLS_RETURN_TTRAIN", 0, 0, 1) == 1;
   const bool use_crossprod_cache =
     (!use_implicit_xprod) &&
     (fast_optimized == 1) &&
@@ -4483,6 +5111,10 @@ List pls_model2_fast_rsvd_xprod_precision(
 
   arma::vec rr_prev;
   bool has_rr_prev = false;
+  arma::mat TT;
+  if (return_ttrain) {
+    TT.zeros(n, max_ncomp);
+  }
   auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
     arma::vec pp;
     arma::vec qq;
@@ -4496,7 +5128,7 @@ List pls_model2_fast_rsvd_xprod_precision(
       rr /= tnorm;
       pp /= tnorm;
       qq = Sxy_cache.t() * rr;
-      if (fit) tt = Xtrain * rr;
+      if (fit || return_ttrain) tt = Xtrain * rr;
     } else if (use_implicit_xprod) {
       tt = Xtrain * rr;
       if (center_t == 1) {
@@ -4549,6 +5181,9 @@ List pls_model2_fast_rsvd_xprod_precision(
     RR.col(a_idx) = rr;
     QQ.col(a_idx) = qq;
     VV.col(a_idx) = vv;
+    if (return_ttrain && tt.n_elem == static_cast<arma::uword>(n)) {
+      TT.col(a_idx) = tt;
+    }
     if (store_B) {
       Bcur += rr * qq.t();
     }
@@ -4638,7 +5273,7 @@ List pls_model2_fast_rsvd_xprod_precision(
   List out = List::create(
     Named("P")       = arma::mat(),
     Named("Q")       = QQ,
-    Named("Ttrain")  = arma::mat(),
+    Named("Ttrain")  = return_ttrain ? TT : arma::mat(),
     Named("R")       = RR,
     Named("mX")      = mX,
     Named("vX")      = vX,
@@ -4849,6 +5484,270 @@ List pls_model1_gpu_implicit_xprod(
   }
   annotate_coefficient_storage(out, store_B);
   return out;
+}
+
+// [[Rcpp::export]]
+List pls_lda_gpu_native(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec y,
+  arma::mat Xtest,
+  arma::ivec ncomp,
+  int n_classes,
+  int method,
+  int scaling,
+  bool xprod,
+  bool fit,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed,
+  double lda_ridge
+) {
+  if (!fastpls_svd::has_cuda_backend() || !fastpls_svd::cuda_lda_native_available()) {
+    stop("pls_lda_gpu_native requires CUDA PLS and native CUDA LDA support");
+  }
+  if (Xtrain.n_rows == 0 || Xtrain.n_cols == 0 || Ytrain.n_rows != Xtrain.n_rows) {
+    stop("pls_lda_gpu_native requires compatible non-empty Xtrain and Ytrain");
+  }
+  if (static_cast<arma::uword>(y.n_elem) != Xtrain.n_rows) {
+    stop("pls_lda_gpu_native requires one class label per training row");
+  }
+  if (Xtest.n_cols != Xtrain.n_cols) {
+    stop("pls_lda_gpu_native Xtest columns must match Xtrain columns");
+  }
+  if (n_classes < 2) {
+    stop("pls_lda_gpu_native requires at least two classes");
+  }
+  if (ncomp.n_elem < 1) {
+    stop("pls_lda_gpu_native requires at least one component count");
+  }
+  const arma::uword n_train_rows = Xtrain.n_rows;
+
+  List model;
+  bool direct_plssvd_gpu = false;
+  fastpls_svd::PLSSVDGPUResult direct_gpu;
+  if (method == 1) {
+    const int n = Xtrain.n_rows;
+    const int p = Xtrain.n_cols;
+    const int m = Ytrain.n_cols;
+    const int max_plssvd_rank = std::min(n, std::min(p, m));
+    for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+      if (ncomp(i) > max_plssvd_rank) {
+        ncomp(i) = max_plssvd_rank;
+      }
+      if (ncomp(i) < 1) {
+        ncomp(i) = 1;
+      }
+    }
+    const int max_ncomp_eff = std::min(static_cast<int>(max(ncomp)), max_plssvd_rank);
+    if (max_ncomp_eff < 1) {
+      stop("plssvd effective rank is < 1");
+    }
+
+    arma::mat mX(1, p, fill::zeros);
+    if (scaling < 3) {
+      mX = mean(Xtrain, 0);
+      Xtrain.each_row() -= mX;
+    }
+
+    arma::mat vX(1, p, fill::ones);
+    if (scaling == 2) {
+      vX = variance(Xtrain);
+      Xtrain.each_row() /= vX;
+    }
+
+    arma::mat mY = mean(Ytrain, 0);
+    Ytrain.each_row() -= mY;
+
+    fastpls_svd::SVDOptions opt;
+    opt.method = fastpls_svd::Method::RSVD;
+    opt.oversample = std::max(rsvd_oversample, 0);
+    opt.power_iters = std::max(rsvd_power, 0);
+    opt.svds_tol = std::max(svds_tol, 0.0);
+    opt.seed = static_cast<unsigned int>(seed);
+    opt.left_only = false;
+    opt.use_full_svd = false;
+
+    direct_gpu = xprod ?
+      fastpls_svd::cuda_plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt) :
+      fastpls_svd::cuda_plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt);
+    direct_plssvd_gpu = true;
+
+    arma::cube Yfit = direct_gpu.Yfit;
+    if (fit && Yfit.n_elem > 0) {
+      for (arma::uword i = 0; i < Yfit.n_slices; ++i) {
+        Yfit.slice(i).each_row() += mY;
+      }
+    }
+
+    const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
+    model = List::create(
+      Named("C_latent") = direct_gpu.C_latent,
+      Named("W_latent") = direct_gpu.W_latent,
+      Named("Q")       = direct_gpu.Q,
+      Named("Ttrain")  = arma::mat(),
+      Named("R")       = direct_gpu.R,
+      Named("mX")      = mX,
+      Named("vX")      = vX,
+      Named("mY")      = mY,
+      Named("p")       = p,
+      Named("m")       = m,
+      Named("ncomp")   = ncomp,
+      Named("Yfit")    = Yfit,
+      Named("R2Y")     = direct_gpu.R2Y,
+      Named("xprod_mode") = xprod ? "implicit" : "materialized"
+    );
+    if (store_B) {
+      model["B"] = direct_gpu.B;
+    }
+    annotate_coefficient_storage(model, store_B);
+  } else if (method == 3) {
+    model = pls_model2_fast_gpu(
+      Xtrain,
+      Ytrain,
+      ncomp,
+      scaling,
+      fit,
+      fastpls_svd::SVD_METHOD_CUDA_RSVD,
+      rsvd_oversample,
+      rsvd_power,
+      svds_tol,
+      seed
+    );
+  } else {
+    stop("pls_lda_gpu_native currently supports method=1 (plssvd) or method=3 (simpls)");
+  }
+
+  // Release persistent PLS workspaces before allocating the LDA workspaces.
+  fastpls_svd::cuda_reset_workspace();
+
+  arma::mat R = Rcpp::as<arma::mat>(model["R"]);
+  arma::mat mX = Rcpp::as<arma::mat>(model["mX"]);
+  arma::mat vX = Rcpp::as<arma::mat>(model["vX"]);
+  arma::ivec ncomp_eff = Rcpp::as<arma::ivec>(model["ncomp"]);
+  int kmax = 0;
+  for (arma::uword i = 0; i < ncomp_eff.n_elem; ++i) {
+    if (ncomp_eff(i) > kmax) kmax = ncomp_eff(i);
+  }
+  if (kmax < 1 || kmax > static_cast<int>(R.n_cols)) {
+    stop("pls_lda_gpu_native has invalid effective component count");
+  }
+
+  arma::mat R_predict = R.cols(0, static_cast<arma::uword>(kmax) - 1);
+  if (vX.n_elem == R_predict.n_rows) {
+    arma::vec scale = arma::vectorise(vX);
+    for (arma::uword j = 0; j < R_predict.n_rows; ++j) {
+      double s = scale(j);
+      if (!std::isfinite(s) || s == 0.0) s = 1.0;
+      R_predict.row(j) /= s;
+    }
+  }
+  arma::rowvec offset(kmax, arma::fill::zeros);
+  if (mX.n_elem == R_predict.n_rows) {
+    offset = arma::vectorise(mX).t() * R_predict;
+  }
+
+  arma::ivec unique_ncomp = arma::unique(ncomp_eff);
+  std::string lda_train_backend = "cuda_fused_project";
+  std::vector<fastpls_svd::LDAGPUModel> gpu_models;
+  if (direct_plssvd_gpu &&
+      direct_gpu.Ttrain.n_rows == n_train_rows &&
+      direct_gpu.Ttrain.n_cols >= static_cast<arma::uword>(kmax)) {
+    gpu_models = fastpls_svd::cuda_lda_train_prefix(
+      direct_gpu.Ttrain.cols(0, static_cast<arma::uword>(kmax) - 1),
+      y,
+      n_classes,
+      unique_ncomp,
+      lda_ridge
+    );
+    lda_train_backend = "cuda_fused_ttrain";
+  } else if (model.containsElementNamed("Ttrain")) {
+    arma::mat Ttrain = Rcpp::as<arma::mat>(model["Ttrain"]);
+    if (Ttrain.n_rows == n_train_rows &&
+        Ttrain.n_cols >= static_cast<arma::uword>(kmax)) {
+      gpu_models = fastpls_svd::cuda_lda_train_prefix(
+        Ttrain.cols(0, static_cast<arma::uword>(kmax) - 1),
+        y,
+        n_classes,
+        unique_ncomp,
+        lda_ridge
+      );
+      lda_train_backend = "cuda_fused_ttrain";
+    }
+  }
+  if (gpu_models.empty()) {
+    gpu_models = fastpls_svd::cuda_lda_project_train_prefix(
+      Xtrain,
+      R_predict,
+      offset,
+      y,
+      n_classes,
+      unique_ncomp,
+      lda_ridge
+    );
+  }
+
+  Rcpp::List lda_models(unique_ncomp.n_elem);
+  Rcpp::CharacterVector lda_names(unique_ncomp.n_elem);
+  for (arma::uword i = 0; i < unique_ncomp.n_elem; ++i) {
+    const fastpls_svd::LDAGPUModel& gm = gpu_models[static_cast<size_t>(i)];
+    lda_models[i] = Rcpp::List::create(
+      Rcpp::Named("means") = gm.means,
+      Rcpp::Named("inv_cov") = arma::mat(),
+      Rcpp::Named("linear") = gm.linear,
+      Rcpp::Named("constants") = gm.constants,
+      Rcpp::Named("priors") = gm.priors,
+      Rcpp::Named("ridge") = gm.ridge,
+      Rcpp::Named("backend") = "cuda_native_fused"
+    );
+    lda_names[i] = std::to_string(unique_ncomp(i));
+  }
+  lda_models.attr("names") = lda_names;
+  model["lda"] = Rcpp::List::create(
+    Rcpp::Named("ncomp") = unique_ncomp,
+    Rcpp::Named("models") = lda_models,
+    Rcpp::Named("ridge") = lda_ridge,
+    Rcpp::Named("train_backend") = lda_train_backend
+  );
+  model["R_predict"] = R_predict;
+  model["R_offset"] = offset;
+  model["classification_rule"] = "lda_cuda";
+  model["lda_backend"] = "cuda_fused";
+
+  if (Xtest.n_rows > 0) {
+    Rcpp::IntegerMatrix pred_codes(Xtest.n_rows, ncomp_eff.n_elem);
+    for (arma::uword i = 0; i < ncomp_eff.n_elem; ++i) {
+      const int kk = ncomp_eff(i);
+      arma::uword model_idx = 0;
+      while (model_idx < unique_ncomp.n_elem && unique_ncomp(model_idx) != kk) {
+        ++model_idx;
+      }
+      if (model_idx >= unique_ncomp.n_elem) {
+        stop("pls_lda_gpu_native could not match LDA model to ncomp");
+      }
+      const fastpls_svd::LDAGPUModel& gm = gpu_models[static_cast<size_t>(model_idx)];
+      Rcpp::List pred = fastpls_svd::cuda_lda_project_predict(
+        Xtest,
+        R_predict.cols(0, static_cast<arma::uword>(kk) - 1),
+        offset.subvec(0, static_cast<arma::uword>(kk) - 1),
+        gm.linear,
+        gm.constants,
+        false
+      );
+      Rcpp::IntegerVector col = pred["pred"];
+      for (R_xlen_t r = 0; r < col.size(); ++r) {
+        pred_codes(r, i) = col[r];
+      }
+    }
+    model["pred_codes"] = pred_codes;
+  }
+
+  model["predict_backend"] = "cuda_fused_lda";
+  model["flash_svd"] = true;
+  model["flash_svd_backend"] = "cuda";
+  model["flash_svd_mode"] = "fused_pls_lda";
+  return model;
 }
 
 // [[Rcpp::export]]

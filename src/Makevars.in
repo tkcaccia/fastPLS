@@ -5,4 +5,4 @@ PKG_CPPFLAGS = @FASTPLS_PKG_CPPFLAGS@
 PKG_LIBS = @FASTPLS_PKG_LIBS@ $(FLIBS)
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
-	svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o svd_cuda_rsvd.o
+	svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o svd_cuda_rsvd.o@FASTPLS_CUDA_OBJECTS@

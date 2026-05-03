@@ -92,6 +92,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// lda_cuda_native_available
+bool lda_cuda_native_available();
+RcppExport SEXP _fastPLS_lda_cuda_native_available() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(lda_cuda_native_available());
+    return rcpp_result_gen;
+END_RCPP
+}
 // cuda_reset_workspace
 void cuda_reset_workspace();
 RcppExport SEXP _fastPLS_cuda_reset_workspace() {
@@ -121,6 +131,198 @@ BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
     rcpp_result_gen = Rcpp::wrap(cuda_thin_qr(A));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_train_cpp
+Rcpp::List lda_train_cpp(const arma::mat& Ttrain, const Rcpp::IntegerVector& y, int n_classes, double ridge);
+RcppExport SEXP _fastPLS_lda_train_cpp(SEXP TtrainSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain(TtrainSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_cpp(Ttrain, y, n_classes, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_train_prefix_cpp
+Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
+RcppExport SEXP _fastPLS_lda_train_prefix_cpp(SEXP TtrainSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain(TtrainSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_project_train_prefix_cpp
+Rcpp::List lda_project_train_prefix_cpp(const arma::mat& Xtrain, const arma::mat& R, const arma::rowvec& offset, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
+RcppExport SEXP _fastPLS_lda_project_train_prefix_cpp(SEXP XtrainSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_project_train_prefix_cpp(Xtrain, R, offset, y, n_classes, ncomp, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_train_prefix_cuda
+Rcpp::List lda_train_prefix_cuda(const arma::mat& Ttrain, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
+RcppExport SEXP _fastPLS_lda_train_prefix_cuda(SEXP TtrainSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain(TtrainSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_prefix_cuda(Ttrain, y, n_classes, ncomp, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_project_train_prefix_cuda
+Rcpp::List lda_project_train_prefix_cuda(const arma::mat& Xtrain, const arma::mat& R, const arma::rowvec& offset, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
+RcppExport SEXP _fastPLS_lda_project_train_prefix_cuda(SEXP XtrainSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_project_train_prefix_cuda(Xtrain, R, offset, y, n_classes, ncomp, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_cpp
+Rcpp::List lda_predict_cpp(const arma::mat& Ttest, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_cpp(SEXP TtestSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_cpp(Ttest, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_labels_cpp
+Rcpp::IntegerVector lda_predict_labels_cpp(const arma::mat& Ttest, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_labels_cpp(SEXP TtestSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_labels_cpp(Ttest, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_project_predict_labels_cpp
+Rcpp::IntegerVector lda_project_predict_labels_cpp(const arma::mat& Xtest, const arma::mat& R, const arma::rowvec& offset, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_project_predict_labels_cpp(SEXP XtestSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_project_predict_labels_cpp(Xtest, R, offset, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_cuda
+Rcpp::List lda_predict_cuda(const arma::mat& Ttest, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_cuda(SEXP TtestSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_cuda(Ttest, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_labels_cuda
+Rcpp::IntegerVector lda_predict_labels_cuda(const arma::mat& Ttest, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_labels_cuda(SEXP TtestSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_labels_cuda(Ttest, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_project_predict_cuda
+Rcpp::List lda_project_predict_cuda(const arma::mat& Xtest, const arma::mat& R, const arma::rowvec& offset, const Rcpp::List& lda, bool return_scores);
+RcppExport SEXP _fastPLS_lda_project_predict_cuda(SEXP XtestSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ldaSEXP, SEXP return_scoresSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
+    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    Rcpp::traits::input_parameter< bool >::type return_scores(return_scoresSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_project_predict_cuda(Xtest, R, offset, lda, return_scores));
+    return rcpp_result_gen;
+END_RCPP
+}
+// linear_train_prefix_cpp
+Rcpp::List linear_train_prefix_cpp(const arma::mat& Ttrain, const arma::mat& Ytrain, const Rcpp::IntegerVector& ncomp);
+RcppExport SEXP _fastPLS_linear_train_prefix_cpp(SEXP TtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain(TtrainSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(linear_train_prefix_cpp(Ttrain, Ytrain, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// linear_predict_cpp
+arma::mat linear_predict_cpp(const arma::mat& Ttest, const Rcpp::List& linear_model);
+RcppExport SEXP _fastPLS_linear_predict_cpp(SEXP TtestSEXP, SEXP linear_modelSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type linear_model(linear_modelSEXP);
+    rcpp_result_gen = Rcpp::wrap(linear_predict_cpp(Ttest, linear_model));
+    return rcpp_result_gen;
+END_RCPP
+}
+// linear_predict_cuda
+arma::mat linear_predict_cuda(const arma::mat& Ttest, const Rcpp::List& linear_model);
+RcppExport SEXP _fastPLS_linear_predict_cuda(SEXP TtestSEXP, SEXP linear_modelSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type linear_model(linear_modelSEXP);
+    rcpp_result_gen = Rcpp::wrap(linear_predict_cuda(Ttest, linear_model));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -389,12 +591,12 @@ END_RCPP
 }
 // pls_model1_rsvd_xprod_precision
 List pls_model1_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
-RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+RcppExport SEXP _fastPLS_pls_model1_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXPSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -409,12 +611,12 @@ END_RCPP
 }
 // pls_model2_fast_rsvd_xprod_precision
 List pls_model2_fast_rsvd_xprod_precision(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, int xprod_precision);
-RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
+RcppExport SEXP _fastPLS_pls_model2_fast_rsvd_xprod_precision(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP xprod_precisionSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXPSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -465,6 +667,31 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_lda_gpu_native
+List pls_lda_gpu_native(arma::mat Xtrain, arma::mat Ytrain, arma::ivec y, arma::mat Xtest, arma::ivec ncomp, int n_classes, int method, int scaling, bool xprod, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, double lda_ridge);
+RcppExport SEXP _fastPLS_pls_lda_gpu_native(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ySEXP, SEXP XtestSEXP, SEXP ncompSEXP, SEXP n_classesSEXP, SEXP methodSEXP, SEXP scalingSEXP, SEXP xprodSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP lda_ridgeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type y(ySEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type xprod(xprodSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< double >::type lda_ridge(lda_ridgeSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_lda_gpu_native(Xtrain, Ytrain, y, Xtest, ncomp, n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
 // pls_cv_predict_compiled
 List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes);
 RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP n_responseSEXP, SEXP xprodSEXP, SEXP opls_northSEXP, SEXP return_scoresSEXP, SEXP class_codesSEXP) {
@@ -502,9 +729,24 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_IRLB", (DL_FUNC) &_fastPLS_IRLB, 7},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
+    {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
     {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
     {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
+    {"_fastPLS_lda_train_cpp", (DL_FUNC) &_fastPLS_lda_train_cpp, 4},
+    {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},
+    {"_fastPLS_lda_project_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp, 7},
+    {"_fastPLS_lda_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_cuda, 5},
+    {"_fastPLS_lda_project_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cuda, 7},
+    {"_fastPLS_lda_predict_cpp", (DL_FUNC) &_fastPLS_lda_predict_cpp, 2},
+    {"_fastPLS_lda_predict_labels_cpp", (DL_FUNC) &_fastPLS_lda_predict_labels_cpp, 2},
+    {"_fastPLS_lda_project_predict_labels_cpp", (DL_FUNC) &_fastPLS_lda_project_predict_labels_cpp, 4},
+    {"_fastPLS_lda_predict_cuda", (DL_FUNC) &_fastPLS_lda_predict_cuda, 2},
+    {"_fastPLS_lda_predict_labels_cuda", (DL_FUNC) &_fastPLS_lda_predict_labels_cuda, 2},
+    {"_fastPLS_lda_project_predict_cuda", (DL_FUNC) &_fastPLS_lda_project_predict_cuda, 5},
+    {"_fastPLS_linear_train_prefix_cpp", (DL_FUNC) &_fastPLS_linear_train_prefix_cpp, 3},
+    {"_fastPLS_linear_predict_cpp", (DL_FUNC) &_fastPLS_linear_predict_cpp, 2},
+    {"_fastPLS_linear_predict_cuda", (DL_FUNC) &_fastPLS_linear_predict_cuda, 2},
     {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
@@ -525,6 +767,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 9},
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
+    {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
     {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 19},
     {NULL, NULL, 0}
 };

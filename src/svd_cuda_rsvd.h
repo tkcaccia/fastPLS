@@ -16,6 +16,14 @@ struct PLSSVDGPUResult {
   Vec R2Y;
 };
 
+struct LDAGPUModel {
+  Mat means;
+  Mat linear;
+  arma::rowvec constants;
+  Vec priors;
+  double ridge = 0.0;
+};
+
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt);
 SVDResult cuda_rsvd_resident_svd(const Mat& A, int k, const SVDOptions& opt);
 PLSSVDGPUResult cuda_plssvd_fit(
@@ -48,6 +56,37 @@ arma::imat cuda_flash_lowrank_predict_classes(
 );
 Mat cuda_matrix_multiply(const Mat& A, const Mat& B);
 Mat cuda_thin_qr(const Mat& A);
+std::vector<LDAGPUModel> cuda_lda_train_prefix(
+  const Mat& Ttrain,
+  const arma::ivec& y,
+  int n_classes,
+  const arma::ivec& ncomp,
+  double ridge
+);
+std::vector<LDAGPUModel> cuda_lda_project_train_prefix(
+  const Mat& Xtrain,
+  const Mat& R,
+  const arma::rowvec& offset,
+  const arma::ivec& y,
+  int n_classes,
+  const arma::ivec& ncomp,
+  double ridge
+);
+Rcpp::List cuda_lda_predict(
+  const Mat& Ttest,
+  const Mat& linear,
+  const arma::rowvec& constants,
+  bool return_scores
+);
+Rcpp::List cuda_lda_project_predict(
+  const Mat& Xtest,
+  const Mat& R,
+  const arma::rowvec& offset,
+  const Mat& linear,
+  const arma::rowvec& constants,
+  bool return_scores
+);
+bool cuda_lda_native_available();
 bool cuda_runtime_available();
 void cuda_reset_workspace();
 void cuda_rsvd_sample_y(

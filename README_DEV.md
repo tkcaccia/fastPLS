@@ -19,14 +19,14 @@ unexported and out of benchmark labels.
 
 ## SVD and xprod Policy
 
-Supported SVD choices through `pls()` and `pls_r()` are:
+Supported CPU SVD choices through `pls()` are:
 
 - `irlba`
 - `cpu_rsvd`
 - `exact`
 
-The former hybrid `svd.method = "cuda_rsvd"` path is intentionally removed.
-CUDA fitting is exposed through the GPU-native wrappers.
+The former hybrid `svd.method = "cuda_rsvd"` path is intentionally removed from
+PLS fitting. CUDA fitting is exposed only through `pls(..., backend = "cuda")`.
 
 The default matrix-free `xprod` policy is implemented in `R/main.R`:
 
@@ -50,7 +50,7 @@ is explicitly testing response compression.
 Implementation location:
 
 - R orchestration and decoding helpers live in `R/main.R`.
-- CUDA matrix multiplication helpers are exported internally from
+- CUDA matrix multiplication helpers are registered internally from
   `src/svd_cuda_rsvd.cpp` through `src/fastPLS.cpp`.
 - Tests for regression, classification, R, C++, OPLS, and kernelPLS coverage are
   in `tests/testthat/test-gaussian-y.R`.
@@ -66,7 +66,7 @@ Regression path:
 
 Classification path:
 
-- avoid dense one-hot `transformy()` when `gaussian_y = TRUE`
+- avoid dense one-hot response materialization when `gaussian_y = TRUE`
 - generate reproducible Gaussian class codes
 - fit to the per-sample class code matrix
 - decode predictions by nearest-code scores and return the original factor
@@ -81,12 +81,8 @@ CUDA path:
 
 ## CUDA Paths
 
-GPU-native fitting wrappers:
-
-- `plssvd_gpu()`
-- `simpls_gpu()`
-- `opls_cuda()`
-- `kernel_pls_cuda()`
+GPU-native fitting is selected through `pls(..., backend = "cuda")` with
+`method = "plssvd"`, `"simpls"`, `"opls"`, or `"kernelpls"`.
 
 FlashSVD-style prediction is integrated into the standard compact prediction
 path instead of being treated as a separate benchmark algorithm. It keeps

@@ -1,14 +1,16 @@
 useDynLib(fastPLS, .registration=TRUE)
 
 importFrom("Rcpp", "evalCpp")
-  importFrom("stats", "median", "pnorm", "predict", "quantile", "rnorm", "sd", "var")
- importFrom("methods", "is")
+importFrom("stats", "median", "pnorm", "predict", "quantile", "rnorm", "sd", "var")
+importFrom("methods", "is")
 import(Matrix)
 
 #exportPattern("^[[:alpha:]]+")
-export(optim.pls.cv,pls.double.cv,pls,pls_r,plssvd_cv_cpp,simpls_cv_cpp,kodama_cpp_simpls_rsvd,opls_cv_cpp,kernelpls_cv_cpp,kernel_pls_cv_cpp,plssvd_cv_cuda,simpls_cv_cuda,kodama_cuda_simpls_rsvd,opls_cv_cuda,kernelpls_cv_cuda,kernel_pls_cv_cuda,simpls_gpu,plssvd_gpu,kernel_pls_r,kernel_pls_cpp,kernel_pls_cuda,kernel_pls_fast_r,kernel_pls_fast_cpp,kernel_pls_fast_cuda,opls_r,opls_cpp,opls_cuda,opls_fast_r,opls_fast_cpp,opls_fast_cuda,predict.fastPLS,transformy,fastcor,ViP,has_cuda,svd_methods,svd_run,svd_benchmark)
+export(fastcor,fastsvd,has_cuda,optim.pls.cv,pca,pls,pls.double.cv,pls.single.cv,ViP)
 
 
 S3method(predict,fastPLS)
 S3method(predict,fastPLSKernel)
 S3method(predict,fastPLSOpls)
+S3method(plot,fastPLS)
+S3method(plot,fastPLSPCA)

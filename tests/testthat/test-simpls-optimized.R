@@ -82,7 +82,7 @@ test_that("accelerated simpls stays close to legacy baseline on a controlled reg
   expect_true(abs(opt_rmse - base_rmse) <= 0.05)
 })
 
-test_that("simpls_gpu returns valid structure and stays close to accelerated simpls", {
+test_that("pls backend='cuda' for simpls returns valid structure and stays close to accelerated simpls", {
   skip_if_not(fastPLS::has_cuda(), "CUDA backend not available")
 
   set.seed(20260419)
@@ -109,12 +109,14 @@ test_that("simpls_gpu returns valid structure and stays close to accelerated sim
     seed = 91L
   )
 
-  gpu_fit <- fastPLS::simpls_gpu(
+  gpu_fit <- fastPLS::pls(
     Xtrain = X[-idx, , drop = FALSE],
     Ytrain = Y[-idx],
     Xtest = X[idx, , drop = FALSE],
     Ytest = Y[idx],
     ncomp = c(2L, 4L),
+    method = "simpls",
+    backend = "cuda",
     fit = FALSE,
     seed = 91L
   )

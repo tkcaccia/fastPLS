@@ -28,6 +28,10 @@ has_cuda <- function() {
     .Call(`_fastPLS_has_cuda`)
 }
 
+lda_cuda_native_available <- function() {
+    .Call(`_fastPLS_lda_cuda_native_available`)
+}
+
 cuda_reset_workspace <- function() {
     invisible(.Call(`_fastPLS_cuda_reset_workspace`))
 }
@@ -38,6 +42,62 @@ cuda_matrix_multiply <- function(A, B) {
 
 cuda_thin_qr <- function(A) {
     .Call(`_fastPLS_cuda_thin_qr`, A)
+}
+
+lda_train_cpp <- function(Ttrain, y, n_classes, ridge) {
+    .Call(`_fastPLS_lda_train_cpp`, Ttrain, y, n_classes, ridge)
+}
+
+lda_train_prefix_cpp <- function(Ttrain, y, n_classes, ncomp, ridge) {
+    .Call(`_fastPLS_lda_train_prefix_cpp`, Ttrain, y, n_classes, ncomp, ridge)
+}
+
+lda_project_train_prefix_cpp <- function(Xtrain, R, offset, y, n_classes, ncomp, ridge) {
+    .Call(`_fastPLS_lda_project_train_prefix_cpp`, Xtrain, R, offset, y, n_classes, ncomp, ridge)
+}
+
+lda_train_prefix_cuda <- function(Ttrain, y, n_classes, ncomp, ridge) {
+    .Call(`_fastPLS_lda_train_prefix_cuda`, Ttrain, y, n_classes, ncomp, ridge)
+}
+
+lda_project_train_prefix_cuda <- function(Xtrain, R, offset, y, n_classes, ncomp, ridge) {
+    .Call(`_fastPLS_lda_project_train_prefix_cuda`, Xtrain, R, offset, y, n_classes, ncomp, ridge)
+}
+
+lda_predict_cpp <- function(Ttest, lda) {
+    .Call(`_fastPLS_lda_predict_cpp`, Ttest, lda)
+}
+
+lda_predict_labels_cpp <- function(Ttest, lda) {
+    .Call(`_fastPLS_lda_predict_labels_cpp`, Ttest, lda)
+}
+
+lda_project_predict_labels_cpp <- function(Xtest, R, offset, lda) {
+    .Call(`_fastPLS_lda_project_predict_labels_cpp`, Xtest, R, offset, lda)
+}
+
+lda_predict_cuda <- function(Ttest, lda) {
+    .Call(`_fastPLS_lda_predict_cuda`, Ttest, lda)
+}
+
+lda_predict_labels_cuda <- function(Ttest, lda) {
+    .Call(`_fastPLS_lda_predict_labels_cuda`, Ttest, lda)
+}
+
+lda_project_predict_cuda <- function(Xtest, R, offset, lda, return_scores = FALSE) {
+    .Call(`_fastPLS_lda_project_predict_cuda`, Xtest, R, offset, lda, return_scores)
+}
+
+linear_train_prefix_cpp <- function(Ttrain, Ytrain, ncomp) {
+    .Call(`_fastPLS_linear_train_prefix_cpp`, Ttrain, Ytrain, ncomp)
+}
+
+linear_predict_cpp <- function(Ttest, linear_model) {
+    .Call(`_fastPLS_linear_predict_cpp`, Ttest, linear_model)
+}
+
+linear_predict_cuda <- function(Ttest, linear_model) {
+    .Call(`_fastPLS_linear_predict_cuda`, Ttest, linear_model)
 }
 
 truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only) {
@@ -120,6 +180,11 @@ pls_model1_gpu_implicit_xprod <- function(Xtrain, Ytrain, ncomp, scaling, fit, r
     .Call(`_fastPLS_pls_model1_gpu_implicit_xprod`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
+pls_lda_gpu_native <- function(Xtrain, Ytrain, y, Xtest, ncomp, n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge) {
+    .Call(`_fastPLS_pls_lda_gpu_native`, Xtrain, Ytrain, y, Xtest, ncomp, n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge)
+}
+
 pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes) {
     .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes)
 }
+

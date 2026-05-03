@@ -26,6 +26,7 @@ TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 RUN_TIMEOUT_SEC="${FASTPLS_RUN_TIMEOUT_SEC:-0}"
 VARIANTS_FILTER="${FASTPLS_VARIANTS:-}"
 SKIP_PLOT="${FASTPLS_SKIP_PLOT:-false}"
+SKIP_HEAVY_R="${FASTPLS_SKIP_HEAVY_R:-true}"
 
 RAW_CSV="${RESULTS_DIR}/dataset_memory_compare_raw.csv"
 RUN_ROWS_DIR="${RESULTS_DIR}/run_rows"
@@ -193,6 +194,7 @@ row <- data.frame(
   engine = spec$engine,
   backend = spec$backend,
   implementation_label = spec$implementation_label,
+  classifier = spec$classifier,
   replicate = as.integer(rep_id),
   requested_ncomp = as.integer(requested_ncomp),
   effective_ncomp = as.integer(effective_ncomp),
@@ -219,8 +221,6 @@ row <- data.frame(
 utils::write.csv(row, row_csv, row.names = FALSE, quote = TRUE, na = "")
 RS
 }
-
-variants="$(Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); specs <- variant_specs(); keep <- trimws(Sys.getenv('FASTPLS_VARIANTS', '')); if (nzchar(keep)) { keep_vec <- trimws(strsplit(keep, ',', fixed = TRUE)[[1L]]); specs <- specs[specs\$variant_name %in% keep_vec, , drop = FALSE] }; cat(paste(specs\$variant_name, collapse=' '))")"
 
 for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
   dataset_ncomp_list="${NCOMP_LIST}"
@@ -263,6 +263,8 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     --meta-rds="${meta_rds}" \
     --split-seed="${SPLIT_SEED}"
 
+  variants="$(TASK_META_RDS="${meta_rds}" Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); specs <- variant_specs(); meta <- readRDS(Sys.getenv('TASK_META_RDS')); if (!identical(meta\$task_type, 'classification')) specs <- specs[specs\$classifier == 'argmax', , drop = FALSE]; keep <- trimws(Sys.getenv('FASTPLS_VARIANTS', '')); if (nzchar(keep)) { keep_vec <- trimws(strsplit(keep, ',', fixed = TRUE)[[1L]]); specs <- specs[specs\$variant_name %in% keep_vec, , drop = FALSE] }; cat(paste(specs\$variant_name, collapse=' '))")"
+
   dataset_reps="${REPS}"
   case "${dataset_id}" in
     cifar100|imagenet|nmr|prism)
@@ -271,8 +273,8 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
   esac
 
   for variant_name in ${variants}; do
-    case "${dataset_id}:${variant_name}" in
-      nmr:r_*|imagenet:r_*)
+    case "${dataset_id}:${variant_name}:${SKIP_HEAVY_R}" in
+      nmr:r_*:true|imagenet:r_*:true)
         echo "[INFO] Skipping pure-R variant ${variant_name} for ${dataset_id}"
         continue
         ;;

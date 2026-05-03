@@ -1,0 +1,266 @@
+---
+title: "fastPLS Public API Quick Start"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fastPLS Public API Quick Start}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## Overview
+
+`fastPLS` exposes a small public API. Users do not need to call the internal
+C++, CUDA, or benchmarking helpers directly. The main entry points are:
+
+- `pls()` for PLSSVD, SIMPLS, OPLS, and kernel PLS.
+- `predict()` for predictions from fitted models.
+- `pls.single.cv()`, `optim.pls.cv()`, and `pls.double.cv()` for
+  cross-validation.
+- `fastsvd()` for stand-alone truncated SVD.
+- `pca()` and `plot()` for PCA score plots with optional confidence or
+  Hotelling's T2 ellipses.
+- `fastcor()`, `ViP()`, and `has_cuda()` for common helper tasks.
+
+## Example Data
+
+The examples below use small simulated data so the vignette is fast to build.
+Regression responses are supplied as numeric vectors or matrices. Classification
+responses are supplied as factors; internally, `fastPLS` handles the response
+encoding and returns predicted class labels.
+
+```{r}
+library(fastPLS)
+
+set.seed(100)
+n <- 80
+p <- 12
+X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+
+y_signal <- 0.8 * X[, 1] - 0.5 * X[, 2] + rnorm(n, sd = 0.25)
+Y_reg <- matrix(y_signal, ncol = 1)
+Y_cls <- factor(ifelse(y_signal > median(y_signal), "high", "low"))
+
+test_id <- sample(seq_len(n), 16)
+Xtrain <- X[-test_id, , drop = FALSE]
+Xtest <- X[test_id, , drop = FALSE]
+Ytrain_reg <- Y_reg[-test_id, , drop = FALSE]
+Ytest_reg <- Y_reg[test_id, , drop = FALSE]
+Ytrain_cls <- Y_cls[-test_id]
+Ytest_cls <- Y_cls[test_id]
+```
+
+## Fit PLS Models
+
+The `method` argument selects the outer PLS algorithm. The `backend` argument
+selects the implementation: `"cpp"` for the compiled CPU implementation,
+`"r"` for the pure-R reference implementation, and `"cuda"` for GPU-native
+execution when available.
+
+The `svd.method` argument selects the CPU singular-vector backend for CPU
+models: `"irlba"`, `"cpu_rsvd"`, or `"exact"`.
+
+```{r}
+fit_reg <- pls(
+  Xtrain,
+  Ytrain_reg,
+  Xtest,
+  Ytest_reg,
+  ncomp = 1:3,
+  method = "simpls",
+  backend = "cpp",
+  svd.method = "irlba",
+  fit = TRUE
+)
+
+fit_reg$Q2Y
+```
+
+```{r}
+fit_cls <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "plssvd",
+  backend = "cpp",
+  svd.method = "cpu_rsvd",
+  seed = 100
+)
+
+head(fit_cls$Ypred)
+```
+
+## OPLS and Kernel PLS
+
+OPLS and kernel PLS are accessed through the same `pls()` function. The
+`inner.method` argument selects whether their internal PLS model uses PLSSVD or
+SIMPLS.
+
+```{r}
+fit_opls <- pls(
+  Xtrain,
+  Ytrain_reg,
+  Xtest,
+  Ytest_reg,
+  ncomp = 1:2,
+  method = "opls",
+  inner.method = "simpls",
+  north = 1,
+  svd.method = "cpu_rsvd",
+  seed = 101
+)
+
+class(fit_opls)
+```
+
+```{r}
+fit_kernel <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "kernelpls",
+  kernel = "rbf",
+  inner.method = "simpls",
+  svd.method = "cpu_rsvd",
+  seed = 102
+)
+
+head(fit_kernel$Ypred)
+```
+
+## Prediction
+
+`predict()` applies the preprocessing stored in the fitted object. If `Ytest` is
+supplied, predictive metrics are returned when available.
+
+```{r}
+pred_reg <- predict(fit_reg, Xtest, Ytest = Ytest_reg, proj = TRUE)
+names(pred_reg)
+dim(pred_reg$Ypred)
+```
+
+```{r}
+pred_cls <- predict(fit_cls, Xtest, Ytest = Ytest_cls)
+table(pred_cls$Ypred[[2]], Ytest_cls)
+```
+
+## Cross-Validation
+
+Use `pls.single.cv()` when the number of components is already fixed. Use
+`optim.pls.cv()` to compare a grid of component counts. Use `pls.double.cv()`
+for a nested cross-validation workflow.
+
+```{r}
+cv_fixed <- pls.single.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  ncomp = 2,
+  kfold = 3,
+  method = "simpls",
+  backend = "cpp",
+  svd.method = "cpu_rsvd",
+  seed = 103
+)
+
+cv_fixed$metric
+```
+
+```{r}
+cv_opt <- optim.pls.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_reg,
+  ncomp = 1:3,
+  kfold = 3,
+  method = "plssvd",
+  svd.method = "irlba"
+)
+
+cv_opt$optim_comp
+```
+
+## PCA and SVD Utilities
+
+`fastsvd()` provides direct access to the same SVD backends used by PLS.
+`pca()` builds PCA scores and loadings from those backends.
+
+```{r}
+s <- fastsvd(Xtrain, ncomp = 3, method = "cpu_rsvd", seed = 104)
+length(s$d)
+```
+
+```{r fig.width = 5, fig.height = 4}
+pc <- pca(Xtrain, ncomp = 3, svd.method = "cpu_rsvd", seed = 105)
+plot(pc, groups = Ytrain_cls, ellipse = TRUE)
+```
+
+## Gaussian Response Compression
+
+For high-dimensional responses, `gaussian_y = TRUE` compresses `Y` to a smaller
+random Gaussian response space before fitting and decodes predictions back to
+the original response scale or class labels. By default, the number of Gaussian
+dimensions is `min(ncol(Xtrain), 100)` unless `gaussian_y_dim` is supplied.
+
+```{r}
+Y_multi <- cbind(Ytrain_reg, Ytrain_reg^2, sin(Ytrain_reg))
+Y_multi_test <- cbind(Ytest_reg, Ytest_reg^2, sin(Ytest_reg))
+
+fit_gaussian <- pls(
+  Xtrain,
+  Y_multi,
+  Xtest,
+  Y_multi_test,
+  ncomp = 1:2,
+  method = "simpls",
+  svd.method = "cpu_rsvd",
+  gaussian_y = TRUE,
+  gaussian_y_dim = 3,
+  gaussian_y_seed = 106
+)
+
+dim(fit_gaussian$Ypred)
+```
+
+## CUDA Availability
+
+CUDA is optional. Use `has_cuda()` before selecting `backend = "cuda"`.
+
+```{r}
+has_cuda()
+```
+
+```{r eval = FALSE}
+if (has_cuda()) {
+  fit_gpu <- pls(
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cuda"
+  )
+}
+```
+
+## Helper Functions
+
+`fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
+importance in projection trajectories for fitted PLS models.
+
+```{r}
+C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
+dim(C)
+```
+
+```{r}
+vip <- ViP(fit_reg)
+dim(vip)
+```
+

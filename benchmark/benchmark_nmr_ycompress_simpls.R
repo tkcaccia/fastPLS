@@ -162,14 +162,14 @@ make_y_transform <- function(Ytrain, mode, code_dim, seed = 123L, use_cuda_proje
 fit_model <- function(task, Yfit, variant, ncomp, seed = 123L) {
   ncomp_eff <- min(as.integer(ncomp), ncol(Yfit), nrow(task$Xtrain) - 1L, ncol(task$Xtrain))
   if (identical(variant, "cpp_rsvd")) {
-    return(fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp_eff, method = "simpls", svd.method = "cpu_rsvd", fit = FALSE, seed = seed))
+    return(fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp_eff, method = "simpls", backend = "cpp", svd.method = "cpu_rsvd", fit = FALSE, seed = seed))
   }
   if (identical(variant, "cpp_irlba")) {
-    return(fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp_eff, method = "simpls", svd.method = "irlba", fit = FALSE, seed = seed))
+    return(fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp_eff, method = "simpls", backend = "cpp", svd.method = "irlba", fit = FALSE, seed = seed))
   }
   if (identical(variant, "cuda")) {
     if (!isTRUE(fastPLS::has_cuda())) stop("CUDA backend is not available")
-    return(fastPLS::simpls_gpu(task$Xtrain, Yfit, ncomp = ncomp_eff, fit = FALSE, seed = seed))
+    return(fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp_eff, method = "simpls", backend = "cuda", fit = FALSE, seed = seed))
   }
   stop("Unknown variant: ", variant)
 }

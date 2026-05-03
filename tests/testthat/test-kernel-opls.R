@@ -4,24 +4,28 @@ test_that("kernel PLS R and C++ wrappers predict classification labels", {
   y <- factor(sample(c("A", "B", "C"), 72, replace = TRUE))
   idx <- seq_len(12)
 
-  fit_r <- kernel_pls_r(
+  fit_r <- pls(
     X[-idx, , drop = FALSE],
     y[-idx],
     X[idx, , drop = FALSE],
     y[idx],
     ncomp = 1:2,
+    method = "kernelpls",
+    backend = "r",
     kernel = "rbf",
-    method = "simpls",
+    inner.method = "simpls",
     svd.method = "cpu_rsvd"
   )
-  fit_cpp <- kernel_pls_cpp(
+  fit_cpp <- pls(
     X[-idx, , drop = FALSE],
     y[-idx],
     X[idx, , drop = FALSE],
     y[idx],
     ncomp = 1:2,
+    method = "kernelpls",
+    backend = "cpp",
     kernel = "rbf",
-    method = "simpls",
+    inner.method = "simpls",
     svd.method = "cpu_rsvd"
   )
 
@@ -33,18 +37,21 @@ test_that("kernel PLS R and C++ wrappers predict classification labels", {
   expect_equal(nrow(fit_cpp$Ypred), length(idx))
 })
 
-test_that("named kernel fast wrapper dispatches correctly", {
+test_that("kernelpls high-level wrapper dispatches to simpls", {
   set.seed(2203)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
   y <- factor(sample(c("low", "high"), 60, replace = TRUE))
   idx <- seq_len(10)
 
-  fit_fast <- kernel_pls_fast_cpp(
+  fit_fast <- pls(
     X[-idx, , drop = FALSE],
     y[-idx],
     X[idx, , drop = FALSE],
     y[idx],
     ncomp = 1:2,
+    method = "kernelpls",
+    backend = "cpp",
+    inner.method = "simpls",
     kernel = "rbf",
     svd.method = "cpu_rsvd"
   )
@@ -59,24 +66,28 @@ test_that("OPLS R and C++ wrappers predict regression matrices", {
   Y <- cbind(rnorm(70), rnorm(70))
   idx <- seq_len(10)
 
-  fit_r <- opls_r(
+  fit_r <- pls(
     X[-idx, , drop = FALSE],
     Y[-idx, , drop = FALSE],
     X[idx, , drop = FALSE],
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
+    method = "opls",
+    backend = "r",
     north = 1L,
-    method = "plssvd",
+    inner.method = "plssvd",
     svd.method = "cpu_rsvd"
   )
-  fit_cpp <- opls_cpp(
+  fit_cpp <- pls(
     X[-idx, , drop = FALSE],
     Y[-idx, , drop = FALSE],
     X[idx, , drop = FALSE],
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
+    method = "opls",
+    backend = "cpp",
     north = 1L,
-    method = "simpls",
+    inner.method = "simpls",
     svd.method = "cpu_rsvd"
   )
 
@@ -88,18 +99,21 @@ test_that("OPLS R and C++ wrappers predict regression matrices", {
   expect_equal(dim(fit_cpp$Ypred), c(length(idx), ncol(Y), 2L))
 })
 
-test_that("named OPLS-fast wrapper dispatches to SIMPLS-fast", {
+test_that("opls high-level wrapper dispatches to simpls", {
   set.seed(2204)
   X <- matrix(rnorm(64 * 9), nrow = 64, ncol = 9)
   Y <- matrix(rnorm(64), ncol = 1)
   idx <- seq_len(12)
 
-  fit <- opls_fast_cpp(
+  fit <- pls(
     X[-idx, , drop = FALSE],
     Y[-idx, , drop = FALSE],
     X[idx, , drop = FALSE],
     Y[idx, , drop = FALSE],
     ncomp = 1:2,
+    method = "opls",
+    backend = "cpp",
+    inner.method = "simpls",
     north = 1L,
     svd.method = "cpu_rsvd"
   )

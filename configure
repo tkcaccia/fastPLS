@@ -9,6 +9,7 @@ cuda_root="${CUDA_ROOT:-/usr/local/cuda}"
 pkg_cxxflags=""
 pkg_cppflags=""
 pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
+cuda_objects=""
 
 if [ "${use_openblas}" = "1" ]; then
   pkg_cppflags="-I${openblas_root}/include"
@@ -27,6 +28,11 @@ fi
 
 if [ "${have_cuda}" = "1" ]; then
   cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_root}/include"
+  cuda_nvcc="${cuda_root}/bin/nvcc"
+  if [ -x "${cuda_nvcc}" ]; then
+    cuda_flags="${cuda_flags} -DFASTPLS_HAS_CUDA_KERNELS"
+    cuda_objects=" lda_cuda_kernels.o"
+  fi
   if [ -n "${pkg_cppflags}" ]; then
     pkg_cppflags="${pkg_cppflags} ${cuda_flags}"
   else
@@ -39,5 +45,17 @@ fi
 sed \
   -e "s|@FASTPLS_PKG_CXXFLAGS@|${pkg_cxxflags}|g" \
   -e "s|@FASTPLS_PKG_CPPFLAGS@|${pkg_cppflags}|g" \
+  -e "s|@FASTPLS_CUDA_OBJECTS@|${cuda_objects}|g" \
   -e "s|@FASTPLS_PKG_LIBS@|${pkg_libs}|g" \
   src/Makevars.in > src/Makevars
+
+if [ -n "${cuda_objects}" ]; then
+  cat >> src/Makevars <<EOF
+
+CUDA_NVCC = ${cuda_root}/bin/nvcc
+CUDA_NVCCFLAGS = -std=c++17 -I${cuda_root}/include -Xcompiler -fPIC
+
+%.o: %.cu
+	\$(CUDA_NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
+EOF
+fi

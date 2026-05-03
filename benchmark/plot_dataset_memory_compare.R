@@ -20,6 +20,8 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 dt <- fread(raw_file)[status %in% c("ok", "capped")]
 if (!nrow(dt)) stop("No successful benchmark rows to plot")
+if (!"classifier" %in% names(dt)) dt[, classifier := "argmax"]
+dt[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
 
 backend_cols <- c(
   irlba = "#1b9e77",
@@ -33,6 +35,10 @@ impl_lines <- c(
   cpp = "solid",
   cuda = "dotdash",
   pls_pkg = "dotted"
+)
+classifier_shapes <- c(
+  argmax = 16,
+  LDA = 17
 )
 
 dt[, backend_algorithm := fcase(
@@ -68,7 +74,9 @@ metric_one <- function(col, label) {
     requested_ncomp,
     variant_name,
     implementation,
-    backend_algorithm
+    backend_algorithm,
+    classifier,
+    classifier_label
   )][, metric := label]
 }
 
@@ -93,11 +101,13 @@ panel_labels <- c(
 )
 sumdt[, backend_algorithm := factor(backend_algorithm, names(backend_cols))]
 sumdt[, implementation := factor(implementation, names(impl_lines))]
+sumdt[, classifier_label := factor(classifier_label, names(classifier_shapes))]
 
 sumdt[, line_id := interaction(
   variant_name,
   implementation,
   backend_algorithm,
+  classifier_label,
   drop = TRUE
 )]
 
@@ -153,13 +163,19 @@ for (ds in unique(sumdt$dataset)) {
       breaks = names(impl_lines),
       name = "Implementation"
     ),
+    scale_shape_manual(
+      values = classifier_shapes,
+      breaks = names(classifier_shapes),
+      name = "Classifier"
+    ),
     guides(
       color = guide_legend(
         nrow = 1,
         byrow = TRUE,
         override.aes = list(linewidth = 1.1, size = 2.5)
       ),
-      linetype = guide_legend(nrow = 1, byrow = TRUE)
+      linetype = guide_legend(nrow = 1, byrow = TRUE),
+      shape = guide_legend(nrow = 1, byrow = TRUE)
     )
   )
 
@@ -175,7 +191,8 @@ for (ds in unique(sumdt$dataset)) {
         y = value,
         group = line_id,
         color = backend_algorithm,
-        linetype = implementation
+        linetype = implementation,
+        shape = classifier_label
       )
     ) +
       geom_line(linewidth = 0.85, na.rm = TRUE) +

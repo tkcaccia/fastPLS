@@ -1,8 +1,11 @@
 # fastPLS
 
 `fastPLS` provides R, C++, and CUDA implementations of partial least squares
-models for high-dimensional regression and classification. The current standard
-pipeline compares four model families:
+models for high-dimensional regression and classification. The user-facing API
+is intentionally small: algorithms and implementation backends are selected
+through `pls()`, `pls.single.cv()`, `pls.double.cv()`, `optim.pls.cv()`,
+`fastsvd()`, and `pca()` instead of through low-level implementation wrappers.
+The current standard pipeline compares four model families:
 
 - `plssvd`
 - `simpls`
@@ -19,9 +22,9 @@ should use `method = "simpls"`.
   `S = X^T Y` and reuses it for the requested component path.
 - `simpls`: optimized SIMPLS with compact latent prediction and automatic
   matrix-free `xprod` selection when it reduces cross-covariance work.
-- `opls_*()`: supervised orthogonal filtering followed by the selected PLS core.
-- `kernel_pls_*()`: linear, RBF, or polynomial kernel construction followed by
-  the selected PLS core.
+- `opls`: supervised orthogonal filtering followed by the selected PLS core.
+- `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
+  selected PLS core.
 
 For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient
@@ -30,9 +33,9 @@ cube does not need to be stored.
 ## Gaussian Response Compression
 
 All four model families can optionally fit a compressed Gaussian representation
-of the response by setting `gaussian_y = TRUE`. This is available through the R,
-compiled C++, and CUDA entry points for `plssvd`, `simpls`, `opls`, and
-`kernelpls`. The option is disabled by default, so existing analyses are
+of the response by setting `gaussian_y = TRUE` in `pls()`. This is available
+through the R, compiled C++, and CUDA backends for `plssvd`, `simpls`, `opls`,
+and `kernelpls`. The option is disabled by default, so existing analyses are
 unchanged unless it is requested explicitly.
 
 When `gaussian_y_dim = NULL`, fastPLS uses `min(ncol(Xtrain), 100)` compressed
@@ -54,6 +57,13 @@ nearest-code scores back to the original factor levels.
 CUDA wrappers use the CUDA matrix-multiply helper for the regression projection
 and decoder construction when CUDA is available. The classification codebook is
 small and is built on the host before the GPU-native PLS fit.
+
+For PLS-DA with LDA classification, the recommended GPU configuration is
+`backend = "cuda", classifier = "lda_cuda"`. This uses the optimized standard
+CUDA path for latent projection, LDA training, and discriminant scoring. An
+experimental fused CUDA PLS+LDA path is available with
+`FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
+rather than the default.
 
 Example:
 
@@ -81,12 +91,10 @@ CPU backends:
 - `exact`: exact dense SVD fallback, used automatically for very small SVD
   inputs.
 
-CUDA backends:
+CUDA backend:
 
-- `plssvd_gpu()`
-- `simpls_gpu()`
-- `opls_cuda()`
-- `kernel_pls_cuda()`
+- use `pls(..., backend = "cuda")` with `method = "plssvd"`, `"simpls"`,
+  `"opls"`, or `"kernelpls"`.
 
 FlashSVD-style low-rank prediction is integrated into the standard prediction
 path. When compact latent factors are available, `predict.fastPLS()` can apply
@@ -95,37 +103,37 @@ multiplying by the full coefficient matrix. This primarily reduces prediction
 time and RAM pressure during prediction; fit memory is still governed by the
 fitting backend.
 
-The removed hybrid `svd.method = "cuda_rsvd"` route through `pls()` is no longer
-supported. Use the GPU-native functions above for CUDA runs.
+The removed hybrid `svd.method = "cuda_rsvd"` route through the CPU PLS fitter is
+no longer supported. Use `backend = "cuda"` for GPU-native PLS runs, or
+`fastsvd(..., method = "cuda_rsvd")` / `pca(..., svd.method = "cuda_rsvd")` for
+stand-alone GPU SVD/PCA when CUDA is available.
 
 ## Current API
 
 Main model fitting:
 
 - `pls()`
-- `pls_r()`
-- `plssvd_gpu()`
-- `simpls_gpu()`
-- `opls_r()`, `opls_cpp()`, `opls_cuda()`
-- `kernel_pls_r()`, `kernel_pls_cpp()`, `kernel_pls_cuda()`
 
 Prediction and utilities:
 
-- `predict.fastPLS()`
-- `transformy()`
+- `predict()`
 - `ViP()`
 - `fastcor()`
 - `has_cuda()`
-- `svd_methods()`
-- `svd_run()`
-- `svd_benchmark()`
+- `fastsvd()`
+- `pca()`
+- `plot()` for `fastPLS` and `fastPLSPCA` score plots with optional confidence
+  or Hotelling's T2 ellipses
 
 Cross-validation:
 
 - `optim.pls.cv()`
+- `pls.single.cv()`
 - `pls.double.cv()`
-- `plssvd_cv_cpp()`, `simpls_cv_cpp()`
-- `plssvd_cv_cuda()`, `simpls_cv_cuda()`
+
+All lower-level C++, CUDA, OPLS, kernel PLS, SVD-dispatch, and KODAMA-oriented
+helpers are internal implementation details. Benchmarks should use the same
+public API as package users.
 
 ## Reproducible Benchmark Pipeline
 

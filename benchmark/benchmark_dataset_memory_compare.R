@@ -116,6 +116,7 @@ row_template <- data.frame(
   engine = spec$engine,
   backend = spec$backend,
   implementation_label = spec$implementation_label,
+  classifier = spec$classifier,
   replicate = as.integer(replicate_id),
   requested_ncomp = as.integer(requested_ncomp),
   effective_ncomp = NA_integer_,
@@ -175,6 +176,15 @@ result_row <- tryCatch({
       )
     }
     skip_row <- row_template
+  } else if (!identical(spec$classifier, "argmax") &&
+             !identical(task$task_type, "classification")) {
+    row_template$status <- "skipped_lda_nonclassification"
+    row_template$msg <- sprintf(
+      "%s skipped: classifier=%s is only meaningful for classification tasks",
+      variant_name,
+      spec$classifier
+    )
+    skip_row <- row_template
   }
 
   if (!is.null(skip_row)) {
@@ -187,93 +197,75 @@ result_row <- tryCatch({
   fastpls_fit <- function(method, svd_method) {
     fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = method, svd.method = svd_method, fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = method, backend = "cpp", svd.method = svd_method, fit = FALSE,
+      classifier = spec$classifier,
+      seed = 123L + as.integer(replicate_id)
     )
   }
 
   fastpls_fit_r <- function(method, svd_method) {
-    fastPLS::pls_r(
+    fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = method, svd.method = svd_method, fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = method, backend = "r", svd.method = svd_method, fit = FALSE,
+      classifier = spec$classifier,
+      seed = 123L + as.integer(replicate_id)
     )
   }
 
-  kernel_fit_cpp <- function(method, svd_method) {
-    fastPLS::kernel_pls_cpp(
+  kernel_fit <- function(backend, method, svd_method = "cpu_rsvd") {
+    fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      kernel = "linear", method = method, svd.method = svd_method,
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = "kernelpls", backend = backend, inner.method = method,
+      kernel = "linear", svd.method = svd_method, fit = FALSE,
+      classifier = spec$classifier,
+      seed = 123L + as.integer(replicate_id)
     )
   }
 
-  kernel_fit_r <- function(method, svd_method) {
-    fastPLS::kernel_pls_r(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      kernel = "linear", method = method, svd.method = svd_method,
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
-    )
-  }
-
-  kernel_fit_cuda <- function(method) {
-    fastPLS::kernel_pls_cuda(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      kernel = "linear", method = method, fit = FALSE, seed = 123L + as.integer(replicate_id)
-    )
-  }
-
-  opls_fit_cpp <- function(method, svd_method) {
-    fastPLS::opls_cpp(
+  opls_fit <- function(backend, method, svd_method = "cpu_rsvd") {
+    fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(opls_layout$predictive_ncomp),
-      method = method, svd.method = svd_method, north = as.integer(opls_layout$north),
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = "opls", backend = backend, inner.method = method,
+      svd.method = svd_method, north = as.integer(opls_layout$north),
+      fit = FALSE, classifier = spec$classifier, seed = 123L + as.integer(replicate_id)
     )
   }
 
-  opls_fit_r <- function(method, svd_method) {
-    fastPLS::opls_r(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(opls_layout$predictive_ncomp),
-      method = method, svd.method = svd_method, north = as.integer(opls_layout$north),
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
-    )
-  }
-
-  opls_fit_cuda <- function(method) {
-    fastPLS::opls_cuda(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(opls_layout$predictive_ncomp),
-      method = method, north = as.integer(opls_layout$north), fit = FALSE, seed = 123L + as.integer(replicate_id)
-    )
-  }
-
+  base_variant_name <- sub("_lda$", "", variant_name)
   fit_fun <- switch(
-    variant_name,
+    base_variant_name,
     cpp_plssvd_cpu_rsvd = function() fastpls_fit("plssvd", "cpu_rsvd"),
     cpp_plssvd_irlba = function() fastpls_fit("plssvd", "irlba"),
     r_plssvd_cpu_rsvd = function() fastpls_fit_r("plssvd", "cpu_rsvd"),
     r_plssvd_irlba = function() fastpls_fit_r("plssvd", "irlba"),
-    gpu_plssvd_fp64 = function() fastPLS::plssvd_gpu(
+    gpu_plssvd_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = "plssvd", backend = "cuda", fit = FALSE,
+      classifier = spec$classifier,
+      seed = 123L + as.integer(replicate_id)
     ),
     cpp_simpls_cpu_rsvd = function() fastpls_fit("simpls", "cpu_rsvd"),
     cpp_simpls_irlba = function() fastpls_fit("simpls", "irlba"),
     r_simpls_cpu_rsvd = function() fastpls_fit_r("simpls", "cpu_rsvd"),
     r_simpls_irlba = function() fastpls_fit_r("simpls", "irlba"),
-    gpu_simpls_fp64 = function() fastPLS::simpls_gpu(
+    gpu_simpls_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      fit = FALSE, seed = 123L + as.integer(replicate_id)
+      method = "simpls", backend = "cuda", fit = FALSE,
+      classifier = spec$classifier,
+      seed = 123L + as.integer(replicate_id)
     ),
     pls_pkg_simpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "simpls"),
-    cpp_kernelpls_cpu_rsvd = function() kernel_fit_cpp("simpls", "cpu_rsvd"),
-    cpp_kernelpls_irlba = function() kernel_fit_cpp("simpls", "irlba"),
-    r_kernelpls_cpu_rsvd = function() kernel_fit_r("simpls", "cpu_rsvd"),
-    r_kernelpls_irlba = function() kernel_fit_r("simpls", "irlba"),
-    gpu_kernelpls_fp64 = function() kernel_fit_cuda("simpls"),
+    cpp_kernelpls_cpu_rsvd = function() kernel_fit("cpp", "simpls", "cpu_rsvd"),
+    cpp_kernelpls_irlba = function() kernel_fit("cpp", "simpls", "irlba"),
+    r_kernelpls_cpu_rsvd = function() kernel_fit("r", "simpls", "cpu_rsvd"),
+    r_kernelpls_irlba = function() kernel_fit("r", "simpls", "irlba"),
+    gpu_kernelpls_fp64 = function() kernel_fit("cuda", "simpls"),
     pls_pkg_kernelpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "kernelpls"),
-    cpp_opls_cpu_rsvd = function() opls_fit_cpp("simpls", "cpu_rsvd"),
-    cpp_opls_irlba = function() opls_fit_cpp("simpls", "irlba"),
-    r_opls_cpu_rsvd = function() opls_fit_r("simpls", "cpu_rsvd"),
-    r_opls_irlba = function() opls_fit_r("simpls", "irlba"),
-    gpu_opls_fp64 = function() opls_fit_cuda("simpls"),
+    cpp_opls_cpu_rsvd = function() opls_fit("cpp", "simpls", "cpu_rsvd"),
+    cpp_opls_irlba = function() opls_fit("cpp", "simpls", "irlba"),
+    r_opls_cpu_rsvd = function() opls_fit("r", "simpls", "cpu_rsvd"),
+    r_opls_irlba = function() opls_fit("r", "simpls", "irlba"),
+    gpu_opls_fp64 = function() opls_fit("cuda", "simpls"),
     # `pls::oscorespls.fit()` does not expose `north`, so keep benchmark
     # parity by reserving one total component slot for the orthogonal part.
     pls_pkg_opls = function() pls_pkg_fit(task, effective_ncomp = opls_layout$predictive_ncomp, fit_method = "opls"),
@@ -311,6 +303,7 @@ result_row <- tryCatch({
         replicate = as.integer(replicate_id),
         requested_ncomp = as.integer(requested_ncomp),
         effective_ncomp = as.integer(effective_cap),
+        classifier = spec$classifier,
         metric_name = metric$metric_name,
         metric_value = metric$metric_value,
         pred = metric$pred,
