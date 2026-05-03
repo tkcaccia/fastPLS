@@ -1,0 +1,647 @@
+#!/usr/bin/env Rscript
+
+# Compare fastPLS with independent PLS implementations from other R packages.
+# The script supports single-run execution so shell wrappers can timeout each
+# package/method independently.
+
+options(stringsAsFactors = FALSE)
+
+parse_args <- function(args = commandArgs(trailingOnly = TRUE)) {
+  out <- list()
+  for (arg in args) {
+    if (!startsWith(arg, "--")) next
+    kv <- substring(arg, 3L)
+    bits <- strsplit(kv, "=", fixed = TRUE)[[1L]]
+    key <- gsub("-", "_", bits[[1L]], fixed = TRUE)
+    val <- if (length(bits) > 1L) paste(bits[-1L], collapse = "=") else "TRUE"
+    out[[key]] <- val
+  }
+  out
+}
+
+args <- parse_args()
+arg <- function(key, default = NULL) {
+  val <- args[[key]]
+  if (is.null(val) || !nzchar(val)) default else val
+}
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+script_file <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+script_file <- if (length(script_file)) sub("^--file=", "", script_file[[1L]]) else "benchmark_pls_package_comparison.R"
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), winslash = "/", mustWork = FALSE)
+
+mode <- arg("mode", "run_one")
+dataset_id <- tolower(arg("dataset", "singlecell"))
+ncomp_requested <- as.integer(arg("ncomp", if (dataset_id == "nmr") "100" else "50"))
+if (!is.finite(ncomp_requested) || is.na(ncomp_requested) || ncomp_requested < 1L) ncomp_requested <- 50L
+split_seed <- as.integer(arg("seed", "123"))
+if (!is.finite(split_seed) || is.na(split_seed)) split_seed <- 123L
+method_id <- arg("method_id", "")
+replicate_id <- as.integer(arg("replicate", "1"))
+if (!is.finite(replicate_id) || is.na(replicate_id)) replicate_id <- 1L
+row_out <- arg("row_out", "")
+results_dir <- arg("results_dir", getwd())
+status_override <- arg("status", "")
+message_override <- arg("message", "")
+
+base_method_ids <- c(
+  "fastPLS_simpls", "fastPLS_plssvd", "fastPLS_opls", "fastPLS_kernelpls",
+  "pls_simpls_fit", "pls_oscorespls_fit", "pls_kernelpls_fit",
+  "mdatools_plsda_or_pls", "plsdepot_simpls", "pcv_simpls",
+  "plsgenomics_pls_regression", "mixOmics_pls", "chemometrics_pls_eigen",
+  "chemometrics_pls2_nipals", "spls_spls", "ropls_pls", "ropls_opls"
+)
+classification_only_method_ids <- c(
+  "plsgenomics_pls_lda", "mixOmics_plsda", "mixOmics_splsda", "spls_splsda"
+)
+
+if (identical(mode, "list_methods")) {
+  task_type_guess <- if (dataset_id %in% c("singlecell", "cifar100", "metref")) {
+    "classification"
+  } else {
+    "regression"
+  }
+  method_ids <- base_method_ids
+  if (identical(task_type_guess, "classification")) {
+    method_ids <- c(method_ids, classification_only_method_ids)
+  }
+  cat(paste(method_ids, collapse = "\n"))
+  cat("\n")
+  quit(status = 0)
+}
+
+source(file.path(repo_root, "benchmark", "helpers_dataset_memory_compare.R"))
+
+quiet_require <- function(pkg) {
+  suppressPackageStartupMessages(requireNamespace(pkg, quietly = TRUE))
+}
+
+package_version_chr <- function(pkg) {
+  if (!quiet_require(pkg)) return(NA_character_)
+  as.character(utils::packageVersion(pkg))
+}
+
+load_compare_task <- function(dataset_id, split_seed) {
+  path <- find_dataset_rdata(dataset_id)
+  task <- load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed)
+  task$Xtrain <- as.matrix(task$Xtrain)
+  task$Xtest <- as.matrix(task$Xtest)
+  if (identical(task$task_type, "classification")) {
+    task$Ytrain <- droplevels(as.factor(task$Ytrain))
+    task$Ytest <- factor(task$Ytest, levels = levels(task$Ytrain))
+    keep <- !is.na(task$Ytest)
+    task$Xtest <- task$Xtest[keep, , drop = FALSE]
+    task$Ytest <- droplevels(task$Ytest[keep])
+    task$n_test <- nrow(task$Xtest)
+    task$n_classes <- nlevels(task$Ytrain)
+  } else {
+    task$Ytrain <- as.matrix(task$Ytrain)
+    task$Ytest <- as.matrix(task$Ytest)
+    task$n_classes <- ncol(task$Ytrain)
+  }
+  task
+}
+
+task <- load_compare_task(dataset_id, split_seed)
+task_type <- task$task_type
+Xtrain <- task$Xtrain
+Xtest <- task$Xtest
+Ytrain <- task$Ytrain
+Ytest <- task$Ytest
+
+if (identical(task_type, "classification")) {
+  class_levels <- levels(Ytrain)
+  Ytrain_dummy <- stats::model.matrix(~ Ytrain - 1)
+  colnames(Ytrain_dummy) <- class_levels
+} else {
+  class_levels <- NULL
+  Ytrain_dummy <- as.matrix(Ytrain)
+}
+
+decode_scores <- function(scores, levels = class_levels) {
+  scores <- as.matrix(scores)
+  if (!nrow(scores)) stop("Prediction score matrix has zero rows.")
+  if (ncol(scores) == 1L) {
+    if (length(levels) < 2L) stop("Cannot decode one-column classification scores.")
+    return(factor(ifelse(scores[, 1L] >= 0.5, levels[2L], levels[1L]), levels = levels))
+  }
+  factor(levels[max.col(scores, ties.method = "first")], levels = levels)
+}
+
+last_component_matrix <- function(x, ncomp_eff = ncomp_requested, n_response = task$n_classes) {
+  if (is.null(x)) stop("No prediction matrix/array supplied.")
+  if (length(dim(x)) == 3L) {
+    d <- dim(x)
+    dn <- dimnames(x)
+    names2 <- tolower(dn[[2L]] %||% character())
+    names3 <- tolower(dn[[3L]] %||% character())
+    response_names <- tolower(colnames(Ytrain_dummy) %||% character())
+    dim2_is_comp <- length(names2) && any(grepl("^comp", names2))
+    dim3_is_comp <- length(names3) && any(grepl("^comp", names3))
+    dim2_is_response <- length(names2) && all(names2 %in% response_names)
+    dim3_is_response <- length(names3) && all(names3 %in% response_names)
+    if (isTRUE(dim2_is_comp) || (d[3L] == n_response && !isTRUE(dim2_is_response))) {
+      ncomp_eff <- as.integer(min(ncomp_eff, d[2L]))
+      return(as.matrix(x[, ncomp_eff, , drop = TRUE]))
+    }
+    if (isTRUE(dim3_is_comp) || isTRUE(dim2_is_response) || d[2L] == n_response) {
+      ncomp_eff <- as.integer(min(ncomp_eff, d[3L]))
+      return(as.matrix(x[, , ncomp_eff, drop = TRUE]))
+    }
+    if (d[2L] >= min(ncomp_eff, d[2L])) return(as.matrix(x[, min(ncomp_eff, d[2L]), , drop = TRUE]))
+    return(as.matrix(x[, , min(ncomp_eff, d[3L]), drop = TRUE]))
+  }
+  as.matrix(x)
+}
+
+metric_from_prediction <- function(pred) {
+  if (identical(task_type, "classification")) {
+    pred <- factor(pred, levels = levels(Ytest))
+    acc <- mean(as.character(pred) == as.character(Ytest), na.rm = TRUE)
+    return(list(metric_name = "accuracy", metric_value = acc, accuracy = acc,
+                rmse = NA_real_, q2 = NA_real_, mae = NA_real_))
+  }
+  pred <- as.matrix(pred)
+  obs <- as.matrix(Ytest)
+  if (!all(dim(pred) == dim(obs))) {
+    pred <- matrix(pred, nrow = nrow(obs), ncol = ncol(obs))
+  }
+  err <- obs - pred
+  rmse <- sqrt(mean(err^2, na.rm = TRUE))
+  mae <- mean(abs(err), na.rm = TRUE)
+  denom <- sum((obs - matrix(colMeans(Ytrain), nrow(obs), ncol(obs), byrow = TRUE))^2, na.rm = TRUE)
+  q2 <- if (is.finite(denom) && denom > 0) 1 - sum(err^2, na.rm = TRUE) / denom else NA_real_
+  list(metric_name = "rmse", metric_value = rmse, accuracy = NA_real_,
+       rmse = rmse, q2 = q2, mae = mae)
+}
+
+predict_from_pls_fit <- function(fit, Xnew, ncomp_eff) {
+  ncomp_eff <- min(as.integer(ncomp_eff), dim(fit$coefficients)[3L])
+  coef <- fit$coefficients[, , ncomp_eff, drop = TRUE]
+  if (is.null(dim(coef))) coef <- matrix(coef, ncol = ncol(Ytrain_dummy))
+  Xc <- sweep(as.matrix(Xnew), 2L, fit$Xmeans, "-")
+  pred <- Xc %*% coef
+  pred <- sweep(pred, 2L, fit$Ymeans, "+")
+  if (identical(task_type, "classification")) decode_scores(pred) else pred
+}
+
+extract_prediction_generic <- function(obj, Xnew = Xtest) {
+  pred_obj <- tryCatch(stats::predict(obj, Xnew), error = function(e) NULL)
+  if (is.null(pred_obj)) pred_obj <- obj
+  candidates <- list(
+    pred_obj$predclass, pred_obj$Ypred, pred_obj$ypred, pred_obj$y.pred,
+    pred_obj$p.pred, pred_obj$c.pred, pred_obj$pred, pred_obj$prediction,
+    pred_obj$y.hat, pred_obj$class, pred_obj$classes, pred_obj$predict
+  )
+  for (cand in candidates) {
+    if (is.null(cand)) next
+    if (is.list(cand) && !is.data.frame(cand)) {
+      for (part in cand) {
+        if (is.matrix(part) || is.array(part) || is.data.frame(part) ||
+            is.factor(part) || is.character(part) || is.numeric(part)) {
+          cand <- part
+          break
+        }
+      }
+    }
+    if (identical(task_type, "classification")) {
+      if (is.factor(cand) || is.character(cand)) return(factor(cand, levels = levels(Ytest)))
+      if (is.data.frame(cand)) {
+        if (ncol(cand) == 1L) return(factor(cand[[1L]], levels = levels(Ytest)))
+        return(decode_scores(as.matrix(cand)))
+      }
+      if (is.matrix(cand) || is.array(cand)) return(decode_scores(last_component_matrix(cand)))
+    } else {
+      if (is.data.frame(cand)) cand <- as.matrix(cand)
+      if (is.matrix(cand) || is.array(cand) || is.numeric(cand)) {
+        mat <- if (is.array(cand)) last_component_matrix(cand, n_response = ncol(Ytrain_dummy)) else as.matrix(cand)
+        if (nrow(mat) == nrow(Ytest)) return(mat)
+      }
+    }
+  }
+  if (identical(task_type, "classification")) {
+    if (is.factor(pred_obj) || is.character(pred_obj)) return(factor(pred_obj, levels = levels(Ytest)))
+    if (is.matrix(pred_obj) || is.array(pred_obj)) return(decode_scores(last_component_matrix(pred_obj)))
+  } else if (is.matrix(pred_obj) || is.array(pred_obj) || is.numeric(pred_obj)) {
+    mat <- if (is.array(pred_obj)) last_component_matrix(pred_obj, n_response = ncol(Ytrain_dummy)) else as.matrix(pred_obj)
+    if (nrow(mat) == nrow(Ytest)) return(mat)
+  }
+  stop("Could not decode predictions from object of class: ", paste(class(pred_obj), collapse = ","))
+}
+
+decode_fastpls <- function(model) {
+  pred <- predict(model, Xtest, Ytest = Ytest)$Ypred
+  if (identical(task_type, "classification")) {
+    if (is.data.frame(pred)) return(factor(pred[[ncol(pred)]], levels = levels(Ytest)))
+    if (is.factor(pred) || is.character(pred)) return(factor(pred, levels = levels(Ytest)))
+    if (is.matrix(pred) || is.array(pred)) return(decode_scores(last_component_matrix(pred)))
+  }
+  if (is.array(pred)) return(last_component_matrix(pred, n_response = ncol(Ytrain_dummy)))
+  as.matrix(pred)
+}
+
+run_fastpls <- function(method_name) {
+  args <- list(
+    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
+    ncomp = ncomp_requested, method = method_name, backend = "cpp",
+    svd.method = "cpu_rsvd", scaling = "centering", fit = FALSE, proj = FALSE,
+    seed = 123L + replicate_id
+  )
+  if (identical(method_name, "opls")) args$north <- min(1L, max(0L, ncomp_requested - 1L))
+  fastPLS::pls(
+    args$Xtrain, args$Ytrain, args$Xtest, args$Ytest,
+    ncomp = args$ncomp, method = args$method, backend = args$backend,
+    svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
+    proj = args$proj, seed = args$seed, north = args$north %||% 1L
+  )
+}
+
+run_pls_fit <- function(fit_fun) {
+  fit <- fit_fun(Xtrain, Ytrain_dummy, ncomp = ncomp_requested)
+  list(fit = fit, pred = predict_from_pls_fit(fit, Xtest, ncomp_requested))
+}
+
+runner_mdatools <- function() {
+  ns <- asNamespace("mdatools")
+  if (identical(task_type, "classification") && exists("plsda", envir = ns, inherits = FALSE)) {
+    f <- get("plsda", envir = ns)
+    fit <- tryCatch(
+      f(Xtrain, Ytrain, ncomp = ncomp_requested, center = TRUE, scale = FALSE, cv = NULL),
+      error = function(e) f(Xtrain, Ytrain, ncomp = ncomp_requested, center = TRUE, scale = FALSE)
+    )
+    pred_obj <- stats::predict(fit, Xtest)
+    scores <- pred_obj$p.pred %||% pred_obj$c.pred
+    return(list(fit = fit, pred = decode_scores(last_component_matrix(scores))))
+  }
+  f <- get("pls", envir = ns)
+  fit <- tryCatch(
+    f(Xtrain, Ytrain_dummy, ncomp = ncomp_requested, center = TRUE, scale = FALSE, method = "simpls", cv = NULL),
+    error = function(e) f(Xtrain, Ytrain_dummy, ncomp = ncomp_requested, center = TRUE, scale = FALSE)
+  )
+  list(fit = fit, pred = extract_prediction_generic(fit))
+}
+
+runner_plsgenomics_regression <- function() {
+  f <- get("pls.regression", envir = asNamespace("plsgenomics"))
+  fit <- f(Xtrain, Ytrain_dummy, Xtest = Xtest, ncomp = ncomp_requested)
+  pred <- fit$Ypred %||% fit$y.pred %||% fit$pred
+  if (identical(task_type, "classification")) {
+    list(fit = fit, pred = decode_scores(last_component_matrix(pred)))
+  } else {
+    list(fit = fit, pred = last_component_matrix(pred, n_response = ncol(Ytrain_dummy)))
+  }
+}
+
+runner_plsgenomics_lda <- function() {
+  f <- get("pls.lda", envir = asNamespace("plsgenomics"))
+  fit <- f(Xtrain, Ytrain, Xtest = Xtest, ncomp = ncomp_requested, nruncv = 0)
+  list(fit = fit, pred = factor(fit$predclass, levels = levels(Ytest)))
+}
+
+runner_chemometrics_pls2_nipals <- function() {
+  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  Xm <- attr(Xc, "scaled:center")
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
+  Ym <- attr(Yc, "scaled:center")
+  fit <- chemometrics::pls2_nipals(Xc, Yc, a = ncomp_requested, scale = FALSE)
+  pred <- sweep(as.matrix(Xtest), 2L, Xm, "-") %*% fit$B
+  pred <- sweep(pred, 2L, Ym, "+")
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
+}
+
+runner_chemometrics_pls_eigen <- function() {
+  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  Xm <- attr(Xc, "scaled:center")
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
+  Ym <- attr(Yc, "scaled:center")
+  fit <- chemometrics::pls_eigen(Xc, Yc, a = ncomp_requested)
+  coef_t <- solve(crossprod(fit$T), crossprod(fit$T, Yc))
+  pred <- (sweep(as.matrix(Xtest), 2L, Xm, "-") %*% fit$P) %*% coef_t
+  pred <- sweep(pred, 2L, Ym, "+")
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
+}
+
+runner_mixomics_plsda <- function(sparse = FALSE) {
+  if (!identical(task_type, "classification")) stop("mixOmics PLS-DA requires classification data.")
+  if (isTRUE(sparse)) {
+    fit <- mixOmics::splsda(Xtrain, Ytrain, ncomp = ncomp_requested,
+                            keepX = rep(ncol(Xtrain), ncomp_requested), scale = FALSE)
+  } else {
+    fit <- mixOmics::plsda(Xtrain, Ytrain, ncomp = ncomp_requested, scale = FALSE)
+  }
+  pred_obj <- stats::predict(fit, Xtest)
+  comp <- min(ncomp_requested, ncol(pred_obj$class$max.dist))
+  list(fit = fit, pred = factor(pred_obj$class$max.dist[, comp], levels = levels(Ytest)))
+}
+
+runner_mixomics_pls <- function() {
+  fit <- mixOmics::pls(Xtrain, Ytrain_dummy, ncomp = ncomp_requested,
+                       scale = FALSE, mode = "regression")
+  pred_obj <- stats::predict(fit, Xtest)
+  pred <- last_component_matrix(pred_obj$predict, n_response = ncol(Ytrain_dummy))
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
+}
+
+runner_spls <- function(sparse_da = FALSE) {
+  if (isTRUE(sparse_da)) {
+    if (!identical(task_type, "classification")) stop("splsda requires classification data.")
+    fit <- spls::splsda(Xtrain, Ytrain, K = ncomp_requested, eta = 0.9,
+                        classifier = "lda", scale.x = FALSE)
+    pred <- stats::predict(fit, Xtest)
+    return(list(fit = fit, pred = factor(pred, levels = levels(Ytest))))
+  }
+  fit <- spls::spls(Xtrain, Ytrain_dummy, K = ncomp_requested, eta = 0.9,
+                    scale.x = FALSE, scale.y = FALSE, fit = "simpls")
+  pred <- stats::predict(fit, Xtest)
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else as.matrix(pred))
+}
+
+runner_ropls <- function(orthoI = 0L) {
+  f <- get("opls", envir = asNamespace("ropls"))
+  fit <- f(
+    x = Xtrain, y = if (identical(task_type, "classification")) Ytrain else Ytrain_dummy,
+    predI = ncomp_requested, orthoI = orthoI, crossvalI = 0, permI = 0,
+    scaleC = "center", fig.pdfC = "none", info.txtC = "none"
+  )
+  pred <- stats::predict(fit, Xtest)
+  if (identical(task_type, "classification")) {
+    if (is.factor(pred) || is.character(pred)) return(list(fit = fit, pred = factor(pred, levels = levels(Ytest))))
+    return(list(fit = fit, pred = decode_scores(pred)))
+  }
+  list(fit = fit, pred = as.matrix(pred))
+}
+
+runner_simple_named <- function(pkg, fun_name) {
+  ns <- asNamespace(pkg)
+  f <- get(fun_name, envir = ns)
+  attempts <- list(
+    function() f(Xtrain, Ytrain_dummy, ncomp = ncomp_requested, center = TRUE, scale = FALSE),
+    function() f(Xtrain, Ytrain_dummy, comps = ncomp_requested, center = TRUE, scale = FALSE),
+    function() f(x = Xtrain, y = Ytrain_dummy, ncomp = ncomp_requested, center = TRUE, scale = FALSE),
+    function() f(X = Xtrain, Y = Ytrain_dummy, ncomp = ncomp_requested, center = TRUE, scale = FALSE),
+    function() f(Xtrain, Ytrain_dummy, ncomp = ncomp_requested),
+    function() f(Xtrain, Ytrain_dummy, comps = ncomp_requested),
+    function() f(Xtrain, Ytrain_dummy, ncomp_requested)
+  )
+  last <- NULL
+  for (attempt in attempts) {
+    fit <- tryCatch(attempt(), error = function(e) {
+      last <<- conditionMessage(e)
+      NULL
+    })
+    if (!is.null(fit)) return(list(fit = fit, pred = extract_prediction_generic(fit)))
+  }
+  stop(last %||% "No compatible call signature found.")
+}
+
+method_specs_all <- function(task_type) {
+  specs <- list(
+    list(id = "fastPLS_simpls", package = "fastPLS", algorithm = "SIMPLS",
+         function_name = "fastPLS::pls(method='simpls', svd.method='cpu_rsvd')",
+         runner = function() list(fit = run_fastpls("simpls"), pred = NULL), decoder = decode_fastpls),
+    list(id = "fastPLS_plssvd", package = "fastPLS", algorithm = "PLSSVD",
+         function_name = "fastPLS::pls(method='plssvd', svd.method='cpu_rsvd')",
+         runner = function() list(fit = run_fastpls("plssvd"), pred = NULL), decoder = decode_fastpls),
+    list(id = "fastPLS_opls", package = "fastPLS", algorithm = "OPLS",
+         function_name = "fastPLS::pls(method='opls', svd.method='cpu_rsvd')",
+         runner = function() list(fit = run_fastpls("opls"), pred = NULL), decoder = decode_fastpls),
+    list(id = "fastPLS_kernelpls", package = "fastPLS", algorithm = "kernel PLS",
+         function_name = "fastPLS::pls(method='kernelpls', svd.method='cpu_rsvd')",
+         runner = function() list(fit = run_fastpls("kernelpls"), pred = NULL), decoder = decode_fastpls),
+    list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
+         function_name = "pls::simpls.fit", runner = function() run_pls_fit(pls::simpls.fit)),
+    list(id = "pls_oscorespls_fit", package = "pls", algorithm = "NIPALS/oscores PLS",
+         function_name = "pls::oscorespls.fit", runner = function() run_pls_fit(pls::oscorespls.fit)),
+    list(id = "pls_kernelpls_fit", package = "pls", algorithm = "kernel PLS",
+         function_name = "pls::kernelpls.fit", runner = function() run_pls_fit(pls::kernelpls.fit)),
+    list(id = "mdatools_plsda_or_pls", package = "mdatools", algorithm = "SIMPLS/PLS-DA",
+         function_name = "mdatools::plsda or mdatools::pls", runner = runner_mdatools),
+    list(id = "plsdepot_simpls", package = "plsdepot", algorithm = "SIMPLS",
+         function_name = "plsdepot::simpls", runner = function() runner_simple_named("plsdepot", "simpls")),
+    list(id = "pcv_simpls", package = "pcv", algorithm = "SIMPLS",
+         function_name = "pcv::simpls", runner = function() runner_simple_named("pcv", "simpls")),
+    list(id = "plsgenomics_pls_regression", package = "plsgenomics", algorithm = "PLS regression",
+         function_name = "plsgenomics::pls.regression", runner = runner_plsgenomics_regression),
+    list(id = "mixOmics_pls", package = "mixOmics", algorithm = "PLS regression",
+         function_name = "mixOmics::pls", runner = runner_mixomics_pls),
+    list(id = "chemometrics_pls_eigen", package = "chemometrics", algorithm = "PLS eigen",
+         function_name = "chemometrics::pls_eigen", runner = runner_chemometrics_pls_eigen),
+    list(id = "chemometrics_pls2_nipals", package = "chemometrics", algorithm = "PLS2 NIPALS",
+         function_name = "chemometrics::pls2_nipals", runner = runner_chemometrics_pls2_nipals),
+    list(id = "spls_spls", package = "spls", algorithm = "sPLS regression",
+         function_name = "spls::spls", runner = function() runner_spls(FALSE)),
+    list(id = "ropls_pls", package = "ropls", algorithm = "PLS",
+         function_name = "ropls::opls(orthoI=0)", runner = function() runner_ropls(0L)),
+    list(id = "ropls_opls", package = "ropls", algorithm = "OPLS",
+         function_name = "ropls::opls(orthoI=1)", runner = function() runner_ropls(1L))
+  )
+  if (identical(task_type, "classification")) {
+    specs <- c(specs, list(
+      list(id = "plsgenomics_pls_lda", package = "plsgenomics", algorithm = "PLS-LDA",
+           function_name = "plsgenomics::pls.lda", runner = runner_plsgenomics_lda),
+      list(id = "mixOmics_plsda", package = "mixOmics", algorithm = "PLS-DA",
+           function_name = "mixOmics::plsda", runner = function() runner_mixomics_plsda(FALSE)),
+      list(id = "mixOmics_splsda", package = "mixOmics", algorithm = "sPLS-DA",
+           function_name = "mixOmics::splsda", runner = function() runner_mixomics_plsda(TRUE)),
+      list(id = "spls_splsda", package = "spls", algorithm = "sPLS-DA",
+           function_name = "spls::splsda", runner = function() runner_spls(TRUE))
+    ))
+  }
+  specs
+}
+
+method_specs <- method_specs_all(task_type)
+names(method_specs) <- vapply(method_specs, `[[`, character(1), "id")
+
+function_available <- function(spec) {
+  if (!quiet_require(spec$package)) return(FALSE)
+  if (identical(spec$id, "mdatools_plsda_or_pls")) {
+    ns <- asNamespace("mdatools")
+    return(exists("plsda", envir = ns, inherits = FALSE) || exists("pls", envir = ns, inherits = FALSE))
+  }
+  parts <- strsplit(spec$function_name, "::", fixed = TRUE)[[1L]]
+  if (length(parts) < 2L) return(TRUE)
+  fun <- sub("\\(.*$", "", parts[[2L]])
+  exists(fun, envir = asNamespace(spec$package), inherits = FALSE)
+}
+
+write_row <- function(row, path) {
+  dir.create(dirname(normalizePath(path, mustWork = FALSE)), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(row, path, row.names = FALSE, quote = TRUE, na = "")
+}
+
+empty_row <- function(spec, status, msg = "") {
+  data.frame(
+    dataset = task$dataset,
+    task_type = task_type,
+    dataset_path = task$dataset_path,
+    split_seed = split_seed,
+    n_train = nrow(Xtrain),
+    n_test = nrow(Xtest),
+    p = ncol(Xtrain),
+    n_response = ncol(Ytrain_dummy),
+    ncomp_requested = ncomp_requested,
+    replicate = replicate_id,
+    method_id = spec$id,
+    package = spec$package,
+    package_version = package_version_chr(spec$package),
+    function_name = spec$function_name,
+    algorithm = spec$algorithm,
+    independent_implementation = TRUE,
+    total_runtime_ms = NA_real_,
+    metric_name = if (identical(task_type, "classification")) "accuracy" else "rmse",
+    metric_value = NA_real_,
+    accuracy = NA_real_,
+    rmse = NA_real_,
+    q2 = NA_real_,
+    mae = NA_real_,
+    status = status,
+    warning_message = "",
+    error_message = msg,
+    stringsAsFactors = FALSE
+  )
+}
+
+measure_once <- function(fun) {
+  gc(FALSE)
+  warn <- character()
+  err <- NULL
+  value <- NULL
+  t0 <- proc.time()[3L]
+  value <- tryCatch(
+    withCallingHandlers(fun(), warning = function(w) {
+      warn <<- c(warn, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }),
+    error = function(e) {
+      err <<- conditionMessage(e)
+      NULL
+    }
+  )
+  elapsed_ms <- as.numeric(proc.time()[3L] - t0) * 1000
+  list(value = value, elapsed_ms = elapsed_ms, error = err,
+       warning = paste(unique(warn), collapse = " | "))
+}
+
+run_one <- function(method_id) {
+  spec <- method_specs[[method_id]]
+  if (is.null(spec)) {
+    spec <- list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)
+    return(empty_row(spec, "error", paste("Unknown method_id:", method_id)))
+  }
+  pkg_ok <- quiet_require(spec$package)
+  fun_ok <- if (pkg_ok) function_available(spec) else FALSE
+  if (!pkg_ok) return(empty_row(spec, "skipped_package_not_installed", sprintf("Package '%s' is not installed.", spec$package)))
+  if (!fun_ok) return(empty_row(spec, "skipped_function_or_method_not_available", sprintf("Function/method '%s' is not available.", spec$function_name)))
+
+  measured <- measure_once(spec$runner)
+  row <- empty_row(spec, "ok")
+  row$total_runtime_ms <- measured$elapsed_ms
+  row$warning_message <- measured$warning
+  if (!is.null(measured$error)) {
+    row$status <- "error"
+    row$error_message <- measured$error
+    return(row)
+  }
+  pred <- tryCatch({
+    if (!is.null(measured$value$pred)) measured$value$pred else spec$decoder(measured$value$fit)
+  }, error = function(e) {
+    row$status <<- "prediction_error"
+    row$error_message <<- conditionMessage(e)
+    NULL
+  })
+  if (!is.null(pred)) {
+    met <- metric_from_prediction(pred)
+    row$metric_name <- met$metric_name
+    row$metric_value <- met$metric_value
+    row$accuracy <- met$accuracy
+    row$rmse <- met$rmse
+    row$q2 <- met$q2
+    row$mae <- met$mae
+  }
+  row
+}
+
+summarize_results <- function(results_dir) {
+  rows_dir <- file.path(results_dir, "run_rows")
+  files <- list.files(rows_dir, pattern = "[.]csv$", full.names = TRUE)
+  if (!length(files)) stop("No row CSV files found in ", rows_dir)
+  raw <- do.call(rbind, lapply(files, utils::read.csv, check.names = FALSE))
+  raw <- raw[order(raw$dataset, raw$method_id, raw$replicate), , drop = FALSE]
+  raw_path <- file.path(results_dir, "pls_package_comparison_raw.csv")
+  utils::write.csv(raw, raw_path, row.names = FALSE, quote = TRUE, na = "")
+
+  ok <- raw[raw$status == "ok", , drop = FALSE]
+  if (nrow(ok)) {
+    split_key <- interaction(ok$dataset, ok$method_id, drop = TRUE)
+    summary <- do.call(rbind, lapply(split(ok, split_key), function(d) {
+      data.frame(
+        dataset = d$dataset[1],
+        task_type = d$task_type[1],
+        method_id = d$method_id[1],
+        package = d$package[1],
+        algorithm = d$algorithm[1],
+        ncomp_requested = d$ncomp_requested[1],
+        reps_ok = nrow(d),
+        median_time_ms = stats::median(d$total_runtime_ms, na.rm = TRUE),
+        median_metric = stats::median(d$metric_value, na.rm = TRUE),
+        metric_name = d$metric_name[1],
+        median_accuracy = stats::median(d$accuracy, na.rm = TRUE),
+        median_rmse = stats::median(d$rmse, na.rm = TRUE),
+        median_q2 = stats::median(d$q2, na.rm = TRUE),
+        stringsAsFactors = FALSE
+      )
+    }))
+  } else {
+    summary <- raw[0, , drop = FALSE]
+  }
+  summary_path <- file.path(results_dir, "pls_package_comparison_summary.csv")
+  utils::write.csv(summary, summary_path, row.names = FALSE, quote = TRUE, na = "")
+
+  if (requireNamespace("ggplot2", quietly = TRUE) && nrow(ok)) {
+    plot_dir <- file.path(results_dir, "plots")
+    dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+    for (ds in unique(ok$dataset)) {
+      d <- ok[ok$dataset == ds, , drop = FALSE]
+      d$method_id <- stats::reorder(d$method_id, d$total_runtime_ms, FUN = stats::median)
+      p1 <- ggplot2::ggplot(d, ggplot2::aes(x = method_id, y = total_runtime_ms, color = package)) +
+        ggplot2::geom_point(size = 2.4, alpha = 0.85) +
+        ggplot2::scale_y_log10() +
+        ggplot2::coord_flip() +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::labs(title = paste0(ds, " package comparison: speed"),
+                      x = NULL, y = "Total runtime (ms, log10)")
+      p2 <- ggplot2::ggplot(d, ggplot2::aes(x = method_id, y = metric_value, color = package)) +
+        ggplot2::geom_point(size = 2.4, alpha = 0.85) +
+        ggplot2::coord_flip() +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::labs(title = paste0(ds, " package comparison: ", d$metric_name[1]),
+                      x = NULL, y = d$metric_name[1])
+      ggplot2::ggsave(file.path(plot_dir, paste0(ds, "_package_speed.png")), p1, width = 10, height = 7, dpi = 160)
+      ggplot2::ggsave(file.path(plot_dir, paste0(ds, "_package_prediction.png")), p2, width = 10, height = 7, dpi = 160)
+    }
+  }
+  message("Wrote: ", raw_path)
+  message("Wrote: ", summary_path)
+}
+
+if (identical(mode, "list_methods")) {
+  cat(paste(vapply(method_specs, `[[`, character(1), "id"), collapse = "\n"))
+  cat("\n")
+} else if (identical(mode, "run_one")) {
+  if (!nzchar(method_id)) stop("--method-id is required for --mode=run_one")
+  row <- run_one(method_id)
+  if (!nzchar(row_out)) row_out <- file.path(getwd(), paste0(dataset_id, "_", method_id, "_row.csv"))
+  write_row(row, row_out)
+  print(row[, c("dataset", "method_id", "package", "total_runtime_ms", "metric_name", "metric_value", "status", "error_message")])
+} else if (identical(mode, "missing_row")) {
+  spec <- method_specs[[method_id]] %||% list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)
+  row <- empty_row(spec, status_override %||% "missing_row", message_override)
+  if (!nzchar(row_out)) row_out <- file.path(getwd(), paste0(dataset_id, "_", method_id, "_missing.csv"))
+  write_row(row, row_out)
+} else if (identical(mode, "summarize")) {
+  summarize_results(results_dir)
+} else {
+  stop("Unknown --mode: ", mode)
+}
