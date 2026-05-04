@@ -211,6 +211,116 @@ ellipses or Hotelling T2 ellipses.
 plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
+The next examples use the base R `iris` data. The first example keeps two
+classes and creates a fixed train/test split. Each column is one PLS family, the
+top row shows training scores colored by the training class, and the bottom row
+shows test scores colored by the predicted class.
+
+```{r iris-binary-pls-plots, fig.width = 10, fig.height = 5}
+set.seed(200)
+iris_two <- subset(iris, Species != "virginica")
+iris_two$Species <- droplevels(iris_two$Species)
+train_two <- unlist(tapply(seq_len(nrow(iris_two)), iris_two$Species, function(i) {
+  sample(i, floor(0.7 * length(i)))
+}))
+
+X_two_train <- as.matrix(iris_two[train_two, 1:4])
+X_two_test <- as.matrix(iris_two[-train_two, 1:4])
+y_two_train <- iris_two$Species[train_two]
+y_two_test <- iris_two$Species[-train_two]
+
+as_test_score_object <- function(model, pred) {
+  out <- model
+  if (!is.null(out$inner_model)) {
+    out$inner_model$Ttrain <- NULL
+    out$inner_model$Ttest <- pred$Ttest
+  } else {
+    out$Ttrain <- NULL
+    out$Ttest <- pred$Ttest
+  }
+  out
+}
+
+last_predicted_class <- function(pred) {
+  yp <- pred$Ypred
+  if (is.data.frame(yp)) {
+    return(yp[[ncol(yp)]])
+  }
+  yp
+}
+
+families <- c("plssvd", "simpls", "opls", "kernelpls")
+labels <- c("PLSSVD", "SIMPLS", "OPLS", "kernelPLS")
+
+models_two <- vector("list", length(families))
+preds_two <- vector("list", length(families))
+for (i in seq_along(families)) {
+  fam <- families[[i]]
+  models_two[[i]] <- pls(
+    X_two_train,
+    y_two_train,
+    ncomp = 1:2,
+    method = fam,
+    backend = "cpp",
+    svd.method = "cpu_rsvd",
+    fit = TRUE,
+    proj = TRUE,
+    north = 1L,
+    kernel = if (identical(fam, "kernelpls")) "rbf" else "linear",
+    seed = 200 + i
+  )
+  preds_two[[i]] <- predict(models_two[[i]], X_two_test, Ytest = y_two_test, proj = TRUE)
+}
+
+old_par <- par(mfrow = c(2, 4), mar = c(3.2, 3.2, 2.2, 0.8), oma = c(0, 0, 1.2, 0))
+for (i in seq_along(families)) {
+  plot(models_two[[i]], groups = y_two_train, ellipse = TRUE, main = paste(labels[[i]], "training"))
+}
+for (i in seq_along(families)) {
+  plot(
+    as_test_score_object(models_two[[i]], preds_two[[i]]),
+    groups = last_predicted_class(preds_two[[i]]),
+    main = paste(labels[[i]], "test prediction")
+  )
+}
+mtext("Two-class iris train/test PLS score plots", outer = TRUE, font = 2)
+par(old_par)
+```
+
+The second example uses all three `iris` classes and fits OPLS with two
+orthogonal components (`north = 2`).
+
+```{r iris-three-class-opls, fig.width = 7, fig.height = 3.5}
+set.seed(201)
+train_three <- unlist(tapply(seq_len(nrow(iris)), iris$Species, function(i) {
+  sample(i, floor(0.7 * length(i)))
+}))
+
+X_three_train <- as.matrix(iris[train_three, 1:4])
+X_three_test <- as.matrix(iris[-train_three, 1:4])
+y_three_train <- iris$Species[train_three]
+y_three_test <- iris$Species[-train_three]
+
+opls_three <- pls(
+  X_three_train,
+  y_three_train,
+  ncomp = 1:2,
+  method = "opls",
+  backend = "cpp",
+  svd.method = "cpu_rsvd",
+  fit = TRUE,
+  proj = TRUE,
+  north = 2L,
+  seed = 201
+)
+pred_three <- predict(opls_three, X_three_test, Ytest = y_three_test, proj = TRUE)
+
+old_par <- par(mfrow = c(1, 2), mar = c(3.2, 3.2, 2.2, 0.8))
+plot(opls_three, groups = y_three_train, ellipse = TRUE, ellipse.type = "hotelling", main = "OPLS training, 3 classes")
+plot(as_test_score_object(opls_three, pred_three), groups = last_predicted_class(pred_three), main = "OPLS test prediction, north = 2")
+par(old_par)
+```
+
 ## Cross-Validation
 
 Use `pls.single.cv()` when the number of components is already fixed. Use

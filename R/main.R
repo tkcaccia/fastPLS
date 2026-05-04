@@ -3878,6 +3878,30 @@ pca <- function(x,
   sweep(radius * circle %*% t(transform), 2L, center, "+")
 }
 
+.fastpls_plot_palette <- function(n) {
+  n <- as.integer(n)
+  base <- c(
+    "#0073C2FF", "#EFC000FF", "#CD534CFF", "#009E73FF",
+    "#868686FF", "#56B4E9FF", "#D55E00FF", "#CC79A7FF",
+    "#003C67FF", "#8F7700FF", "#A73030FF", "#005F45FF"
+  )
+  if (n <= length(base)) {
+    return(base[seq_len(n)])
+  }
+  grDevices::hcl.colors(n, "Dark 3")
+}
+
+.fastpls_plot_call <- function(x, y, args) {
+  do.call(graphics::plot, c(list(x = x, y = y), args))
+}
+
+.fastpls_plot_args <- function(xlab, ylab, main, dots) {
+  if (is.null(dots$xlab)) dots$xlab <- xlab
+  if (is.null(dots$ylab)) dots$ylab <- ylab
+  if (is.null(dots$main)) dots$main <- main
+  dots
+}
+
 .fastpls_plot_scores <- function(scores,
                                  comps = c(1L, 2L),
                                  groups = NULL,
@@ -3898,8 +3922,16 @@ pca <- function(x,
   if (is.null(ylab)) ylab <- colnames(scores)[comps[2L]]
   if (is.null(xlab) || is.na(xlab)) xlab <- paste0("Component ", comps[1L])
   if (is.null(ylab) || is.na(ylab)) ylab <- paste0("Component ", comps[2L])
+  dots <- list(...)
   if (is.null(groups)) {
-    graphics::plot(xy[, 1L], xy[, 2L], xlab = xlab, ylab = ylab, main = main, ...)
+    if (is.null(dots$pch)) dots$pch <- 21
+    if (is.null(dots$col)) dots$col <- "black"
+    if (is.null(dots$bg)) dots$bg <- "#0073C2FF"
+    .fastpls_plot_call(
+      xy[, 1L],
+      xy[, 2L],
+      .fastpls_plot_args(xlab, ylab, main, dots)
+    )
     if (isTRUE(ellipse)) {
       el <- .fastpls_ellipse(xy, conf = conf, type = ellipse.type)
       if (!is.null(el)) graphics::lines(el[, 1L], el[, 2L], col = "firebrick", lwd = 2)
@@ -3907,10 +3939,17 @@ pca <- function(x,
     return(invisible(xy))
   }
   groups <- as.factor(groups)
-  pal <- grDevices::hcl.colors(nlevels(groups), "Dark 3")
-  col <- pal[as.integer(groups)]
-  graphics::plot(xy[, 1L], xy[, 2L], xlab = xlab, ylab = ylab, main = main, col = col, pch = 19, ...)
-  graphics::legend("topright", legend = levels(groups), col = pal, pch = 19, bty = "n")
+  pal <- .fastpls_plot_palette(nlevels(groups))
+  bg <- pal[as.integer(groups)]
+  if (is.null(dots$pch)) dots$pch <- 21
+  if (is.null(dots$col)) dots$col <- "black"
+  if (is.null(dots$bg)) dots$bg <- bg
+  .fastpls_plot_call(
+    xy[, 1L],
+    xy[, 2L],
+    .fastpls_plot_args(xlab, ylab, main, dots)
+  )
+  graphics::legend("topright", legend = levels(groups), pt.bg = pal, col = "black", pch = 21, bty = "n")
   if (isTRUE(ellipse)) {
     for (lev in levels(groups)) {
       idx <- which(groups == lev)
@@ -3926,6 +3965,8 @@ pca <- function(x,
 #' Draws a two-component score plot for `fastPLSPCA` and `fastPLS` objects.
 #' Optional ellipses are computed either as a data confidence ellipse or a
 #' Hotelling T2 score ellipse.
+#' By default, grouped points use filled symbols with the group color in `bg`
+#' and a black contour in `col`.
 #'
 #' @param x A `fastPLSPCA` object.
 #' @param comps Two component indices.
@@ -3943,17 +3984,37 @@ plot.fastPLSPCA <- function(x,
                             ellipse.type = c("confidence", "hotelling"),
                             conf = 0.95,
                             ...) {
-  .fastpls_plot_scores(
-    x$scores,
-    comps = comps,
-    groups = groups,
-    ellipse = ellipse,
-    ellipse.type = match.arg(ellipse.type),
-    conf = conf,
-    main = "fastPLS PCA scores",
-    xlab = sprintf("PC%d (%.1f%%)", comps[1L], 100 * x$variance_explained[comps[1L]]),
-    ylab = sprintf("PC%d (%.1f%%)", comps[2L], 100 * x$variance_explained[comps[2L]]),
-    ...
+  dots <- list(...)
+  main <- if (is.null(dots$main)) "fastPLS PCA scores" else dots$main
+  xlab <- if (is.null(dots$xlab)) {
+    sprintf("PC%d (%.1f%%)", comps[1L], 100 * x$variance_explained[comps[1L]])
+  } else {
+    dots$xlab
+  }
+  ylab <- if (is.null(dots$ylab)) {
+    sprintf("PC%d (%.1f%%)", comps[2L], 100 * x$variance_explained[comps[2L]])
+  } else {
+    dots$ylab
+  }
+  dots$main <- NULL
+  dots$xlab <- NULL
+  dots$ylab <- NULL
+  do.call(
+    .fastpls_plot_scores,
+    c(
+      list(
+        scores = x$scores,
+        comps = comps,
+        groups = groups,
+        ellipse = ellipse,
+        ellipse.type = match.arg(ellipse.type),
+        conf = conf,
+        main = main,
+        xlab = xlab,
+        ylab = ylab
+      ),
+      dots
+    )
   )
 }
 
@@ -3987,15 +4048,23 @@ plot.fastPLS <- function(x,
   if (is.null(scores)) {
     stop("No PLS scores are stored in this object. Refit with fit=TRUE or predict with proj=TRUE before plotting.", call. = FALSE)
   }
-  .fastpls_plot_scores(
-    scores,
-    comps = comps,
-    groups = groups,
-    ellipse = ellipse,
-    ellipse.type = match.arg(ellipse.type),
-    conf = conf,
-    main = "fastPLS scores",
-    ...
+  dots <- list(...)
+  main <- if (is.null(dots$main)) "fastPLS scores" else dots$main
+  dots$main <- NULL
+  do.call(
+    .fastpls_plot_scores,
+    c(
+      list(
+        scores = scores,
+        comps = comps,
+        groups = groups,
+        ellipse = ellipse,
+        ellipse.type = match.arg(ellipse.type),
+        conf = conf,
+        main = main
+      ),
+      dots
+    )
   )
 }
 
