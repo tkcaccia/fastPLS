@@ -1,6 +1,6 @@
 # fastPLS
 
-`fastPLS` provides R, C++, and CUDA implementations of partial least squares
+`fastPLS` provides compiled C++ and CUDA implementations of partial least squares
 models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
 through `pls()`, `pls.single.cv()`, `pls.double.cv()`, `optim.pls.cv()`,
@@ -34,7 +34,7 @@ cube does not need to be stored.
 
 All four model families can optionally fit a compressed Gaussian representation
 of the response by setting `gaussian_y = TRUE` in `pls()`. This is available
-through the R, compiled C++, and CUDA backends for `plssvd`, `simpls`, `opls`,
+through the compiled C++ and CUDA backends for `plssvd`, `simpls`, `opls`,
 and `kernelpls`. The option is disabled by default, so existing analyses are
 unchanged unless it is requested explicitly.
 
@@ -90,8 +90,9 @@ CPU backends:
 - `irlba`: bundled internal IRLBA wrapper.
 - `cpu_rsvd`: randomized SVD with Gaussian sketching and optional power
   iterations.
-- `exact`: exact dense SVD fallback, used automatically for very small SVD
-  inputs.
+Very small SVD inputs automatically fall back to a full dense decomposition
+inside the compiled backends when the truncated route is not meaningful, but
+`exact` is no longer exposed as a user-selectable PLS benchmark option.
 
 CUDA backend:
 
@@ -149,8 +150,8 @@ It writes one raw row per run and regenerates 4x4 plots with:
 
 - columns: `plssvd`, `simpls`, `opls`, `kernelpls`
 - rows: total time, predictive metric, peak host RSS, peak GPU memory
-- color: SVD/backend (`irlba`, `rsvd`, `pls_pkg`)
-- line type: implementation (`R`, `cpp`, `cuda`, `pls_pkg`)
+- color: SVD/backend (`irlba`, `rsvd_cpu`, `rsvd_cuda`, `pls_pkg`)
+- line type: prediction rule (`argmax`, `LDA`)
 
 The standard simulated variable-sweep benchmark is:
 

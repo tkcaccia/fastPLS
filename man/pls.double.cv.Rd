@@ -10,8 +10,10 @@ pls.double.cv(
   ncomp = 2,
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd", "exact"),
+  method = c("simpls", "plssvd", "opls", "kernelpls"),
+  backend = c("cpp", "cuda"),
+  inner.method = c("simpls", "plssvd"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -31,7 +33,17 @@ pls.double.cv(
   times = 100,
   runn = 10,
   kfold_inner = 10,
-  kfold_outer = 10
+  kfold_outer = 10,
+  north = 1L,
+  kernel = c("linear", "rbf", "poly"),
+  gamma = NULL,
+  degree = 3L,
+  coef0 = 1,
+  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+  lda_ridge = 1e-08,
+  regression_head = c("standard", "linear_cpp", "linear_cuda"),
+  xprod = NULL,
+  ...
 )
 }
 \arguments{
@@ -45,9 +57,14 @@ pls.double.cv(
 
 \item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
 
-\item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
+\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.}
 
-\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
+\item{backend}{Implementation backend: `"cpp"` or `"cuda"`.}
+
+\item{inner.method}{Inner PLS core used by `method = "opls"` or
+`method = "kernelpls"`.}
+
+\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 from `pls()`; use `backend = "cuda"` for GPU-native fits.}
 
@@ -96,10 +113,46 @@ the former incdefl profile.}
 \item{kfold_inner}{Inner-fold count.}
 
 \item{kfold_outer}{Outer-fold count.}
+
+\item{north}{Number of orthogonal components removed by OPLS.}
+
+\item{kernel}{Kernel type for kernel PLS: `"linear"`, `"rbf"`, or `"poly"`.}
+
+\item{gamma}{Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.}
+
+\item{degree}{Polynomial kernel degree.}
+
+\item{coef0}{Polynomial kernel offset.}
+
+\item{classifier}{Classification decision rule. `"argmax"` keeps the
+standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
+on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
+same LDA model and CUDA matrix multiplication for latent projection and
+discriminant scoring when CUDA is available. For high-throughput PLS-DA on
+GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
+and `classifier = "lda_cuda"`; the compiled CPU fallback is
+`classifier = "lda_cpp"`. The experimental fused
+CUDA PLS+LDA path can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the
+optimized standard CUDA LDA route remains the default.}
+
+\item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+
+\item{regression_head}{Regression prediction head. `"standard"` keeps the
+usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
+least-squares linear model on the latent scores with compiled C++ code.
+`"linear_cuda"` uses CUDA matrix multiplication for latent projection and
+prediction when CUDA is available.}
+
+\item{xprod}{Use the matrix-free cross-product route where available for
+inner component optimization. `NULL` applies fastPLS defaults.}
+
+\item{...}{Additional backend tuning arguments.}
 }
 \value{
 List of nested CV outputs and summaries.
 }
 \description{
 Runs outer/inner CV loops for performance estimation and component selection.
+Inner component optimization uses the same compiled C++/CUDA CV core as
+[pls.single.cv()] and [optim.pls.cv()].
 }

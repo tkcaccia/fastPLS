@@ -1,4 +1,4 @@
-##r_irlba <- function(X, nu, work=nu+7, maxit=1000, tol=1e-5, eps=1e-10, svtol=tol) {
+## Historical R IRLBA prototype retained only as a commented development note.
 ##  stopifnot(work>nu)
 ##  IRLB(X, nu, work, maxit, tol, eps, svtol)
 ##}
@@ -1016,7 +1016,7 @@
 
 .normalize_svd_method <- function(method) {
   if (length(method) == 1L && !is.na(method) && as.character(method) %in% c("arpack", "dc")) {
-    stop("svd.method='arpack' has been removed from fastPLS; use 'exact', 'irlba', or 'cpu_rsvd'.", call. = FALSE)
+    stop("svd.method='arpack' has been removed from fastPLS; use 'irlba' or 'cpu_rsvd'.", call. = FALSE)
   }
   method
 }
@@ -2182,7 +2182,7 @@ kernel_pls_r <- function(Xtrain,
                          degree = 3L,
                          coef0 = 1,
                          method = c("simpls", "plssvd"),
-                         svd.method = c("irlba", "cpu_rsvd", "exact"),
+                         svd.method = c("irlba", "cpu_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,
@@ -2201,35 +2201,7 @@ kernel_pls_r <- function(Xtrain,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
                          proj = FALSE) {
-  method <- match.arg(method)
-  classifier <- .normalize_classifier(classifier)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
-  if (isTRUE(gaussian_y) && is.null(gaussian_y_dim)) {
-    gaussian_y_dim <- .gaussian_y_default_dim(Xtrain, NULL)
-  }
-  .kernel_pls_fit(
-    Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), match.arg(kernel),
-    gamma, degree, coef0, fit, proj, "R", pls_r,
-    list(
-      method = method,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol,
-      seed = seed,
-      fast_block = fast_block,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed,
-      classifier = classifier,
-      lda_ridge = lda_ridge
-    )
-  )
+  stop("The pure-R kernel PLS backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
 
 #' @rdname kernel_pls_r
@@ -2245,7 +2217,7 @@ kernel_pls_cpp <- function(Xtrain,
                            degree = 3L,
                            coef0 = 1,
                            method = c("simpls", "plssvd"),
-                           svd.method = c("irlba", "cpu_rsvd", "exact"),
+                           svd.method = c("irlba", "cpu_rsvd"),
                            rsvd_oversample = 10L,
                            rsvd_power = 1L,
                            svds_tol = 0,
@@ -2266,7 +2238,7 @@ kernel_pls_cpp <- function(Xtrain,
                            proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
   if (isTRUE(gaussian_y) && is.null(gaussian_y_dim)) {
     gaussian_y_dim <- .gaussian_y_default_dim(Xtrain, NULL)
   }
@@ -2463,7 +2435,7 @@ opls_r <- function(Xtrain,
                    north = 1L,
                    scaling = c("centering", "autoscaling", "none"),
                    method = c("simpls", "plssvd"),
-                   svd.method = c("irlba", "cpu_rsvd", "exact"),
+                   svd.method = c("irlba", "cpu_rsvd"),
                    rsvd_oversample = 10L,
                    rsvd_power = 1L,
                    svds_tol = 0,
@@ -2481,32 +2453,7 @@ opls_r <- function(Xtrain,
                    lda_ridge = 1e-8,
                    fit = FALSE,
                    proj = FALSE) {
-  method <- match.arg(method)
-  classifier <- .normalize_classifier(classifier)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
-  .opls_fit(
-    Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north, fit, proj,
-    "R", pls_r,
-    list(
-      method = method,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol,
-      seed = seed,
-      fast_block = fast_block,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed,
-      classifier = classifier,
-      lda_ridge = lda_ridge
-    )
-  )
+  stop("The pure-R OPLS backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
 
 #' @rdname opls_r
@@ -2519,7 +2466,7 @@ opls_cpp <- function(Xtrain,
                      north = 1L,
                      scaling = c("centering", "autoscaling", "none"),
                      method = c("simpls", "plssvd"),
-                     svd.method = c("irlba", "cpu_rsvd", "exact"),
+                     svd.method = c("irlba", "cpu_rsvd"),
                      rsvd_oversample = 10L,
                      rsvd_power = 1L,
                      svds_tol = 0,
@@ -2539,7 +2486,7 @@ opls_cpp <- function(Xtrain,
                      proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
   .opls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north, fit, proj,
     "cpp", pls,
@@ -3202,6 +3149,11 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              svds_tol = 0,
+                             irlba_work = 0L,
+                             irlba_maxit = 1000L,
+                             irlba_tol = 1e-5,
+                             irlba_eps = 1e-9,
+                             irlba_svtol = 1e-5,
                              seed = 1L,
                              xprod = NULL,
                              north = 1L,
@@ -3360,7 +3312,14 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
     }
     cuda_reset_workspace()
   } else {
-    res <- run_cv_profiled()
+    res <- .with_irlba_options(
+      run_cv_profiled(),
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol
+    )
   }
 
   decoded <- if (classification && !is.null(res$class_pred)) {
@@ -3418,82 +3377,7 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
                              gaussian_y,
                              gaussian_y_dim,
                              gaussian_y_seed) {
-  Xdata <- as.matrix(Xdata)
-  ncomp <- as.integer(ncomp)
-  fold <- .make_single_cv_folds(Ydata, constrain, as.integer(kfold), seed)
-  classification <- is.factor(Ydata)
-  lev <- if (classification) levels(Ydata) else NULL
-  if (classification) {
-    class_pred <- matrix(NA_integer_, nrow = nrow(Xdata), ncol = length(ncomp))
-  } else {
-    Ymat <- as.matrix(Ydata)
-    Ypred <- array(NA_real_, dim = c(nrow(Xdata), ncol(Ymat), length(ncomp)))
-  }
-  status <- integer(kfold)
-
-  for (f in seq_len(kfold)) {
-    test_idx <- which(fold == (f - 1L))
-    train_idx <- which(fold != (f - 1L))
-    if (!length(test_idx) || !length(train_idx)) {
-      status[f] <- 2L
-      next
-    }
-    fit <- pls(
-      Xtrain = Xdata[train_idx, , drop = FALSE],
-      Ytrain = if (classification) droplevels(Ydata[train_idx]) else as.matrix(Ydata)[train_idx, , drop = FALSE],
-      Xtest = NULL,
-      Ytest = NULL,
-      ncomp = ncomp,
-      scaling = scaling,
-      method = method,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      seed = as.integer(seed + f - 1L),
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed,
-      fit = FALSE,
-      backend = "r",
-      inner.method = inner.method,
-      north = north,
-      kernel = kernel,
-      gamma = gamma,
-      degree = degree,
-      coef0 = coef0
-    )
-    pred <- predict(fit, Xdata[test_idx, , drop = FALSE])
-    if (classification) {
-      yp <- as.data.frame(pred$Ypred)
-      for (j in seq_along(ncomp)) {
-        class_pred[test_idx, j] <- match(as.character(yp[[j]]), lev)
-      }
-    } else {
-      for (j in seq_along(ncomp)) {
-        Ypred[test_idx, , j] <- pred$Ypred[, , j, drop = TRUE]
-      }
-    }
-    status[f] <- 1L
-  }
-
-  if (classification) {
-    decoded <- .decode_cv_class_predictions(class_pred, Ydata, lev)
-    out <- list(class_pred = class_pred)
-  } else {
-    decoded <- .decode_cv_predictions(Ypred, Ydata, FALSE, NULL)
-    out <- list(Ypred = Ypred)
-  }
-  out$fold <- fold + 1L
-  out$status <- status
-  out$ncomp <- ncomp
-  out$method <- method
-  out$backend <- "r"
-  out$pred <- decoded$pred
-  out$metrics <- decoded$metrics
-  out$classification <- classification
-  out$levels <- lev
-  out
+  stop("The pure-R PLS CV backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
 
 #' Single grouped cross-validation for PLS
@@ -3509,6 +3393,11 @@ kernel_pls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
 #'   in the same fold.
 #' @param kfold Number of folds.
 #' @param return_scores Store score predictions for classification when `TRUE`.
+#' @param irlba_work IRLBA work subspace size; `0` lets the backend choose.
+#' @param irlba_maxit Maximum IRLBA iterations.
+#' @param irlba_tol IRLBA convergence tolerance.
+#' @param irlba_eps IRLBA orthogonality threshold.
+#' @param irlba_svtol IRLBA singular-value convergence tolerance.
 #' @return A list with fold assignments, predictions, metrics, status, and
 #'   backend metadata.
 #' @export
@@ -3519,12 +3408,17 @@ pls.single.cv <- function(Xdata,
                           kfold = 10L,
                           scaling = c("centering", "autoscaling", "none"),
                           method = c("simpls", "plssvd", "opls", "kernelpls"),
-                          backend = c("cpp", "r", "cuda"),
+                          backend = c("cpp", "cuda"),
                           inner.method = c("simpls", "plssvd"),
-                          svd.method = c("irlba", "cpu_rsvd", "exact"),
+                          svd.method = c("irlba", "cpu_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           svds_tol = 0,
+                          irlba_work = 0L,
+                          irlba_maxit = 1000L,
+                          irlba_tol = 1e-5,
+                          irlba_eps = 1e-9,
+                          irlba_svtol = 1e-5,
                           seed = 1L,
                           north = 1L,
                           kernel = c("linear", "rbf", "poly"),
@@ -3541,35 +3435,10 @@ pls.single.cv <- function(Xdata,
   backend <- match.arg(backend)
   inner.method <- match.arg(inner.method)
   scaling <- match.arg(scaling)
-  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd", "exact"))
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
   kernel <- match.arg(kernel)
-  if (!identical(kernel, "linear") && !identical(backend, "r")) {
-    stop("Nonlinear kernel CV currently requires backend='r'.", call. = FALSE)
-  }
-  if (identical(backend, "r")) {
-    return(.pls_single_cv_r(
-      Xdata = Xdata,
-      Ydata = Ydata,
-      constrain = constrain,
-      ncomp = ncomp,
-      kfold = kfold,
-      scaling = scaling,
-      method = method,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      seed = seed,
-      inner.method = inner.method,
-      north = north,
-      kernel = kernel,
-      gamma = gamma,
-      degree = degree,
-      coef0 = coef0,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed
-    ))
+  if (!identical(kernel, "linear")) {
+    stop("Nonlinear kernel CV is not available after removal of the pure-R PLS backend; use kernel='linear'.", call. = FALSE)
   }
   .pls_cv_compiled(
     Xdata = Xdata,
@@ -3584,6 +3453,11 @@ pls.single.cv <- function(Xdata,
     rsvd_oversample = rsvd_oversample,
     rsvd_power = rsvd_power,
     svds_tol = svds_tol,
+    irlba_work = irlba_work,
+    irlba_maxit = irlba_maxit,
+    irlba_tol = irlba_tol,
+    irlba_eps = irlba_eps,
+    irlba_svtol = irlba_svtol,
     seed = seed,
     xprod = xprod,
     north = north,
@@ -3694,8 +3568,8 @@ kernelpls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold 
 kernel_pls_cv_cuda <- kernelpls_cv_cuda
 
 .svd_methods_internal <- c("exact", "irlba", "cpu_rsvd", "cuda_rsvd")
-.svd_methods_public <- c("exact", "irlba", "cpu_rsvd")
-.svd_methods_cpu <- c("exact", "irlba", "cpu_rsvd")
+.svd_methods_public <- c("irlba", "cpu_rsvd")
+.svd_methods_cpu <- c("irlba", "cpu_rsvd")
 
 .svd_method_id <- function(method) {
   method <- .normalize_svd_method(method)
@@ -3743,7 +3617,7 @@ svd_methods <- function() {
 #' @keywords internal
 svd_run <- function(A,
                     k,
-                    method = c("cpu_rsvd", "irlba", "exact", "cuda_rsvd"),
+                    method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -3798,7 +3672,7 @@ svd_run <- function(A,
 #' @keywords internal
 svd_benchmark <- function(A,
                           k,
-                          methods = c("irlba", "cpu_rsvd", "exact"),
+                          methods = c("irlba", "cpu_rsvd"),
                           reps = 3L,
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
@@ -3860,9 +3734,7 @@ svd_benchmark <- function(A,
 
 #' Singular value decomposition through fastPLS backends
 #'
-#' User-facing SVD wrapper. `method = "exact"` delegates to base R for the
-#' ordinary full SVD case and to the fastPLS dispatcher for truncated requests.
-#' Iterative backends use the bundled IRLBA-style and randomized SVD
+#' User-facing SVD wrapper for the bundled IRLBA-style and randomized SVD
 #' implementations; CUDA is available when fastPLS was built with CUDA support.
 #'
 #' @param x Numeric matrix.
@@ -3870,7 +3742,7 @@ svd_benchmark <- function(A,
 #' @param nv Number of right singular vectors to return.
 #' @param ncomp Optional truncated rank. When supplied, it overrides `nu`/`nv`
 #'   for the decomposition rank.
-#' @param method One of `"exact"`, `"irlba"`, `"cpu_rsvd"`, or `"cuda_rsvd"`.
+#' @param method One of `"irlba"`, `"cpu_rsvd"`, or `"cuda_rsvd"`.
 #' @param rsvd_oversample Randomized SVD oversampling.
 #' @param rsvd_power Randomized SVD power iterations.
 #' @param svds_tol Iterative backend tolerance.
@@ -3882,7 +3754,7 @@ fastsvd <- function(x,
                     nu = NULL,
                     nv = NULL,
                     ncomp = NULL,
-                    method = c("exact", "irlba", "cpu_rsvd", "cuda_rsvd"),
+                    method = c("irlba", "cpu_rsvd", "cuda_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -3892,7 +3764,7 @@ fastsvd <- function(x,
   p <- ncol(x)
   if (is.null(nu)) nu <- min(n, p)
   if (is.null(nv)) nv <- min(n, p)
-  method <- match.arg(.normalize_svd_method(method), c("exact", "irlba", "cpu_rsvd", "cuda_rsvd"))
+  method <- match.arg(.normalize_svd_method(method), c("irlba", "cpu_rsvd", "cuda_rsvd"))
   if (identical(method, "cuda_rsvd") && !has_cuda()) {
     stop("method='cuda_rsvd' requires a CUDA-enabled fastPLS build.", call. = FALSE)
   }
@@ -3902,16 +3774,6 @@ fastsvd <- function(x,
     k <- as.integer(ncomp)[1L]
   }
   k <- max(1L, min(k, n, p))
-
-  if (identical(method, "exact") && k >= min(n, p)) {
-    t_elapsed <- system.time({
-      out <- base::svd(x, nu = as.integer(nu), nv = as.integer(nv))
-    })["elapsed"]
-    out$method <- "exact"
-    out$elapsed <- as.numeric(t_elapsed)
-    out$ncomp <- min(n, p)
-    return(out)
-  }
 
   out <- svd_run(
     A = x,
@@ -3954,7 +3816,7 @@ pca <- function(x,
                 ncomp = 2L,
                 center = TRUE,
                 scale. = FALSE,
-                svd.method = c("cpu_rsvd", "irlba", "exact", "cuda_rsvd"),
+                svd.method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
                 ...) {
   x <- as.matrix(x)
   ncomp <- max(1L, min(as.integer(ncomp)[1L], nrow(x), ncol(x)))
@@ -4139,7 +4001,7 @@ plot.fastPLS <- function(x,
 
 .truncated_svd_r <- function(A,
                              k,
-                             svd.method = c("irlba", "cpu_rsvd", "exact"),
+                             svd.method = c("irlba", "cpu_rsvd"),
                              rsvd_oversample = 10L,
                              rsvd_power = 1L,
                              svds_tol = 0,
@@ -4150,7 +4012,7 @@ plot.fastPLS <- function(x,
                              irlba_svtol = 1e-5,
                              seed = 1L) {
   svd.method <- .normalize_svd_method(svd.method)
-  svd.method <- match.arg(svd.method)
+  svd.method <- match.arg(svd.method, c("irlba", "cpu_rsvd"))
   A <- as.matrix(A)
   k <- as.integer(k)
   if (k < 1L) stop("k must be >= 1")
@@ -4923,167 +4785,19 @@ plot.fastPLS <- function(x,
   out
 }
 
-#' Pure-R PLS reference implementation
+#' Removed pure-R PLS reference implementation
 #'
-#' Pure-R implementation of `plssvd` and the fastPLS `simpls` core with CPU-only SVD choices.
+#' The pure-R PLS implementation was removed from the public package. Use
+#' `pls(..., backend = "cpp")` for CPU IRLBA/rSVD or `backend = "cuda"` for
+#' CUDA rSVD.
 #'
 #' @inheritParams pls
 #' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
 #' @param svd.method One of `"irlba"` or `"cpu_rsvd"`.
 #' @return A `fastPLS` object.
 #' @keywords internal
-pls_r = function (Xtrain,
-	                  Ytrain,
-	                  Xtest = NULL,
-                  Ytest = NULL,
-                  ncomp=2,
-                  scaling = c("centering", "autoscaling","none"),
-                  method = c("simpls", "plssvd"),
-                  svd.method = c("irlba", "cpu_rsvd", "exact"),
-                  rsvd_oversample = 10L,
-                  rsvd_power = 1L,
-                  svds_tol = 0,
-                  irlba_work = 0L,
-                  irlba_maxit = 1000L,
-                  irlba_tol = 1e-5,
-                  irlba_eps = 1e-9,
-                  irlba_svtol = 1e-5,
-                  seed = 1L,
-                  fast_block = 1L,
-                  gaussian_y = FALSE,
-                  gaussian_y_dim = NULL,
-	                  gaussian_y_seed = seed,
-	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
-	                  lda_ridge = 1e-8,
-	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
-	                  fit = FALSE,
-	  proj = FALSE,
-  perm.test = FALSE,
-  times = 100) {
-  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-	  requested_method <- match.arg(method, c("simpls", "plssvd"))
-	  classifier <- .normalize_classifier(classifier)
-	  regression_head <- .normalize_regression_head(regression_head)
-  meth <- .normalize_pls_method(requested_method)
-  svdmeth <- .normalize_svd_method(svd.method)
-  svdmeth <- match.arg(svdmeth, c("irlba", "cpu_rsvd", "exact"))
-  Xtrain <- as.matrix(Xtrain)
-  Ytrain_original <- Ytrain
-  yprep <- .prepare_gaussian_y(
-    Ytrain,
-    Xtrain,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
-    gaussian_y_seed = gaussian_y_seed,
-    backend = "cpu"
-  )
-  Ytrain <- yprep$Ytrain
-  classification <- yprep$classification
-  lev <- yprep$lev
-
-  ncomp <- as.integer(ncomp)
-  use_xprod_default <- identical(svdmeth, "cpu_rsvd") &&
-    meth %in% c(1L, 3L) &&
-    .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
-  if (meth == 1L) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
-    ncomp <- cap$ncomp
-    if (use_xprod_default) {
-      model <- .pls_model1_r_xprod(
-        Xtrain, Ytrain, ncomp, scal, fit,
-        rsvd_oversample, rsvd_power, seed
-      )
-    } else {
-      model <- .pls_model1_r(
-        Xtrain, Ytrain, ncomp, scal, fit,
-        svdmeth, rsvd_oversample, rsvd_power, svds_tol,
-        irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-        seed
-      )
-    }
-  } else if (meth == 2L) {
-    model <- .pls_model2_r(
-      Xtrain, Ytrain, ncomp, scal, fit,
-      svdmeth, rsvd_oversample, rsvd_power, svds_tol,
-      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-      seed
-    )
-  } else {
-    if (use_xprod_default) {
-      model <- .pls_model2_fast_r_xprod(
-        Xtrain, Ytrain, ncomp, scal, fit,
-        rsvd_power = rsvd_power,
-        seed = seed,
-        fast_block = fast_block
-      )
-    } else {
-      model <- .pls_model2_fast_r(
-        Xtrain, Ytrain, ncomp, scal, fit,
-        svdmeth, rsvd_oversample, rsvd_power, svds_tol,
-        irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-        seed,
-        fast_block = fast_block
-      )
-    }
-  }
-  model$xprod_default <- use_xprod_default
-  model$pls_method <- if (meth == 1L) "plssvd" else "simpls"
-  model$predict_latent_ok <- TRUE
-  if (isTRUE(fit)) model <- .attach_train_scores(model, Xtrain)
-  model <- .enable_flash_prediction(model, "cpu")
-  model <- .attach_gaussian_y(model, yprep$gaussian)
-  model$classification <- classification
-  model$lev <- lev
-  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
-  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
-
-  if (!is.null(Xtest)) {
-    Xtest <- as.matrix(Xtest)
-    res <- predict.fastPLS(model, Xtest, Ytest = Ytest, proj = proj)
-    model <- c(model, res)
-    if (perm.test) {
-      v <- matrix(NA_real_, nrow = times, ncol = length(ncomp))
-      for (i in seq_len(times)) {
-        ss <- sample(seq_len(nrow(Xtrain)))
-        Xperm <- Xtrain[ss, , drop = FALSE]
-        if (meth == 1L) {
-          mperm <- .pls_model1_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, svds_tol,
-                                 irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-                                 seed + i)
-        } else if (meth == 2L) {
-          mperm <- .pls_model2_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                 rsvd_oversample, rsvd_power, svds_tol,
-                                 irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-                                 seed + i)
-        } else {
-          mperm <- .pls_model2_fast_r(Xperm, Ytrain, ncomp, scal, FALSE, svdmeth,
-                                      rsvd_oversample, rsvd_power, svds_tol,
-                                      irlba_work, irlba_maxit, irlba_tol, irlba_eps, irlba_svtol,
-                                      seed + i, fast_block = fast_block)
-        }
-        mperm <- .attach_gaussian_y(mperm, yprep$gaussian)
-        mperm$classification <- classification
-        mperm$lev <- lev
-        rperm <- predict.fastPLS(mperm, Xtest, Ytest = Ytest, proj = FALSE)
-        v[i, ] <- rperm$Q2Y
-      }
-      model$pval <- vapply(seq_along(ncomp), function(j) sum(v[, j] > model$Q2Y[j]) / times, numeric(1))
-    }
-  }
-
-  if (classification && fit && !is.null(model$Yfit)) {
-    Yfitlab <- as.data.frame(matrix(nrow = nrow(Xtrain), ncol = length(ncomp)))
-    colnames(Yfitlab) <- paste("ncomp=", ncomp, sep = "")
-    for (i in seq_along(ncomp)) {
-      tt <- apply(model$Yfit[, , i], 1, which.max)
-      Yfitlab[, i] <- factor(lev[tt], levels = lev)
-    }
-    model$Yfit <- Yfitlab
-  }
-
-  class(model) <- "fastPLS"
-  model
+pls_r <- function(...) {
+  stop("The pure-R PLS backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
 
 
@@ -5091,8 +4805,8 @@ pls_r = function (Xtrain,
 #' Partial Least Squares with selectable model family and backend
 #'
 #' `pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
-#' and kernel PLS through the selected CPU, pure-R, or CUDA backend while keeping
-#' low-level implementation functions internal.
+#' and kernel PLS through the selected compiled CPU or CUDA backend while
+#' keeping low-level implementation functions internal.
 #'
 #' @param Xtrain Numeric training predictor matrix.
 #' @param Ytrain Training response (numeric or factor).
@@ -5102,7 +4816,7 @@ pls_r = function (Xtrain,
 #' @param scaling One of `"centering"`, `"autoscaling"`, `"none"`.
 #' @param method One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
 #'   `simpls` uses the fastPLS accelerated SIMPLS core.
-#' @param svd.method One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
+#' @param svd.method One of `"irlba"` or `"cpu_rsvd"`.
 #'   The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 #'   from `pls()`; use `backend = "cuda"` for GPU-native fits.
 #' @param rsvd_oversample RSVD oversampling.
@@ -5153,8 +4867,8 @@ pls_r = function (Xtrain,
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param perm.test Run permutation test.
 #' @param times Number of permutations.
-#' @param backend Implementation backend: `"cpp"` for compiled CPU, `"r"` for
-#'   the matched pure-R reference path, or `"cuda"` for GPU-native fitting.
+#' @param backend Implementation backend: `"cpp"` for compiled CPU or `"cuda"`
+#'   for GPU-native fitting.
 #' @param inner.method Inner PLS core used by `method = "opls"` or
 #'   `method = "kernelpls"`.
 #' @param north Number of orthogonal components removed by OPLS.
@@ -5178,7 +4892,7 @@ pls =  function (Xtrain,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"),
                  method = c("simpls", "plssvd", "opls", "kernelpls"),
-                 svd.method = c("irlba", "cpu_rsvd", "exact"),
+                 svd.method = c("irlba", "cpu_rsvd"),
                  rsvd_oversample = 10L,
                  rsvd_power = 1L,
                  svds_tol = 0,
@@ -5204,7 +4918,7 @@ pls =  function (Xtrain,
                  proj = FALSE,
                  perm.test = FALSE,
                  times = 100,
-                 backend = c("cpp", "r", "cuda"),
+                 backend = c("cpp", "cuda"),
                  inner.method = c("simpls", "plssvd"),
                  north = 1L,
                  kernel = c("linear", "rbf", "poly"),
@@ -5226,7 +4940,7 @@ pls =  function (Xtrain,
 	  regression_head <- .normalize_regression_head(regression_head)
 
   if (identical(requested_method, "opls")) {
-    fit_fun <- switch(backend, r = opls_r, cpp = opls_cpp, cuda = opls_cuda)
+    fit_fun <- switch(backend, cpp = opls_cpp, cuda = opls_cuda)
     args <- list(
       Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
       ncomp = ncomp, north = north, scaling = scaling, method = inner.method,
@@ -5257,7 +4971,7 @@ pls =  function (Xtrain,
   }
 
   if (identical(requested_method, "kernelpls")) {
-    fit_fun <- switch(backend, r = kernel_pls_r, cpp = kernel_pls_cpp, cuda = kernel_pls_cuda)
+    fit_fun <- switch(backend, cpp = kernel_pls_cpp, cuda = kernel_pls_cuda)
     args <- list(
       Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
       ncomp = ncomp, scaling = scaling, kernel = kernel, gamma = gamma,
@@ -5286,39 +5000,6 @@ pls =  function (Xtrain,
       ))
     }
     return(do.call(fit_fun, args))
-  }
-
-  if (identical(backend, "r")) {
-    return(pls_r(
-      Xtrain = Xtrain,
-      Ytrain = Ytrain,
-      Xtest = Xtest,
-      Ytest = Ytest,
-      ncomp = ncomp,
-      scaling = scaling,
-      method = requested_method,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol,
-      seed = seed,
-      fast_block = fast_block,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed,
-	      classifier = classifier,
-	      lda_ridge = lda_ridge,
-	      regression_head = regression_head,
-	      fit = fit,
-      proj = proj,
-      perm.test = perm.test,
-      times = times
-    ))
   }
 
   if (identical(backend, "cuda")) {
@@ -5684,16 +5365,54 @@ pls =  function (Xtrain,
   model
 }
 
+.cv_best_index <- function(metrics) {
+  values <- as.numeric(metrics$metric_value)
+  metric_names <- tolower(as.character(metrics$metric_name))
+  finite <- is.finite(values)
+  if (!any(finite)) {
+    return(1L)
+  }
+  loss_metric <- any(metric_names[finite] %in% c("rmsd", "rmse", "mae", "mse"))
+  idx <- if (loss_metric) {
+    which.min(ifelse(finite, values, Inf))
+  } else {
+    which.max(ifelse(finite, values, -Inf))
+  }
+  as.integer(idx[1L])
+}
+
+.cv_numeric_metric_values <- function(metrics) {
+  values <- as.numeric(metrics$metric_value)
+  names(values) <- as.character(metrics$metric_name)
+  values
+}
+
+.cv_extract_prediction_at <- function(cv_res, idx) {
+  if (!is.null(cv_res$class_pred)) {
+    return(cv_res$pred[[idx]])
+  }
+  if (!is.null(cv_res$Ypred)) {
+    return(cv_res$Ypred[, , idx, drop = FALSE])
+  }
+  cv_res$pred[[idx]]
+}
+
+.cv_metric_name_at <- function(metrics, idx) {
+  as.character(metrics$metric_name[[idx]])
+}
+
 #' Cross-validation component optimization for PLS
 #'
-#' Performs k-fold CV over candidate component counts for `simpls` or `plssvd`.
+#' Performs k-fold CV over candidate component counts using the compiled
+#' C++/CUDA CV core shared with [pls.single.cv()].
 #'
 #' @inheritParams pls
 #' @param Xdata Predictor matrix.
 #' @param Ydata Response (numeric or factor).
 #' @param constrain Optional grouping vector for constrained splitting.
 #' @param kfold Number of folds.
-#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
+#' @param method One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
+#' @param backend Implementation backend: `"cpp"` or `"cuda"`.
 #' @param fast_block Refresh block size for the fastPLS `simpls` core; use `1L` for the
 #'   most accuracy-stable per-component refresh.
 #' @param fast_center_t Deprecated and ignored. `simpls` now permanently uses
@@ -5706,15 +5425,22 @@ pls =  function (Xtrain,
 #'   the former incdefl profile.
 #' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
-#' @return List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
+#' @param return_scores Store score predictions for classification when `TRUE`.
+#' @param xprod Use the matrix-free cross-product route where available.
+#'   `NULL` applies fastPLS defaults.
+#' @param ... Additional backend tuning arguments.
+#' @return List with `optim_comp`, decoded `pred`, `metrics`, legacy
+#'   `Q2Y`/`R2Y` metric vectors, `fold`, backend metadata, and `Ypred` when
+#'   score predictions are stored.
 #' @export
 optim.pls.cv =  function (Xdata,
                           Ydata,
                           ncomp=2,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
-                          method = c("simpls", "plssvd"),
-                          svd.method = c("irlba", "cpu_rsvd", "exact"),
+                          method = c("simpls", "plssvd", "opls", "kernelpls"),
+                          backend = c("cpp", "cuda"),
+                          svd.method = c("irlba", "cpu_rsvd"),
                           rsvd_oversample = 10L,
                           rsvd_power = 1L,
                           svds_tol = 0,
@@ -5730,99 +5456,55 @@ optim.pls.cv =  function (Xdata,
                           fast_incremental = TRUE,
                           fast_inc_iters = 2L,
                           fast_defl_cache = TRUE,
-                          kfold=10)
+                          kfold=10,
+                          north = 1L,
+                          return_scores = FALSE,
+                          xprod = NULL,
+                          ...)
 {
-  scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
-  meth = .normalize_pls_method(method)
+  if (sum(is.na(Xdata)) > 0) {
+    stop("Missing values are present")
+  }
+  method <- match.arg(method)
+  backend <- match.arg(backend)
+  scaling <- match.arg(scaling)
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  Xdata <- as.matrix(Xdata)
+  if (is.null(constrain)) constrain <- seq_len(nrow(Xdata))
 
-  .guard_removed_hybrid_cuda(svd.method, "optim.pls.cv()")
-  svd.method <- .normalize_svd_method(svd.method)
-  svd.method <- match.arg(svd.method)
-  svdmeth <- .svd_method_id(svd.method)
-  if(is.null(constrain))
-    constrain=1:nrow(Xdata)
-  Xdata=as.matrix(Xdata)
-  ncomp <- as.integer(ncomp)
-
-  if (is.factor(Ydata)){
-    classification=TRUE # classification
-    lev = levels(Ydata)
-    Ydata = transformy(Ydata)
-  } else{
-    classification=FALSE   # regression
-  }
-  if (meth == 1L) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), ncol(Ydata), warn = TRUE)
-    ncomp <- cap$ncomp
-  }
-  if (meth == 3L) {
-    profile <- .resolve_simpls_fast_profile(
-      fast_block = fast_block,
-      fast_center_t = fast_center_t,
-      fast_reorth_v = fast_reorth_v,
-      fast_incremental = fast_incremental,
-      fast_inc_iters = fast_inc_iters,
-      fast_defl_cache = fast_defl_cache,
-      missing_fast_block = missing(fast_block),
-      missing_fast_center_t = missing(fast_center_t),
-      missing_fast_reorth_v = missing(fast_reorth_v),
-      missing_fast_incremental = missing(fast_incremental),
-      missing_fast_inc_iters = missing(fast_inc_iters),
-      missing_fast_defl_cache = missing(fast_defl_cache),
-      context = "simpls_fast"
-    )
-    res <- .with_irlba_options(
-      .with_fastpls_fast_options(
-        optim_pls_cv(
-          Xdata=Xdata,
-          Ydata=Ydata,
-          constrain=constrain,
-          ncomp=ncomp,
-          scaling=scal,
-          kfold=kfold,
-          method=meth,
-          svd_method=svdmeth,
-          rsvd_oversample=rsvd_oversample,
-          rsvd_power=rsvd_power,
-          svds_tol=svds_tol,
-          seed=seed
-        ),
-        fast_block = profile$fast_block,
-        fast_center_t = profile$fast_center_t,
-        fast_reorth_v = profile$fast_reorth_v,
-        fast_incremental = profile$fast_incremental,
-        fast_inc_iters = profile$fast_inc_iters,
-        fast_defl_cache = profile$fast_defl_cache
-      ),
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol
-    )
-  } else {
-    res <- .with_irlba_options(
-      optim_pls_cv(
-        Xdata=Xdata,
-        Ydata=Ydata,
-        constrain=constrain,
-        ncomp=ncomp,
-        scaling=scal,
-        kfold=kfold,
-        method=meth,
-        svd_method=svdmeth,
-        rsvd_oversample=rsvd_oversample,
-        rsvd_power=rsvd_power,
-        svds_tol=svds_tol,
-        seed=seed
-      ),
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol
-    )
-  }
+  res <- .pls_cv_compiled(
+    Xdata = Xdata,
+    Ydata = Ydata,
+    constrain = constrain,
+    ncomp = as.integer(ncomp),
+    kfold = as.integer(kfold),
+    scaling = scaling,
+    method = method,
+    backend = backend,
+    svd.method = svd.method,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    svds_tol = svds_tol,
+    irlba_work = irlba_work,
+    irlba_maxit = irlba_maxit,
+    irlba_tol = irlba_tol,
+    irlba_eps = irlba_eps,
+    irlba_svtol = irlba_svtol,
+    seed = seed,
+    xprod = xprod,
+    north = north,
+    return_scores = return_scores,
+    ...
+  )
+  best_idx <- .cv_best_index(res$metrics)
+  values <- as.numeric(res$metrics$metric_value)
+  res$optim_comp <- as.integer(res$ncomp[[best_idx]])
+  res$best_index <- best_idx
+  res$best_metric_name <- .cv_metric_name_at(res$metrics, best_idx)
+  res$best_metric_value <- values[[best_idx]]
+  res$Q2Y <- values
+  res$R2Y <- values
+  res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res
 }
 
@@ -5834,6 +5516,8 @@ optim.pls.cv =  function (Xdata,
 #' Nested cross-validation for PLS
 #'
 #' Runs outer/inner CV loops for performance estimation and component selection.
+#' Inner component optimization uses the same compiled C++/CUDA CV core as
+#' [pls.single.cv()] and [optim.pls.cv()].
 #'
 #' @inheritParams pls
 #' @param Xdata Predictor matrix.
@@ -5842,7 +5526,8 @@ optim.pls.cv =  function (Xdata,
 #' @param runn Number of repeated runs.
 #' @param kfold_inner Inner-fold count.
 #' @param kfold_outer Outer-fold count.
-#' @param method One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.
+#' @param method One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
+#' @param backend Implementation backend: `"cpp"` or `"cuda"`.
 #' @param fast_block Refresh block size for the fastPLS `simpls` core; use `1L` for the
 #'   most accuracy-stable per-component refresh.
 #' @param fast_center_t Deprecated and ignored. `simpls` now permanently uses
@@ -5855,6 +5540,9 @@ optim.pls.cv =  function (Xdata,
 #'   the former incdefl profile.
 #' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
+#' @param xprod Use the matrix-free cross-product route where available for
+#'   inner component optimization. `NULL` applies fastPLS defaults.
+#' @param ... Additional backend tuning arguments.
 #' @return List of nested CV outputs and summaries.
 #' @export
 pls.double.cv = function(Xdata,
@@ -5862,8 +5550,10 @@ pls.double.cv = function(Xdata,
                          ncomp=2,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"),
-                         method = c("simpls", "plssvd"),
-                         svd.method = c("irlba", "cpu_rsvd", "exact"),
+                         method = c("simpls", "plssvd", "opls", "kernelpls"),
+                         backend = c("cpp", "cuda"),
+                         inner.method = c("simpls", "plssvd"),
+                         svd.method = c("irlba", "cpu_rsvd"),
                          rsvd_oversample = 10L,
                          rsvd_power = 1L,
                          svds_tol = 0,
@@ -5883,249 +5573,298 @@ pls.double.cv = function(Xdata,
                          times=100,
                          runn=10,
                          kfold_inner=10,
-                         kfold_outer=10){
+                         kfold_outer=10,
+                         north = 1L,
+                         kernel = c("linear", "rbf", "poly"),
+                         gamma = NULL,
+                         degree = 3L,
+                         coef0 = 1,
+                         classifier = c("argmax", "lda_cpp", "lda_cuda"),
+                         lda_ridge = 1e-8,
+                         regression_head = c("standard", "linear_cpp", "linear_cuda"),
+                         xprod = NULL,
+                         ...){
 
   if(sum(is.na(Xdata))>0) {
     stop("Missing values are present")
   }
-  scal=pmatch(scaling,c("centering","autoscaling","none"))[1]
-  meth = .normalize_pls_method(method)
+  method <- match.arg(method)
+  backend <- match.arg(backend)
+  inner.method <- match.arg(inner.method)
+  scaling <- match.arg(scaling)
+  svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
+  kernel <- match.arg(kernel)
+  classifier <- .normalize_classifier(classifier)
+  regression_head <- .normalize_regression_head(regression_head)
+  if (!identical(kernel, "linear")) {
+    stop("Nonlinear kernel double CV is not available after removal of the pure-R PLS backend; use kernel='linear'.", call. = FALSE)
+  }
 
-  .guard_removed_hybrid_cuda(svd.method, "pls.double.cv()")
-  svd.method <- .normalize_svd_method(svd.method)
-  svd.method <- match.arg(svd.method)
-  svdmeth <- .svd_method_id(svd.method)
-
-  if (is.factor(Ydata)){
-    classification=TRUE # classification
-    lev = levels(Ydata)
-    Ydata_original = Ydata
-    Ydata = transformy(Ydata)
-    conf_tot=matrix(0,ncol=length(lev),nrow=length(lev))
-    colnames(conf_tot)=lev
-    rownames(conf_tot)=lev
-  } else{
-    classification=FALSE   # regression
-    Ydata = as.matrix(Ydata)
+  Xdata <- as.matrix(Xdata)
+  constrain <- as.integer(as.factor(constrain))
+  classification <- is.factor(Ydata)
+  Ydata_original <- Ydata
+  if (classification) {
+    lev <- levels(Ydata)
+    conf_tot <- matrix(0, ncol = length(lev), nrow = length(lev), dimnames = list(lev, lev))
+  } else {
+    lev <- NULL
+    Ydata <- as.matrix(Ydata)
   }
   ncomp <- as.integer(ncomp)
-  if (meth == 1L) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), ncol(Ydata), warn = TRUE)
-    ncomp <- cap$ncomp
+
+  res <- list(results = vector("list", as.integer(runn)))
+  Q2Y <- rep(NA_real_, as.integer(runn))
+  R2Y <- rep(NA_real_, as.integer(runn))
+  metric_name <- rep(NA_character_, as.integer(runn))
+  bb <- integer(0)
+
+  if (classification) {
+    vote_tot <- matrix(0, nrow = nrow(Xdata), ncol = length(lev), dimnames = list(NULL, lev))
+  } else {
+    Ypred_tot <- matrix(0, nrow = nrow(Xdata), ncol = ncol(Ydata))
   }
 
-  Xdata=as.matrix(Xdata)
-  constrain=as.numeric(as.factor(constrain))
+  for (j in seq_len(as.integer(runn))) {
+    fold <- .make_single_cv_folds(
+      Ydata = if (classification) Ydata_original else Ydata,
+      constrain = constrain,
+      kfold = as.integer(kfold_outer),
+      seed = as.integer(seed) + j - 1L
+    )
+    best_comp <- integer(as.integer(kfold_outer))
+    inner_results <- vector("list", as.integer(kfold_outer))
+    if (classification) {
+      run_pred_chr <- rep(NA_character_, nrow(Xdata))
+    } else {
+      run_pred <- matrix(NA_real_, nrow = nrow(Xdata), ncol = ncol(Ydata))
+    }
 
-  res=list()
-  Q2Y=NULL
-  R2Y=NULL
-  bcomp=NULL
+    for (f in seq_len(as.integer(kfold_outer))) {
+      test_idx <- which(fold == (f - 1L))
+      train_idx <- which(fold != (f - 1L))
+      if (!length(test_idx) || !length(train_idx)) {
+        next
+      }
+      Ytrain <- if (classification) Ydata_original[train_idx] else Ydata[train_idx, , drop = FALSE]
+      Ytest <- if (classification) Ydata_original[test_idx] else Ydata[test_idx, , drop = FALSE]
+      if (classification && length(unique(Ytrain)) < 2L) {
+        fallback <- names(which.max(table(Ytrain)))
+        run_pred_chr[test_idx] <- fallback
+        best_comp[f] <- min(ncomp)
+        next
+      }
 
-  bb=NULL
-  Ypred_tot=matrix(0,nrow=nrow(Xdata),ncol=ncol(Ydata))
-  for(j in 1:runn){
+      inner <- optim.pls.cv(
+        Xdata = Xdata[train_idx, , drop = FALSE],
+        Ydata = Ytrain,
+        ncomp = ncomp,
+        constrain = constrain[train_idx],
+        scaling = scaling,
+        method = method,
+        backend = backend,
+        svd.method = svd.method,
+        rsvd_oversample = rsvd_oversample,
+        rsvd_power = rsvd_power,
+        svds_tol = svds_tol,
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol,
+        seed = as.integer(seed) + 1000L * j + f,
+        kfold = kfold_inner,
+        north = north,
+        return_scores = FALSE,
+        xprod = xprod,
+        ...
+      )
+      best_comp[f] <- as.integer(inner$optim_comp[[1L]])
+      inner_results[[f]] <- inner
 
-
-    if (meth == 3L) {
-      profile <- .resolve_simpls_fast_profile(
+      fit <- pls(
+        Xtrain = Xdata[train_idx, , drop = FALSE],
+        Ytrain = Ytrain,
+        Xtest = Xdata[test_idx, , drop = FALSE],
+        Ytest = Ytest,
+        ncomp = best_comp[f],
+        scaling = scaling,
+        method = method,
+        svd.method = svd.method,
+        rsvd_oversample = rsvd_oversample,
+        rsvd_power = rsvd_power,
+        svds_tol = svds_tol,
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol,
+        seed = as.integer(seed) + 2000L * j + f,
         fast_block = fast_block,
         fast_center_t = fast_center_t,
         fast_reorth_v = fast_reorth_v,
         fast_incremental = fast_incremental,
         fast_inc_iters = fast_inc_iters,
         fast_defl_cache = fast_defl_cache,
-        missing_fast_block = missing(fast_block),
-        missing_fast_center_t = missing(fast_center_t),
-        missing_fast_reorth_v = missing(fast_reorth_v),
-        missing_fast_incremental = missing(fast_incremental),
-        missing_fast_inc_iters = missing(fast_inc_iters),
-        missing_fast_defl_cache = missing(fast_defl_cache),
-        context = "simpls_fast"
+        fit = FALSE,
+        proj = FALSE,
+        backend = backend,
+        inner.method = inner.method,
+        north = north,
+        kernel = kernel,
+        gamma = gamma,
+        degree = degree,
+        coef0 = coef0,
+        classifier = classifier,
+        lda_ridge = lda_ridge,
+        regression_head = regression_head
       )
-      o <- .with_irlba_options(
-        .with_fastpls_fast_options(
-          double_pls_cv(
-            Xdata,
-            Ydata,
-            ncomp,
-            constrain,
-            scal,
-            kfold_inner,
-            kfold_outer,
-            meth,
-            svd_method=svdmeth,
-            rsvd_oversample=rsvd_oversample,
-            rsvd_power=rsvd_power,
-            svds_tol=svds_tol,
-            seed=seed
-          ),
-          fast_block = profile$fast_block,
-          fast_center_t = profile$fast_center_t,
-          fast_reorth_v = profile$fast_reorth_v,
-          fast_incremental = profile$fast_incremental,
-          fast_inc_iters = profile$fast_inc_iters,
-          fast_defl_cache = profile$fast_defl_cache
-        ),
-        irlba_work = irlba_work,
-        irlba_maxit = irlba_maxit,
-        irlba_tol = irlba_tol,
-        irlba_eps = irlba_eps,
-        irlba_svtol = irlba_svtol
-      )
-    } else {
-      o <- .with_irlba_options(
-        double_pls_cv(
-          Xdata,
-          Ydata,
-          ncomp,
-          constrain,
-          scal,
-          kfold_inner,
-          kfold_outer,
-          meth,
-          svd_method=svdmeth,
-          rsvd_oversample=rsvd_oversample,
-          rsvd_power=rsvd_power,
-          svds_tol=svds_tol,
-          seed=seed
-        ),
-        irlba_work = irlba_work,
-        irlba_maxit = irlba_maxit,
-        irlba_tol = irlba_tol,
-        irlba_eps = irlba_eps,
-        irlba_svtol = irlba_svtol
-      )
-    }
-    Ypred_tot=Ypred_tot+o$Ypred
-    if(classification){
-      t = apply(o$Ypred, 1, which.max)
-      Ypredlab = factor(lev[t], levels = lev)
 
-      o$Ypred=Ypredlab
-
-      o$conf=table(Ypredlab,Ydata_original)
-      conf_tot=conf_tot+o$conf
-      o$acc=(sum(diag(o$conf))*100)/length(Ydata)
-    }
-    #  o$R2X=diag((t(o$T)%*%(o$T))%*%(t(o$P)%*%(o$P)))/sum(scale(Xdata,TRUE,TRUE)^2)
-    Q2Y[j]=o$Q2Y
-    R2Y[j]=mean(o$R2Y)
-    res$results[[j]]=o
-    bb=c(bb,o$optim_comp)
-  }
-  Ypred_tot=Ypred_tot/runn
-
-  if(classification){
-    conf_tot=conf_tot/runn
-    acc_tot=round(sum(diag(conf_tot)),digits=1)
-    acc_tot_perc=100*acc_tot/nrow(Xdata)
-    acc_tot_txt=paste(acc_tot," (",acc_tot_perc,"%)",sep="")
-
-
-    conf_tot_perc=t(t(conf_tot)/colSums(conf_tot))*100
-    conf_tot=round(conf_tot,digits=1)
-    conf_tot_perc=round(conf_tot_perc,digits=1)
-
-    conf_txt=matrix(paste(conf_tot," (",conf_tot_perc,"%)",sep=""),ncol=length(lev))
-    colnames(conf_txt)=lev
-    rownames(conf_txt)=lev
-    res$acc_tot=acc_tot_txt
-    res$conf=conf_txt
-
-    t = apply(Ypred_tot, 1, which.max)
-    Ypredlab = factor(lev[t], levels = lev)
-
-    res$Ypred=Ypredlab
-  }
-
-    res$Q2Y=Q2Y
-    res$R2Y=R2Y
-    res$medianR2Y=median(R2Y)
-    res$CI95R2Y=as.numeric(quantile(R2Y,c(0.025,0.975)))
-    res$medianQ2Y=median(Q2Y)
-    res$CI95Q2Y=as.numeric(quantile(Q2Y,c(0.025,0.975)))
-
-
-    res$bcomp=names(which.max(table(bb)))
-
-    if(perm.test){
-
-      v=NULL
-
-      for(i in 1:times){
-        ss=sample(1:nrow(Xdata))
-        w=NULL
-        for(ii in 1:runn)
-          if (meth == 3L) {
-            w[ii] <- .with_irlba_options(
-              .with_fastpls_fast_options(
-                double_pls_cv(
-                  Xdata[ss,],
-                  Ydata,
-                  ncomp,
-                  constrain,
-                  scal,
-                  kfold_inner,
-                  kfold_outer,
-                  meth,
-                  svd_method=svdmeth,
-                  rsvd_oversample=rsvd_oversample,
-                  rsvd_power=rsvd_power,
-                  svds_tol=svds_tol,
-                  seed=seed
-                ),
-                fast_block = fast_block,
-                fast_center_t = fast_center_t,
-                fast_reorth_v = fast_reorth_v,
-                fast_incremental = fast_incremental,
-                fast_inc_iters = fast_inc_iters,
-                fast_defl_cache = fast_defl_cache
-              ),
-              irlba_work = irlba_work,
-              irlba_maxit = irlba_maxit,
-              irlba_tol = irlba_tol,
-              irlba_eps = irlba_eps,
-              irlba_svtol = irlba_svtol
-            )$Q2Y
-          } else {
-            w[ii] <- .with_irlba_options(
-              double_pls_cv(
-                Xdata[ss,],
-                Ydata,
-                ncomp,
-                constrain,
-                scal,
-                kfold_inner,
-                kfold_outer,
-                meth,
-                svd_method=svdmeth,
-                rsvd_oversample=rsvd_oversample,
-                rsvd_power=rsvd_power,
-                svds_tol=svds_tol,
-                seed=seed
-              ),
-              irlba_work = irlba_work,
-              irlba_maxit = irlba_maxit,
-              irlba_tol = irlba_tol,
-              irlba_eps = irlba_eps,
-              irlba_svtol = irlba_svtol
-            )$Q2Y
-          }
-
-        v[i]=median(w)
+      if (classification) {
+        pred <- fit$Ypred
+        pred <- if (is.data.frame(pred)) pred[[1L]] else pred
+        run_pred_chr[test_idx] <- as.character(pred)
+      } else {
+        pred <- fit$Ypred
+        if (length(dim(pred)) == 3L) {
+          pred <- pred[, , 1L, drop = TRUE]
+        }
+        run_pred[test_idx, ] <- as.matrix(pred)
       }
-      pval=pnorm(median(Q2Y), mean=mean(v), sd=sqrt(((length(v)-1)/length(v))*var(v)), lower.tail=FALSE)
-      res$Q2Ysampled=v
-      res$p.value=pval
     }
-
 
     if (classification) {
-      conf_tot=matrix(0,ncol=length(lev),nrow=length(lev))
-      colnames(conf_tot)=lev
-      rownames(conf_tot)=lev
+      pred_factor <- factor(run_pred_chr, levels = lev)
+      tab <- table(pred_factor, factor(Ydata_original, levels = lev))
+      conf_tot <- conf_tot + tab
+      idx <- match(run_pred_chr, lev)
+      ok <- is.finite(idx)
+      if (any(ok)) {
+        vote_tot[cbind(which(ok), idx[ok])] <- vote_tot[cbind(which(ok), idx[ok])] + 1
+      }
+      Q2Y[j] <- mean(as.character(pred_factor) == as.character(Ydata_original), na.rm = TRUE)
+      R2Y[j] <- Q2Y[j]
+      metric_name[j] <- "accuracy"
+      res$results[[j]] <- list(
+        Ypred = pred_factor,
+        pred = pred_factor,
+        fold = fold + 1L,
+        optim_comp = best_comp,
+        inner = inner_results,
+        metric_name = "accuracy",
+        metric_value = Q2Y[j],
+        backend = backend,
+        method = method
+      )
+      bb <- c(bb, best_comp)
+    } else {
+      Ypred_tot <- Ypred_tot + run_pred
+      metric <- .cv_metric_from_matrix(Ydata, run_pred, Ytrain = Ydata)
+      Q2Y[j] <- metric$metric_value
+      R2Y[j] <- metric$metric_value
+      metric_name[j] <- metric$metric_name
+      res$results[[j]] <- list(
+        Ypred = run_pred,
+        pred = run_pred,
+        fold = fold + 1L,
+        optim_comp = best_comp,
+        inner = inner_results,
+        metric_name = metric$metric_name,
+        metric_value = metric$metric_value,
+        backend = backend,
+        method = method
+      )
+      bb <- c(bb, best_comp)
     }
+  }
+
+  if (classification) {
+    final_idx <- max.col(vote_tot, ties.method = "first")
+    final_idx[rowSums(vote_tot) <= 0] <- NA_integer_
+    Ypredlab <- factor(ifelse(is.na(final_idx), NA_character_, lev[final_idx]), levels = lev)
+    res$Ypred <- Ypredlab
+    conf_final <- table(Ypredlab, factor(Ydata_original, levels = lev))
+    acc_tot <- round(sum(diag(conf_final)), digits = 1)
+    acc_tot_perc <- 100 * acc_tot / nrow(Xdata)
+    res$acc_tot <- paste(acc_tot, " (", acc_tot_perc, "%)", sep = "")
+    conf_perc <- suppressWarnings(t(t(conf_final) / colSums(conf_final)) * 100)
+    conf_perc[!is.finite(conf_perc)] <- 0
+    conf_txt <- matrix(
+      paste(round(conf_final, digits = 1), " (", round(conf_perc, digits = 1), "%)", sep = ""),
+      ncol = length(lev),
+      dimnames = list(lev, lev)
+    )
+    res$conf <- conf_txt
+    res$vote_counts <- vote_tot
+  } else {
+    res$Ypred <- Ypred_tot / as.integer(runn)
+  }
+
+  res$Q2Y <- Q2Y
+  res$R2Y <- R2Y
+  res$metric_name <- metric_name
+  res$medianR2Y <- median(R2Y, na.rm = TRUE)
+  res$CI95R2Y <- as.numeric(quantile(R2Y, c(0.025, 0.975), na.rm = TRUE))
+  res$medianQ2Y <- median(Q2Y, na.rm = TRUE)
+  res$CI95Q2Y <- as.numeric(quantile(Q2Y, c(0.025, 0.975), na.rm = TRUE))
+  res$bcomp <- names(which.max(table(bb)))
+  res$backend <- backend
+  res$method <- method
+
+  if (perm.test) {
+    sampled <- numeric(as.integer(times))
+    for (i in seq_len(as.integer(times))) {
+      ss <- sample(seq_len(nrow(Xdata)))
+      sampled[i] <- median(pls.double.cv(
+        Xdata = Xdata[ss, , drop = FALSE],
+        Ydata = Ydata_original,
+        ncomp = ncomp,
+        constrain = constrain,
+        scaling = scaling,
+        method = method,
+        backend = backend,
+        inner.method = inner.method,
+        svd.method = svd.method,
+        rsvd_oversample = rsvd_oversample,
+        rsvd_power = rsvd_power,
+        svds_tol = svds_tol,
+        irlba_work = irlba_work,
+        irlba_maxit = irlba_maxit,
+        irlba_tol = irlba_tol,
+        irlba_eps = irlba_eps,
+        irlba_svtol = irlba_svtol,
+        seed = as.integer(seed) + 3000L + i,
+        fast_block = fast_block,
+        fast_center_t = fast_center_t,
+        fast_reorth_v = fast_reorth_v,
+        fast_incremental = fast_incremental,
+        fast_inc_iters = fast_inc_iters,
+        fast_defl_cache = fast_defl_cache,
+        perm.test = FALSE,
+        runn = runn,
+        kfold_inner = kfold_inner,
+        kfold_outer = kfold_outer,
+        north = north,
+        kernel = kernel,
+        gamma = gamma,
+        degree = degree,
+        coef0 = coef0,
+        classifier = classifier,
+        lda_ridge = lda_ridge,
+        regression_head = regression_head,
+        xprod = xprod,
+        ...
+      )$Q2Y, na.rm = TRUE)
+    }
+    loss_metric <- any(tolower(metric_name) %in% c("rmsd", "rmse", "mae", "mse"))
+    observed <- median(Q2Y, na.rm = TRUE)
+    res$Q2Ysampled <- sampled
+    res$p.value <- if (loss_metric) {
+      mean(sampled <= observed, na.rm = TRUE)
+    } else {
+      mean(sampled >= observed, na.rm = TRUE)
+    }
+  }
 
   res
 }

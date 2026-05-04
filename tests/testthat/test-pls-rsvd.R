@@ -126,47 +126,45 @@ test_that("xprod default threshold matches the benchmark rule", {
   expect_true(should_use_irlba(n = 10000, p = 5000, q = 1000, ncomp = 50))
 })
 
-test_that("CPU FlashSVD prediction is the default for compiled and R PLS", {
+test_that("CPU FlashSVD prediction is the default for compiled PLS", {
   set.seed(17)
   X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)
   Y <- matrix(rnorm(70 * 5), nrow = 70, ncol = 5)
   idx <- 1:12
 
-  for (impl in c("cpp", "r")) {
-    for (method in c("plssvd", "simpls")) {
-      ref <- pls(
-        X[-idx, ],
-        Y[-idx, ],
-        ncomp = 1:4,
-        method = method,
-        backend = impl,
-        svd.method = "cpu_rsvd",
-        rsvd_oversample = 8L,
-        rsvd_power = 1L,
-        seed = 17L
-      )
-      flash <- pls(
-        X[-idx, ],
-        Y[-idx, ],
-        ncomp = 1:4,
-        method = method,
-        backend = impl,
-        svd.method = "cpu_rsvd",
-        rsvd_oversample = 8L,
-        rsvd_power = 1L,
-        seed = 17L
-      )
-      pred_ref <- predict(ref, X[idx, , drop = FALSE], predict.backend = "cpu")
-      pred_flash <- predict(flash, X[idx, , drop = FALSE])
+  for (method in c("plssvd", "simpls")) {
+    ref <- pls(
+      X[-idx, ],
+      Y[-idx, ],
+      ncomp = 1:4,
+      method = method,
+      backend = "cpp",
+      svd.method = "cpu_rsvd",
+      rsvd_oversample = 8L,
+      rsvd_power = 1L,
+      seed = 17L
+    )
+    flash <- pls(
+      X[-idx, ],
+      Y[-idx, ],
+      ncomp = 1:4,
+      method = method,
+      backend = "cpp",
+      svd.method = "cpu_rsvd",
+      rsvd_oversample = 8L,
+      rsvd_power = 1L,
+      seed = 17L
+    )
+    pred_ref <- predict(ref, X[idx, , drop = FALSE], predict.backend = "cpu")
+    pred_flash <- predict(flash, X[idx, , drop = FALSE])
 
-      expect_s3_class(flash, "fastPLS")
-      expect_true(isTRUE(flash$flash_svd))
-      expect_identical(flash$flash_svd_backend, "cpu")
-      expect_identical(flash$predict_backend, "cpu_flash")
-      expect_identical(flash$flash_svd_mode, "streamed_low_rank_prediction")
-      expect_equal(flash$B, ref$B)
-      expect_equal(pred_flash$Ypred, pred_ref$Ypred, tolerance = 1e-10)
-    }
+    expect_s3_class(flash, "fastPLS")
+    expect_true(isTRUE(flash$flash_svd))
+    expect_identical(flash$flash_svd_backend, "cpu")
+    expect_identical(flash$predict_backend, "cpu_flash")
+    expect_identical(flash$flash_svd_mode, "streamed_low_rank_prediction")
+    expect_equal(flash$B, ref$B)
+    expect_equal(pred_flash$Ypred, pred_ref$Ypred, tolerance = 1e-10)
   }
 })
 

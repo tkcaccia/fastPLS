@@ -22,25 +22,19 @@ if (!"classifier" %in% names(ok)) ok[, classifier := "argmax"]
 ok[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
 ok[, backend_algorithm := fifelse(
   backend_algorithm == "gpu_native",
-  "rsvd",
+  "rsvd_cuda",
   as.character(backend_algorithm)
 )]
 
 backend_cols <- c(
-  irlba = "#1b9e77",
-  rsvd = "#d95f02",
-  flash_svd = "#7570b3",
-  pls_pkg = "#555555"
+  irlba = "#0073C2FF",
+  rsvd_cpu = "#EFC000FF",
+  rsvd_cuda = "#CD534CFF",
+  pls_pkg = "#868686FF"
 )
-impl_lines <- c(
-  R = "22",
-  cpp = "solid",
-  cuda = "dotdash",
-  pls_pkg = "dotted"
-)
-classifier_shapes <- c(
-  argmax = 16,
-  LDA = 17
+classifier_lines <- c(
+  argmax = "solid",
+  LDA = "longdash"
 )
 method_levels <- c("plssvd", "simpls", "opls", "kernelpls")
 method_labels <- c(
@@ -52,10 +46,8 @@ method_labels <- c(
 
 ok[, method_panel := factor(method_panel, method_levels)]
 backend_breaks <- intersect(names(backend_cols), unique(as.character(ok$backend_algorithm)))
-impl_breaks <- intersect(names(impl_lines), unique(as.character(ok$implementation)))
 ok[, backend_algorithm := factor(backend_algorithm, backend_breaks)]
-ok[, implementation := factor(implementation, impl_breaks)]
-ok[, classifier_label := factor(classifier_label, names(classifier_shapes))]
+ok[, classifier_label := factor(classifier_label, names(classifier_lines))]
 ok[, line_id := interaction(variant_name, implementation, backend_algorithm, classifier_label, drop = TRUE)]
 
 summ <- ok[, .(
@@ -76,8 +68,7 @@ summ <- ok[, .(
 )]
 summ[, method_panel := factor(method_panel, method_levels)]
 summ[, backend_algorithm := factor(backend_algorithm, backend_breaks)]
-summ[, implementation := factor(implementation, impl_breaks)]
-summ[, classifier_label := factor(classifier_label, names(classifier_shapes))]
+summ[, classifier_label := factor(classifier_label, names(classifier_lines))]
 summ[, line_id := interaction(variant_name, implementation, backend_algorithm, classifier_label, drop = TRUE)]
 fwrite(summ, summary_file)
 
@@ -188,13 +179,11 @@ plot_family <- function(fam) {
 
   common_scales <- list(
     scale_x_continuous(breaks = x_breaks, labels = scales::label_number()),
-    scale_color_manual(values = backend_cols[backend_breaks], breaks = backend_breaks, name = "SVD/backend", drop = FALSE),
-    scale_linetype_manual(values = impl_lines[impl_breaks], breaks = impl_breaks, name = "Implementation", drop = FALSE),
-    scale_shape_manual(values = classifier_shapes, breaks = names(classifier_shapes), name = "Classifier", drop = FALSE),
+    scale_color_manual(values = backend_cols[backend_breaks], breaks = backend_breaks, name = "SVD", drop = FALSE),
+    scale_linetype_manual(values = classifier_lines, breaks = names(classifier_lines), name = "Prediction", drop = FALSE),
     guides(
       color = guide_legend(nrow = 1, byrow = TRUE, override.aes = list(linewidth = 1.1, size = 2.5)),
-      linetype = guide_legend(nrow = 1, byrow = TRUE),
-      shape = guide_legend(nrow = 1, byrow = TRUE)
+      linetype = guide_legend(nrow = 1, byrow = TRUE)
     )
   )
 
@@ -209,12 +198,11 @@ plot_family <- function(fam) {
         y = value,
         group = line_id,
         color = backend_algorithm,
-        linetype = implementation,
-        shape = classifier_label
+        linetype = classifier_label
       )
     ) +
       geom_line(linewidth = 0.85, na.rm = TRUE) +
-      geom_point(size = 1.9, stroke = 0.8, na.rm = TRUE) +
+      geom_point(size = 1.9, stroke = 0.8, shape = 16, na.rm = TRUE) +
       facet_grid(. ~ method_panel, drop = FALSE, labeller = labeller(method_panel = method_labels)) +
       common_scales +
       labs(
@@ -265,7 +253,7 @@ plot_family <- function(fam) {
     rel_heights = c(0.06, 1, 0.10)
   )
   out <- file.path(plot_dir, sprintf("%s_4x4_synthetic_variable_sweep.png", fam))
-  ggsave(out, final, width = 26, height = 21, dpi = 140, limitsize = FALSE, bg = "white")
+  ggsave(out, final, width = 30, height = 21, dpi = 140, limitsize = FALSE, bg = "white")
   invisible(TRUE)
 }
 

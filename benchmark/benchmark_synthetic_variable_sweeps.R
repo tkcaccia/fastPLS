@@ -448,21 +448,8 @@ variant_specs <- function(task) {
     method_panel = c("plssvd", "plssvd", "simpls", "simpls", "opls", "opls", "kernelpls", "kernelpls"),
     engine = "CPU",
     implementation = "cpp",
-    backend_algorithm = c("rsvd", "irlba", "rsvd", "irlba", "rsvd", "irlba", "rsvd", "irlba")
+    backend_algorithm = c("rsvd_cpu", "irlba", "rsvd_cpu", "irlba", "rsvd_cpu", "irlba", "rsvd_cpu", "irlba")
   )
-  if (isTRUE(include_r)) {
-    specs <- rbind(
-      specs,
-      data.table(
-        variant_name = c("r_plssvd_cpu_rsvd", "r_plssvd_irlba", "r_simpls_cpu_rsvd", "r_simpls_irlba", "r_opls_cpu_rsvd", "r_opls_irlba", "r_kernelpls_cpu_rsvd", "r_kernelpls_irlba"),
-        method_panel = c("plssvd", "plssvd", "simpls", "simpls", "opls", "opls", "kernelpls", "kernelpls"),
-        engine = "CPU",
-        implementation = "R",
-        backend_algorithm = c("rsvd", "irlba", "rsvd", "irlba", "rsvd", "irlba", "rsvd", "irlba")
-      ),
-      fill = TRUE
-    )
-  }
   if (isTRUE(include_gpu) && isTRUE(cuda_ok)) {
     specs <- rbind(
       specs,
@@ -475,7 +462,7 @@ variant_specs <- function(task) {
         ),
         engine = "GPU",
         implementation = "cuda",
-        backend_algorithm = "rsvd"
+        backend_algorithm = "rsvd_cuda"
       ),
       fill = TRUE
     )
@@ -495,7 +482,7 @@ variant_specs <- function(task) {
   }
   specs[, classifier := "argmax"]
   if (identical(task$task_type, "classification")) {
-    lda_specs <- copy(specs[implementation %in% c("R", "cpp", "cuda")])
+    lda_specs <- copy(specs[implementation %in% c("cpp", "cuda")])
     if (nrow(lda_specs)) {
       lda_specs[, variant_name := paste0(variant_name, "_lda")]
       lda_specs[, classifier := ifelse(implementation == "cuda", "lda_cuda", "lda_cpp")]
@@ -552,8 +539,8 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
       }
     }
 
-    backend <- if (identical(spec$implementation, "R")) "r" else "cpp"
-    svd_method <- if (identical(spec$backend_algorithm, "rsvd")) "cpu_rsvd" else "irlba"
+    backend <- "cpp"
+    svd_method <- if (identical(spec$backend_algorithm, "rsvd_cpu")) "cpu_rsvd" else "irlba"
     if (identical(spec$method_panel, "plssvd") || identical(spec$method_panel, "simpls")) {
       return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
     }

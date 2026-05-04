@@ -57,21 +57,6 @@ test_that("Gaussian response compression decodes regression predictions", {
   expect_equal(default_small_y$gaussian_y_dim, min(ncol(X), 100L))
   expect_equal(dim(default_small_y$Ypred), c(nrow(Xtest), ncol(small_y), 1L))
 
-  r_fit <- pls(
-    X,
-    Y,
-    Xtest,
-    Ytest,
-    ncomp = 2,
-    method = "simpls",
-    backend = "r",
-    svd.method = "cpu_rsvd",
-    gaussian_y = TRUE,
-    gaussian_y_dim = 7,
-    seed = 120L
-  )
-  expect_equal(dim(r_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
-  expect_true(isTRUE(r_fit$gaussian_y))
 })
 
 test_that("Gaussian response compression decodes classification labels", {
@@ -119,17 +104,6 @@ test_that("Gaussian response compression is available through OPLS and kernelPLS
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  opls_r_fit <- pls(
-    X,
-    Y,
-    Xtest,
-    Ytest,
-    ncomp = 2,
-    method = "opls",
-    backend = "r",
-    gaussian_y = TRUE,
-    gaussian_y_dim = 6
-  )
   kernel_fit <- pls(
     X,
     Y,
@@ -138,18 +112,6 @@ test_that("Gaussian response compression is available through OPLS and kernelPLS
     ncomp = 2,
     method = "kernelpls",
     backend = "cpp",
-    kernel = "linear",
-    gaussian_y = TRUE,
-    gaussian_y_dim = 6
-  )
-  kernel_r_fit <- pls(
-    X,
-    Y,
-    Xtest,
-    Ytest,
-    ncomp = 2,
-    method = "kernelpls",
-    backend = "r",
     kernel = "linear",
     gaussian_y = TRUE,
     gaussian_y_dim = 6
@@ -169,13 +131,9 @@ test_that("Gaussian response compression is available through OPLS and kernelPLS
   )
 
   expect_equal(dim(opls_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
-  expect_equal(dim(opls_r_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
   expect_equal(dim(kernel_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
-  expect_equal(dim(kernel_r_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
   expect_equal(dim(kernel_svd_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
   expect_true(isTRUE(opls_fit$inner_model$gaussian_y))
-  expect_true(isTRUE(opls_r_fit$inner_model$gaussian_y))
   expect_true(isTRUE(kernel_fit$gaussian_y))
-  expect_true(isTRUE(kernel_r_fit$gaussian_y))
   expect_true(isTRUE(kernel_svd_fit$gaussian_y))
 })

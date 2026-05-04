@@ -13,17 +13,23 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 
 ## Overview
 
-`fastPLS` exposes a small public API. Users do not need to call the internal
-C++, CUDA, or benchmarking helpers directly. The main entry points are:
+`fastPLS` exposes a compact public API. Users do not need to call the internal
+C++, CUDA, or benchmarking helpers directly; all model families and backends are
+selected through the user-facing functions below.
 
-- `pls()` for PLSSVD, SIMPLS, OPLS, and kernel PLS.
-- `predict()` for predictions from fitted models.
-- `pls.single.cv()`, `optim.pls.cv()`, and `pls.double.cv()` for
-  cross-validation.
-- `fastsvd()` for stand-alone truncated SVD.
-- `pca()` and `plot()` for PCA score plots with optional confidence or
-  Hotelling's T2 ellipses.
-- `fastcor()`, `ViP()`, and `has_cuda()` for common helper tasks.
+| Function | Purpose |
+|---|---|
+| `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
+| `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
+| `plot()` | Plot PLS or PCA score maps, with optional confidence or Hotelling T2 ellipses. |
+| `pls.single.cv()` | Run fixed-component grouped cross-validation. |
+| `optim.pls.cv()` | Choose the best number of components by cross-validation. |
+| `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
+| `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
+| `pca()` | Compute PCA using the same SVD backend selector. |
+| `fastcor()` | Compute fast Pearson-style correlations. |
+| `ViP()` | Compute variable-importance-in-projection trajectories. |
+| `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 
 ## Example Data
 
@@ -56,12 +62,11 @@ Ytest_cls <- Y_cls[test_id]
 ## Fit PLS Models
 
 The `method` argument selects the outer PLS algorithm. The `backend` argument
-selects the implementation: `"cpp"` for the compiled CPU implementation,
-`"r"` for the pure-R reference implementation, and `"cuda"` for GPU-native
-execution when available.
+selects the implementation: `"cpp"` for the compiled CPU implementation and
+`"cuda"` for GPU-native execution when available.
 
 The `svd.method` argument selects the CPU singular-vector backend for CPU
-models: `"irlba"`, `"cpu_rsvd"`, or `"exact"`.
+models: `"irlba"` or `"cpu_rsvd"`.
 
 ```{r}
 fit_reg <- pls(
@@ -78,6 +83,13 @@ fit_reg <- pls(
 
 fit_reg$Q2Y
 ```
+
+The same call can fit the four model families by changing `method`:
+
+- `method = "plssvd"`: direct cross-covariance SVD PLS.
+- `method = "simpls"`: accelerated compiled SIMPLS implementation.
+- `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
+- `method = "kernelpls"`: kernel PLS with linear, RBF, or polynomial kernels.
 
 ```{r}
 fit_cls <- pls(
@@ -173,7 +185,9 @@ head(fit_kernel$Ypred)
 ## Prediction
 
 `predict()` applies the preprocessing stored in the fitted object. If `Ytest` is
-supplied, predictive metrics are returned when available.
+supplied, predictive metrics are returned when available. The optional
+`predict.backend` argument can select the ordinary CPU path, the compact
+FlashSVD-style CPU path, or CUDA prediction on CUDA-enabled builds.
 
 ```{r}
 pred_reg <- predict(fit_reg, Xtest, Ytest = Ytest_reg, proj = TRUE)
@@ -186,11 +200,23 @@ pred_cls <- predict(fit_cls, Xtest, Ytest = Ytest_cls)
 table(pred_cls$Ypred[[2]], Ytest_cls)
 ```
 
+## Score Plots
+
+`plot()` is an S3 method for both fitted PLS models and PCA objects. For PLS
+models, refit with `fit = TRUE` to store training scores, or predict with
+`proj = TRUE` to store test scores. Ellipses can be ordinary confidence
+ellipses or Hotelling T2 ellipses.
+
+```{r fig.width = 5, fig.height = 4}
+plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
+```
+
 ## Cross-Validation
 
 Use `pls.single.cv()` when the number of components is already fixed. Use
 `optim.pls.cv()` to compare a grid of component counts. Use `pls.double.cv()`
-for a nested cross-validation workflow.
+for a nested cross-validation workflow. All three helpers use the same compiled
+C++/CUDA CV core.
 
 ```{r}
 cv_fixed <- pls.single.cv(
@@ -204,7 +230,7 @@ cv_fixed <- pls.single.cv(
   seed = 103
 )
 
-cv_fixed$metric
+cv_fixed$metrics
 ```
 
 ```{r}
@@ -218,6 +244,23 @@ cv_opt <- optim.pls.cv(
 )
 
 cv_opt$optim_comp
+```
+
+```{r}
+cv_double <- pls.double.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  ncomp = 1:2,
+  runn = 1,
+  kfold_inner = 3,
+  kfold_outer = 3,
+  method = "simpls",
+  backend = "cpp",
+  svd.method = "cpu_rsvd",
+  seed = 104
+)
+
+cv_double$bcomp
 ```
 
 ## PCA and SVD Utilities
@@ -298,7 +341,8 @@ if (has_cuda()) {
 ## Helper Functions
 
 `fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
-importance in projection trajectories for fitted PLS models.
+importance in projection trajectories for fitted PLS models. These functions are
+ordinary R-level helpers and are independent of CUDA availability.
 
 ```{r}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)

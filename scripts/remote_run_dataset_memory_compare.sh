@@ -26,7 +26,6 @@ TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 RUN_TIMEOUT_SEC="${FASTPLS_RUN_TIMEOUT_SEC:-0}"
 VARIANTS_FILTER="${FASTPLS_VARIANTS:-}"
 SKIP_PLOT="${FASTPLS_SKIP_PLOT:-false}"
-SKIP_HEAVY_R="${FASTPLS_SKIP_HEAVY_R:-true}"
 
 RAW_CSV="${RESULTS_DIR}/dataset_memory_compare_raw.csv"
 RUN_ROWS_DIR="${RESULTS_DIR}/run_rows"
@@ -273,12 +272,6 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
   esac
 
   for variant_name in ${variants}; do
-    case "${dataset_id}:${variant_name}:${SKIP_HEAVY_R}" in
-      nmr:r_*:true|imagenet:r_*:true)
-        echo "[INFO] Skipping pure-R variant ${variant_name} for ${dataset_id}"
-        continue
-        ;;
-    esac
     variant_timed_out=0
     for requested_ncomp in $(printf '%s' "${dataset_ncomp_list}" | tr ',' ' '); do
       if [ "${variant_timed_out}" -eq 1 ]; then

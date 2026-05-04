@@ -6,6 +6,11 @@
 
 options(stringsAsFactors = FALSE)
 
+bench_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(bench_lib) && dir.exists(bench_lib)) {
+  .libPaths(unique(c(normalizePath(bench_lib, winslash = "/", mustWork = TRUE), .libPaths())))
+}
+
 parse_args <- function(args = commandArgs(trailingOnly = TRUE)) {
   out <- list()
   for (arg in args) {
@@ -357,6 +362,60 @@ runner_spls <- function(sparse_da = FALSE) {
   list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else as.matrix(pred))
 }
 
+predict_from_scores_weights <- function(fit, Xfit, Yfit, Xnew, Ym) {
+  if (!is.null(fit$R) && !is.null(fit$C)) {
+    R <- as.matrix(fit$R)
+    C <- as.matrix(fit$C)
+    k <- min(ncomp_requested, ncol(R), ncol(C))
+    pred <- as.matrix(Xnew) %*% R[, seq_len(k), drop = FALSE] %*%
+      t(C[, seq_len(k), drop = FALSE])
+    return(sweep(pred, 2L, Ym, "+"))
+  }
+  Tscore <- fit$x.scores %||% fit$scores %||% fit$T
+  W <- fit$x.wgs %||% fit$weights %||% fit$W
+  if (is.null(Tscore) || is.null(W)) {
+    stop("SIMPLS fit did not expose X scores and X weights.")
+  }
+  Tscore <- as.matrix(Tscore)
+  W <- as.matrix(W)
+  k <- min(ncomp_requested, ncol(Tscore), ncol(W))
+  Tscore <- Tscore[, seq_len(k), drop = FALSE]
+  W <- W[, seq_len(k), drop = FALSE]
+  P <- crossprod(Xfit, Tscore) %*% solve(crossprod(Tscore))
+  Q <- crossprod(Yfit, Tscore) %*% solve(crossprod(Tscore))
+  B <- W %*% solve(crossprod(P, W)) %*% t(Q)
+  pred <- as.matrix(Xnew) %*% B
+  sweep(pred, 2L, Ym, "+")
+}
+
+runner_plsdepot_simpls <- function() {
+  f <- get("simpls", envir = asNamespace("plsdepot"))
+  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  Xm <- attr(Xc, "scaled:center")
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
+  Ym <- attr(Yc, "scaled:center")
+  fit <- f(as.matrix(Xc), as.matrix(Yc), comps = ncomp_requested)
+  pred <- predict_from_scores_weights(
+    fit, as.matrix(Xc), as.matrix(Yc),
+    sweep(as.matrix(Xtest), 2L, Xm, "-"), Ym
+  )
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
+}
+
+runner_pcv_simpls <- function() {
+  f <- get("simpls", envir = asNamespace("pcv"))
+  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  Xm <- attr(Xc, "scaled:center")
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
+  Ym <- attr(Yc, "scaled:center")
+  fit <- f(as.matrix(Xc), as.matrix(Yc), ncomp = ncomp_requested)
+  pred <- predict_from_scores_weights(
+    fit, as.matrix(Xc), as.matrix(Yc),
+    sweep(as.matrix(Xtest), 2L, Xm, "-"), Ym
+  )
+  list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
+}
+
 runner_ropls <- function(orthoI = 0L) {
   f <- get("opls", envir = asNamespace("ropls"))
   fit <- f(
@@ -418,9 +477,9 @@ method_specs_all <- function(task_type) {
     list(id = "mdatools_plsda_or_pls", package = "mdatools", algorithm = "SIMPLS/PLS-DA",
          function_name = "mdatools::plsda or mdatools::pls", runner = runner_mdatools),
     list(id = "plsdepot_simpls", package = "plsdepot", algorithm = "SIMPLS",
-         function_name = "plsdepot::simpls", runner = function() runner_simple_named("plsdepot", "simpls")),
+         function_name = "plsdepot::simpls", runner = runner_plsdepot_simpls),
     list(id = "pcv_simpls", package = "pcv", algorithm = "SIMPLS",
-         function_name = "pcv::simpls", runner = function() runner_simple_named("pcv", "simpls")),
+         function_name = "pcv:::simpls", runner = runner_pcv_simpls),
     list(id = "plsgenomics_pls_regression", package = "plsgenomics", algorithm = "PLS regression",
          function_name = "plsgenomics::pls.regression", runner = runner_plsgenomics_regression),
     list(id = "mixOmics_pls", package = "mixOmics", algorithm = "PLS regression",
@@ -462,7 +521,7 @@ function_available <- function(spec) {
   }
   parts <- strsplit(spec$function_name, "::", fixed = TRUE)[[1L]]
   if (length(parts) < 2L) return(TRUE)
-  fun <- sub("\\(.*$", "", parts[[2L]])
+  fun <- sub("^:+", "", sub("\\(.*$", "", parts[[2L]]))
   exists(fun, envir = asNamespace(spec$package), inherits = FALSE)
 }
 

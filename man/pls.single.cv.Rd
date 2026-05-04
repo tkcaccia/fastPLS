@@ -10,12 +10,17 @@ pls.single.cv(
   kfold = 10L,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = c("cpp", "r", "cuda"),
+  backend = c("cpp", "cuda"),
   inner.method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd", "exact"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
+  irlba_work = 0L,
+  irlba_maxit = 1000L,
+  irlba_tol = 1e-05,
+  irlba_eps = 1e-09,
+  irlba_svtol = 1e-05,
   seed = 1L,
   north = 1L,
   kernel = c("linear", "rbf", "poly"),
@@ -38,10 +43,15 @@ pls.single.cv(
 \item{kfold}{Number of folds.}
 \item{scaling}{One of \code{"centering"}, \code{"autoscaling"}, or \code{"none"}.}
 \item{method}{Model family: \code{"simpls"}, \code{"plssvd"}, \code{"opls"}, or \code{"kernelpls"}.}
-\item{backend}{Implementation backend: \code{"cpp"}, \code{"r"}, or \code{"cuda"}.}
+\item{backend}{Implementation backend: \code{"cpp"} or \code{"cuda"}.}
 \item{inner.method}{Inner PLS core used by OPLS and kernel PLS.}
-\item{svd.method}{CPU SVD backend: \code{"irlba"}, \code{"cpu_rsvd"}, or \code{"exact"}.}
+\item{svd.method}{CPU SVD backend: \code{"irlba"} or \code{"cpu_rsvd"}.}
 \item{rsvd_oversample, rsvd_power, svds_tol, seed}{SVD backend controls.}
+\item{irlba_work}{IRLBA work subspace size; \code{0} lets the backend choose.}
+\item{irlba_maxit}{Maximum IRLBA iterations.}
+\item{irlba_tol}{IRLBA convergence tolerance.}
+\item{irlba_eps}{IRLBA orthogonality threshold.}
+\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
 \item{north}{Number of orthogonal components for OPLS.}
 \item{kernel, gamma, degree, coef0}{Kernel PLS controls.}
 \item{gaussian_y, gaussian_y_dim, gaussian_y_seed}{Optional Gaussian response compression controls.}

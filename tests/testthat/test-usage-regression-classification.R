@@ -56,45 +56,6 @@ test_that("pls and predict support classification workflow", {
   expect_length(pr$Q2Y, 2L)
 })
 
-test_that("pls backend='r' supports regression and classification workflows", {
-  set.seed(1003)
-  X <- matrix(rnorm(84 * 9), nrow = 84, ncol = 9)
-  Y <- matrix(rnorm(84 * 2), nrow = 84, ncol = 2)
-  y <- factor(sample(c("ctrl", "case"), 84, replace = TRUE))
-  idx <- sample(seq_len(84), 18)
-
-  reg_fit <- pls(
-    X[-idx, , drop = FALSE],
-    Y[-idx, , drop = FALSE],
-    X[idx, , drop = FALSE],
-    Y[idx, , drop = FALSE],
-    ncomp = 1:2,
-    method = "plssvd",
-    backend = "r",
-    svd.method = "cpu_rsvd",
-    fit = TRUE
-  )
-  expect_s3_class(reg_fit, "fastPLS")
-  expect_true(is.array(reg_fit$Ypred))
-  expect_length(reg_fit$Q2Y, 2L)
-
-  cls_fit <- pls(
-    X[-idx, , drop = FALSE],
-    y[-idx],
-    X[idx, , drop = FALSE],
-    y[idx],
-    ncomp = 1:2,
-    method = "plssvd",
-    backend = "r",
-    svd.method = "cpu_rsvd",
-    seed = 123L,
-    fit = TRUE
-  )
-  expect_s3_class(cls_fit, "fastPLS")
-  expect_true(is.data.frame(cls_fit$Ypred))
-  expect_equal(levels(cls_fit$Ypred[[1]]), levels(y))
-})
-
 test_that("optim.pls.cv and pls.double.cv run in both contexts", {
   set.seed(1004)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
@@ -172,6 +133,34 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cpu_cv$backend, "cpp")
   expect_identical(cpu_cv$prediction_backend, "cpu")
 
+  cpu_opt <- optim.pls.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    kfold = 3,
+    method = "plssvd",
+    backend = "cpp",
+    svd.method = "cpu_rsvd",
+    seed = 123L
+  )
+  expect_identical(cpu_opt$backend, "cpp")
+  expect_length(cpu_opt$optim_comp, 1L)
+
+  cpu_double <- pls.double.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    runn = 1,
+    kfold_inner = 3,
+    kfold_outer = 3,
+    method = "plssvd",
+    backend = "cpp",
+    svd.method = "cpu_rsvd",
+    seed = 123L
+  )
+  expect_identical(cpu_double$backend, "cpp")
+  expect_true(is.factor(cpu_double$Ypred))
+
   skip_if_not(has_cuda(), "CUDA backend unavailable")
   cuda_cv <- pls.single.cv(
     Xdata = X,
@@ -184,6 +173,18 @@ test_that("compiled CV reports the prediction backend", {
   )
   expect_identical(cuda_cv$backend, "cuda")
   expect_identical(cuda_cv$prediction_backend, "cuda_flash")
+
+  cuda_opt <- optim.pls.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    kfold = 3,
+    method = "plssvd",
+    backend = "cuda",
+    seed = 123L
+  )
+  expect_identical(cuda_opt$backend, "cuda")
+  expect_length(cuda_opt$optim_comp, 1L)
 })
 
 test_that("SVD utilities and helper functions are usable in practice", {

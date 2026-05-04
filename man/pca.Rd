@@ -7,7 +7,7 @@ pca(
   ncomp = 2L,
   center = TRUE,
   scale. = FALSE,
-  svd.method = c("cpu_rsvd", "irlba", "exact", "cuda_rsvd"),
+  svd.method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
   ...
 )
 }

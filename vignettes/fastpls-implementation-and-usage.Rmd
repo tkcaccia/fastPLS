@@ -17,9 +17,9 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 classification with:
 
 - four model families: `plssvd`, `simpls`, `opls`, and `kernelpls`
-- multiple CPU SVD backends (`exact`, `irlba`, `cpu_rsvd`) plus GPU-native
+- CPU SVD backends (`irlba`, `cpu_rsvd`) plus GPU-native
   execution through `pls(..., backend = "cuda")` where CUDA is available
-- compiled C++, pure-R, and CUDA backends selected through `pls()`
+- compiled C++ and CUDA backends selected through `pls()`
 - cross-validation helpers (`pls.single.cv()`, `optim.pls.cv()`,
   `pls.double.cv()`)
 
@@ -28,11 +28,11 @@ usage patterns in both regression and classification contexts.
 
 ## Core API
 
-- `pls()`: main model fitting function for C++, R, and CUDA backends.
+- `pls()`: main model fitting function for compiled C++ and CUDA backends.
 - `predict()`: prediction for fitted `fastPLS` models.
 - `plot()`: PCA/PLS score plots with optional confidence or Hotelling T2 ellipses.
 - `pca()`: PCA through the same SVD backend selector.
-- `fastsvd()`: stand-alone SVD through exact, IRLBA, CPU rSVD, or CUDA rSVD backends.
+- `fastsvd()`: stand-alone SVD through IRLBA, CPU rSVD, or CUDA rSVD backends.
 - `pls.single.cv()`: fixed-component grouped cross-validation.
 - `optim.pls.cv()`: component selection with cross-validation.
 - `pls.double.cv()`: double cross-validation workflow.
@@ -111,14 +111,14 @@ the selected PLS core in kernel space. Both are accessed through `pls()`:
 
 - `irlba`: bundled truncated SVD route.
 - `cpu_rsvd`: randomized CPU SVD with `rsvd_oversample`, `rsvd_power`, and `seed`.
-- `exact`: exact dense SVD, used automatically for very small SVD inputs.
+- very small SVD inputs automatically fall back to a dense decomposition inside
+  the compiled backends when needed.
 - GPU PLS execution is exposed through `pls(..., backend = "cuda")`, not through
   `pls(..., svd.method = "cuda_rsvd")`.
 
 ### 5) Public API vs Internal Backends
 
 - `pls(..., backend = "cpp")` calls compiled CPU code paths for performance.
-- `pls(..., backend = "r")` uses the matched pure-R reference path.
 - `pls(..., backend = "cuda")` uses GPU-native fits where available.
 - for classification, factor `Y` is converted internally to one-hot encoding and
   class labels are returned by `predict.fastPLS()`.
@@ -208,21 +208,6 @@ m_lda_cpp <- pls(
 )
 ```
 
-## Pure-R Workflow
-
-```{r}
-m_r <- pls(
-  Xtr, ytr_cls, Xte, yte_cls,
-  ncomp = 1:2,
-  method = "simpls",
-  backend = "r",
-  svd.method = "cpu_rsvd",
-  seed = 123
-)
-
-head(m_r$Ypred)
-```
-
 ## Cross-Validation Workflows
 
 ```{r}
@@ -275,8 +260,8 @@ str(vip)
 
 - Use `method = "simpls"` when you want the accelerated SIMPLS implementation
   with speed controls for model-building.
-- Use `backend = "r"` for reference validation, `backend = "cpp"` for the
-  standard CPU implementation, and `backend = "cuda"` for GPU-native fitting.
+- Use `backend = "cpp"` for the standard CPU implementation and
+  `backend = "cuda"` for GPU-native fitting.
 - Use `plssvd` when you want direct control over rank-constrained latent
   structure; fastPLS automatically enforces the valid component cap.
 - For PLS-DA with LDA prediction, prefer `method = "plssvd"`,

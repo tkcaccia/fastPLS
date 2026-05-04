@@ -464,31 +464,23 @@ variant_specs <- function() {
   rows <- list(
     c("cpp_plssvd_cpu_rsvd", "plssvd", "CPU", "cpu_rsvd", "Cpp", "argmax"),
     c("cpp_plssvd_irlba", "plssvd", "CPU", "irlba", "Cpp", "argmax"),
-    c("r_plssvd_cpu_rsvd", "plssvd", "CPU", "cpu_rsvd", "R", "argmax"),
-    c("r_plssvd_irlba", "plssvd", "CPU", "irlba", "R", "argmax"),
     c("gpu_plssvd_fp64", "plssvd", "GPU", "gpu_native", "CUDA 64-bit", "argmax"),
     c("cpp_simpls_cpu_rsvd", "simpls", "CPU", "cpu_rsvd", "Cpp", "argmax"),
     c("cpp_simpls_irlba", "simpls", "CPU", "irlba", "Cpp", "argmax"),
-    c("r_simpls_cpu_rsvd", "simpls", "CPU", "cpu_rsvd", "R", "argmax"),
-    c("r_simpls_irlba", "simpls", "CPU", "irlba", "R", "argmax"),
     c("gpu_simpls_fp64", "simpls", "GPU", "gpu_native", "CUDA 64-bit", "argmax"),
     c("pls_pkg_simpls", "simpls", "CPU", "pls_pkg", "pls_pkg", "argmax"),
     c("cpp_kernelpls_cpu_rsvd", "kernelpls", "CPU", "cpu_rsvd", "Cpp", "argmax"),
     c("cpp_kernelpls_irlba", "kernelpls", "CPU", "irlba", "Cpp", "argmax"),
-    c("r_kernelpls_cpu_rsvd", "kernelpls", "CPU", "cpu_rsvd", "R", "argmax"),
-    c("r_kernelpls_irlba", "kernelpls", "CPU", "irlba", "R", "argmax"),
     c("gpu_kernelpls_fp64", "kernelpls", "GPU", "gpu_native", "CUDA 64-bit", "argmax"),
     c("pls_pkg_kernelpls", "kernelpls", "CPU", "pls_pkg", "pls_pkg", "argmax"),
     c("cpp_opls_cpu_rsvd", "opls", "CPU", "cpu_rsvd", "Cpp", "argmax"),
     c("cpp_opls_irlba", "opls", "CPU", "irlba", "Cpp", "argmax"),
-    c("r_opls_cpu_rsvd", "opls", "CPU", "cpu_rsvd", "R", "argmax"),
-    c("r_opls_irlba", "opls", "CPU", "irlba", "R", "argmax"),
     c("gpu_opls_fp64", "opls", "GPU", "gpu_native", "CUDA 64-bit", "argmax"),
     c("pls_pkg_opls", "opls", "CPU", "pls_pkg", "pls_pkg", "argmax")
   )
   out <- as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE)
   names(out) <- c("variant_name", "method_family", "engine", "backend", "implementation_label", "classifier")
-  lda_rows <- out[out$implementation_label %in% c("R", "Cpp", "CUDA 64-bit"), , drop = FALSE]
+  lda_rows <- out[out$implementation_label %in% c("Cpp", "CUDA 64-bit"), , drop = FALSE]
   lda_rows$variant_name <- paste0(lda_rows$variant_name, "_lda")
   lda_rows$classifier <- ifelse(lda_rows$engine == "GPU", "lda_cuda", "lda_cpp")
   out <- rbind(out, lda_rows)

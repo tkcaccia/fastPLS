@@ -24,28 +24,22 @@ if (!"classifier" %in% names(dt)) dt[, classifier := "argmax"]
 dt[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
 
 backend_cols <- c(
-  irlba = "#1b9e77",
-  rsvd = "#d95f02",
-  flash_svd = "#7570b3",
-  pls_pkg = "#555555"
+  irlba = "#0073C2FF",
+  rsvd_cpu = "#EFC000FF",
+  rsvd_cuda = "#CD534CFF",
+  pls_pkg = "#868686FF"
 )
 
-impl_lines <- c(
-  R = "22",
-  cpp = "solid",
-  cuda = "dotdash",
-  pls_pkg = "dotted"
-)
-classifier_shapes <- c(
-  argmax = 16,
-  LDA = 17
+classifier_lines <- c(
+  argmax = "solid",
+  LDA = "longdash"
 )
 
 dt[, backend_algorithm := fcase(
   backend == "pls_pkg", "pls_pkg",
-  backend %in% c("cpu_rsvd", "gpu_native"), "rsvd",
+  backend == "cpu_rsvd", "rsvd_cpu",
+  backend == "gpu_native", "rsvd_cuda",
   backend == "irlba", "irlba",
-  backend == "flash_svd", "flash_svd",
   default = backend
 )]
 
@@ -100,12 +94,10 @@ panel_labels <- c(
   kernelpls = "kernelpls"
 )
 sumdt[, backend_algorithm := factor(backend_algorithm, names(backend_cols))]
-sumdt[, implementation := factor(implementation, names(impl_lines))]
-sumdt[, classifier_label := factor(classifier_label, names(classifier_shapes))]
+sumdt[, classifier_label := factor(classifier_label, names(classifier_lines))]
 
 sumdt[, line_id := interaction(
   variant_name,
-  implementation,
   backend_algorithm,
   classifier_label,
   drop = TRUE
@@ -156,17 +148,12 @@ for (ds in unique(sumdt$dataset)) {
     scale_color_manual(
       values = backend_cols,
       breaks = names(backend_cols),
-      name = "SVD/backend"
+      name = "SVD"
     ),
     scale_linetype_manual(
-      values = impl_lines,
-      breaks = names(impl_lines),
-      name = "Implementation"
-    ),
-    scale_shape_manual(
-      values = classifier_shapes,
-      breaks = names(classifier_shapes),
-      name = "Classifier"
+      values = classifier_lines,
+      breaks = names(classifier_lines),
+      name = "Prediction"
     ),
     guides(
       color = guide_legend(
@@ -174,8 +161,7 @@ for (ds in unique(sumdt$dataset)) {
         byrow = TRUE,
         override.aes = list(linewidth = 1.1, size = 2.5)
       ),
-      linetype = guide_legend(nrow = 1, byrow = TRUE),
-      shape = guide_legend(nrow = 1, byrow = TRUE)
+      linetype = guide_legend(nrow = 1, byrow = TRUE)
     )
   )
 
@@ -191,12 +177,11 @@ for (ds in unique(sumdt$dataset)) {
         y = value,
         group = line_id,
         color = backend_algorithm,
-        linetype = implementation,
-        shape = classifier_label
+        linetype = classifier_label
       )
     ) +
       geom_line(linewidth = 0.85, na.rm = TRUE) +
-      geom_point(size = 1.9, stroke = 0.8, na.rm = TRUE) +
+      geom_point(size = 1.9, stroke = 0.8, shape = 16, na.rm = TRUE) +
       facet_grid(. ~ method_panel, drop = FALSE, labeller = labeller(method_panel = panel_labels)) +
       common_scales +
       labs(
@@ -255,7 +240,7 @@ for (ds in unique(sumdt$dataset)) {
   ggsave(
     file.path(out_dir, sprintf("%s_4x4_methods_memory.png", ds)),
     p_final,
-    width = 26,
+    width = 30,
     height = 21,
     dpi = 140,
     limitsize = FALSE,

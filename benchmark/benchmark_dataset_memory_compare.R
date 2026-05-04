@@ -203,15 +203,6 @@ result_row <- tryCatch({
     )
   }
 
-  fastpls_fit_r <- function(method, svd_method) {
-    fastPLS::pls(
-      Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = method, backend = "r", svd.method = svd_method, fit = FALSE,
-      classifier = spec$classifier,
-      seed = 123L + as.integer(replicate_id)
-    )
-  }
-
   kernel_fit <- function(backend, method, svd_method = "cpu_rsvd") {
     fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
@@ -236,8 +227,6 @@ result_row <- tryCatch({
     base_variant_name,
     cpp_plssvd_cpu_rsvd = function() fastpls_fit("plssvd", "cpu_rsvd"),
     cpp_plssvd_irlba = function() fastpls_fit("plssvd", "irlba"),
-    r_plssvd_cpu_rsvd = function() fastpls_fit_r("plssvd", "cpu_rsvd"),
-    r_plssvd_irlba = function() fastpls_fit_r("plssvd", "irlba"),
     gpu_plssvd_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       method = "plssvd", backend = "cuda", fit = FALSE,
@@ -246,8 +235,6 @@ result_row <- tryCatch({
     ),
     cpp_simpls_cpu_rsvd = function() fastpls_fit("simpls", "cpu_rsvd"),
     cpp_simpls_irlba = function() fastpls_fit("simpls", "irlba"),
-    r_simpls_cpu_rsvd = function() fastpls_fit_r("simpls", "cpu_rsvd"),
-    r_simpls_irlba = function() fastpls_fit_r("simpls", "irlba"),
     gpu_simpls_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       method = "simpls", backend = "cuda", fit = FALSE,
@@ -257,14 +244,10 @@ result_row <- tryCatch({
     pls_pkg_simpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "simpls"),
     cpp_kernelpls_cpu_rsvd = function() kernel_fit("cpp", "simpls", "cpu_rsvd"),
     cpp_kernelpls_irlba = function() kernel_fit("cpp", "simpls", "irlba"),
-    r_kernelpls_cpu_rsvd = function() kernel_fit("r", "simpls", "cpu_rsvd"),
-    r_kernelpls_irlba = function() kernel_fit("r", "simpls", "irlba"),
     gpu_kernelpls_fp64 = function() kernel_fit("cuda", "simpls"),
     pls_pkg_kernelpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "kernelpls"),
     cpp_opls_cpu_rsvd = function() opls_fit("cpp", "simpls", "cpu_rsvd"),
     cpp_opls_irlba = function() opls_fit("cpp", "simpls", "irlba"),
-    r_opls_cpu_rsvd = function() opls_fit("r", "simpls", "cpu_rsvd"),
-    r_opls_irlba = function() opls_fit("r", "simpls", "irlba"),
     gpu_opls_fp64 = function() opls_fit("cuda", "simpls"),
     # `pls::oscorespls.fit()` does not expose `north`, so keep benchmark
     # parity by reserving one total component slot for the orthogonal part.

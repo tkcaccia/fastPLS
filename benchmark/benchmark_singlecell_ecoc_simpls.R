@@ -171,7 +171,7 @@ macro_f1 <- function(truth, pred) {
 fit_predict_one <- function(task, variant, response_mode, rep_id, codes = NULL) {
   method <- "simpls"
   svd_method <- if (grepl("irlba", variant, fixed = TRUE)) "irlba" else "cpu_rsvd"
-  implementation <- if (startsWith(variant, "cpp")) "Cpp" else if (startsWith(variant, "r_")) "R" else "CUDA"
+  implementation <- if (startsWith(variant, "cpp")) "Cpp" else "CUDA"
   engine <- if (identical(implementation, "CUDA")) "GPU" else "CPU"
 
   if (!identical(response_mode, "onehot")) {
@@ -184,8 +184,6 @@ fit_predict_one <- function(task, variant, response_mode, rep_id, codes = NULL) 
     variant,
     cpp_rsvd = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "cpp", svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
     cpp_irlba = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "cpp", svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
-    r_rsvd = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "r", svd.method = "cpu_rsvd", fit = FALSE, seed = 1000L + rep_id),
-    r_irlba = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = method, backend = "r", svd.method = "irlba", fit = FALSE, seed = 1000L + rep_id),
     cuda = function() fastPLS::pls(task$Xtrain, Yfit, ncomp = ncomp, method = "simpls", backend = "cuda", fit = FALSE, seed = 1000L + rep_id),
     stop("Unknown variant: ", variant)
   )
@@ -236,7 +234,7 @@ fit_predict_one <- function(task, variant, response_mode, rep_id, codes = NULL) 
 
 task_path <- find_dataset_rdata("singlecell")
 task <- as_task(task_path, dataset_id = "singlecell", split_seed = split_seed)
-variants <- strsplit(arg_value(args, "variants", default = "cpp_rsvd,cpp_irlba,r_rsvd,r_irlba,cuda"), ",", fixed = TRUE)[[1L]]
+variants <- strsplit(arg_value(args, "variants", default = "cpp_rsvd,cpp_irlba,cuda"), ",", fixed = TRUE)[[1L]]
 variants <- trimws(variants)
 response_modes <- strsplit(arg_value(args, "response_modes", default = "onehot,random_ecoc50,balanced_ecoc50,hadamard_ecoc50,gaussian50,orthogonal_random50,centroid_pca50"), ",", fixed = TRUE)[[1L]]
 response_modes <- trimws(response_modes)

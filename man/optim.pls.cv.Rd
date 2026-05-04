@@ -10,8 +10,9 @@ optim.pls.cv(
   ncomp = 2,
   constrain = NULL,
   scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd", "exact"),
+  method = c("simpls", "plssvd", "opls", "kernelpls"),
+  backend = c("cpp", "cuda"),
+  svd.method = c("irlba", "cpu_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -27,7 +28,11 @@ optim.pls.cv(
   fast_incremental = TRUE,
   fast_inc_iters = 2L,
   fast_defl_cache = TRUE,
-  kfold = 10
+  kfold = 10,
+  north = 1L,
+  return_scores = FALSE,
+  xprod = NULL,
+  ...
 )
 }
 \arguments{
@@ -41,9 +46,11 @@ optim.pls.cv(
 
 \item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
 
-\item{method}{One of `"simpls"` or `"plssvd"`. `simpls` uses the fastPLS SIMPLS core.}
+\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.}
 
-\item{svd.method}{One of `"exact"`, `"irlba"` or `"cpu_rsvd"`.
+\item{backend}{Implementation backend: `"cpp"` or `"cuda"`.}
+
+\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
 The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
 from `pls()`; use `backend = "cuda"` for GPU-native fits.}
 
@@ -84,10 +91,22 @@ the former incdefl profile.}
 the former incdefl profile.}
 
 \item{kfold}{Number of folds.}
+
+\item{north}{Number of orthogonal components removed by OPLS.}
+
+\item{return_scores}{Store score predictions for classification when `TRUE`.}
+
+\item{xprod}{Use the matrix-free cross-product route where available.
+`NULL` applies fastPLS defaults.}
+
+\item{...}{Additional backend tuning arguments.}
 }
 \value{
-List with `optim_comp`, `Ypred`, `Q2Y`, `R2Y`, and `fold`.
+List with `optim_comp`, decoded `pred`, `metrics`, legacy
+  `Q2Y`/`R2Y` metric vectors, `fold`, backend metadata, and `Ypred` when
+  score predictions are stored.
 }
 \description{
-Performs k-fold CV over candidate component counts for `simpls` or `plssvd`.
+Performs k-fold CV over candidate component counts using the compiled
+C++/CUDA CV core shared with [pls.single.cv()].
 }
