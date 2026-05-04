@@ -211,18 +211,16 @@ ellipses or Hotelling T2 ellipses.
 plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
-The next examples use the `lymphoma` gene-expression data from the KODAMA
-package. The first example keeps two lymphoma classes and creates a fixed
-train/test split. Each column is one PLS family, the top row shows training
+The next example uses the two-class `Colon` gene-expression dataset from the
+plsgenomics package. Each column is one PLS family, the top row shows training
 scores colored by the training class, and the bottom row shows test scores
 colored by the predicted class.
 
-```{r lymphoma-binary-pls-plots, fig.width = 10, fig.height = 5}
-data("lymphoma", package = "KODAMA")
+```{r colon-binary-pls-plots, fig.width = 10, fig.height = 5}
+data("Colon", package = "plsgenomics")
 set.seed(200)
-keep_two <- lymphoma$class %in% c("B-CLL", "DLBCL")
-X_two <- as.matrix(lymphoma$data[keep_two, , drop = FALSE])
-y_two <- droplevels(lymphoma$class[keep_two])
+X_two <- as.matrix(Colon$X)
+y_two <- factor(Colon$Y, labels = c("normal", "tumor"))
 train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
   sample(i, floor(0.7 * length(i)))
 }))
@@ -251,16 +249,18 @@ for (i in seq_along(families)) {
     main = paste(labels[[i]], "test prediction")
   )
 }
-mtext("Two-class lymphoma gene-expression train/test PLS score plots", outer = TRUE, font = 2)
+mtext("Two-class colon gene-expression train/test PLS score plots", outer = TRUE, font = 2)
 par(old_par)
 ```
 
-The second example uses all three lymphoma classes and fits OPLS with two
+The second example uses all three `lymphoma` gene-expression classes from KODAMA
+and fits OPLS with two
 orthogonal components (`north = 2`). The displayed two-dimensional score map is
 computed after the OPLS orthogonal filtering, so the three lymphoma classes sit
 near the three vertices of the omics score triangle.
 
 ```{r lymphoma-three-class-opls, fig.width = 7, fig.height = 3.5}
+data("lymphoma", package = "KODAMA")
 set.seed(201)
 X_three <- as.matrix(lymphoma$data)
 y_three <- droplevels(lymphoma$class)

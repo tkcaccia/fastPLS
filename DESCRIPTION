@@ -17,7 +17,7 @@ License: GPL-3
 Depends: R (>= 2.10.0), Matrix
 Imports: Rcpp (>= 0.12.17), methods
 LinkingTo: Rcpp, RcppArmadillo, Matrix
-Suggests: knitr, rmarkdown, testthat (>= 3.0.0), irlba, pls, data.table, KODAMA
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0), irlba, pls, data.table, KODAMA, plsgenomics
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3
