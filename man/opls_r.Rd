@@ -36,6 +36,7 @@ opls_r(
   classifier = c("argmax", "lda_cpp", "lda_cuda"),
   lda_ridge = 1e-08,
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE
 )
 
@@ -65,6 +66,7 @@ opls_cpp(
   classifier = c("argmax", "lda_cpp", "lda_cuda"),
   lda_ridge = 1e-08,
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE
 )
 
@@ -89,6 +91,7 @@ opls_cuda(
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE,
   ...
 )
@@ -185,6 +188,10 @@ optimized standard CUDA LDA route remains the default.}
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
+
+\item{return_variance}{Compute predictor-space latent-variable variance
+explained. Set to `FALSE` for timing/memory benchmarks that do not need
+plotting variance metadata.}
 
 \item{proj}{Return projected `Ttest` when `TRUE`.}
 

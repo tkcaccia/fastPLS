@@ -40,6 +40,7 @@ kernel_pls_r(
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE
 )
 
@@ -73,6 +74,7 @@ kernel_pls_cpp(
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE
 )
 
@@ -100,6 +102,7 @@ kernel_pls_cuda(
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
+  return_variance = TRUE,
   proj = FALSE,
   ...
 )
@@ -211,6 +214,10 @@ least-squares linear model on the latent scores with compiled C++ code.
 prediction when CUDA is available.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
+
+\item{return_variance}{Compute predictor-space latent-variable variance
+explained. Set to `FALSE` for timing/memory benchmarks that do not need
+plotting variance metadata.}
 
 \item{proj}{Return projected `Ttest` when `TRUE`.}
 

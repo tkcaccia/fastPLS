@@ -23,6 +23,9 @@ test_that("pls and predict support regression workflow", {
   expect_length(fit$variance_explained, 3L)
   expect_true(all(is.finite(fit$variance_explained)))
   expect_equal(fit$x_variance_explained, fit$variance_explained)
+  lean_fit <- pls(X, Y, ncomp = 3, method = "simpls", return_variance = FALSE)
+  expect_null(lean_fit$variance_explained)
+  expect_null(lean_fit$x_variance_explained)
 
   pr <- predict(fit, X[idx, , drop = FALSE], Ytest = Y[idx, , drop = FALSE], proj = TRUE)
   expect_true(is.array(pr$Ypred))

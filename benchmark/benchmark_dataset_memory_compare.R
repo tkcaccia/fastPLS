@@ -199,6 +199,7 @@ result_row <- tryCatch({
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       method = method, backend = "cpp", svd.method = svd_method, fit = FALSE,
       classifier = spec$classifier,
+      return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
     )
   }
@@ -209,6 +210,7 @@ result_row <- tryCatch({
       method = "kernelpls", backend = backend, inner.method = method,
       kernel = "linear", svd.method = svd_method, fit = FALSE,
       classifier = spec$classifier,
+      return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
     )
   }
@@ -218,7 +220,8 @@ result_row <- tryCatch({
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(opls_layout$predictive_ncomp),
       method = "opls", backend = backend, inner.method = method,
       svd.method = svd_method, north = as.integer(opls_layout$north),
-      fit = FALSE, classifier = spec$classifier, seed = 123L + as.integer(replicate_id)
+      fit = FALSE, classifier = spec$classifier, return_variance = FALSE,
+      seed = 123L + as.integer(replicate_id)
     )
   }
 
@@ -231,6 +234,7 @@ result_row <- tryCatch({
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       method = "plssvd", backend = "cuda", fit = FALSE,
       classifier = spec$classifier,
+      return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
     ),
     cpp_simpls_cpu_rsvd = function() fastpls_fit("simpls", "cpu_rsvd"),
@@ -239,6 +243,7 @@ result_row <- tryCatch({
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
       method = "simpls", backend = "cuda", fit = FALSE,
       classifier = spec$classifier,
+      return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
     ),
     pls_pkg_simpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "simpls"),

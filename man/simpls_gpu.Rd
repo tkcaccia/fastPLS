@@ -34,7 +34,8 @@ simpls_gpu(
   gaussian_y_seed = seed,
   classifier = c("argmax", "lda_cpp", "lda_cuda"),
   lda_ridge = 1e-08,
-  regression_head = c("standard", "linear_cpp", "linear_cuda")
+  regression_head = c("standard", "linear_cpp", "linear_cuda"),
+  return_variance = TRUE
 )
 
 simpls_flash_gpu(
@@ -85,6 +86,10 @@ simpls_flash_gpu(
 \item{seed}{Random seed.}
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
+
+\item{return_variance}{Compute predictor-space latent-variable variance
+explained. Set to `FALSE` for timing/memory benchmarks that do not need
+plotting variance metadata.}
 
 \item{proj}{Return projected `Ttest` when `TRUE`.}
 

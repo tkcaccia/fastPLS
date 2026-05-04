@@ -235,21 +235,36 @@
   }
   scores <- as.matrix(scores)[, seq_len(k), drop = FALSE]
 
-  residual <- Xscaled
   explained_ss <- numeric(k)
-  for (j in seq_len(k)) {
-    tj <- scores[, j, drop = FALSE]
-    denom <- drop(crossprod(tj))
-    if (!is.finite(denom) || denom <= 0) {
-      explained_ss[j] <- 0
-      next
+  score_gram <- crossprod(scores)
+  score_norms <- diag(score_gram)
+  offdiag <- score_gram
+  diag(offdiag) <- 0
+  gram_scale <- max(abs(score_norms), 1)
+  if (all(is.finite(score_norms)) &&
+      all(score_norms > 0) &&
+      max(abs(offdiag), na.rm = TRUE) <= sqrt(.Machine$double.eps) * gram_scale) {
+    # SIMPLS/OPLS scores are orthogonal, so all one-dimensional projection
+    # sums of squares can be obtained with one BLAS crossproduct.
+    XtT <- crossprod(Xscaled, scores)
+    explained_ss <- colSums(XtT * XtT) / score_norms
+    explained_ss[!is.finite(explained_ss) | explained_ss < 0] <- 0
+  } else {
+    residual <- Xscaled
+    for (j in seq_len(k)) {
+      tj <- scores[, j, drop = FALSE]
+      denom <- drop(crossprod(tj))
+      if (!is.finite(denom) || denom <= 0) {
+        explained_ss[j] <- 0
+        next
+      }
+      before <- sum(residual * residual)
+      pj <- crossprod(residual, tj) / denom
+      residual <- residual - tj %*% t(pj)
+      after <- sum(residual * residual)
+      gain <- before - after
+      explained_ss[j] <- if (is.finite(gain) && gain > 0) gain else 0
     }
-    before <- sum(residual * residual)
-    pj <- crossprod(residual, tj) / denom
-    residual <- residual - tj %*% t(pj)
-    after <- sum(residual * residual)
-    gain <- before - after
-    explained_ss[j] <- if (is.finite(gain) && gain > 0) gain else 0
   }
 
   denom_df <- max(1, nrow(Xscaled) - 1L)
@@ -265,6 +280,13 @@
     variance_total = total_ss / denom_df,
     variance_basis = "X"
   )
+}
+
+.maybe_attach_pls_variance_explained <- function(model, Xtrain, return_variance = TRUE) {
+  if (!isTRUE(return_variance)) {
+    return(model)
+  }
+  .attach_pls_variance_explained(model, Xtrain)
 }
 
 .attach_pls_variance_explained <- function(model, Xtrain) {
@@ -2290,12 +2312,13 @@ kernel_pls_r <- function(Xtrain,
                          fast_block = 1L,
                          gaussian_y = FALSE,
                          gaussian_y_dim = NULL,
-	                  gaussian_y_seed = seed,
+                          gaussian_y_seed = seed,
 	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
-                         proj = FALSE) {
+                           return_variance = TRUE,
+                           proj = FALSE) {
   stop("The pure-R kernel PLS backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
 
@@ -2330,6 +2353,7 @@ kernel_pls_cpp <- function(Xtrain,
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
+                           return_variance = TRUE,
                            proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
@@ -2357,7 +2381,8 @@ kernel_pls_cpp <- function(Xtrain,
       gaussian_y_dim = gaussian_y_dim,
       gaussian_y_seed = gaussian_y_seed,
       classifier = classifier,
-      lda_ridge = lda_ridge
+      lda_ridge = lda_ridge,
+      return_variance = return_variance
     )
   )
 }
@@ -2387,6 +2412,7 @@ kernel_pls_cuda <- function(Xtrain,
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
+                            return_variance = TRUE,
 	  proj = FALSE,
                             ...) {
   method <- match.arg(method)
@@ -2408,7 +2434,8 @@ kernel_pls_cuda <- function(Xtrain,
         gaussian_y_dim = gaussian_y_dim,
         gaussian_y_seed = gaussian_y_seed,
         classifier = classifier,
-        lda_ridge = lda_ridge
+        lda_ridge = lda_ridge,
+        return_variance = return_variance
       ),
       if (identical(method, "simpls")) list(fast_block = fast_block) else list(),
       list(...)
@@ -2548,6 +2575,7 @@ opls_r <- function(Xtrain,
                    classifier = c("argmax", "lda_cpp", "lda_cuda"),
                    lda_ridge = 1e-8,
                    fit = FALSE,
+                   return_variance = TRUE,
                    proj = FALSE) {
   stop("The pure-R OPLS backend has been removed; use backend='cpp' or backend='cuda'.", call. = FALSE)
 }
@@ -2579,6 +2607,7 @@ opls_cpp <- function(Xtrain,
                      classifier = c("argmax", "lda_cpp", "lda_cuda"),
                      lda_ridge = 1e-8,
                      fit = FALSE,
+                     return_variance = TRUE,
                      proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
@@ -2603,7 +2632,8 @@ opls_cpp <- function(Xtrain,
       gaussian_y_dim = gaussian_y_dim,
       gaussian_y_seed = gaussian_y_seed,
       classifier = classifier,
-      lda_ridge = lda_ridge
+      lda_ridge = lda_ridge,
+      return_variance = return_variance
     )
   )
 }
@@ -2630,6 +2660,7 @@ opls_cuda <- function(Xtrain,
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
+                      return_variance = TRUE,
 	  proj = FALSE,
                       ...) {
   method <- match.arg(method)
@@ -2648,7 +2679,8 @@ opls_cuda <- function(Xtrain,
         gaussian_y_dim = gaussian_y_dim,
         gaussian_y_seed = gaussian_y_seed,
         classifier = classifier,
-        lda_ridge = lda_ridge
+        lda_ridge = lda_ridge,
+        return_variance = return_variance
       ),
       if (identical(method, "simpls")) list(fast_block = fast_block) else list(),
       list(...)
@@ -2704,6 +2736,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param svds_tol Tolerance placeholder passed through to the backend.
 #' @param seed Random seed.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
+#' @param return_variance Compute predictor-space latent-variable variance
+#'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
+#'   plotting variance metadata.
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param gpu_device_state Keep selected SIMPLS workspaces resident on the GPU when `TRUE`.
 #' @param gpu_qr Use GPU QR finalization when available.
@@ -2753,7 +2788,8 @@ simpls_gpu = function(Xtrain,
 	                      gaussian_y_seed = seed,
 	                      classifier = c("argmax", "lda_cpp", "lda_cuda"),
 	                      lda_ridge = 1e-8,
-	                      regression_head = c("standard", "linear_cpp", "linear_cuda")) {
+	                      regression_head = c("standard", "linear_cpp", "linear_cuda"),
+                          return_variance = TRUE) {
   if (!has_cuda()) {
     stop("simpls_gpu requires a CUDA-enabled fastPLS build")
   }
@@ -2818,7 +2854,7 @@ simpls_gpu = function(Xtrain,
   if (!is.null(fused_model)) {
     fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
     fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
-    fused_model <- .attach_pls_variance_explained(fused_model, Xtrain)
+    fused_model <- .maybe_attach_pls_variance_explained(fused_model, Xtrain, return_variance)
     return(fused_model)
   }
   fit_expr <- function() {
@@ -2860,7 +2896,7 @@ simpls_gpu = function(Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
-  model <- .attach_pls_variance_explained(model, Xtrain)
+  model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
   if (!is.null(Xtest)) {
     Xtest <- as.matrix(Xtest)
@@ -2934,7 +2970,8 @@ plssvd_gpu = function(Xtrain,
 	                      gaussian_y_seed = seed,
 	                      classifier = c("argmax", "lda_cpp", "lda_cuda"),
 	                      lda_ridge = 1e-8,
-	                      regression_head = c("standard", "linear_cpp", "linear_cuda")) {
+	                      regression_head = c("standard", "linear_cpp", "linear_cuda"),
+                          return_variance = TRUE) {
   if (!has_cuda()) {
     stop("plssvd_gpu requires a CUDA-enabled fastPLS build")
   }
@@ -2990,7 +3027,7 @@ plssvd_gpu = function(Xtrain,
   if (!is.null(fused_model)) {
     fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
     fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
-    fused_model <- .attach_pls_variance_explained(fused_model, Xtrain)
+    fused_model <- .maybe_attach_pls_variance_explained(fused_model, Xtrain, return_variance)
     return(fused_model)
   }
   fit_fun <- if (use_xprod_default) pls.model1.gpu.implicit.xprod else pls.model1.gpu
@@ -3024,7 +3061,7 @@ plssvd_gpu = function(Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
-  model <- .attach_pls_variance_explained(model, Xtrain)
+  model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
   if (!is.null(Xtest)) {
     Xtest <- as.matrix(Xtest)
@@ -5155,6 +5192,7 @@ pls =  function (Xtrain,
 	                 lda_ridge = 1e-8,
 	                 regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                 fit = FALSE,
+                 return_variance = TRUE,
                  proj = FALSE,
                  perm.test = FALSE,
                  times = 100,
@@ -5190,6 +5228,7 @@ pls =  function (Xtrain,
       gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
+    args$return_variance <- return_variance
     if (identical(backend, "cuda")) {
       args <- c(args, list(
         gpu_qr = gpu_qr,
@@ -5222,6 +5261,7 @@ pls =  function (Xtrain,
       gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
+    args$return_variance <- return_variance
     if (identical(backend, "cuda")) {
       args <- c(args, list(
         gpu_qr = gpu_qr,
@@ -5266,7 +5306,8 @@ pls =  function (Xtrain,
         gaussian_y_seed = gaussian_y_seed,
 	        classifier = classifier,
 	        lda_ridge = lda_ridge,
-	        regression_head = regression_head
+	        regression_head = regression_head,
+            return_variance = return_variance
 	      ))
     }
     return(simpls_gpu(
@@ -5298,7 +5339,8 @@ pls =  function (Xtrain,
       gaussian_y_seed = gaussian_y_seed,
 	      classifier = classifier,
 	      lda_ridge = lda_ridge,
-	      regression_head = regression_head
+	      regression_head = regression_head,
+          return_variance = return_variance
 	    ))
   }
 
@@ -5489,7 +5531,7 @@ pls =  function (Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 		  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
-  model <- .attach_pls_variance_explained(model, Xtrain)
+  model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
 
 #  model$R2Y[i] = 1 - sum(((Ytrain - model$Yfit[, , i]))^2)/sum(t(t(Ytrain) -  colMeans(Ytrain))^2)

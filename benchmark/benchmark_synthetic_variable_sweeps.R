@@ -533,29 +533,29 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   fit_call <- function() {
   if (identical(spec$engine, "GPU")) {
       if (identical(spec$method_panel, "plssvd")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = "cuda", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = "cuda", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "simpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = "cuda", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = "cuda", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", inner.method = "simpls", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", inner.method = "simpls", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", inner.method = "simpls", kernel = "linear", classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", inner.method = "simpls", kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
     }
 
     backend <- "cpp"
     svd_method <- if (identical(spec$backend_algorithm, "rsvd_cpu")) "cpu_rsvd" else "irlba"
     if (identical(spec$method_panel, "plssvd") || identical(spec$method_panel, "simpls")) {
-      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "opls")) {
-      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = backend, inner.method = "simpls", north = opls_layout$north, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = backend, inner.method = "simpls", north = opls_layout$north, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "kernelpls")) {
-      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = backend, inner.method = "simpls", kernel = "linear", svd.method = svd_method, classifier = spec$classifier, fit = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = backend, inner.method = "simpls", kernel = "linear", svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     stop("Unsupported method panel: ", spec$method_panel)
   }
