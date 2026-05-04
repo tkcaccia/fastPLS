@@ -253,26 +253,23 @@ mtext("Two-class colon gene-expression train/test PLS score plots", outer = TRUE
 par(old_par)
 ```
 
-The second example uses all three `lymphoma` gene-expression classes from KODAMA
-and fits OPLS with two
-orthogonal components (`north = 2`). The displayed two-dimensional score map is
-computed after the OPLS orthogonal filtering, so the three lymphoma classes sit
-near the three vertices of the omics score triangle.
+The second example uses the three breast-cancer subtypes in the
+`breast.TCGA` multi-omics dataset from mixOmics and fits OPLS with two
+orthogonal components (`north = 2`). The example uses the dataset's predefined
+training and test sets.
 
-```{r lymphoma-three-class-opls, fig.width = 7, fig.height = 3.5}
-data("lymphoma", package = "KODAMA")
-set.seed(201)
-X_three <- as.matrix(lymphoma$data)
-y_three <- droplevels(lymphoma$class)
-train_three <- unlist(tapply(seq_along(y_three), y_three, function(i) {
-  sample(i, floor(0.7 * length(i)))
-}))
+```{r breast-tcga-three-class-opls, fig.width = 7, fig.height = 3.5}
+data("breast.TCGA", package = "mixOmics")
+X_three <- as.matrix(breast.TCGA$data.train$mrna)
+y_three <- droplevels(breast.TCGA$data.train$subtype)
+X_three_test <- as.matrix(breast.TCGA$data.test$mrna)
+y_three_test <- factor(breast.TCGA$data.test$subtype, levels = levels(y_three))
 
 opls_three <- pls(
-  X_three[train_three, , drop = FALSE],
-  y_three[train_three],
-  X_three[-train_three, , drop = FALSE],
-  y_three[-train_three],
+  X_three,
+  y_three,
+  X_three_test,
+  y_three_test,
   ncomp = 1:2,
   method = "opls",
   backend = "cpp",
@@ -287,10 +284,9 @@ old_par <- par(mfrow = c(1, 2), mar = c(3.2, 3.2, 2.2, 0.8))
 plot(
   opls_three,
   score.set = "train",
-  groups = y_three[train_three],
+  groups = y_three,
   ellipse = TRUE,
   ellipse.type = "hotelling",
-  xlim = c(-0.16, 0.42),
   main = "OPLS training, north = 2"
 )
 plot(
