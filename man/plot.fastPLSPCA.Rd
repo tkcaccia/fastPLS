@@ -17,6 +17,7 @@
   x,
   comps = c(1L, 2L),
   groups = NULL,
+  score.set = c("auto", "train", "test"),
   ellipse = FALSE,
   ellipse.type = c("confidence", "hotelling"),
   conf = 0.95,
@@ -27,6 +28,7 @@
 \item{x}{A \code{fastPLSPCA} or \code{fastPLS} object.}
 \item{comps}{Two component indices to plot.}
 \item{groups}{Optional grouping vector for color and grouped ellipses.}
+\item{score.set}{For PLS objects, plot \code{"train"} scores, \code{"test"} scores, or \code{"auto"} to use training scores when available.}
 \item{ellipse}{Logical; draw confidence ellipses when \code{TRUE}.}
 \item{ellipse.type}{Either \code{"confidence"} for a covariance confidence ellipse or \code{"hotelling"} for a Hotelling's T2 ellipse.}
 \item{conf}{Confidence level.}

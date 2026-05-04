@@ -212,6 +212,24 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_true(is.data.frame(cls_pred$Ypred))
   expect_equal(nrow(cls_pred$Ypred), 5L)
 
+  plot_model <- pls(
+    A[1:60, , drop = FALSE],
+    y[1:60],
+    A[61:70, , drop = FALSE],
+    y[61:70],
+    ncomp = 1:2,
+    method = "opls",
+    svd.method = "cpu_rsvd",
+    fit = TRUE,
+    proj = TRUE
+  )
+  png_file <- tempfile(fileext = ".png")
+  grDevices::png(png_file)
+  expect_silent(plot(plot_model, score.set = "train", groups = y[1:60]))
+  expect_silent(plot(plot_model, score.set = "test", groups = plot_model$Ypred[[length(plot_model$ncomp)]]))
+  grDevices::dev.off()
+  unlink(png_file)
+
   C1 <- fastcor(A, byrow = FALSE, diag = FALSE)
   expect_true(is.matrix(C1))
   expect_equal(dim(C1), c(ncol(A), ncol(A)))

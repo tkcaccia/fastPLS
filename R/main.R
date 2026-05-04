@@ -3971,6 +3971,8 @@ pca <- function(x,
 #' @param x A `fastPLSPCA` object.
 #' @param comps Two component indices.
 #' @param groups Optional grouping vector for color and grouped ellipses.
+#' @param score.set For PLS objects, plot `"train"` scores, `"test"` scores,
+#'   or `"auto"` to use training scores when available.
 #' @param ellipse Logical; draw confidence ellipses when `TRUE`.
 #' @param ellipse.type `"confidence"` or `"hotelling"`.
 #' @param conf Confidence level.
@@ -4018,14 +4020,38 @@ plot.fastPLSPCA <- function(x,
   )
 }
 
-.fastpls_model_scores <- function(x) {
-  if (inherits(x, "fastPLSKernel") || inherits(x, "fastPLSOpls")) {
-    if (!is.null(x$inner_model)) return(.fastpls_model_scores(x$inner_model))
+.fastpls_score_matrix <- function(x, slot) {
+  scores <- x[[slot]]
+  if (!is.null(scores) && length(scores) > 0L && all(dim(scores) > 0L)) {
+    scores <- as.matrix(scores)
+    colnames(scores) <- paste0("LV", seq_len(ncol(scores)))
+    return(scores)
+  }
+  NULL
+}
+
+.fastpls_model_scores <- function(x, score.set = c("auto", "train", "test")) {
+  score.set <- match.arg(score.set)
+  if (identical(score.set, "train")) {
+    scores <- .fastpls_score_matrix(x, "Ttrain")
+    if (!is.null(scores)) return(scores)
+    if (!is.null(x$inner_model)) return(.fastpls_model_scores(x$inner_model, score.set = "train"))
+    return(NULL)
+  }
+  if (identical(score.set, "test")) {
+    scores <- .fastpls_score_matrix(x, "Ttest")
+    if (!is.null(scores)) return(scores)
+    if (!is.null(x$inner_model)) return(.fastpls_model_scores(x$inner_model, score.set = "test"))
+    return(NULL)
   }
   if (!is.null(x$Ttrain) && length(x$Ttrain) > 0L && all(dim(x$Ttrain) > 0L)) {
     scores <- as.matrix(x$Ttrain)
     colnames(scores) <- paste0("LV", seq_len(ncol(scores)))
     return(scores)
+  }
+  if (!is.null(x$inner_model)) {
+    scores <- .fastpls_model_scores(x$inner_model, score.set = "auto")
+    if (!is.null(scores)) return(scores)
   }
   if (!is.null(x$Ttest) && length(x$Ttest) > 0L && all(dim(x$Ttest) > 0L)) {
     scores <- as.matrix(x$Ttest)
@@ -4040,13 +4066,15 @@ plot.fastPLSPCA <- function(x,
 plot.fastPLS <- function(x,
                          comps = c(1L, 2L),
                          groups = NULL,
+                         score.set = c("auto", "train", "test"),
                          ellipse = FALSE,
                          ellipse.type = c("confidence", "hotelling"),
                          conf = 0.95,
                          ...) {
-  scores <- .fastpls_model_scores(x)
+  score.set <- match.arg(score.set)
+  scores <- .fastpls_model_scores(x, score.set = score.set)
   if (is.null(scores)) {
-    stop("No PLS scores are stored in this object. Refit with fit=TRUE or predict with proj=TRUE before plotting.", call. = FALSE)
+    stop("The requested PLS scores are not stored. Refit with fit=TRUE for training scores or proj=TRUE for test scores.", call. = FALSE)
   }
   dots <- list(...)
   main <- if (is.null(dots$main)) "fastPLS scores" else dots$main
