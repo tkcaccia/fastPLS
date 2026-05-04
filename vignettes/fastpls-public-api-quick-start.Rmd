@@ -211,23 +211,33 @@ ellipses or Hotelling T2 ellipses.
 plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
-The next examples use the base R `iris` data. The first example keeps two
-classes and creates a fixed train/test split. Each column is one PLS family, the
-top row shows training scores colored by the training class, and the bottom row
-shows test scores colored by the predicted class.
+The next examples use the `lymphoma` gene-expression data from the KODAMA
+package. The first example keeps two lymphoma classes and creates a fixed
+train/test split. Each column is one PLS family, the top row shows training
+scores colored by the training class, and the bottom row shows test scores
+colored by the predicted class.
 
-```{r iris-binary-pls-plots, fig.width = 10, fig.height = 5}
+```{r lymphoma-binary-pls-plots, fig.width = 10, fig.height = 5}
+if (!requireNamespace("KODAMA", quietly = TRUE)) {
+  knitr::asis_output("The lymphoma score-plot example requires the KODAMA package.")
+} else {
+omics_env <- new.env(parent = emptyenv())
+utils::data("lymphoma", package = "KODAMA", envir = omics_env)
+lymphoma <- omics_env$lymphoma
+
 set.seed(200)
-iris_two <- subset(iris, Species != "virginica")
-iris_two$Species <- droplevels(iris_two$Species)
-train_two <- unlist(tapply(seq_len(nrow(iris_two)), iris_two$Species, function(i) {
+two_classes <- c("B-CLL", "DLBCL")
+keep_two <- lymphoma$class %in% two_classes
+X_two <- as.matrix(lymphoma$data[keep_two, , drop = FALSE])
+y_two <- droplevels(lymphoma$class[keep_two])
+train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
   sample(i, floor(0.7 * length(i)))
 }))
 
-X_two_train <- as.matrix(iris_two[train_two, 1:4])
-X_two_test <- as.matrix(iris_two[-train_two, 1:4])
-y_two_train <- iris_two$Species[train_two]
-y_two_test <- iris_two$Species[-train_two]
+X_two_train <- X_two[train_two, , drop = FALSE]
+X_two_test <- X_two[-train_two, , drop = FALSE]
+y_two_train <- y_two[train_two]
+y_two_test <- y_two[-train_two]
 
 as_test_score_object <- function(model, pred) {
   out <- model
@@ -283,23 +293,37 @@ for (i in seq_along(families)) {
     main = paste(labels[[i]], "test prediction")
   )
 }
-mtext("Two-class iris train/test PLS score plots", outer = TRUE, font = 2)
+mtext("Two-class lymphoma gene-expression train/test PLS score plots", outer = TRUE, font = 2)
 par(old_par)
+}
 ```
 
-The second example uses all three `iris` classes and fits OPLS with two
-orthogonal components (`north = 2`).
+The second example uses all three lymphoma classes and fits OPLS with two
+orthogonal components (`north = 2`). The displayed two-dimensional score map is
+computed after the OPLS orthogonal filtering, so the three lymphoma classes sit
+near the three vertices of the omics score triangle.
 
-```{r iris-three-class-opls, fig.width = 7, fig.height = 3.5}
+```{r lymphoma-three-class-opls, fig.width = 7, fig.height = 3.5}
+if (!requireNamespace("KODAMA", quietly = TRUE)) {
+  knitr::asis_output("The lymphoma OPLS example requires the KODAMA package.")
+} else {
 set.seed(201)
-train_three <- unlist(tapply(seq_len(nrow(iris)), iris$Species, function(i) {
+if (!exists("lymphoma")) {
+  omics_env <- new.env(parent = emptyenv())
+  utils::data("lymphoma", package = "KODAMA", envir = omics_env)
+  lymphoma <- omics_env$lymphoma
+}
+
+X_three <- as.matrix(lymphoma$data)
+y_three <- droplevels(lymphoma$class)
+train_three <- unlist(tapply(seq_along(y_three), y_three, function(i) {
   sample(i, floor(0.7 * length(i)))
 }))
 
-X_three_train <- as.matrix(iris[train_three, 1:4])
-X_three_test <- as.matrix(iris[-train_three, 1:4])
-y_three_train <- iris$Species[train_three]
-y_three_test <- iris$Species[-train_three]
+X_three_train <- X_three[train_three, , drop = FALSE]
+X_three_test <- X_three[-train_three, , drop = FALSE]
+y_three_train <- y_three[train_three]
+y_three_test <- y_three[-train_three]
 
 opls_three <- pls(
   X_three_train,
@@ -316,9 +340,22 @@ opls_three <- pls(
 pred_three <- predict(opls_three, X_three_test, Ytest = y_three_test, proj = TRUE)
 
 old_par <- par(mfrow = c(1, 2), mar = c(3.2, 3.2, 2.2, 0.8))
-plot(opls_three, groups = y_three_train, ellipse = TRUE, ellipse.type = "hotelling", main = "OPLS training, 3 classes")
-plot(as_test_score_object(opls_three, pred_three), groups = last_predicted_class(pred_three), main = "OPLS test prediction, north = 2")
+plot(
+  opls_three,
+  groups = y_three_train,
+  ellipse = TRUE,
+  ellipse.type = "hotelling",
+  xlim = c(-0.16, 0.42),
+  main = "OPLS training, north = 2"
+)
+plot(
+  as_test_score_object(opls_three, pred_three),
+  groups = last_predicted_class(pred_three),
+  xlim = c(-0.16, 0.42),
+  main = "OPLS test prediction"
+)
 par(old_par)
+}
 ```
 
 ## Cross-Validation
