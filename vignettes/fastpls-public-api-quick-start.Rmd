@@ -216,7 +216,7 @@ plsgenomics package. Each column is one PLS family, the top row shows training
 scores colored by the training class, and the bottom row shows test scores
 colored by the predicted class.
 
-```{r colon-binary-pls-plots, fig.width = 10, fig.height = 5}
+```{r colon-binary-pls-plots, fig.width = 11, fig.height = 6}
 data("Colon", package = "plsgenomics")
 set.seed(200)
 X_two <- as.matrix(Colon$X)
@@ -237,7 +237,7 @@ fits_two <- lapply(seq_along(families), function(i) {
   )
 })
 
-old_par <- par(mfrow = c(2, 4), mar = c(3.2, 3.2, 2.2, 0.8), oma = c(0, 0, 1.2, 0))
+old_par <- par(mfrow = c(2, 4), mar = c(4.2, 4.2, 2.2, 0.8), oma = c(0, 0, 1.2, 0))
 for (i in seq_along(families)) {
   plot(fits_two[[i]], score.set = "train", groups = y_two[train_two], ellipse = TRUE, main = paste(labels[[i]], "training"))
 }
@@ -258,7 +258,7 @@ The second example uses the three breast-cancer subtypes in the
 orthogonal components (`north = 2`). The example uses the dataset's predefined
 training and test sets.
 
-```{r breast-tcga-three-class-opls, fig.width = 7, fig.height = 3.5}
+```{r breast-tcga-three-class-opls, fig.width = 7.5, fig.height = 4}
 data("breast.TCGA", package = "mixOmics")
 X_three <- as.matrix(breast.TCGA$data.train$mrna)
 y_three <- droplevels(breast.TCGA$data.train$subtype)
@@ -280,7 +280,7 @@ opls_three <- pls(
   seed = 201
 )
 
-old_par <- par(mfrow = c(1, 2), mar = c(3.2, 3.2, 2.2, 0.8))
+old_par <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2.2, 0.8))
 plot(
   opls_three,
   score.set = "train",

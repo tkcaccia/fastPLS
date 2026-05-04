@@ -22,6 +22,12 @@ dt <- fread(raw_file)[status %in% c("ok", "capped")]
 if (!nrow(dt)) stop("No successful benchmark rows to plot")
 if (!"classifier" %in% names(dt)) dt[, classifier := "argmax"]
 dt[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
+if (any(grepl("^R", dt$implementation_label))) {
+  stop(
+    "R implementation rows were found in dataset_memory_compare_raw.csv. ",
+    "This raw table is stale or was produced by an old benchmark; rerun with the current package."
+  )
+}
 
 backend_cols <- c(
   irlba = "#0073C2FF",
@@ -45,7 +51,6 @@ dt[, backend_algorithm := fcase(
 
 dt[, implementation := fcase(
   grepl("^CUDA", implementation_label), "cuda",
-  grepl("^R", implementation_label), "R",
   grepl("^Cpp", implementation_label), "cpp",
   default = "pls_pkg"
 )]

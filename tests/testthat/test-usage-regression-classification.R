@@ -20,6 +20,9 @@ test_that("pls and predict support regression workflow", {
   expect_true(is.array(fit$Ypred))
   expect_equal(dim(fit$Ypred), c(length(idx), ncol(Y), 3))
   expect_length(fit$Q2Y, 3L)
+  expect_length(fit$variance_explained, 3L)
+  expect_true(all(is.finite(fit$variance_explained)))
+  expect_equal(fit$x_variance_explained, fit$variance_explained)
 
   pr <- predict(fit, X[idx, , drop = FALSE], Ytest = Y[idx, , drop = FALSE], proj = TRUE)
   expect_true(is.array(pr$Ypred))
@@ -50,6 +53,8 @@ test_that("pls and predict support classification workflow", {
   expect_equal(ncol(fit$Ypred), 2L)
   expect_true(is.data.frame(fit$Yfit))
   expect_equal(levels(fit$Ypred[[1]]), levels(y))
+  expect_length(fit$variance_explained, 2L)
+  expect_true(all(is.finite(fit$variance_explained)))
 
   pr <- predict(fit, X[idx, , drop = FALSE], Ytest = y[idx], proj = FALSE)
   expect_true(is.data.frame(pr$Ypred))
@@ -223,6 +228,8 @@ test_that("SVD utilities and helper functions are usable in practice", {
     fit = TRUE,
     proj = TRUE
   )
+  expect_length(plot_model$variance_explained, 2L)
+  expect_true(all(is.finite(plot_model$variance_explained)))
   png_file <- tempfile(fileext = ".png")
   grDevices::png(png_file)
   expect_silent(plot(plot_model, score.set = "train", groups = y[1:60]))

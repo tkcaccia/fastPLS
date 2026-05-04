@@ -18,6 +18,12 @@ summary_file <- file.path(results_dir, "synthetic_variable_sweeps_summary.csv")
 raw <- fread(raw_file)
 ok <- raw[status == "ok"]
 if (!nrow(ok)) stop("No successful synthetic variable-sweep rows to plot")
+if ("implementation" %in% names(ok) && any(ok$implementation == "R")) {
+  stop(
+    "R implementation rows were found in synthetic_variable_sweeps_raw.csv. ",
+    "This raw table is stale or was produced by an old benchmark; rerun with the current package."
+  )
+}
 if (!"classifier" %in% names(ok)) ok[, classifier := "argmax"]
 ok[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
 ok[, backend_algorithm := fifelse(

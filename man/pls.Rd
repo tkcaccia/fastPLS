@@ -174,7 +174,9 @@ using `backend = "cuda"`.}
 finalization.}
 }
 \value{
-A `fastPLS` object.
+A `fastPLS` object. Fitted objects include `variance_explained`,
+`cumulative_variance_explained`, and matching `x_*` aliases containing the
+fraction of training predictor variance explained by each latent variable.
 }
 \description{
 `pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,

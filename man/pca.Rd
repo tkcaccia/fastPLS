@@ -21,7 +21,8 @@ pca(
 }
 \value{
 A \code{fastPLSPCA} object containing scores, loadings, standard deviations,
-variance explained, preprocessing values, and SVD metadata.
+per-component \code{variance_explained}, cumulative variance explained,
+preprocessing values, and SVD metadata.
 }
 \description{
 Computes PCA from the selected fastPLS SVD backend and returns a compact object

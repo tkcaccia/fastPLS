@@ -92,6 +92,13 @@ include_pls_pkg <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_PLS_PKG", TRUE)
 include_classification <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_CLASSIFICATION", TRUE)
 measure_memory <- bool_env("FASTPLS_MEASURE_MEMORY", TRUE)
 cuda_ok <- tryCatch(isTRUE(fastPLS::has_cuda()), error = function(e) FALSE)
+if (isTRUE(include_r)) {
+  warning(
+    "FASTPLS_SYNTH_VAR_INCLUDE_R is ignored because pure-R PLS implementations were removed; using cpp/cuda/pls_pkg only.",
+    call. = FALSE
+  )
+  include_r <- FALSE
+}
 
 proc_rss_mb <- function(pid = Sys.getpid()) {
   status_file <- file.path("/proc", as.character(pid), "status")

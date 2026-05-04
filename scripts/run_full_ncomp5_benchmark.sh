@@ -20,7 +20,7 @@ echo "[INFO] lib=${LIB_LOC}"
 echo "[INFO] ncomp=${NCOMP}"
 
 echo "[INFO] Installing fastPLS into isolated benchmark library"
-R CMD INSTALL --library="${LIB_LOC}" "${REPO_ROOT}" >"${RUN_ROOT}/logs/install.log" 2>&1
+R CMD INSTALL --preclean --library="${LIB_LOC}" "${REPO_ROOT}" >"${RUN_ROOT}/logs/install.log" 2>&1
 
 export R_LIBS_USER="${LIB_LOC}${R_LIBS_USER:+:${R_LIBS_USER}}"
 export FASTPLS_BENCH_LIB="${LIB_LOC}"

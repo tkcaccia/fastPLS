@@ -44,6 +44,8 @@ test_that("pca uses public SVD backends and returns plottable scores", {
   expect_equal(dim(fit$scores), c(60L, 3L))
   expect_equal(dim(fit$loadings), c(8L, 3L))
   expect_true(all(is.finite(fit$variance_explained)))
+  expect_equal(length(fit$cumulative_variance_explained), 3L)
+  expect_true(all(diff(fit$cumulative_variance_explained) >= -1e-12))
 })
 
 test_that("fastPLS does not mask base svd", {

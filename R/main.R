@@ -210,6 +210,100 @@
   model
 }
 
+.fastpls_named_components <- function(x, prefix) {
+  names(x) <- paste0(prefix, seq_along(x))
+  x
+}
+
+.pls_x_variance_explained <- function(model, Xtrain) {
+  if (is.null(model$R) || length(model$R) == 0L || is.null(model$ncomp)) {
+    return(NULL)
+  }
+  k <- min(max(as.integer(model$ncomp), na.rm = TRUE), ncol(as.matrix(model$R)))
+  if (!is.finite(k) || is.na(k) || k < 1L) {
+    return(NULL)
+  }
+  Xscaled <- .fastpls_scaled_by_model(model, Xtrain)
+  total_ss <- sum(Xscaled * Xscaled)
+  if (!is.finite(total_ss) || total_ss <= 0) {
+    return(NULL)
+  }
+
+  scores <- .fastpls_score_matrix(model, "Ttrain")
+  if (is.null(scores) || ncol(scores) < k || nrow(scores) != nrow(Xscaled)) {
+    scores <- .fastpls_latent_scores(model, Xtrain, ncomp = k, backend = "cpu")
+  }
+  scores <- as.matrix(scores)[, seq_len(k), drop = FALSE]
+
+  residual <- Xscaled
+  explained_ss <- numeric(k)
+  for (j in seq_len(k)) {
+    tj <- scores[, j, drop = FALSE]
+    denom <- drop(crossprod(tj))
+    if (!is.finite(denom) || denom <= 0) {
+      explained_ss[j] <- 0
+      next
+    }
+    before <- sum(residual * residual)
+    pj <- crossprod(residual, tj) / denom
+    residual <- residual - tj %*% t(pj)
+    after <- sum(residual * residual)
+    gain <- before - after
+    explained_ss[j] <- if (is.finite(gain) && gain > 0) gain else 0
+  }
+
+  denom_df <- max(1, nrow(Xscaled) - 1L)
+  variance <- explained_ss / denom_df
+  variance_explained <- explained_ss / total_ss
+  variance <- .fastpls_named_components(variance, "LV")
+  variance_explained <- .fastpls_named_components(variance_explained, "LV")
+  cumulative <- .fastpls_named_components(cumsum(variance_explained), "LV")
+  list(
+    variance = variance,
+    variance_explained = variance_explained,
+    cumulative_variance_explained = cumulative,
+    variance_total = total_ss / denom_df,
+    variance_basis = "X"
+  )
+}
+
+.attach_pls_variance_explained <- function(model, Xtrain) {
+  stats <- try(.pls_x_variance_explained(model, Xtrain), silent = TRUE)
+  if (inherits(stats, "try-error") || is.null(stats)) {
+    return(model)
+  }
+  model$variance <- stats$variance
+  model$variance_explained <- stats$variance_explained
+  model$cumulative_variance_explained <- stats$cumulative_variance_explained
+  model$variance_total <- stats$variance_total
+  model$variance_basis <- stats$variance_basis
+  model$x_variance <- stats$variance
+  model$x_variance_explained <- stats$variance_explained
+  model$x_cumulative_variance_explained <- stats$cumulative_variance_explained
+  model$x_variance_total <- stats$variance_total
+  model
+}
+
+.inherit_inner_variance_explained <- function(model, inner) {
+  fields <- c(
+    "variance",
+    "variance_explained",
+    "cumulative_variance_explained",
+    "variance_total",
+    "variance_basis",
+    "x_variance",
+    "x_variance_explained",
+    "x_cumulative_variance_explained",
+    "x_variance_total"
+  )
+  for (field in fields) {
+    if (!is.null(inner[[field]])) {
+      model[[field]] <- inner[[field]]
+    }
+  }
+  model
+}
+
 .normalize_classifier <- function(classifier) {
   match.arg(classifier, c("argmax", "lda_cpp", "lda_cuda"))
 }
@@ -2149,6 +2243,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
     xprod_mode = inner$xprod_mode,
     gpu_resident = isTRUE(inner$gpu_resident)
   )
+  out <- .inherit_inner_variance_explained(out, inner)
   class(out) <- c("fastPLSKernel", "fastPLS")
   if (!is.null(Xtest)) {
     res <- predict(out, Xtest, Ytest = Ytest, proj = proj)
@@ -2408,6 +2503,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
     xprod_mode = inner$xprod_mode,
     gpu_resident = isTRUE(inner$gpu_resident)
   )
+  out <- .inherit_inner_variance_explained(out, inner)
   class(out) <- c("fastPLSOpls", "fastPLS")
   if (!is.null(Xtest)) {
     res <- predict(out, Xtest, Ytest = Ytest, proj = proj)
@@ -2722,6 +2818,7 @@ simpls_gpu = function(Xtrain,
   if (!is.null(fused_model)) {
     fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
     fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
+    fused_model <- .attach_pls_variance_explained(fused_model, Xtrain)
     return(fused_model)
   }
   fit_expr <- function() {
@@ -2763,6 +2860,7 @@ simpls_gpu = function(Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
+  model <- .attach_pls_variance_explained(model, Xtrain)
 
   if (!is.null(Xtest)) {
     Xtest <- as.matrix(Xtest)
@@ -2892,6 +2990,7 @@ plssvd_gpu = function(Xtrain,
   if (!is.null(fused_model)) {
     fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
     fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
+    fused_model <- .attach_pls_variance_explained(fused_model, Xtrain)
     return(fused_model)
   }
   fit_fun <- if (use_xprod_default) pls.model1.gpu.implicit.xprod else pls.model1.gpu
@@ -2925,6 +3024,7 @@ plssvd_gpu = function(Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
+  model <- .attach_pls_variance_explained(model, Xtrain)
 
   if (!is.null(Xtest)) {
     Xtest <- as.matrix(Xtest)
@@ -3810,7 +3910,8 @@ fastsvd <- function(x,
 #' @param scale. Logical; scale columns before SVD.
 #' @param svd.method SVD backend used by [fastsvd()].
 #' @param ... Additional arguments passed to [fastsvd()].
-#' @return A `fastPLSPCA` object.
+#' @return A `fastPLSPCA` object with scores, loadings, and per-component
+#'   `variance_explained` plus cumulative variance explained.
 #' @export
 pca <- function(x,
                 ncomp = 2L,
@@ -3841,13 +3942,23 @@ pca <- function(x,
   rownames(loadings) <- colnames(x)
   colnames(loadings) <- colnames(scores)
   sdev <- decomp$d[seq_len(ncomp)] / sqrt(max(1, nrow(x_scaled) - 1L))
-  variance <- sdev^2
+  variance <- .fastpls_named_components(sdev^2, "PC")
+  total_variance <- sum(x_scaled^2 / max(1, nrow(x_scaled) - 1L))
+  variance_explained <- if (is.finite(total_variance) && total_variance > 0) {
+    variance / total_variance
+  } else {
+    rep(NA_real_, length(variance))
+  }
+  variance_explained <- .fastpls_named_components(as.numeric(variance_explained), "PC")
   out <- list(
     scores = scores,
     loadings = loadings,
     sdev = sdev,
     variance = variance,
-    variance_explained = variance / sum(x_scaled^2 / max(1, nrow(x_scaled) - 1L)),
+    variance_explained = variance_explained,
+    cumulative_variance_explained = .fastpls_named_components(cumsum(variance_explained), "PC"),
+    variance_total = total_variance,
+    variance_basis = "X",
     center = x_center,
     scale = x_scale,
     svd = decomp,
@@ -3967,6 +4078,8 @@ pca <- function(x,
 #' Hotelling T2 score ellipse.
 #' By default, grouped points use filled symbols with the group color in `bg`
 #' and a black contour in `col`.
+#' Axis labels include the predictor-space variance explained by each plotted
+#' PCA component or PLS latent variable when available.
 #'
 #' @param x A `fastPLSPCA` object.
 #' @param comps Two component indices.
@@ -4030,6 +4143,21 @@ plot.fastPLSPCA <- function(x,
   NULL
 }
 
+.fastpls_model_variance_explained <- function(x) {
+  vx <- x$variance_explained
+  if (!is.null(vx) && length(vx) > 0L) {
+    return(as.numeric(vx))
+  }
+  vx <- x$x_variance_explained
+  if (!is.null(vx) && length(vx) > 0L) {
+    return(as.numeric(vx))
+  }
+  if (!is.null(x$inner_model)) {
+    return(.fastpls_model_variance_explained(x$inner_model))
+  }
+  NULL
+}
+
 .fastpls_model_scores <- function(x, score.set = c("auto", "train", "test")) {
   score.set <- match.arg(score.set)
   if (identical(score.set, "train")) {
@@ -4078,7 +4206,18 @@ plot.fastPLS <- function(x,
   }
   dots <- list(...)
   main <- if (is.null(dots$main)) "fastPLS scores" else dots$main
+  var_exp <- .fastpls_model_variance_explained(x)
+  xlab <- dots$xlab
+  ylab <- dots$ylab
+  if (is.null(xlab) && !is.null(var_exp) && length(var_exp) >= comps[1L] && is.finite(var_exp[comps[1L]])) {
+    xlab <- sprintf("LV%d (%.1f%%)", comps[1L], 100 * var_exp[comps[1L]])
+  }
+  if (is.null(ylab) && !is.null(var_exp) && length(var_exp) >= comps[2L] && is.finite(var_exp[comps[2L]])) {
+    ylab <- sprintf("LV%d (%.1f%%)", comps[2L], 100 * var_exp[comps[2L]])
+  }
   dots$main <- NULL
+  dots$xlab <- NULL
+  dots$ylab <- NULL
   do.call(
     .fastpls_plot_scores,
     c(
@@ -4089,7 +4228,9 @@ plot.fastPLS <- function(x,
         ellipse = ellipse,
         ellipse.type = match.arg(ellipse.type),
         conf = conf,
-        main = main
+        main = main,
+        xlab = xlab,
+        ylab = ylab
       ),
       dots
     )
@@ -4980,7 +5121,9 @@ pls_r <- function(...) {
 #' @param gpu_qless_qr Use the q-less GPU QR path when available.
 #' @param gpu_finalize_threshold Component threshold controlling GPU-side
 #'   finalization.
-#' @return A `fastPLS` object.
+#' @return A `fastPLS` object. Fitted objects include `variance_explained`,
+#'   `cumulative_variance_explained`, and matching `x_*` aliases containing the
+#'   fraction of training predictor variance explained by each latent variable.
 #' @export
 pls =  function (Xtrain,
                  Ytrain,
@@ -5346,6 +5489,7 @@ pls =  function (Xtrain,
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
 		  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
+  model <- .attach_pls_variance_explained(model, Xtrain)
 
 
 #  model$R2Y[i] = 1 - sum(((Ytrain - model$Yfit[, , i]))^2)/sum(t(t(Ytrain) -  colMeans(Ytrain))^2)
