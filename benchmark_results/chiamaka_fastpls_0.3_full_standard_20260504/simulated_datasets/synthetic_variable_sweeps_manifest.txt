@@ -1,0 +1,13 @@
+Synthetic variable-sweep benchmark
+out_dir = /home/chiamaka/fastPLS_usual_latest_return_variance_20260504_211939/simulated_datasets
+families = reg_n,reg_p,reg_q,class_n,class_p,class_q
+reps = 3
+requested_ncomp = 5
+timeout_sec = 1200
+max_host_rss_mb = 10240
+cuda_available = TRUE
+include_gpu = TRUE
+include_r = FALSE
+include_pls_pkg = TRUE
+rows = 3285
+ok_rows = 3285
