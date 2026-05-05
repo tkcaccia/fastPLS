@@ -53,24 +53,29 @@ run_host <- arg("run_host", Sys.info()[["nodename"]] %||% "unknown")
 install_missing <- tolower(Sys.getenv("FASTPLS_INSTALL_MISSING", "false")) %in%
   c("1", "true", "yes", "y")
 
-fastpls_grid_ids <- function() {
+fastpls_grid_ids <- function(task_type = "classification") {
   methods <- c("plssvd", "simpls", "opls", "kernelpls")
+  cpp_classifiers <- if (identical(task_type, "classification")) c("argmax", "lda_cpp") else "none"
+  cuda_classifiers <- if (identical(task_type, "classification")) c("argmax", "lda_cuda") else "none"
   ids <- character()
   for (method_name in methods) {
     for (svd_method in c("irlba", "cpu_rsvd")) {
-      for (classifier in c("argmax", "lda_cpp")) {
-        ids <- c(ids, paste("fastPLS", method_name, "cpp", svd_method, classifier, sep = "_"))
+      for (classifier in cpp_classifiers) {
+        id_parts <- c("fastPLS", method_name, "cpp", svd_method)
+        if (!identical(classifier, "none")) id_parts <- c(id_parts, classifier)
+        ids <- c(ids, paste(id_parts, collapse = "_"))
       }
     }
-    for (classifier in c("argmax", "lda_cuda")) {
-      ids <- c(ids, paste("fastPLS", method_name, "cuda", "cuda_rsvd", classifier, sep = "_"))
+    for (classifier in cuda_classifiers) {
+      id_parts <- c("fastPLS", method_name, "cuda", "cuda_rsvd")
+      if (!identical(classifier, "none")) id_parts <- c(id_parts, classifier)
+      ids <- c(ids, paste(id_parts, collapse = "_"))
     }
   }
   ids
 }
 
-base_method_ids <- c(
-  fastpls_grid_ids(),
+external_base_method_ids <- c(
   "pls_simpls_fit", "pls_oscorespls_fit", "pls_kernelpls_fit",
   "mdatools_plsda_or_pls", "plsdepot_simpls", "pcv_simpls",
   "plsgenomics_pls_regression", "mixOmics_pls", "chemometrics_pls_eigen",
@@ -86,7 +91,7 @@ if (identical(mode, "list_methods")) {
   } else {
     "regression"
   }
-  method_ids <- base_method_ids
+  method_ids <- c(fastpls_grid_ids(task_type_guess), external_base_method_ids)
   if (identical(task_type_guess, "classification")) {
     method_ids <- c(method_ids, classification_only_method_ids)
   }
@@ -307,12 +312,14 @@ run_fastpls_variant <- function(method_name, backend, svd_method, classifier) {
     ncomp = ncomp_requested,
     method = method_name,
     backend = backend,
-    classifier = classifier,
     scaling = "centering",
     fit = FALSE,
     proj = FALSE,
     seed = 123L + replicate_id
   )
+  if (!identical(classifier, "none")) {
+    args$classifier <- classifier
+  }
   if ("return_variance" %in% names(formals(fastPLS::pls))) {
     args$return_variance <- FALSE
   }
@@ -331,18 +338,28 @@ make_fastpls_spec <- function(method_name, backend, svd_method, classifier) {
   force(svd_method)
   force(classifier)
   svd_label <- if (identical(backend, "cuda")) "cuda_rsvd" else svd_method
-  list(
-    id = paste("fastPLS", method_name, backend, svd_label, classifier, sep = "_"),
-    package = "fastPLS",
-    algorithm = fastpls_algorithm_label(method_name),
-    function_name = sprintf(
+  id_parts <- c("fastPLS", method_name, backend, svd_label)
+  if (!identical(classifier, "none")) id_parts <- c(id_parts, classifier)
+  function_name <- if (identical(classifier, "none")) {
+    sprintf(
+      "fastPLS::pls(method='%s', backend='%s', svd.method='%s')",
+      method_name, backend, svd_label
+    )
+  } else {
+    sprintf(
       "fastPLS::pls(method='%s', backend='%s', svd.method='%s', classifier='%s')",
       method_name, backend, svd_label, classifier
-    ),
+    )
+  }
+  list(
+    id = paste(id_parts, collapse = "_"),
+    package = "fastPLS",
+    algorithm = fastpls_algorithm_label(method_name),
+    function_name = function_name,
     fastpls_method = method_name,
     fastpls_backend = backend,
     fastpls_svd_method = svd_label,
-    fastpls_classifier = classifier,
+    fastpls_classifier = if (identical(classifier, "none")) NA_character_ else classifier,
     requires_cuda = identical(backend, "cuda"),
     runner = function() {
       list(
@@ -354,18 +371,20 @@ make_fastpls_spec <- function(method_name, backend, svd_method, classifier) {
   )
 }
 
-make_fastpls_specs <- function() {
+make_fastpls_specs <- function(task_type = "classification") {
   methods <- c("plssvd", "simpls", "opls", "kernelpls")
+  cpp_classifiers <- if (identical(task_type, "classification")) c("argmax", "lda_cpp") else "none"
+  cuda_classifiers <- if (identical(task_type, "classification")) c("argmax", "lda_cuda") else "none"
   specs <- list()
   k <- 1L
   for (method_name in methods) {
     for (svd_method in c("irlba", "cpu_rsvd")) {
-      for (classifier in c("argmax", "lda_cpp")) {
+      for (classifier in cpp_classifiers) {
         specs[[k]] <- make_fastpls_spec(method_name, "cpp", svd_method, classifier)
         k <- k + 1L
       }
     }
-    for (classifier in c("argmax", "lda_cuda")) {
+    for (classifier in cuda_classifiers) {
       specs[[k]] <- make_fastpls_spec(method_name, "cuda", "cuda_rsvd", classifier)
       k <- k + 1L
     }
@@ -581,7 +600,7 @@ runner_simple_named <- function(pkg, fun_name) {
 }
 
 method_specs_all <- function(task_type) {
-  specs <- c(make_fastpls_specs(), list(
+  specs <- c(make_fastpls_specs(task_type), list(
     list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
          function_name = "pls::simpls.fit", runner = function() run_pls_fit(pls::simpls.fit)),
     list(id = "pls_oscorespls_fit", package = "pls", algorithm = "NIPALS/oscores PLS",
