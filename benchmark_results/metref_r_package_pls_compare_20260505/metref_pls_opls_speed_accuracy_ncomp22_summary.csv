@@ -1,0 +1,21 @@
+method_id,package,package_version,algorithm,function_name,n_ok,median_runtime_ms,min_runtime_ms,max_runtime_ms,median_peak_memory_mb,median_accuracy,status_summary,error_messages
+fastPLS_simpls,fastPLS,0.3,SIMPLS,fastPLS::pls(method='simpls'),3,10,8,16,66.4355,0.8,ok:3,
+fastPLS_plssvd,fastPLS,0.3,PLSSVD,fastPLS::pls(method='plssvd'),3,12,11,14,88.3496,0.8,ok:3,
+pls_kernelpls_fit,pls,2.8.5,kernel PLS,pls::kernelpls.fit,3,31,30,31,3853.46,0.75,ok:3,
+pls_simpls_fit,pls,2.8.5,SIMPLS,pls::simpls.fit,3,33,31,36,3649.04,0.77,ok:3,
+plsgenomics_pls_regression,plsgenomics,1.5.3,PLS regression,plsgenomics::pls.regression,3,33,30,33,2017.35,0.77,ok:3,
+plsgenomics_pls_lda,plsgenomics,1.5.3,PLS-LDA,plsgenomics::pls.lda,3,36,34,38,2668.94,0.88,ok:3,
+chemometrics_pls_eigen,chemometrics,1.4.4,PLS eigen,chemometrics::pls_eigen,3,91,90,94,3928.59,0.81,ok:3,
+spls_splsda,spls,2.3.2,sPLS-DA,spls::splsda,3,215,208,255,11948.3,0.72,ok:3,
+spls_spls,spls,2.3.2,sPLS regression,spls::spls,3,234,232,343,12280.2,0.66,ok:3,
+mixOmics_pls,mixOmics,6.26.0,PLS regression,mixOmics::pls,3,252,246,332,12487.2,0.75,ok:3,
+mdatools_plsda_or_pls,mdatools,0.14.2,SIMPLS/PLS-DA,mdatools::plsda or mdatools::pls,3,258,252,299,11586.7,0.77,ok:3,
+mixOmics_plsda,mixOmics,6.26.0,PLS-DA,mixOmics::plsda,3,851,822,899,12488.5,0.75,ok:3,
+mixOmics_splsda,mixOmics,6.26.0,sPLS-DA,mixOmics::splsda,3,854,823,860,12469.4,0.75,ok:3,
+pls_oscorespls_fit,pls,2.8.5,NIPALS/oscores PLS,pls::oscorespls.fit,3,1003,967,1065,12024.1,0.75,ok:3,
+chemometrics_pls2_nipals,chemometrics,1.4.4,PLS2 NIPALS,chemometrics::pls2_nipals,3,1027,952,1312,12757,0.75,ok:3,
+fastPLS_simpls_fast,fastPLS,0.3,SIMPLS-fast,fastPLS::pls(method='simpls_fast'),0,,,,,,skipped_function_or_method_not_available:1,Function/method 'fastPLS::pls(method='simpls_fast')' is not available.
+pcv_simpls,pcv,1.1.0,SIMPLS,pcv::simpls,0,,,,,,error:3,Could not decode predictions from object of class: list
+plsdepot_simpls,plsdepot,0.2.0,SIMPLS,plsdepot::simpls,0,,,,,,error:3,Could not decode predictions from object of class: simpls
+ropls_oplsda,ropls,1.34.0,OPLS-DA,ropls::opls(orthoI=1),0,,,,,,error:3,OPLS-DA only available for binary classification (use PLS-DA for multiple classes)
+ropls_plsda,ropls,1.34.0,PLS-DA,ropls::opls(orthoI=0),0,,,,,,error:3,attempt to select less than one element in integerOneIndex

@@ -283,7 +283,8 @@ run_fastpls <- function(method_name) {
     method = method_name,
     scaling = "centering",
     fit = FALSE,
-    proj = FALSE
+    proj = FALSE,
+    return_variance = FALSE
   )
 }
 
