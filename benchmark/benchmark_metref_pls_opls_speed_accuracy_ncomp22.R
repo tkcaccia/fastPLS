@@ -454,20 +454,62 @@ runner_simple_named <- function(pkg, fun_name) {
   stop(last %||% "No compatible call signature found.")
 }
 
+runner_pcv_simpls <- function() {
+  Xc <- scale(Xtrain, center = TRUE, scale = TRUE)
+  Xm <- attr(Xc, "scaled:center")
+  Xs <- attr(Xc, "scaled:scale")
+  Xs[!is.finite(Xs) | Xs == 0] <- 1
+
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = TRUE)
+  Ym <- attr(Yc, "scaled:center")
+  Ys <- attr(Yc, "scaled:scale")
+  Ys[!is.finite(Ys) | Ys == 0] <- 1
+
+  fit <- get("simpls", envir = asNamespace("pcv"))(Xc, Yc, ncomp_requested)
+  ncomp_eff <- min(ncomp_requested, ncol(fit$R), ncol(fit$C))
+  Xnew <- sweep(sweep(as.matrix(Xtest), 2L, Xm, "-"), 2L, Xs, "/")
+  pred <- Xnew %*% fit$R[, seq_len(ncomp_eff), drop = FALSE] %*%
+    t(fit$C[, seq_len(ncomp_eff), drop = FALSE])
+  pred <- sweep(sweep(pred, 2L, Ys, "*"), 2L, Ym, "+")
+  list(fit = fit, pred = decode_scores(pred, class_levels))
+}
+
+runner_plsdepot_simpls <- function() {
+  fit <- plsdepot::simpls(Xtrain, Ytrain_dummy, comps = ncomp_requested)
+  ncomp_eff <- min(ncomp_requested, ncol(fit$x.wgs), ncol(fit$y.wgs))
+  Xm <- colMeans(Xtrain)
+  Xs <- apply(Xtrain, 2L, stats::sd)
+  Xs[!is.finite(Xs) | Xs == 0] <- 1
+  Ym <- colMeans(Ytrain_dummy)
+  Ys <- apply(Ytrain_dummy, 2L, stats::sd)
+  Ys[!is.finite(Ys) | Ys == 0] <- 1
+
+  Xnew <- sweep(sweep(as.matrix(Xtest), 2L, Xm, "-"), 2L, Xs, "/")
+  pred <- Xnew %*% fit$x.wgs[, seq_len(ncomp_eff), drop = FALSE] %*%
+    t(fit$y.wgs[, seq_len(ncomp_eff), drop = FALSE])
+  pred <- sweep(sweep(pred, 2L, Ys, "*"), 2L, Ym, "+")
+  list(fit = fit, pred = decode_scores(pred, class_levels))
+}
+
 runner_ropls <- function(orthoI = 0L) {
+  if (orthoI > 0L && nlevels(Ytrain) > 2L) {
+    stop("ropls OPLS-DA is only available for binary classification; MetRef has ",
+         nlevels(Ytrain), " classes.")
+  }
   f <- get("opls", envir = asNamespace("ropls"))
   fit <- f(
     x = Xtrain,
     y = Ytrain,
     predI = ncomp_requested,
     orthoI = orthoI,
-    crossvalI = 0,
+    crossvalI = if (orthoI == 0L) 2L else 0L,
     permI = 0,
     scaleC = "center",
     fig.pdfC = "none",
     info.txtC = "none"
   )
-  pred <- stats::predict(fit, Xtest)
+  pred_fun <- methods::selectMethod("predict", "opls")
+  pred <- pred_fun(fit, Xtest)
   if (is.factor(pred) || is.character(pred)) {
     return(list(fit = fit, pred = factor(pred, levels = levels(Ytest))))
   }
@@ -505,10 +547,10 @@ method_specs <- list(
        runner = runner_mdatools),
   list(id = "plsdepot_simpls", package = "plsdepot", algorithm = "SIMPLS",
        function_name = "plsdepot::simpls", independent = TRUE,
-       runner = function() runner_simple_named("plsdepot", "simpls")),
+       runner = runner_plsdepot_simpls),
   list(id = "pcv_simpls", package = "pcv", algorithm = "SIMPLS",
        function_name = "pcv::simpls", independent = TRUE,
-       runner = function() runner_simple_named("pcv", "simpls")),
+       runner = runner_pcv_simpls),
   list(id = "plsgenomics_pls_regression", package = "plsgenomics", algorithm = "PLS regression",
        function_name = "plsgenomics::pls.regression", independent = TRUE,
        runner = runner_plsgenomics_regression),
@@ -541,6 +583,7 @@ method_specs <- list(
        runner = function() runner_ropls(0L)),
   list(id = "ropls_oplsda", package = "ropls", algorithm = "OPLS-DA",
        function_name = "ropls::opls(orthoI=1)", independent = TRUE,
+       requires_binary_y = TRUE,
        runner = function() runner_ropls(1L))
 )
 
@@ -622,7 +665,8 @@ message("Rows train/test: ", nrow(Xtrain), "/", nrow(Xtest),
 for (spec in method_specs) {
   pkg_ok <- quiet_require(spec$package)
   fun_ok <- if (pkg_ok) function_available(spec) else FALSE
-  n_rep <- if (pkg_ok && fun_ok) reps else 1L
+  compatible <- !(isTRUE(spec$requires_binary_y) && nlevels(Ytrain) != 2L)
+  n_rep <- if (pkg_ok && fun_ok && compatible) reps else 1L
 
   for (rep_id in seq_len(n_rep)) {
     status <- "ok"
@@ -639,6 +683,13 @@ for (spec in method_specs) {
     } else if (!fun_ok) {
       status <- "skipped_function_or_method_not_available"
       error_message <- sprintf("Function/method '%s' is not available.", spec$function_name)
+    } else if (!compatible) {
+      status <- "skipped_incompatible_response"
+      error_message <- sprintf(
+        "%s requires a binary response; this MetRef split has %d classes.",
+        spec$function_name,
+        nlevels(Ytrain)
+      )
     } else {
       message(sprintf("[%s] rep %d/%d", spec$id, rep_id, reps))
       measured <- measure_once(spec$runner)
@@ -670,7 +721,7 @@ for (spec in method_specs) {
       n_classes = nlevels(Ytrain),
       ncomp_requested = ncomp_requested,
       ncomp_effective = ncomp_effective,
-      replicate = if (pkg_ok && fun_ok) rep_id else NA_integer_,
+      replicate = if (pkg_ok && fun_ok && compatible) rep_id else NA_integer_,
       method_id = spec$id,
       package = spec$package,
       package_version = package_version_chr(spec$package),

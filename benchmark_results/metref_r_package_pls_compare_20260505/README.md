@@ -24,36 +24,34 @@ metref_pls_opls_speed_accuracy_ncomp22.csv
 metref_pls_opls_speed_accuracy_ncomp22_summary.csv
 ```
 
-Package installation was enabled for missing packages. `plsdof` was installed
-successfully, but its available PLS fit functions are univariate and did not
-accept the 22-column MetRef dummy response directly. `plsVarSel` could not be
-loaded because its dependency `praznik` is unavailable for this local R 4.3
-setup.
+The package-specific runners call each package's own implementation directly.
+For packages without a standard prediction method, predictions are reconstructed
+from the fitted SIMPLS matrices instead of using a generic decoder.
 
 Fastest successful median runtimes:
 
 ```text
-fastPLS::pls(method="kernelpls"): 10 ms, accuracy 0.80
+fastPLS::pls(method="kernelpls"):  8 ms, accuracy 0.80
+fastPLS::pls(method="simpls"):     9 ms, accuracy 0.80
 fastPLS::pls(method="plssvd"):    10 ms, accuracy 0.81
-fastPLS::pls(method="simpls"):    10 ms, accuracy 0.80
-fastPLS::pls(method="opls"):      21 ms, accuracy 0.79
-plsgenomics PLS:                  31 ms, accuracy 0.77
-pls::kernelpls.fit:               35 ms, accuracy 0.75
-pls::simpls.fit:                  35 ms, accuracy 0.77
-plsgenomics PLS-LDA:              37 ms, accuracy 0.88
+fastPLS::pls(method="opls"):      16 ms, accuracy 0.79
+pls::kernelpls.fit:               27 ms, accuracy 0.75
+plsgenomics PLS:                  29 ms, accuracy 0.77
+pls::simpls.fit:                  30 ms, accuracy 0.77
+plsgenomics PLS-LDA:              34 ms, accuracy 0.88
+pcv::simpls:                      86 ms, accuracy 0.89
 ```
 
 Highest accuracy:
 
 ```text
-plsgenomics::pls.lda: 0.88 median accuracy, 36 ms median runtime
+pcv::simpls: 0.89 median accuracy, 86 ms median runtime
+plsgenomics::pls.lda: 0.88 median accuracy, 34 ms median runtime
+plsdepot::simpls: 0.87 median accuracy, 1000 ms median runtime
 ```
 
 Methods with non-OK rows:
 
 ```text
-pcv::simpls: fitted but prediction decoder could not extract class scores
-plsdepot::simpls: fitted but prediction decoder could not extract class scores
-ropls::opls(orthoI=1): OPLS-DA only supports binary classification
-ropls::opls(orthoI=0): prediction extraction failed on this multiclass task
+ropls::opls(orthoI=1): skipped because ropls OPLS-DA requires binary response
 ```

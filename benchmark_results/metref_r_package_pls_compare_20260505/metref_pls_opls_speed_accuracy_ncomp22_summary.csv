@@ -1,22 +1,21 @@
-method_id,package,package_version,algorithm,function_name,n_ok,median_runtime_ms,min_runtime_ms,max_runtime_ms,median_peak_memory_mb,median_accuracy,status_summary,error_messages
-fastPLS_kernelpls,fastPLS,0.3,kernel PLS,fastPLS::pls(method='kernelpls'),3,10,10,12,62.5527,0.8,ok:3,
-fastPLS_plssvd,fastPLS,0.3,PLSSVD,fastPLS::pls(method='plssvd'),3,10,9,12,88.3496,0.81,ok:3,
-fastPLS_simpls,fastPLS,0.3,SIMPLS,fastPLS::pls(method='simpls'),3,10,9,18,66.4355,0.8,ok:3,
-fastPLS_opls,fastPLS,0.3,OPLS,fastPLS::pls(method='opls'),3,21,20,30,401.771,0.79,ok:3,
-plsgenomics_pls_regression,plsgenomics,1.5.3,PLS regression,plsgenomics::pls.regression,3,31,31,32,2017.35,0.77,ok:3,
-pls_kernelpls_fit,pls,2.8.5,kernel PLS,pls::kernelpls.fit,3,35,33,62,3853.46,0.75,ok:3,
-pls_simpls_fit,pls,2.8.5,SIMPLS,pls::simpls.fit,3,35,29,56,3649.04,0.77,ok:3,
-plsgenomics_pls_lda,plsgenomics,1.5.3,PLS-LDA,plsgenomics::pls.lda,3,37,35,39,2668.94,0.88,ok:3,
-chemometrics_pls_eigen,chemometrics,1.4.4,PLS eigen,chemometrics::pls_eigen,3,90,90,95,3928.59,0.81,ok:3,
-spls_splsda,spls,2.3.2,sPLS-DA,spls::splsda,3,194,190,198,11948.3,0.72,ok:3,
-spls_spls,spls,2.3.2,sPLS regression,spls::spls,3,215,214,215,12280.2,0.66,ok:3,
-mixOmics_pls,mixOmics,6.26.0,PLS regression,mixOmics::pls,3,247,247,256,12483.6,0.75,ok:3,
-mdatools_plsda_or_pls,mdatools,0.14.2,SIMPLS/PLS-DA,mdatools::plsda or mdatools::pls,3,252,240,308,11583.5,0.77,ok:3,
-mixOmics_splsda,mixOmics,6.26.0,sPLS-DA,mixOmics::splsda,3,803,800,807,12466,0.75,ok:3,
-chemometrics_pls2_nipals,chemometrics,1.4.4,PLS2 NIPALS,chemometrics::pls2_nipals,3,823,820,1101,12757,0.75,ok:3,
-mixOmics_plsda,mixOmics,6.26.0,PLS-DA,mixOmics::plsda,3,922,885,948,12485.1,0.75,ok:3,
-pls_oscorespls_fit,pls,2.8.5,NIPALS/oscores PLS,pls::oscorespls.fit,3,995,978,1067,12021,0.75,ok:3,
-pcv_simpls,pcv,1.1.0,SIMPLS,pcv::simpls,0,,,,,,error:3,Could not decode predictions from object of class: list
-plsdepot_simpls,plsdepot,0.2.0,SIMPLS,plsdepot::simpls,0,,,,,,error:3,Could not decode predictions from object of class: simpls
-ropls_oplsda,ropls,1.34.0,OPLS-DA,ropls::opls(orthoI=1),0,,,,,,error:3,OPLS-DA only available for binary classification (use PLS-DA for multiple classes)
-ropls_plsda,ropls,1.34.0,PLS-DA,ropls::opls(orthoI=0),0,,,,,,error:3,attempt to select less than one element in integerOneIndex
+"method_id","package","algorithm","status","total_runtime_ms","peak_memory_mb","accuracy"
+"fastPLS_kernelpls","fastPLS","kernel PLS","ok",8.0000000000009,62.552734375,0.8
+"fastPLS_simpls","fastPLS","SIMPLS","ok",9.00000000000034,66.435546875,0.8
+"fastPLS_plssvd","fastPLS","PLSSVD","ok",9.99999999999979,88.349609375,0.81
+"fastPLS_opls","fastPLS","OPLS","ok",16,401.771484375,0.79
+"pls_kernelpls_fit","pls","kernel PLS","ok",26.9999999999975,3853.4599609375,0.75
+"plsgenomics_pls_regression","plsgenomics","PLS regression","ok",29.0000000000035,2017.353515625,0.77
+"pls_simpls_fit","pls","SIMPLS","ok",30.0000000000011,3649.0361328125,0.77
+"plsgenomics_pls_lda","plsgenomics","PLS-LDA","ok",33.9999999999989,2668.94140625,0.88
+"pcv_simpls","pcv","SIMPLS","ok",85.9999999999985,8244.013671875,0.89
+"chemometrics_pls_eigen","chemometrics","PLS eigen","ok",97.999999999999,3928.587890625,0.81
+"spls_splsda","spls","sPLS-DA","ok",207.000000000001,11948.328125,0.72
+"spls_spls","spls","sPLS regression","ok",219.000000000008,12280.2197265625,0.66
+"mdatools_plsda_or_pls","mdatools","SIMPLS/PLS-DA","ok",228.000000000002,11583.533203125,0.77
+"mixOmics_pls","mixOmics","PLS regression","ok",244,12487.2177734375,0.75
+"mixOmics_plsda","mixOmics","PLS-DA","ok",797.000000000004,12488.5673828125,0.75
+"mixOmics_splsda","mixOmics","sPLS-DA","ok",798.000000000002,12469.4169921875,0.75
+"pls_oscorespls_fit","pls","NIPALS/oscores PLS","ok",927,12020.845703125,0.75
+"chemometrics_pls2_nipals","chemometrics","PLS2 NIPALS","ok",959.000000000003,12757.0078125,0.75
+"plsdepot_simpls","plsdepot","SIMPLS","ok",1000,12684.91796875,0.87
+"ropls_plsda","ropls","PLS-DA","ok",2171.00000000001,12392.6513671875,0.76
