@@ -49,9 +49,28 @@ row_out <- arg("row_out", "")
 results_dir <- arg("results_dir", getwd())
 status_override <- arg("status", "")
 message_override <- arg("message", "")
+run_host <- arg("run_host", Sys.info()[["nodename"]] %||% "unknown")
+install_missing <- tolower(Sys.getenv("FASTPLS_INSTALL_MISSING", "false")) %in%
+  c("1", "true", "yes", "y")
+
+fastpls_grid_ids <- function() {
+  methods <- c("plssvd", "simpls", "opls", "kernelpls")
+  ids <- character()
+  for (method_name in methods) {
+    for (svd_method in c("irlba", "cpu_rsvd")) {
+      for (classifier in c("argmax", "lda_cpp")) {
+        ids <- c(ids, paste("fastPLS", method_name, "cpp", svd_method, classifier, sep = "_"))
+      }
+    }
+    for (classifier in c("argmax", "lda_cuda")) {
+      ids <- c(ids, paste("fastPLS", method_name, "cuda", "cuda_rsvd", classifier, sep = "_"))
+    }
+  }
+  ids
+}
 
 base_method_ids <- c(
-  "fastPLS_simpls", "fastPLS_plssvd", "fastPLS_opls", "fastPLS_kernelpls",
+  fastpls_grid_ids(),
   "pls_simpls_fit", "pls_oscorespls_fit", "pls_kernelpls_fit",
   "mdatools_plsda_or_pls", "plsdepot_simpls", "pcv_simpls",
   "plsgenomics_pls_regression", "mixOmics_pls", "chemometrics_pls_eigen",
@@ -82,6 +101,30 @@ quiet_require <- function(pkg) {
   suppressPackageStartupMessages(requireNamespace(pkg, quietly = TRUE))
 }
 
+maybe_install <- function(pkg, bioc = FALSE) {
+  if (quiet_require(pkg) || !isTRUE(install_missing)) return(quiet_require(pkg))
+  message("Package ", pkg, " is missing; FASTPLS_INSTALL_MISSING=true, trying to install.")
+  ok <- tryCatch({
+    if (isTRUE(bioc)) {
+      if (!quiet_require("BiocManager")) {
+        utils::install.packages("BiocManager", repos = "https://cloud.r-project.org")
+      }
+      BiocManager::install(pkg, ask = FALSE, update = FALSE)
+    } else {
+      utils::install.packages(pkg, repos = "https://cloud.r-project.org")
+    }
+    quiet_require(pkg)
+  }, error = function(e) {
+    message("Installation failed for ", pkg, ": ", conditionMessage(e))
+    FALSE
+  })
+  isTRUE(ok)
+}
+
+ensure_package <- function(pkg) {
+  maybe_install(pkg, bioc = pkg %in% c("mixOmics", "ropls"))
+}
+
 package_version_chr <- function(pkg) {
   if (!quiet_require(pkg)) return(NA_character_)
   as.character(utils::packageVersion(pkg))
@@ -89,7 +132,7 @@ package_version_chr <- function(pkg) {
 
 load_compare_task <- function(dataset_id, split_seed) {
   path <- find_dataset_rdata(dataset_id)
-  task <- load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed)
+  task <- as_task(path, dataset_id = dataset_id, split_seed = split_seed)
   task$Xtrain <- as.matrix(task$Xtrain)
   task$Xtest <- as.matrix(task$Xtest)
   if (identical(task$task_type, "classification")) {
@@ -246,20 +289,88 @@ decode_fastpls <- function(model) {
   as.matrix(pred)
 }
 
-run_fastpls <- function(method_name) {
+fastpls_algorithm_label <- function(method_name) {
+  switch(method_name,
+         plssvd = "PLSSVD",
+         simpls = "SIMPLS",
+         opls = "OPLS",
+         kernelpls = "kernel PLS",
+         method_name)
+}
+
+run_fastpls_variant <- function(method_name, backend, svd_method, classifier) {
   args <- list(
-    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
-    ncomp = ncomp_requested, method = method_name, backend = "cpp",
-    svd.method = "cpu_rsvd", scaling = "centering", fit = FALSE, proj = FALSE,
+    Xtrain = Xtrain,
+    Ytrain = Ytrain,
+    Xtest = Xtest,
+    Ytest = Ytest,
+    ncomp = ncomp_requested,
+    method = method_name,
+    backend = backend,
+    classifier = classifier,
+    scaling = "centering",
+    fit = FALSE,
+    proj = FALSE,
     seed = 123L + replicate_id
   )
-  if (identical(method_name, "opls")) args$north <- min(1L, max(0L, ncomp_requested - 1L))
-  fastPLS::pls(
-    args$Xtrain, args$Ytrain, args$Xtest, args$Ytest,
-    ncomp = args$ncomp, method = args$method, backend = args$backend,
-    svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
-    proj = args$proj, seed = args$seed, north = args$north %||% 1L
+  if ("return_variance" %in% names(formals(fastPLS::pls))) {
+    args$return_variance <- FALSE
+  }
+  if (identical(backend, "cpp")) {
+    args$svd.method <- svd_method
+  }
+  if (identical(method_name, "opls")) {
+    args$north <- min(1L, max(0L, ncomp_requested - 1L))
+  }
+  do.call(fastPLS::pls, args)
+}
+
+make_fastpls_spec <- function(method_name, backend, svd_method, classifier) {
+  force(method_name)
+  force(backend)
+  force(svd_method)
+  force(classifier)
+  svd_label <- if (identical(backend, "cuda")) "cuda_rsvd" else svd_method
+  list(
+    id = paste("fastPLS", method_name, backend, svd_label, classifier, sep = "_"),
+    package = "fastPLS",
+    algorithm = fastpls_algorithm_label(method_name),
+    function_name = sprintf(
+      "fastPLS::pls(method='%s', backend='%s', svd.method='%s', classifier='%s')",
+      method_name, backend, svd_label, classifier
+    ),
+    fastpls_method = method_name,
+    fastpls_backend = backend,
+    fastpls_svd_method = svd_label,
+    fastpls_classifier = classifier,
+    requires_cuda = identical(backend, "cuda"),
+    runner = function() {
+      list(
+        fit = run_fastpls_variant(method_name, backend, svd_method, classifier),
+        pred = NULL
+      )
+    },
+    decoder = decode_fastpls
   )
+}
+
+make_fastpls_specs <- function() {
+  methods <- c("plssvd", "simpls", "opls", "kernelpls")
+  specs <- list()
+  k <- 1L
+  for (method_name in methods) {
+    for (svd_method in c("irlba", "cpu_rsvd")) {
+      for (classifier in c("argmax", "lda_cpp")) {
+        specs[[k]] <- make_fastpls_spec(method_name, "cpp", svd_method, classifier)
+        k <- k + 1L
+      }
+    }
+    for (classifier in c("argmax", "lda_cuda")) {
+      specs[[k]] <- make_fastpls_spec(method_name, "cuda", "cuda_rsvd", classifier)
+      k <- k + 1L
+    }
+  }
+  specs
 }
 
 run_pls_fit <- function(fit_fun) {
@@ -390,40 +501,55 @@ predict_from_scores_weights <- function(fit, Xfit, Yfit, Xnew, Ym) {
 
 runner_plsdepot_simpls <- function() {
   f <- get("simpls", envir = asNamespace("plsdepot"))
-  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
-  Xm <- attr(Xc, "scaled:center")
-  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
-  Ym <- attr(Yc, "scaled:center")
-  fit <- f(as.matrix(Xc), as.matrix(Yc), comps = ncomp_requested)
-  pred <- predict_from_scores_weights(
-    fit, as.matrix(Xc), as.matrix(Yc),
-    sweep(as.matrix(Xtest), 2L, Xm, "-"), Ym
-  )
+  fit <- f(Xtrain, Ytrain_dummy, comps = ncomp_requested)
+  k <- min(ncomp_requested, ncol(fit$x.wgs), ncol(fit$y.wgs))
+  Xm <- colMeans(Xtrain)
+  Xs <- apply(Xtrain, 2L, stats::sd)
+  Xs[!is.finite(Xs) | Xs == 0] <- 1
+  Ym <- colMeans(Ytrain_dummy)
+  Ys <- apply(Ytrain_dummy, 2L, stats::sd)
+  Ys[!is.finite(Ys) | Ys == 0] <- 1
+  Xnew <- sweep(sweep(as.matrix(Xtest), 2L, Xm, "-"), 2L, Xs, "/")
+  pred <- Xnew %*% fit$x.wgs[, seq_len(k), drop = FALSE] %*%
+    t(fit$y.wgs[, seq_len(k), drop = FALSE])
+  pred <- sweep(sweep(pred, 2L, Ys, "*"), 2L, Ym, "+")
   list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
 }
 
 runner_pcv_simpls <- function() {
   f <- get("simpls", envir = asNamespace("pcv"))
-  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  Xc <- scale(Xtrain, center = TRUE, scale = TRUE)
   Xm <- attr(Xc, "scaled:center")
-  Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
+  Xs <- attr(Xc, "scaled:scale")
+  Xs[!is.finite(Xs) | Xs == 0] <- 1
+  Yc <- scale(Ytrain_dummy, center = TRUE, scale = TRUE)
   Ym <- attr(Yc, "scaled:center")
+  Ys <- attr(Yc, "scaled:scale")
+  Ys[!is.finite(Ys) | Ys == 0] <- 1
   fit <- f(as.matrix(Xc), as.matrix(Yc), ncomp = ncomp_requested)
-  pred <- predict_from_scores_weights(
-    fit, as.matrix(Xc), as.matrix(Yc),
-    sweep(as.matrix(Xtest), 2L, Xm, "-"), Ym
-  )
+  k <- min(ncomp_requested, ncol(fit$R), ncol(fit$C))
+  Xnew <- sweep(sweep(as.matrix(Xtest), 2L, Xm, "-"), 2L, Xs, "/")
+  pred <- Xnew %*% fit$R[, seq_len(k), drop = FALSE] %*%
+    t(fit$C[, seq_len(k), drop = FALSE])
+  pred <- sweep(sweep(pred, 2L, Ys, "*"), 2L, Ym, "+")
   list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
 }
 
 runner_ropls <- function(orthoI = 0L) {
+  if (identical(task_type, "classification") && orthoI > 0L && nlevels(Ytrain) > 2L) {
+    stop("ropls OPLS-DA is only available for binary classification; this dataset has ",
+         nlevels(Ytrain), " classes.")
+  }
   f <- get("opls", envir = asNamespace("ropls"))
   fit <- f(
     x = Xtrain, y = if (identical(task_type, "classification")) Ytrain else Ytrain_dummy,
-    predI = ncomp_requested, orthoI = orthoI, crossvalI = 0, permI = 0,
+    predI = ncomp_requested, orthoI = orthoI,
+    crossvalI = if (identical(task_type, "classification")) 2L else 0L,
+    permI = 0,
     scaleC = "center", fig.pdfC = "none", info.txtC = "none"
   )
-  pred <- stats::predict(fit, Xtest)
+  pred_fun <- methods::selectMethod("predict", "opls")
+  pred <- pred_fun(fit, Xtest)
   if (identical(task_type, "classification")) {
     if (is.factor(pred) || is.character(pred)) return(list(fit = fit, pred = factor(pred, levels = levels(Ytest))))
     return(list(fit = fit, pred = decode_scores(pred)))
@@ -455,19 +581,7 @@ runner_simple_named <- function(pkg, fun_name) {
 }
 
 method_specs_all <- function(task_type) {
-  specs <- list(
-    list(id = "fastPLS_simpls", package = "fastPLS", algorithm = "SIMPLS",
-         function_name = "fastPLS::pls(method='simpls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("simpls"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_plssvd", package = "fastPLS", algorithm = "PLSSVD",
-         function_name = "fastPLS::pls(method='plssvd', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("plssvd"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_opls", package = "fastPLS", algorithm = "OPLS",
-         function_name = "fastPLS::pls(method='opls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("opls"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_kernelpls", package = "fastPLS", algorithm = "kernel PLS",
-         function_name = "fastPLS::pls(method='kernelpls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("kernelpls"), pred = NULL), decoder = decode_fastpls),
+  specs <- c(make_fastpls_specs(), list(
     list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
          function_name = "pls::simpls.fit", runner = function() run_pls_fit(pls::simpls.fit)),
     list(id = "pls_oscorespls_fit", package = "pls", algorithm = "NIPALS/oscores PLS",
@@ -494,7 +608,7 @@ method_specs_all <- function(task_type) {
          function_name = "ropls::opls(orthoI=0)", runner = function() runner_ropls(0L)),
     list(id = "ropls_opls", package = "ropls", algorithm = "OPLS",
          function_name = "ropls::opls(orthoI=1)", runner = function() runner_ropls(1L))
-  )
+  ))
   if (identical(task_type, "classification")) {
     specs <- c(specs, list(
       list(id = "plsgenomics_pls_lda", package = "plsgenomics", algorithm = "PLS-LDA",
@@ -534,6 +648,7 @@ empty_row <- function(spec, status, msg = "") {
   data.frame(
     dataset = task$dataset,
     task_type = task_type,
+    run_host = run_host,
     dataset_path = task$dataset_path,
     split_seed = split_seed,
     n_train = nrow(Xtrain),
@@ -547,6 +662,10 @@ empty_row <- function(spec, status, msg = "") {
     package_version = package_version_chr(spec$package),
     function_name = spec$function_name,
     algorithm = spec$algorithm,
+    fastpls_method = spec$fastpls_method %||% NA_character_,
+    fastpls_backend = spec$fastpls_backend %||% NA_character_,
+    fastpls_svd_method = spec$fastpls_svd_method %||% NA_character_,
+    fastpls_classifier = spec$fastpls_classifier %||% NA_character_,
     independent_implementation = TRUE,
     total_runtime_ms = NA_real_,
     metric_name = if (identical(task_type, "classification")) "accuracy" else "rmse",
@@ -589,10 +708,18 @@ run_one <- function(method_id) {
     spec <- list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)
     return(empty_row(spec, "error", paste("Unknown method_id:", method_id)))
   }
-  pkg_ok <- quiet_require(spec$package)
+  pkg_ok <- ensure_package(spec$package)
   fun_ok <- if (pkg_ok) function_available(spec) else FALSE
   if (!pkg_ok) return(empty_row(spec, "skipped_package_not_installed", sprintf("Package '%s' is not installed.", spec$package)))
   if (!fun_ok) return(empty_row(spec, "skipped_function_or_method_not_available", sprintf("Function/method '%s' is not available.", spec$function_name)))
+  if (isTRUE(spec$requires_cuda) &&
+      !isTRUE(tryCatch(fastPLS::has_cuda(), error = function(e) FALSE))) {
+    return(empty_row(
+      spec,
+      "skipped_cuda_unavailable",
+      "This fastPLS build does not report CUDA availability via fastPLS::has_cuda()."
+    ))
+  }
 
   measured <- measure_once(spec$runner)
   row <- empty_row(spec, "ok")
@@ -638,9 +765,14 @@ summarize_results <- function(results_dir) {
       data.frame(
         dataset = d$dataset[1],
         task_type = d$task_type[1],
+        run_host = d$run_host[1],
         method_id = d$method_id[1],
         package = d$package[1],
         algorithm = d$algorithm[1],
+        fastpls_method = d$fastpls_method[1],
+        fastpls_backend = d$fastpls_backend[1],
+        fastpls_svd_method = d$fastpls_svd_method[1],
+        fastpls_classifier = d$fastpls_classifier[1],
         ncomp_requested = d$ncomp_requested[1],
         reps_ok = nrow(d),
         median_time_ms = stats::median(d$total_runtime_ms, na.rm = TRUE),

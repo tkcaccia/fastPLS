@@ -61,11 +61,16 @@ find_dataset_rdata <- function(dataset_id) {
     Sys.getenv(env_name, ""),
     file.path(home_dir, "Documents", "Rdatasets", fname),
     file.path(home_dir, "Documents", "fastpls", "data", fname),
-    file.path(home_dir, "GPUPLS", "Data", fname)
+    file.path(home_dir, "GPUPLS", "Data", fname),
+    if (dataset_id == "metref") file.path(home_dir, "Documents", "GPUPLS", "Data", "metref_remote_task.RData") else "",
+    if (dataset_id == "metref") "/Users/stefano/Documents/GPUPLS/Data/metref_remote_task.RData" else ""
   )
   candidates <- unique(Filter(nzchar, vapply(candidates, normalize_path_if_exists, character(1))))
   for (cand in candidates) {
     if (file.exists(cand)) return(cand)
+  }
+  if (dataset_id == "metref") {
+    return("KODAMA::MetRef")
   }
   found <- list.files(
     home_dir,

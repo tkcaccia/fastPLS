@@ -46,6 +46,7 @@ PY
 
 for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
   case "${dataset}" in
+    metref) ncomp="${FASTPLS_PKG_COMPARE_METREF_NCOMP:-22}" ;;
     nmr) ncomp="${FASTPLS_PKG_COMPARE_NMR_NCOMP:-100}" ;;
     singlecell) ncomp="${FASTPLS_PKG_COMPARE_SINGLECELL_NCOMP:-50}" ;;
     *) ncomp="${FASTPLS_PKG_COMPARE_NCOMP:-50}" ;;
