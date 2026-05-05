@@ -1,7 +1,17 @@
 # MetRef R package PLS comparison, ncomp = 22
 
 This benchmark compares fastPLS 0.3 against independent PLS implementations
-available from R packages on the MetRef classification task.
+available from R packages on the MetRef classification task. The fastPLS block
+now expands the public `fastPLS::pls()` options across methods, compiled CPU
+SVD backends, and classification decision rules:
+
+```text
+methods: plssvd, simpls, opls, kernelpls
+C++ SVD: irlba, cpu_rsvd
+C++ classifiers: argmax, lda_cpp
+CUDA SVD: cuda_rsvd
+CUDA classifiers: argmax, lda_cuda
+```
 
 Dataset:
 
@@ -31,27 +41,57 @@ from the fitted SIMPLS matrices instead of using a generic decoder.
 Fastest successful median runtimes:
 
 ```text
-fastPLS::pls(method="kernelpls"):  8 ms, accuracy 0.80
-fastPLS::pls(method="simpls"):     9 ms, accuracy 0.80
-fastPLS::pls(method="plssvd"):    10 ms, accuracy 0.81
-fastPLS::pls(method="opls"):      16 ms, accuracy 0.79
-pls::kernelpls.fit:               27 ms, accuracy 0.75
-plsgenomics PLS:                  29 ms, accuracy 0.77
-pls::simpls.fit:                  30 ms, accuracy 0.77
-plsgenomics PLS-LDA:              34 ms, accuracy 0.88
-pcv::simpls:                      86 ms, accuracy 0.89
+fastPLS simpls cpp cpu_rsvd argmax:       9 ms, accuracy 0.80
+fastPLS kernelpls cpp cpu_rsvd argmax:    9 ms, accuracy 0.80
+fastPLS kernelpls cpp irlba argmax:       9 ms, accuracy 0.80
+fastPLS simpls cpp irlba argmax:          9 ms, accuracy 0.80
+fastPLS kernelpls cpp cpu_rsvd lda_cpp:  11 ms, accuracy 0.92
+fastPLS simpls cpp cpu_rsvd lda_cpp:     11 ms, accuracy 0.92
+fastPLS plssvd cpp cpu_rsvd argmax:      11 ms, accuracy 0.83
+pls::kernelpls.fit:                      29 ms, accuracy 0.75
+pls::simpls.fit:                         34 ms, accuracy 0.77
+plsgenomics PLS-LDA:                     36 ms, accuracy 0.88
 ```
 
 Highest accuracy:
 
 ```text
+fastPLS kernelpls cpp cpu_rsvd lda_cpp: 0.92 median accuracy, 11 ms median runtime
+fastPLS simpls cpp cpu_rsvd lda_cpp: 0.92 median accuracy, 11 ms median runtime
+fastPLS opls cpp cpu_rsvd lda_cpp: 0.92 median accuracy, 20 ms median runtime
 pcv::simpls: 0.89 median accuracy, 86 ms median runtime
-plsgenomics::pls.lda: 0.88 median accuracy, 34 ms median runtime
-plsdepot::simpls: 0.87 median accuracy, 1000 ms median runtime
 ```
 
 Methods with non-OK rows:
 
 ```text
+fastPLS CUDA rows: skipped locally because fastPLS::has_cuda() is FALSE
 ropls::opls(orthoI=1): skipped because ropls OPLS-DA requires binary response
 ```
+
+CUDA validation on chiamaka:
+
+```text
+remote host: chiamaka@137.158.224.178
+GPU: NVIDIA GeForce RTX 5060 Ti
+fastPLS::has_cuda(): TRUE
+result files:
+  chiamaka_cuda/metref_pls_opls_speed_accuracy_ncomp22_chiamaka_cuda.csv
+  chiamaka_cuda/metref_pls_opls_speed_accuracy_ncomp22_chiamaka_cuda_summary.csv
+```
+
+Fastest fastPLS rows on the CUDA-enabled run:
+
+```text
+fastPLS plssvd cuda cuda_rsvd argmax:       6 ms, accuracy 0.80
+fastPLS plssvd cuda cuda_rsvd lda_cuda:     7 ms, accuracy 0.91
+fastPLS plssvd cpp cpu_rsvd argmax:        10 ms, accuracy 0.82
+fastPLS kernelpls cuda cuda_rsvd argmax:   11 ms, accuracy 0.75
+fastPLS simpls cuda cuda_rsvd argmax:      12 ms, accuracy 0.75
+fastPLS simpls cuda cuda_rsvd lda_cuda:    13 ms, accuracy 0.88
+fastPLS opls cuda cuda_rsvd lda_cuda:      18 ms, accuracy 0.93
+```
+
+The external package rows were mostly skipped on chiamaka because those
+comparison packages were not installed there; the full external-package
+comparison remains the local CSV above.

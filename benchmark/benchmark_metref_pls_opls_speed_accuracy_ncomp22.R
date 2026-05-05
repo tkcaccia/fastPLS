@@ -273,19 +273,83 @@ predict_from_pls_fit <- function(fit, Xnew, ncomp_eff) {
   decode_scores(pred, class_levels)
 }
 
-run_fastpls <- function(method_name) {
-  fastPLS::pls(
-    Xtrain,
-    Ytrain,
-    Xtest,
-    Ytest,
+fastpls_algorithm_label <- function(method_name) {
+  switch(method_name,
+         plssvd = "PLSSVD",
+         simpls = "SIMPLS",
+         opls = "OPLS",
+         kernelpls = "kernel PLS",
+         method_name)
+}
+
+run_fastpls_variant <- function(method_name, backend, svd_method, classifier) {
+  args <- list(
+    Xtrain = Xtrain,
+    Ytrain = Ytrain,
+    Xtest = Xtest,
+    Ytest = Ytest,
     ncomp = ncomp_requested,
     method = method_name,
     scaling = "centering",
+    backend = backend,
+    classifier = classifier,
     fit = FALSE,
     proj = FALSE,
     return_variance = FALSE
   )
+  if (identical(backend, "cpp")) {
+    args$svd.method <- svd_method
+  }
+  do.call(fastPLS::pls, args)
+}
+
+make_fastpls_spec <- function(method_name, backend, svd_method, classifier) {
+  force(method_name)
+  force(backend)
+  force(svd_method)
+  force(classifier)
+  svd_label <- if (identical(backend, "cuda")) "cuda_rsvd" else svd_method
+  list(
+    id = paste("fastPLS", method_name, backend, svd_label, classifier, sep = "_"),
+    package = "fastPLS",
+    algorithm = fastpls_algorithm_label(method_name),
+    function_name = sprintf(
+      "fastPLS::pls(method='%s', backend='%s', svd.method='%s', classifier='%s')",
+      method_name, backend, svd_label, classifier
+    ),
+    independent = TRUE,
+    fastpls_method = method_name,
+    fastpls_backend = backend,
+    fastpls_svd_method = svd_label,
+    fastpls_classifier = classifier,
+    requires_cuda = identical(backend, "cuda"),
+    runner = function() {
+      list(
+        fit = run_fastpls_variant(method_name, backend, svd_method, classifier),
+        pred = NULL
+      )
+    },
+    decoder = decode_fastpls
+  )
+}
+
+make_fastpls_specs <- function() {
+  methods <- c("plssvd", "simpls", "opls", "kernelpls")
+  specs <- list()
+  k <- 1L
+  for (method_name in methods) {
+    for (svd_method in c("irlba", "cpu_rsvd")) {
+      for (classifier in c("argmax", "lda_cpp")) {
+        specs[[k]] <- make_fastpls_spec(method_name, "cpp", svd_method, classifier)
+        k <- k + 1L
+      }
+    }
+    for (classifier in c("argmax", "lda_cuda")) {
+      specs[[k]] <- make_fastpls_spec(method_name, "cuda", "cuda_rsvd", classifier)
+      k <- k + 1L
+    }
+  }
+  specs
 }
 
 run_pls_fit <- function(fit_fun) {
@@ -516,23 +580,7 @@ runner_ropls <- function(orthoI = 0L) {
   list(fit = fit, pred = decode_scores(pred, class_levels))
 }
 
-method_specs <- list(
-  list(id = "fastPLS_simpls", package = "fastPLS", algorithm = "SIMPLS",
-       function_name = "fastPLS::pls(method='simpls')", independent = TRUE,
-       runner = function() list(fit = run_fastpls("simpls"), pred = NULL),
-       decoder = decode_fastpls),
-  list(id = "fastPLS_plssvd", package = "fastPLS", algorithm = "PLSSVD",
-       function_name = "fastPLS::pls(method='plssvd')", independent = TRUE,
-       runner = function() list(fit = run_fastpls("plssvd"), pred = NULL),
-       decoder = decode_fastpls),
-  list(id = "fastPLS_opls", package = "fastPLS", algorithm = "OPLS",
-       function_name = "fastPLS::pls(method='opls')", independent = TRUE,
-       runner = function() list(fit = run_fastpls("opls"), pred = NULL),
-       decoder = decode_fastpls),
-  list(id = "fastPLS_kernelpls", package = "fastPLS", algorithm = "kernel PLS",
-       function_name = "fastPLS::pls(method='kernelpls')", independent = TRUE,
-       runner = function() list(fit = run_fastpls("kernelpls"), pred = NULL),
-       decoder = decode_fastpls),
+method_specs <- c(make_fastpls_specs(), list(
   list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
        function_name = "pls::simpls.fit", independent = TRUE,
        runner = function() run_pls_fit(pls::simpls.fit)),
@@ -585,7 +633,7 @@ method_specs <- list(
        function_name = "ropls::opls(orthoI=1)", independent = TRUE,
        requires_binary_y = TRUE,
        runner = function() runner_ropls(1L))
-)
+))
 
 package_version_chr <- function(pkg) {
   if (!quiet_require(pkg)) return(NA_character_)
@@ -666,7 +714,11 @@ for (spec in method_specs) {
   pkg_ok <- quiet_require(spec$package)
   fun_ok <- if (pkg_ok) function_available(spec) else FALSE
   compatible <- !(isTRUE(spec$requires_binary_y) && nlevels(Ytrain) != 2L)
-  n_rep <- if (pkg_ok && fun_ok && compatible) reps else 1L
+  cuda_ok <- !(isTRUE(spec$requires_cuda) &&
+                 (!quiet_require("fastPLS") ||
+                    !isTRUE(tryCatch(fastPLS::has_cuda(), error = function(e) FALSE))))
+  runnable <- pkg_ok && fun_ok && compatible && cuda_ok
+  n_rep <- if (runnable) reps else 1L
 
   for (rep_id in seq_len(n_rep)) {
     status <- "ok"
@@ -690,6 +742,9 @@ for (spec in method_specs) {
         spec$function_name,
         nlevels(Ytrain)
       )
+    } else if (!cuda_ok) {
+      status <- "skipped_cuda_unavailable"
+      error_message <- "This fastPLS build does not report CUDA availability via fastPLS::has_cuda()."
     } else {
       message(sprintf("[%s] rep %d/%d", spec$id, rep_id, reps))
       measured <- measure_once(spec$runner)
@@ -721,12 +776,16 @@ for (spec in method_specs) {
       n_classes = nlevels(Ytrain),
       ncomp_requested = ncomp_requested,
       ncomp_effective = ncomp_effective,
-      replicate = if (pkg_ok && fun_ok && compatible) rep_id else NA_integer_,
+      replicate = if (runnable) rep_id else NA_integer_,
       method_id = spec$id,
       package = spec$package,
       package_version = package_version_chr(spec$package),
       function_name = spec$function_name,
       algorithm = spec$algorithm,
+      fastpls_method = spec$fastpls_method %||% NA_character_,
+      fastpls_backend = spec$fastpls_backend %||% NA_character_,
+      fastpls_svd_method = spec$fastpls_svd_method %||% NA_character_,
+      fastpls_classifier = spec$fastpls_classifier %||% NA_character_,
       independent_implementation = isTRUE(spec$independent),
       delegates_to_pls_package = FALSE,
       total_runtime_ms = total_runtime_ms,

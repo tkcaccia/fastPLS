@@ -1,21 +1,42 @@
-"method_id","package","algorithm","status","total_runtime_ms","peak_memory_mb","accuracy"
-"fastPLS_kernelpls","fastPLS","kernel PLS","ok",8.0000000000009,62.552734375,0.8
-"fastPLS_simpls","fastPLS","SIMPLS","ok",9.00000000000034,66.435546875,0.8
-"fastPLS_plssvd","fastPLS","PLSSVD","ok",9.99999999999979,88.349609375,0.81
-"fastPLS_opls","fastPLS","OPLS","ok",16,401.771484375,0.79
-"pls_kernelpls_fit","pls","kernel PLS","ok",26.9999999999975,3853.4599609375,0.75
-"plsgenomics_pls_regression","plsgenomics","PLS regression","ok",29.0000000000035,2017.353515625,0.77
-"pls_simpls_fit","pls","SIMPLS","ok",30.0000000000011,3649.0361328125,0.77
-"plsgenomics_pls_lda","plsgenomics","PLS-LDA","ok",33.9999999999989,2668.94140625,0.88
-"pcv_simpls","pcv","SIMPLS","ok",85.9999999999985,8244.013671875,0.89
-"chemometrics_pls_eigen","chemometrics","PLS eigen","ok",97.999999999999,3928.587890625,0.81
-"spls_splsda","spls","sPLS-DA","ok",207.000000000001,11948.328125,0.72
-"spls_spls","spls","sPLS regression","ok",219.000000000008,12280.2197265625,0.66
-"mdatools_plsda_or_pls","mdatools","SIMPLS/PLS-DA","ok",228.000000000002,11583.533203125,0.77
-"mixOmics_pls","mixOmics","PLS regression","ok",244,12487.2177734375,0.75
-"mixOmics_plsda","mixOmics","PLS-DA","ok",797.000000000004,12488.5673828125,0.75
-"mixOmics_splsda","mixOmics","sPLS-DA","ok",798.000000000002,12469.4169921875,0.75
-"pls_oscorespls_fit","pls","NIPALS/oscores PLS","ok",927,12020.845703125,0.75
-"chemometrics_pls2_nipals","chemometrics","PLS2 NIPALS","ok",959.000000000003,12757.0078125,0.75
-"plsdepot_simpls","plsdepot","SIMPLS","ok",1000,12684.91796875,0.87
-"ropls_plsda","ropls","PLS-DA","ok",2171.00000000001,12392.6513671875,0.76
+"method_id","package","algorithm","status","fastpls_method","fastpls_backend","fastpls_svd_method","fastpls_classifier","total_runtime_ms","peak_memory_mb","accuracy"
+"fastPLS_simpls_cpp_cpu_rsvd_argmax","fastPLS","SIMPLS","ok","simpls","cpp","cpu_rsvd","argmax",8.99999999999679,59.28125,0.8
+"fastPLS_kernelpls_cpp_cpu_rsvd_argmax","fastPLS","kernel PLS","ok","kernelpls","cpp","cpu_rsvd","argmax",9.00000000000034,60.173828125,0.8
+"fastPLS_kernelpls_cpp_irlba_argmax","fastPLS","kernel PLS","ok","kernelpls","cpp","irlba","argmax",9.00000000000034,60.1494140625,0.8
+"fastPLS_simpls_cpp_irlba_argmax","fastPLS","SIMPLS","ok","simpls","cpp","irlba","argmax",9.00000000000034,59.2568359375,0.8
+"fastPLS_kernelpls_cpp_cpu_rsvd_lda_cpp","fastPLS","kernel PLS","ok","kernelpls","cpp","cpu_rsvd","lda_cpp",10.9999999999957,92.978515625,0.92
+"fastPLS_kernelpls_cpp_irlba_lda_cpp","fastPLS","kernel PLS","ok","kernelpls","cpp","irlba","lda_cpp",10.9999999999957,92.9541015625,0.92
+"fastPLS_plssvd_cpp_cpu_rsvd_argmax","fastPLS","PLSSVD","ok","plssvd","cpp","cpu_rsvd","argmax",10.9999999999992,76.6953125,0.83
+"fastPLS_simpls_cpp_cpu_rsvd_lda_cpp","fastPLS","SIMPLS","ok","simpls","cpp","cpu_rsvd","lda_cpp",10.9999999999992,92.0654296875,0.92
+"fastPLS_simpls_cpp_irlba_lda_cpp","fastPLS","SIMPLS","ok","simpls","cpp","irlba","lda_cpp",10.9999999999992,92.041015625,0.92
+"fastPLS_plssvd_cpp_irlba_argmax","fastPLS","PLSSVD","ok","plssvd","cpp","irlba","argmax",11.0000000000001,98.22265625,0.81
+"fastPLS_plssvd_cpp_irlba_lda_cpp","fastPLS","PLSSVD","ok","plssvd","cpp","irlba","lda_cpp",12.0000000000005,118.7392578125,0.91
+"fastPLS_plssvd_cpp_cpu_rsvd_lda_cpp","fastPLS","PLSSVD","ok","plssvd","cpp","cpu_rsvd","lda_cpp",12.9999999999999,109.4873046875,0.91
+"fastPLS_opls_cpp_cpu_rsvd_argmax","fastPLS","OPLS","ok","opls","cpp","cpu_rsvd","argmax",16.9999999999959,399.392578125,0.79
+"fastPLS_opls_cpp_irlba_argmax","fastPLS","OPLS","ok","opls","cpp","irlba","argmax",16.9999999999995,399.3681640625,0.79
+"fastPLS_opls_cpp_irlba_lda_cpp","fastPLS","OPLS","ok","opls","cpp","irlba","lda_cpp",18.9999999999984,432.150390625,0.92
+"fastPLS_opls_cpp_cpu_rsvd_lda_cpp","fastPLS","OPLS","ok","opls","cpp","cpu_rsvd","lda_cpp",19.999999999996,432.1748046875,0.92
+"pls_kernelpls_fit","pls","kernel PLS","ok",NA,NA,NA,NA,29.0000000000035,3853.4599609375,0.75
+"pls_simpls_fit","pls","SIMPLS","ok",NA,NA,NA,NA,33.9999999999989,3649.0361328125,0.77
+"plsgenomics_pls_regression","plsgenomics","PLS regression","ok",NA,NA,NA,NA,34.000000000006,2017.353515625,0.77
+"plsgenomics_pls_lda","plsgenomics","PLS-LDA","ok",NA,NA,NA,NA,36.0000000000014,2668.94140625,0.88
+"chemometrics_pls_eigen","chemometrics","PLS eigen","ok",NA,NA,NA,NA,91.0000000000082,3928.587890625,0.81
+"pcv_simpls","pcv","SIMPLS","ok",NA,NA,NA,NA,108.000000000004,8244.013671875,0.89
+"spls_splsda","spls","sPLS-DA","ok",NA,NA,NA,NA,224.999999999994,11948.328125,0.72
+"mdatools_plsda_or_pls","mdatools","SIMPLS/PLS-DA","ok",NA,NA,NA,NA,246.000000000002,11570.63671875,0.77
+"mixOmics_pls","mixOmics","PLS regression","ok",NA,NA,NA,NA,258.00000000001,12473.8017578125,0.75
+"spls_spls","spls","sPLS regression","ok",NA,NA,NA,NA,263.999999999996,12280.2197265625,0.66
+"mixOmics_splsda","mixOmics","sPLS-DA","ok",NA,NA,NA,NA,832.000000000008,12456.66796875,0.75
+"mixOmics_plsda","mixOmics","PLS-DA","ok",NA,NA,NA,NA,876.000000000005,12475.869140625,0.75
+"pls_oscorespls_fit","pls","NIPALS/oscores PLS","ok",NA,NA,NA,NA,975.000000000001,12005.8837890625,0.75
+"plsdepot_simpls","plsdepot","SIMPLS","ok",NA,NA,NA,NA,1046,12684.91796875,0.87
+"chemometrics_pls2_nipals","chemometrics","PLS2 NIPALS","ok",NA,NA,NA,NA,1169,12754.7236328125,0.75
+"ropls_plsda","ropls","PLS-DA","ok",NA,NA,NA,NA,2178.99999999999,12379.6201171875,0.76
+"fastPLS_kernelpls_cuda_cuda_rsvd_argmax","fastPLS","kernel PLS","skipped_cuda_unavailable","kernelpls","cuda","cuda_rsvd","argmax",NA,NA,NA
+"fastPLS_kernelpls_cuda_cuda_rsvd_lda_cuda","fastPLS","kernel PLS","skipped_cuda_unavailable","kernelpls","cuda","cuda_rsvd","lda_cuda",NA,NA,NA
+"fastPLS_opls_cuda_cuda_rsvd_argmax","fastPLS","OPLS","skipped_cuda_unavailable","opls","cuda","cuda_rsvd","argmax",NA,NA,NA
+"fastPLS_opls_cuda_cuda_rsvd_lda_cuda","fastPLS","OPLS","skipped_cuda_unavailable","opls","cuda","cuda_rsvd","lda_cuda",NA,NA,NA
+"fastPLS_plssvd_cuda_cuda_rsvd_argmax","fastPLS","PLSSVD","skipped_cuda_unavailable","plssvd","cuda","cuda_rsvd","argmax",NA,NA,NA
+"fastPLS_plssvd_cuda_cuda_rsvd_lda_cuda","fastPLS","PLSSVD","skipped_cuda_unavailable","plssvd","cuda","cuda_rsvd","lda_cuda",NA,NA,NA
+"fastPLS_simpls_cuda_cuda_rsvd_argmax","fastPLS","SIMPLS","skipped_cuda_unavailable","simpls","cuda","cuda_rsvd","argmax",NA,NA,NA
+"fastPLS_simpls_cuda_cuda_rsvd_lda_cuda","fastPLS","SIMPLS","skipped_cuda_unavailable","simpls","cuda","cuda_rsvd","lda_cuda",NA,NA,NA
+"ropls_oplsda","ropls","OPLS-DA","skipped_incompatible_response",NA,NA,NA,NA,NA,NA,NA
