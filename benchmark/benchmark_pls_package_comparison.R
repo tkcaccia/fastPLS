@@ -86,7 +86,17 @@ classification_only_method_ids <- c(
 )
 
 if (identical(mode, "list_methods")) {
-  task_type_guess <- if (dataset_id %in% c("singlecell", "cifar100", "metref")) {
+  classification_datasets <- c(
+    "ccle",
+    "cifar100",
+    "gtex_v8",
+    "metref",
+    "singlecell",
+    "tcga_brca",
+    "tcga_hnsc_methylation",
+    "tcga_pan_cancer"
+  )
+  task_type_guess <- if (dataset_id %in% classification_datasets) {
     "classification"
   } else {
     "regression"
