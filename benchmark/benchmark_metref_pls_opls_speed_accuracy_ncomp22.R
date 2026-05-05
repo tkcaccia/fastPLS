@@ -483,11 +483,14 @@ method_specs <- list(
        function_name = "fastPLS::pls(method='plssvd')", independent = TRUE,
        runner = function() list(fit = run_fastpls("plssvd"), pred = NULL),
        decoder = decode_fastpls),
-  list(id = "fastPLS_simpls_fast", package = "fastPLS", algorithm = "SIMPLS-fast",
-       function_name = "fastPLS::pls(method='simpls_fast')", independent = TRUE,
-       runner = function() list(fit = run_fastpls("simpls_fast"), pred = NULL),
-       decoder = decode_fastpls,
-       optional = TRUE),
+  list(id = "fastPLS_opls", package = "fastPLS", algorithm = "OPLS",
+       function_name = "fastPLS::pls(method='opls')", independent = TRUE,
+       runner = function() list(fit = run_fastpls("opls"), pred = NULL),
+       decoder = decode_fastpls),
+  list(id = "fastPLS_kernelpls", package = "fastPLS", algorithm = "kernel PLS",
+       function_name = "fastPLS::pls(method='kernelpls')", independent = TRUE,
+       runner = function() list(fit = run_fastpls("kernelpls"), pred = NULL),
+       decoder = decode_fastpls),
   list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
        function_name = "pls::simpls.fit", independent = TRUE,
        runner = function() run_pls_fit(pls::simpls.fit)),
@@ -548,18 +551,6 @@ package_version_chr <- function(pkg) {
 
 function_available <- function(spec) {
   if (!quiet_require(spec$package)) return(FALSE)
-  if (identical(spec$id, "fastPLS_simpls_fast")) {
-    ok <- tryCatch({
-      fastPLS::pls(
-        Xtrain[seq_len(min(12L, nrow(Xtrain))), , drop = FALSE],
-        droplevels(Ytrain[seq_len(min(12L, nrow(Xtrain)))]),
-        ncomp = 1L,
-        method = "simpls_fast"
-      )
-      TRUE
-    }, error = function(e) FALSE)
-    return(isTRUE(ok))
-  }
   if (identical(spec$id, "mdatools_plsda_or_pls")) {
     ns <- asNamespace("mdatools")
     return(exists("plsda", envir = ns, inherits = FALSE) ||

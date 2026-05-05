@@ -33,12 +33,14 @@ setup.
 Fastest successful median runtimes:
 
 ```text
-fastPLS_simpls:      10 ms, accuracy 0.80
-fastPLS_plssvd:      12 ms, accuracy 0.80
-pls::kernelpls.fit:  31 ms, accuracy 0.75
-pls::simpls.fit:     33 ms, accuracy 0.77
-plsgenomics PLS:     33 ms, accuracy 0.77
-plsgenomics PLS-LDA: 36 ms, accuracy 0.88
+fastPLS::pls(method="kernelpls"): 10 ms, accuracy 0.80
+fastPLS::pls(method="plssvd"):    10 ms, accuracy 0.81
+fastPLS::pls(method="simpls"):    10 ms, accuracy 0.80
+fastPLS::pls(method="opls"):      21 ms, accuracy 0.79
+plsgenomics PLS:                  31 ms, accuracy 0.77
+pls::kernelpls.fit:               35 ms, accuracy 0.75
+pls::simpls.fit:                  35 ms, accuracy 0.77
+plsgenomics PLS-LDA:              37 ms, accuracy 0.88
 ```
 
 Highest accuracy:
@@ -50,7 +52,6 @@ plsgenomics::pls.lda: 0.88 median accuracy, 36 ms median runtime
 Methods with non-OK rows:
 
 ```text
-fastPLS_simpls_fast: method removed/not available in fastPLS 0.3
 pcv::simpls: fitted but prediction decoder could not extract class scores
 plsdepot::simpls: fitted but prediction decoder could not extract class scores
 ropls::opls(orthoI=1): OPLS-DA only supports binary classification
