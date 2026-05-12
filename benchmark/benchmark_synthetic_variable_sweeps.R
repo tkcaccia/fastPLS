@@ -495,6 +495,12 @@ variant_specs <- function(task) {
       lda_specs[, classifier := ifelse(implementation == "cuda", "lda_cuda", "lda_cpp")]
       specs <- rbind(specs, lda_specs, fill = TRUE)
     }
+    class_bias_specs <- copy(specs[implementation %in% c("cpp", "cuda") & classifier == "argmax"])
+    if (nrow(class_bias_specs)) {
+      class_bias_specs[, variant_name := paste0(variant_name, "_class_bias")]
+      class_bias_specs[, classifier := ifelse(implementation == "cuda", "class_bias_cuda", "class_bias_cpp")]
+      specs <- rbind(specs, class_bias_specs, fill = TRUE)
+    }
   }
   specs[]
 }
@@ -564,7 +570,7 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   model <- fit_call()
   fit_ms <- (proc.time()[3] - t0) * 1000
   t1 <- proc.time()[3]
-  pred <- predict(model, newdata = task$Xtest, Ytest = NULL, proj = FALSE)
+  pred <- predict(model, newdata = task$Xtest, Ytest = NULL, proj = FALSE, top5 = FALSE)
   predict_ms <- (proc.time()[3] - t1) * 1000
   metric <- metric_from_prediction(task, pred)
   mem <- stop_memory_monitor(mon)

@@ -128,6 +128,14 @@ pls_predict_flash_cpu <- function(model, Xtest, proj, block_size) {
     .Call(`_fastPLS_pls_predict_flash_cpu`, model, Xtest, proj, block_size)
 }
 
+pls_class_predict_topk_cpp <- function(model, Xtest, class_bias, top_k, proj, block_size) {
+    .Call(`_fastPLS_pls_class_predict_topk_cpp`, model, Xtest, class_bias, top_k, proj, block_size)
+}
+
+pls_class_predict_topk_cuda <- function(model, Xtest, class_bias, top_k, proj) {
+    .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, class_bias, top_k, proj)
+}
+
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
     .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
 }

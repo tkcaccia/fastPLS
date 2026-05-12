@@ -13,6 +13,9 @@
   proj = FALSE,
   predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
   flash.block_size = NULL,
+  top = 1L,
+  top5 = FALSE,
+  raw_scores = FALSE,
   ...
 )
 
@@ -34,6 +37,13 @@ low-rank prediction when compact factors are available and the low-rank
 application is expected to be beneficial.}
 
 \item{flash.block_size}{Row block size for `"cpu_flash"` prediction.}
+
+\item{top}{Number of ranked classes to return for classification.}
+
+\item{top5}{Convenience flag equivalent to `top = max(top, 5)`.}
+
+\item{raw_scores}{If `TRUE`, keep raw classification score cubes as
+`Yscore` when available.}
 
 \item{...}{Unused.}
 }

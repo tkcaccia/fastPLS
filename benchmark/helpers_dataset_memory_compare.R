@@ -483,7 +483,14 @@ variant_specs <- function() {
   lda_rows <- out[out$implementation_label %in% c("Cpp", "CUDA 64-bit"), , drop = FALSE]
   lda_rows$variant_name <- paste0(lda_rows$variant_name, "_lda")
   lda_rows$classifier <- ifelse(lda_rows$engine == "GPU", "lda_cuda", "lda_cpp")
-  out <- rbind(out, lda_rows)
+  class_bias_rows <- out[out$implementation_label %in% c("Cpp", "CUDA 64-bit"), , drop = FALSE]
+  class_bias_rows$variant_name <- paste0(class_bias_rows$variant_name, "_class_bias")
+  class_bias_rows$classifier <- ifelse(
+    class_bias_rows$engine == "GPU",
+    "class_bias_cuda",
+    "class_bias_cpp"
+  )
+  out <- rbind(out, lda_rows, class_bias_rows)
   out
 }
 

@@ -32,8 +32,15 @@ simpls_gpu(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
   lda_ridge = 1e-08,
+  class_bias_method = c("iter_count_ratio", "count_ratio"),
+  class_bias_lambda = 0.05,
+  class_bias_iter = 1L,
+  class_bias_clip = Inf,
+  class_bias_eps = 1,
+  class_bias_calibration_fraction = 1,
+  class_bias_seed = seed,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   return_variance = TRUE
 )
@@ -87,10 +94,6 @@ simpls_flash_gpu(
 
 \item{fit}{Return fitted values and `R2Y` when `TRUE`.}
 
-\item{return_variance}{Compute predictor-space latent-variable variance
-explained. Set to `FALSE` for timing/memory benchmarks that do not need
-plotting variance metadata.}
-
 \item{proj}{Return projected `Ttest` when `TRUE`.}
 
 \item{gpu_device_state}{Keep selected SIMPLS workspaces resident on the GPU when `TRUE`.}
@@ -124,6 +127,10 @@ the default is `min(ncol(Xtrain), 100)`.}
 
 \item{gaussian_y_seed}{Random seed used to generate the Gaussian response
 sketch.}
+
+\item{return_variance}{Compute predictor-space latent-variable variance
+explained. Set to `FALSE` for timing/memory benchmarks that do not need
+plotting variance metadata.}
 }
 \value{
 A `fastPLS` object.

@@ -178,7 +178,7 @@ result_row <- tryCatch({
     skip_row <- row_template
   } else if (!identical(spec$classifier, "argmax") &&
              !identical(task$task_type, "classification")) {
-    row_template$status <- "skipped_lda_nonclassification"
+    row_template$status <- "skipped_classifier_nonclassification"
     row_template$msg <- sprintf(
       "%s skipped: classifier=%s is only meaningful for classification tasks",
       variant_name,
@@ -225,7 +225,7 @@ result_row <- tryCatch({
     )
   }
 
-  base_variant_name <- sub("_lda$", "", variant_name)
+    base_variant_name <- sub("_(lda|class_bias)$", "", variant_name)
   fit_fun <- switch(
     base_variant_name,
     cpp_plssvd_cpu_rsvd = function() fastpls_fit("plssvd", "cpu_rsvd"),
@@ -277,7 +277,7 @@ result_row <- tryCatch({
       fit_obj <- fit_fun()
     })[["elapsed"]] * 1000
     pred_ms <- system.time({
-      pred_obj <- predict(fit_obj, task$Xtest, Ytest = NULL, proj = FALSE)
+      pred_obj <- predict(fit_obj, task$Xtest, Ytest = NULL, proj = FALSE, top5 = FALSE)
     })[["elapsed"]] * 1000
   }
 

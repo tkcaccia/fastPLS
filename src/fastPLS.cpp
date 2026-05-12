@@ -3628,6 +3628,283 @@ arma::cube compact_prediction_weights(List& model, const int m, const arma::ivec
   Rcpp::stop("Compact class prediction requires compact low-rank factors");
 }
 
+arma::mat class_bias_offsets(List& model, const arma::mat& class_bias, const int m, const arma::uword length_ncomp) {
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+  arma::mat offsets(static_cast<arma::uword>(m), length_ncomp, arma::fill::zeros);
+  for (arma::uword a = 0; a < length_ncomp; ++a) {
+    offsets.col(a) = mY.t();
+  }
+
+  if (class_bias.n_elem == 0) {
+    return offsets;
+  }
+  if (static_cast<int>(class_bias.n_rows) != m) {
+    Rcpp::stop("class_bias must have one row per class");
+  }
+  if (class_bias.n_cols == 1) {
+    offsets.each_col() += class_bias.col(0);
+    return offsets;
+  }
+  if (class_bias.n_cols == length_ncomp) {
+    offsets += class_bias;
+    return offsets;
+  }
+  Rcpp::stop("class_bias must have one column or one column per ncomp");
+}
+
+void fill_topk_from_yblock(
+  const arma::mat& yblock,
+  const arma::vec& offset,
+  const arma::uword total_n,
+  const arma::uword row_offset,
+  const arma::uword slice,
+  const int top_k,
+  Rcpp::IntegerVector& top_index,
+  Rcpp::NumericVector& top_score
+) {
+  const int m = static_cast<int>(yblock.n_cols);
+  const int use_top_k = std::max(1, std::min(top_k, m));
+  const size_t slice_offset =
+    static_cast<size_t>(slice) *
+    static_cast<size_t>(total_n) *
+    static_cast<size_t>(use_top_k);
+
+  for (arma::uword i = 0; i < yblock.n_rows; ++i) {
+    std::vector<double> best_score(static_cast<size_t>(use_top_k), -std::numeric_limits<double>::infinity());
+    std::vector<int> best_index(static_cast<size_t>(use_top_k), 0);
+    for (int j = 0; j < m; ++j) {
+      const double value = yblock(i, static_cast<arma::uword>(j)) + offset(static_cast<arma::uword>(j));
+      for (int r = 0; r < use_top_k; ++r) {
+        if (value > best_score[static_cast<size_t>(r)]) {
+          for (int rr = use_top_k - 1; rr > r; --rr) {
+            best_score[static_cast<size_t>(rr)] = best_score[static_cast<size_t>(rr - 1)];
+            best_index[static_cast<size_t>(rr)] = best_index[static_cast<size_t>(rr - 1)];
+          }
+          best_score[static_cast<size_t>(r)] = value;
+          best_index[static_cast<size_t>(r)] = j + 1;
+          break;
+        }
+      }
+    }
+    for (int r = 0; r < use_top_k; ++r) {
+      const size_t out_pos =
+        slice_offset +
+        static_cast<size_t>(row_offset + i) +
+        static_cast<size_t>(total_n) * static_cast<size_t>(r);
+      top_index[out_pos] = best_index[static_cast<size_t>(r)];
+      top_score[out_pos] = best_score[static_cast<size_t>(r)];
+    }
+  }
+}
+
+List class_bias_topk_from_cube(
+  const arma::cube& Ypred,
+  const arma::mat& class_bias,
+  List& model,
+  const int top_k
+) {
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+  const arma::uword ntest = Ypred.n_rows;
+  const int use_top_k = std::max(1, std::min(top_k, m));
+  arma::mat bias_only = class_bias;
+  if (bias_only.n_elem == 0) {
+    bias_only.set_size(static_cast<arma::uword>(m), length_ncomp);
+    bias_only.zeros();
+  }
+  if (static_cast<int>(bias_only.n_rows) != m) {
+    Rcpp::stop("class_bias must have one row per class");
+  }
+  if (bias_only.n_cols == 1 && length_ncomp > 1) {
+    bias_only = arma::repmat(bias_only, 1, length_ncomp);
+  }
+  if (bias_only.n_cols != length_ncomp) {
+    Rcpp::stop("class_bias must have one column or one column per ncomp");
+  }
+
+  Rcpp::IntegerVector top_index(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
+  top_index.attr("dim") = Rcpp::IntegerVector::create(
+    static_cast<int>(ntest),
+    use_top_k,
+    static_cast<int>(length_ncomp)
+  );
+  Rcpp::NumericVector top_score(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
+  top_score.attr("dim") = top_index.attr("dim");
+
+  for (arma::uword a = 0; a < length_ncomp; ++a) {
+    fill_topk_from_yblock(Ypred.slice(a), bias_only.col(a), ntest, 0, a, use_top_k, top_index, top_score);
+  }
+
+  return List::create(
+    Named("top_index") = top_index,
+    Named("top_score") = top_score
+  );
+}
+
+// [[Rcpp::export]]
+List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj, int block_size) {
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+  const int use_top_k = std::max(1, std::min(top_k, m));
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+
+  const arma::uword ntest = Xtest.n_rows;
+  arma::mat offsets = class_bias_offsets(model, class_bias, m, length_ncomp);
+
+  Rcpp::IntegerVector top_index(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
+  top_index.attr("dim") = Rcpp::IntegerVector::create(
+    static_cast<int>(ntest),
+    use_top_k,
+    static_cast<int>(length_ncomp)
+  );
+  Rcpp::NumericVector top_score(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
+  top_score.attr("dim") = top_index.attr("dim");
+
+  arma::uword bs = static_cast<arma::uword>(std::max(1, block_size));
+  if (bs > ntest) bs = ntest;
+
+  bool used_compact = false;
+  try {
+    Rcpp::NumericVector R_vec = model["R"];
+    Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+    if (R_dim.size() == 2L && R_dim[0] == Xtest.n_cols && R_dim[1] > 0) {
+      const arma::mat RR(
+        R_vec.begin(),
+        static_cast<arma::uword>(R_dim[0]),
+        static_cast<arma::uword>(R_dim[1]),
+        false,
+        true
+      );
+      const int kmax = static_cast<int>(RR.n_cols);
+      arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+      for (arma::uword start = 0; start < ntest; start += bs) {
+        const arma::uword stop = std::min(start + bs - 1, ntest - 1);
+        const arma::mat scores = Xtest.rows(start, stop) * RR;
+        for (arma::uword a = 0; a < length_ncomp; ++a) {
+          const int mc = ncomp(a);
+          if (mc < 1 || mc > kmax) {
+            Rcpp::stop("ncomp exceeds latent rank for class-bias prediction");
+          }
+          arma::mat yblock =
+            scores.cols(0, static_cast<arma::uword>(mc - 1)) *
+            Wflash.slice(a).rows(0, static_cast<arma::uword>(mc - 1));
+          fill_topk_from_yblock(yblock, offsets.col(a), ntest, start, a, use_top_k, top_index, top_score);
+        }
+      }
+      used_compact = true;
+    }
+  } catch (...) {
+    used_compact = false;
+  }
+
+  if (!used_compact) {
+    if (!model.containsElementNamed("B")) {
+      Rcpp::stop("Class-bias prediction requires compact factors or stored B");
+    }
+    Rcpp::NumericVector B_vec = model["B"];
+    Rcpp::IntegerVector B_dim = B_vec.attr("dim");
+    if (B_dim.size() != 3L || B_dim[0] != Xtest.n_cols || B_dim[1] != m ||
+        B_dim[2] < static_cast<int>(length_ncomp)) {
+      Rcpp::stop("Model coefficient array `B` is not compatible with class-bias prediction");
+    }
+    const arma::cube B(
+      B_vec.begin(),
+      static_cast<arma::uword>(B_dim[0]),
+      static_cast<arma::uword>(B_dim[1]),
+      static_cast<arma::uword>(B_dim[2]),
+      false,
+      true
+    );
+    for (arma::uword start = 0; start < ntest; start += bs) {
+      const arma::uword stop = std::min(start + bs - 1, ntest - 1);
+      const arma::mat Xblock = Xtest.rows(start, stop);
+      for (arma::uword a = 0; a < length_ncomp; ++a) {
+        arma::mat yblock = Xblock * B.slice(a);
+        fill_topk_from_yblock(yblock, offsets.col(a), ntest, start, a, use_top_k, top_index, top_score);
+      }
+    }
+  }
+
+  arma::mat T_Xtest;
+  if (proj) {
+    Rcpp::NumericVector RR_vec = model["R"];
+    Rcpp::IntegerVector RR_dim = RR_vec.attr("dim");
+    if (RR_dim.size() == 2L && RR_dim[0] > 0 && RR_dim[1] > 0) {
+      const arma::mat RR(
+        RR_vec.begin(),
+        static_cast<arma::uword>(RR_dim[0]),
+        static_cast<arma::uword>(RR_dim[1]),
+        false,
+        true
+      );
+      T_Xtest = Xtest * RR;
+    } else {
+      T_Xtest.set_size(ntest, 0);
+    }
+  }
+
+  return List::create(
+    Named("top_index") = top_index,
+    Named("top_score") = top_score,
+    Named("Ttest") = T_Xtest,
+    Named("predict_backend") = "cpp_class_bias"
+  );
+}
+
+// [[Rcpp::export]]
+List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj) {
+  if (!fastpls_svd::has_cuda_backend()) {
+    return pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, 4096);
+  }
+
+  try {
+    const int m = Rcpp::as<int>(model["m"]);
+    arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+    Rcpp::NumericVector mX_vec = model["mX"];
+    arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+    Xtest.each_row() -= mX;
+    Rcpp::NumericVector vX_vec = model["vX"];
+    arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+    Xtest.each_row() /= vX;
+
+    Rcpp::NumericVector mY_vec = model["mY"];
+    arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+    Rcpp::NumericVector R_vec = model["R"];
+    Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+    if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
+      Rcpp::stop("Model `R` is not compatible with CUDA class-bias prediction");
+    }
+    const arma::mat RR(
+      R_vec.begin(),
+      static_cast<arma::uword>(R_dim[0]),
+      static_cast<arma::uword>(R_dim[1]),
+      false,
+      true
+    );
+    arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
+    arma::cube Ypred = fastpls_svd::cuda_flash_lowrank_predict(Xtest, RR, Wflash, mY, ncomp);
+    Rcpp::List out = class_bias_topk_from_cube(Ypred, class_bias, model, top_k);
+    arma::mat T_Xtest;
+    if (proj) {
+      T_Xtest = Xtest * RR;
+    }
+    out["Ttest"] = T_Xtest;
+    out["predict_backend"] = "cuda_class_bias";
+    return out;
+  } catch (...) {
+    return pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, 4096);
+  }
+}
+
 arma::imat pls_predict_classes_compact_cpu(List& model, arma::mat Xtest) {
   const int m = Rcpp::as<int>(model["m"]);
   arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);

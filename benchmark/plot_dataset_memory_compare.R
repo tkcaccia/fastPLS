@@ -21,7 +21,12 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 dt <- fread(raw_file)[status %in% c("ok", "capped")]
 if (!nrow(dt)) stop("No successful benchmark rows to plot")
 if (!"classifier" %in% names(dt)) dt[, classifier := "argmax"]
-dt[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
+dt[, classifier_label := fcase(
+  classifier == "argmax", "argmax",
+  grepl("^lda", classifier), "LDA",
+  grepl("^class_bias", classifier), "class-bias",
+  default = classifier
+)]
 if (any(grepl("^R", dt$implementation_label))) {
   stop(
     "R implementation rows were found in dataset_memory_compare_raw.csv. ",
@@ -38,7 +43,8 @@ backend_cols <- c(
 
 classifier_lines <- c(
   argmax = "solid",
-  LDA = "longdash"
+  LDA = "longdash",
+  "class-bias" = "dotdash"
 )
 
 dt[, backend_algorithm := fcase(

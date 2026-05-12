@@ -444,6 +444,37 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pls_class_predict_topk_cpp
+List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj, int block_size);
+RcppExport SEXP _fastPLS_pls_class_predict_topk_cpp(SEXP modelSEXP, SEXP XtestSEXP, SEXP class_biasSEXP, SEXP top_kSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type class_bias(class_biasSEXP);
+    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
+    Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
+    Rcpp::traits::input_parameter< int >::type block_size(block_sizeSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, block_size));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_class_predict_topk_cuda
+List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj);
+RcppExport SEXP _fastPLS_pls_class_predict_topk_cuda(SEXP modelSEXP, SEXP XtestSEXP, SEXP class_biasSEXP, SEXP top_kSEXP, SEXP projSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type class_bias(class_biasSEXP);
+    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
+    Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cuda(model, Xtest, class_bias, top_k, proj));
+    return rcpp_result_gen;
+END_RCPP
+}
 // kernel_matrix_cpp
 arma::mat kernel_matrix_cpp(const arma::mat& X1, const arma::mat& X2, const int kernel, const double gamma, const int degree, const double coef0);
 RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP X1SEXP, SEXP X2SEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP) {
@@ -754,6 +785,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
     {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},
+    {"_fastPLS_pls_class_predict_topk_cpp", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cpp, 6},
+    {"_fastPLS_pls_class_predict_topk_cuda", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cuda, 5},
     {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
     {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
     {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},

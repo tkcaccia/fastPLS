@@ -18,6 +18,10 @@
 ##}
 # https://github.com/zdk123/irlba
 
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
 .cap_plssvd_ncomp <- function(ncomp, nrows_x, ncols_x, ncols_y, warn = TRUE) {
   ncomp <- as.integer(ncomp)
   max_plssvd_rank <- min(as.integer(nrows_x), as.integer(ncols_x), as.integer(ncols_y))
@@ -327,7 +331,435 @@
 }
 
 .normalize_classifier <- function(classifier) {
-  match.arg(classifier, c("argmax", "lda_cpp", "lda_cuda"))
+  if (length(classifier) > 1L) {
+    classifier <- classifier[1L]
+  }
+  classifier <- match.arg(classifier, c("argmax", "lda_cpp", "lda_cuda", "class_bias", "class_bias_cpp", "class_bias_cuda"))
+  if (identical(classifier, "class_bias")) "class_bias_cpp" else classifier
+}
+
+.is_class_bias_classifier <- function(classifier) {
+  !is.null(classifier) && classifier %in% c("class_bias_cpp", "class_bias_cuda")
+}
+
+.class_bias_backend <- function(classifier) {
+  if (identical(classifier, "class_bias_cuda")) "cuda" else "cpp"
+}
+
+.normalize_class_bias_method <- function(class_bias_method) {
+  match.arg(class_bias_method, c("iter_count_ratio", "count_ratio"))
+}
+
+.class_bias_calibration_indices <- function(y, fraction = 1, seed = 1L) {
+  y <- factor(y)
+  n <- length(y)
+  fraction <- as.numeric(fraction)[1L]
+  if (!is.finite(fraction) || fraction <= 0 || fraction > 1) {
+    stop("class_bias_calibration_fraction must be in (0, 1]", call. = FALSE)
+  }
+  if (fraction >= 1) {
+    return(seq_len(n))
+  }
+
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  } else {
+    NULL
+  }
+  on.exit({
+    if (is.null(old_seed)) {
+      if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    } else {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+
+  set.seed(as.integer(seed)[1L])
+  idx <- unlist(lapply(split(seq_len(n), y), function(ii) {
+    ni <- length(ii)
+    take <- max(1L, floor(ni * fraction))
+    sample(ii, min(ni, take))
+  }), use.names = FALSE)
+  sort(unique(as.integer(idx)))
+}
+
+.resolve_top_k <- function(top = 1L, top5 = FALSE) {
+  top <- as.integer(top)[1L]
+  if (!is.finite(top) || is.na(top) || top < 1L) {
+    stop("top must be a positive integer", call. = FALSE)
+  }
+  if (isTRUE(top5)) top <- max(top, 5L)
+  top
+}
+
+.class_bias_matrix <- function(class_bias, lev, ncomp) {
+  nclass <- length(lev)
+  nslice <- length(ncomp)
+  if (is.null(class_bias)) {
+    out <- matrix(0, nrow = nclass, ncol = nslice)
+    rownames(out) <- lev
+    return(out)
+  }
+  if (is.vector(class_bias) || is.factor(class_bias)) {
+    nm <- names(class_bias)
+    class_bias <- as.numeric(class_bias)
+    if (!is.null(nm) && any(nzchar(nm))) {
+      class_bias <- class_bias[match(lev, nm)]
+    }
+    if (length(class_bias) != nclass || anyNA(class_bias)) {
+      stop("class_bias must have one numeric value per class", call. = FALSE)
+    }
+    out <- matrix(class_bias, nrow = nclass, ncol = nslice)
+    rownames(out) <- lev
+    return(out)
+  }
+  class_bias <- as.matrix(class_bias)
+  if (nrow(class_bias) != nclass && ncol(class_bias) == nclass) {
+    class_bias <- t(class_bias)
+  }
+  if (!is.null(rownames(class_bias))) {
+    class_bias <- class_bias[match(lev, rownames(class_bias)), , drop = FALSE]
+  }
+  if (nrow(class_bias) != nclass || anyNA(class_bias)) {
+    stop("class_bias must have one row per class", call. = FALSE)
+  }
+  if (ncol(class_bias) == 1L && nslice > 1L) {
+    class_bias <- matrix(class_bias[, 1L], nrow = nclass, ncol = nslice)
+  }
+  if (ncol(class_bias) != nslice) {
+    stop("class_bias must have one column or one column per ncomp", call. = FALSE)
+  }
+  rownames(class_bias) <- lev
+  class_bias
+}
+
+.class_topk_to_labels <- function(top_index, top_score, lev, ncomp) {
+  dims <- dim(top_index)
+  labels <- array(lev[as.integer(top_index)], dim = dims)
+  top1 <- as.data.frame(matrix(labels[, 1L, ], nrow = dims[1L], ncol = dims[3L]))
+  colnames(top1) <- paste("ncomp=", ncomp, sep = "")
+  for (j in seq_along(top1)) {
+    top1[[j]] <- factor(top1[[j]], levels = lev)
+  }
+  out <- list(Ypred = top1)
+  out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
+  colnames(out$Ypred_index) <- paste("ncomp=", ncomp, sep = "")
+  if (dims[2L] > 1L) {
+    top_list <- vector("list", dims[3L])
+    score_list <- vector("list", dims[3L])
+    names(top_list) <- names(score_list) <- paste("ncomp=", ncomp, sep = "")
+    for (a in seq_len(dims[3L])) {
+      top_list[[a]] <- matrix(
+        labels[, , a],
+        nrow = dims[1L],
+        ncol = dims[2L],
+        dimnames = list(NULL, paste0("rank", seq_len(dims[2L])))
+      )
+      score_list[[a]] <- matrix(
+        top_score[, , a],
+        nrow = dims[1L],
+        ncol = dims[2L],
+        dimnames = list(NULL, paste0("rank", seq_len(dims[2L])))
+      )
+    }
+    out$Ypred_top <- top_list
+    out$Ypred_top_score <- score_list
+  }
+  out
+}
+
+.class_topk_from_score_cube <- function(score_cube, lev, ncomp, class_bias = NULL, top = 1L) {
+  dims <- dim(score_cube)
+  top <- min(as.integer(top)[1L], dims[2L])
+  bias <- .class_bias_matrix(class_bias, lev, ncomp)
+  top_index <- array(NA_integer_, dim = c(dims[1L], top, dims[3L]))
+  top_score <- array(NA_real_, dim = c(dims[1L], top, dims[3L]))
+  for (a in seq_len(dims[3L])) {
+    score <- sweep(score_cube[, , a, drop = FALSE][, , 1L], 2L, bias[, a], "+", check.margin = FALSE)
+    if (top == 1L) {
+      idx <- max.col(score, ties.method = "first")
+      top_index[, 1L, a] <- idx
+      top_score[, 1L, a] <- score[cbind(seq_len(nrow(score)), idx)]
+    } else {
+      for (i in seq_len(nrow(score))) {
+        idx <- order(score[i, ], decreasing = TRUE)[seq_len(top)]
+        top_index[i, , a] <- idx
+        top_score[i, , a] <- score[i, idx]
+      }
+    }
+  }
+  .class_topk_to_labels(top_index, top_score, lev, ncomp)
+}
+
+.class_bias_predict <- function(model, Xtest, class_bias = NULL, top = 1L, proj = FALSE, backend = c("cpp", "cuda")) {
+  backend <- match.arg(backend)
+  bias <- .class_bias_matrix(class_bias, model$lev, model$ncomp)
+  block_size <- model$flash_block_size
+  if (is.null(block_size) || !length(block_size) || is.na(block_size)) {
+    block_size <- 4096L
+  }
+  out <- if (identical(backend, "cuda") && isTRUE(has_cuda())) {
+    pls_class_predict_topk_cuda(model, as.matrix(Xtest), bias, as.integer(top), isTRUE(proj))
+  } else {
+    pls_class_predict_topk_cpp(model, as.matrix(Xtest), bias, as.integer(top), isTRUE(proj), as.integer(block_size))
+  }
+  res <- .class_topk_to_labels(out$top_index, out$top_score, model$lev, model$ncomp)
+  if (isTRUE(proj)) res$Ttest <- out$Ttest
+  if (!is.null(out$predict_backend)) res$predict_backend <- out$predict_backend
+  res
+}
+
+.class_bias_update <- function(y_true, pred_index, lev, scale, eps, clip) {
+  truth <- tabulate(as.integer(factor(y_true, levels = lev)), nbins = length(lev))
+  pred <- tabulate(as.integer(pred_index), nbins = length(lev))
+  .class_bias_update_counts(truth, pred, scale, eps, clip)
+}
+
+.class_bias_update_counts <- function(truth, pred, scale, eps, clip) {
+  delta <- scale * log((truth + eps) / (pred + eps))
+  delta <- delta - mean(delta)
+  if (is.finite(clip)) {
+    delta <- pmax(pmin(delta, clip), -clip)
+  }
+  delta
+}
+
+.fastpls_block_size <- function(option_name, env_name, default = 4096L) {
+  value <- getOption(option_name, NULL)
+  if (is.null(value)) {
+    value <- Sys.getenv(env_name, unset = as.character(default))
+  }
+  value <- suppressWarnings(as.integer(value)[1L])
+  if (!is.finite(value) || is.na(value) || value < 1L) {
+    value <- as.integer(default)
+  }
+  value
+}
+
+.should_use_label_aware_plssvd <- function(n, q) {
+  dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
+  threshold <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", "512"))[1L])
+  if (!is.finite(threshold) || threshold < 0) threshold <- 512
+  isTRUE(dense_y_mb >= threshold)
+}
+
+.plssvd_label_aware_stream_model <- function(Xtrain,
+                                             y_train,
+                                             ncomp,
+                                             scaling = 1L,
+                                             backend = c("cpp", "cuda"),
+                                             block_size = NULL) {
+  backend <- match.arg(backend)
+  Xtrain <- as.matrix(Xtrain)
+  y_train <- factor(y_train)
+  lev <- levels(y_train)
+  y_code <- as.integer(y_train)
+  n <- nrow(Xtrain)
+  p <- ncol(Xtrain)
+  m <- length(lev)
+  if (n < 1L || p < 1L || m < 2L) {
+    stop("label-aware PLSSVD requires non-empty X and at least two classes", call. = FALSE)
+  }
+  cap <- .cap_plssvd_ncomp(ncomp, n, p, m, warn = TRUE)
+  ncomp <- as.integer(cap$ncomp)
+  max_rank <- max(ncomp)
+  if (is.null(block_size)) {
+    block_size <- .fastpls_block_size(
+      "fastPLS.label_aware_block_size",
+      "FASTPLS_LABEL_AWARE_BLOCK_SIZE",
+      default = 8192L
+    )
+  }
+  block_size <- max(1L, as.integer(block_size)[1L])
+
+  sums <- numeric(p)
+  sums_sq <- numeric(p)
+  for (start in seq(1L, n, by = block_size)) {
+    stop <- min(n, start + block_size - 1L)
+    Xb <- Xtrain[start:stop, , drop = FALSE]
+    sums <- sums + colSums(Xb)
+    if (as.integer(scaling) == 2L) {
+      sums_sq <- sums_sq + colSums(Xb * Xb)
+    }
+  }
+  mX <- if (as.integer(scaling) < 3L) sums / n else rep(0, p)
+  vX <- rep(1, p)
+  if (as.integer(scaling) == 2L) {
+    centered_ss <- pmax(sums_sq - n * mX * mX, 0)
+    vX <- sqrt(centered_ss / max(1L, n - 1L))
+    vX[!is.finite(vX) | vX == 0] <- 1
+  }
+
+  counts <- tabulate(y_code, nbins = m)
+  mY <- counts / n
+  class_sums <- matrix(0, nrow = p, ncol = m)
+  for (start in seq(1L, n, by = block_size)) {
+    stop <- min(n, start + block_size - 1L)
+    rows <- start:stop
+    Xb <- Xtrain[rows, , drop = FALSE]
+    if (as.integer(scaling) < 3L) {
+      Xb <- sweep(Xb, 2L, mX, "-", check.margin = FALSE)
+    }
+    if (as.integer(scaling) == 2L) {
+      Xb <- sweep(Xb, 2L, vX, "/", check.margin = FALSE)
+    }
+    rs <- rowsum(
+      Xb,
+      group = factor(y_code[rows], levels = seq_len(m)),
+      reorder = FALSE
+    )
+    rs <- as.matrix(rs)
+    if (nrow(rs) != m) {
+      rs_full <- matrix(0, nrow = m, ncol = ncol(Xb))
+      row_pos <- match(rownames(rs), as.character(seq_len(m)))
+      rs_full[row_pos[!is.na(row_pos)], ] <- rs[!is.na(row_pos), , drop = FALSE]
+      rs <- rs_full
+    }
+    class_sums <- class_sums + t(rs)
+  }
+  total_sums <- rowSums(class_sums)
+  S <- class_sums - tcrossprod(total_sums, mY)
+
+  sv <- svd(S, nu = max_rank, nv = max_rank)
+  R <- sv$u[, seq_len(max_rank), drop = FALSE]
+  Q <- sv$v[, seq_len(max_rank), drop = FALSE]
+  d <- sv$d[seq_len(max_rank)]
+
+  G <- matrix(0, nrow = max_rank, ncol = max_rank)
+  for (start in seq(1L, n, by = block_size)) {
+    stop <- min(n, start + block_size - 1L)
+    Xb <- Xtrain[start:stop, , drop = FALSE]
+    if (as.integer(scaling) < 3L) {
+      Xb <- sweep(Xb, 2L, mX, "-", check.margin = FALSE)
+    }
+    if (as.integer(scaling) == 2L) {
+      Xb <- sweep(Xb, 2L, vX, "/", check.margin = FALSE)
+    }
+    Tb <- Xb %*% R
+    G <- G + crossprod(Tb)
+  }
+
+  ns <- length(ncomp)
+  C_latent <- array(0, dim = c(max_rank, max_rank, ns))
+  W_latent <- array(0, dim = c(max_rank, m, ns))
+  for (a in seq_along(ncomp)) {
+    k <- ncomp[[a]]
+    Gk <- G[seq_len(k), seq_len(k), drop = FALSE]
+    Dk <- diag(d[seq_len(k)], nrow = k, ncol = k)
+    ridge <- 1e-10 * mean(diag(Gk))
+    if (!is.finite(ridge) || ridge <= 0) ridge <- 1e-10
+    coeff <- tryCatch(
+      solve(Gk + diag(ridge, k), Dk),
+      error = function(e) qr.solve(Gk + diag(ridge, k), Dk)
+    )
+    C_latent[seq_len(k), seq_len(k), a] <- coeff
+    W_latent[seq_len(k), , a] <- coeff %*% t(Q[, seq_len(k), drop = FALSE])
+  }
+
+  model <- list(
+    C_latent = C_latent,
+    W_latent = W_latent,
+    Q = Q,
+    Ttrain = matrix(numeric(0), nrow = 0, ncol = max_rank),
+    R = R,
+    mX = matrix(mX, nrow = 1L),
+    vX = matrix(vX, nrow = 1L),
+    mY = matrix(mY, nrow = 1L),
+    p = p,
+    m = m,
+    ncomp = ncomp,
+    Yfit = array(numeric(0), dim = c(0L, 0L, 0L)),
+    R2Y = rep(NA_real_, ns),
+    pls_method = "plssvd",
+    classification = TRUE,
+    lev = lev,
+    predict_latent_ok = TRUE,
+    xprod_default = TRUE,
+    xprod_mode = "label_aware_stream",
+    B_stored = FALSE,
+    compact_prediction = TRUE,
+    flash_svd = TRUE,
+    flash_svd_backend = backend,
+    predict_backend = if (identical(backend, "cuda")) "cuda_flash" else "cpu_flash",
+    flash_block_size = block_size
+  )
+  class(model) <- "fastPLS"
+  model
+}
+
+.fit_class_bias <- function(model,
+                            Xtrain,
+                            y_train,
+                            backend = c("cpp", "cuda"),
+                            method = c("iter_count_ratio", "count_ratio"),
+                            lambda = 0.05,
+                            iter = 1L,
+                            clip = Inf,
+                            eps = 1,
+                            calibration_fraction = 1,
+                            seed = 1L) {
+  backend <- match.arg(backend)
+  method <- .normalize_class_bias_method(method)
+  iter <- max(1L, as.integer(iter)[1L])
+  cal_idx <- .class_bias_calibration_indices(
+    y_train,
+    fraction = calibration_fraction,
+    seed = seed
+  )
+  bias <- matrix(0, nrow = length(model$lev), ncol = length(model$ncomp))
+  rownames(bias) <- model$lev
+  n_pass <- if (identical(method, "count_ratio")) 1L else iter
+  truth_counts <- tabulate(as.integer(factor(y_train[cal_idx], levels = model$lev)), nbins = length(model$lev))
+  block_size <- .fastpls_block_size(
+    "fastPLS.class_bias_block_size",
+    "FASTPLS_CLASS_BIAS_BLOCK_SIZE",
+    default = 4096L
+  )
+  Xmat <- as.matrix(Xtrain)
+  for (i in seq_len(n_pass)) {
+    pred_counts <- matrix(0, nrow = length(model$lev), ncol = length(model$ncomp))
+    for (start in seq(1L, length(cal_idx), by = block_size)) {
+      stop <- min(length(cal_idx), start + block_size - 1L)
+      rows <- cal_idx[start:stop]
+      pred <- .class_bias_predict(
+        model,
+        Xmat[rows, , drop = FALSE],
+        bias,
+        top = 1L,
+        proj = FALSE,
+        backend = backend
+      )
+      for (a in seq_along(model$ncomp)) {
+        pred_counts[, a] <- pred_counts[, a] +
+          tabulate(as.integer(pred$Ypred_index[, a]), nbins = length(model$lev))
+      }
+    }
+    for (a in seq_along(model$ncomp)) {
+      bias[, a] <- bias[, a] + .class_bias_update_counts(
+        truth = truth_counts,
+        pred = pred_counts[, a],
+        scale = lambda,
+        eps = eps,
+        clip = clip
+      )
+      bias[, a] <- bias[, a] - mean(bias[, a])
+    }
+  }
+  colnames(bias) <- paste("ncomp=", model$ncomp, sep = "")
+  attr(bias, "parameters") <- list(
+    method = method,
+    lambda = lambda,
+    iter = n_pass,
+    clip = clip,
+    eps = eps,
+    calibration_fraction = as.numeric(calibration_fraction)[1L],
+    n_calibration = length(cal_idx),
+    seed = as.integer(seed)[1L],
+    backend = backend
+  )
+  bias
 }
 
 .normalize_regression_head <- function(regression_head) {
@@ -480,7 +912,14 @@
                                    Xtrain,
                                    Ytrain,
                                    classifier = "argmax",
-                                   lda_ridge = 1e-8) {
+                                   lda_ridge = 1e-8,
+                                   class_bias_method = getOption("fastPLS.class_bias_method", "iter_count_ratio"),
+                                   class_bias_lambda = getOption("fastPLS.class_bias_lambda", 0.05),
+                                   class_bias_iter = getOption("fastPLS.class_bias_iter", 1L),
+                                   class_bias_clip = getOption("fastPLS.class_bias_clip", Inf),
+                                   class_bias_eps = getOption("fastPLS.class_bias_eps", 1),
+                                   class_bias_calibration_fraction = getOption("fastPLS.class_bias_calibration_fraction", 1),
+                                   class_bias_seed = getOption("fastPLS.class_bias_seed", 1L)) {
   classifier <- .normalize_classifier(classifier)
   model$classification_rule <- classifier
   model$lda_backend <- classifier
@@ -488,7 +927,33 @@
     return(model)
   }
   if (!is.factor(Ytrain)) {
-    stop("LDA classification requires factor Ytrain", call. = FALSE)
+    stop("Classification head requires factor Ytrain", call. = FALSE)
+  }
+  if (.is_class_bias_classifier(classifier)) {
+    backend <- .class_bias_backend(classifier)
+    if (identical(backend, "cuda") && !isTRUE(has_cuda())) {
+      warning("classifier='class_bias_cuda' requested but CUDA is unavailable; using class_bias_cpp.", call. = FALSE)
+      backend <- "cpp"
+      model$classification_rule <- "class_bias_cpp"
+      model$lda_backend <- "class_bias_cpp"
+    }
+    model$class_bias_backend <- backend
+    class_bias <- .fit_class_bias(
+      model,
+      Xtrain,
+      Ytrain,
+      backend = backend,
+      method = class_bias_method,
+      lambda = as.numeric(class_bias_lambda)[1L],
+      iter = as.integer(class_bias_iter)[1L],
+      clip = as.numeric(class_bias_clip)[1L],
+      eps = as.numeric(class_bias_eps)[1L],
+      calibration_fraction = as.numeric(class_bias_calibration_fraction)[1L],
+      seed = as.integer(class_bias_seed)[1L]
+    )
+    model$class_bias <- class_bias
+    model$class_bias_parameters <- attr(class_bias, "parameters", exact = TRUE)
+    return(model)
   }
   if (identical(classifier, "lda_cuda") && !.cuda_matmul_available()) {
     warning("classifier='lda_cuda' requested but CUDA matrix multiply is unavailable; using lda_cpp.", call. = FALSE)
@@ -1911,17 +2376,23 @@ pls.model2.fast.gpu =
 #'   low-rank prediction when compact factors are available and the low-rank
 #'   application is expected to be beneficial.
 #' @param flash.block_size Row block size for `"cpu_flash"` prediction.
+#' @param top Number of ranked classes to return for classification.
+#' @param top5 Convenience flag equivalent to `top = max(top, 5)`.
+#' @param raw_scores If `TRUE`, keep raw classification score cubes as
+#'   `Yscore` when available.
 #' @param ... Unused.
 #' @return A list containing `Ypred`, optional `Q2Y`, optional `Ttest`, and
 #'   optional LDA scores for LDA classification models.
 #' @export
 predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
-                           flash.block_size = NULL, ...) {
+                           flash.block_size = NULL, top = 1L, top5 = FALSE,
+                           raw_scores = FALSE, ...) {
   if (!is(object, "fastPLS")) {
     stop("object is not a fastPLS object")
   }
   predict.backend <- match.arg(predict.backend)
+  top <- .resolve_top_k(top, top5)
   Xtest=as.matrix(newdata)
   use_cuda_flash <- identical(predict.backend, "cuda_flash") ||
     (identical(predict.backend, "auto") &&
@@ -1939,10 +2410,24 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	  if (isTRUE(object$classification) &&
 	      !is.null(object$classification_rule) &&
 	      object$classification_rule %in% c("lda_cpp", "lda_cuda")) {
-    lda_res <- .fastpls_lda_predictions(object, Xtest, keep_ttest = isTRUE(proj))
+    lda_res <- .fastpls_lda_predictions(
+      object,
+      Xtest,
+      return_scores = isTRUE(raw_scores) || top > 1L,
+      keep_ttest = isTRUE(proj)
+    )
     res <- list(Ypred = lda_res$Ypred, Q2Y = NULL)
     if (!is.null(lda_res$lda_scores)) {
-      res$LDA_scores <- lda_res$lda_scores
+      if (isTRUE(raw_scores)) {
+        res$LDA_scores <- lda_res$lda_scores
+      }
+      if (top > 1L) {
+        top_res <- .class_topk_from_score_cube(lda_res$lda_scores, object$lev, object$ncomp, top = top)
+        res$Ypred <- top_res$Ypred
+        res$Ypred_index <- top_res$Ypred_index
+        res$Ypred_top <- top_res$Ypred_top
+        res$Ypred_top_score <- top_res$Ypred_top_score
+      }
     }
     if (isTRUE(proj)) {
       res$Ttest <- lda_res$Ttest
@@ -1952,6 +2437,33 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	    }
 	    return(res)
 	  }
+  if (isTRUE(object$classification) &&
+      is.null(Ytest) &&
+      !isTRUE(raw_scores) &&
+      !isTRUE(object$gaussian_y) &&
+      (is.null(object$classification_rule) ||
+         identical(object$classification_rule, "argmax") ||
+         .is_class_bias_classifier(object$classification_rule))) {
+    pred_backend <- if (!is.null(object$classification_rule) &&
+                        .is_class_bias_classifier(object$classification_rule)) {
+      object$class_bias_backend %||% .class_bias_backend(object$classification_rule)
+    } else if (identical(object$predict_backend, "cuda_flash") && isTRUE(has_cuda())) {
+      "cuda"
+    } else {
+      "cpp"
+    }
+    bias_res <- .class_bias_predict(
+      object,
+      Xtest,
+      class_bias = if (!is.null(object$classification_rule) &&
+                       .is_class_bias_classifier(object$classification_rule)) object$class_bias else NULL,
+      top = top,
+      proj = proj,
+      backend = pred_backend
+    )
+    bias_res$Q2Y <- NULL
+    return(bias_res)
+  }
 	  if (!isTRUE(object$classification) &&
 	      !is.null(object$regression_head) &&
 	      object$regression_head %in% c("linear_cpp", "linear_cuda")) {
@@ -2027,23 +2539,43 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       lda_res <- .fastpls_lda_predictions(
         object,
         Xtest,
-        Ttest = if (!is.null(res$Ttest)) res$Ttest else NULL
+        Ttest = if (!is.null(res$Ttest)) res$Ttest else NULL,
+        return_scores = isTRUE(raw_scores) || top > 1L
       )
       res$Ypred <- lda_res$Ypred
       if (!is.null(lda_res$lda_scores)) {
-        res$LDA_scores <- lda_res$lda_scores
+        if (isTRUE(raw_scores)) {
+          res$LDA_scores <- lda_res$lda_scores
+        }
+        if (top > 1L) {
+          top_res <- .class_topk_from_score_cube(lda_res$lda_scores, object$lev, object$ncomp, top = top)
+          res$Ypred <- top_res$Ypred
+          res$Ypred_index <- top_res$Ypred_index
+          res$Ypred_top <- top_res$Ypred_top
+          res$Ypred_top_score <- top_res$Ypred_top_score
+        }
       }
       if (isTRUE(proj) || !is.null(res$Ttest)) {
         res$Ttest <- lda_res$Ttest
       }
     } else {
-      Ypredlab = as.data.frame(matrix(nrow = nrow(Xtest), ncol = length(object$ncomp)))
-
-      for (i in 1:length(object$ncomp)) {
-        t = apply(res$Ypred[, , i], 1, which.max)
-        Ypredlab[, i] = (factor(object$lev[t], levels = object$lev))
+      bias <- if (!is.null(object$classification_rule) &&
+                  .is_class_bias_classifier(object$classification_rule)) {
+        object$class_bias
+      } else {
+        NULL
       }
-      res$Ypred=Ypredlab
+      score_cube <- res$Ypred
+      top_res <- .class_topk_from_score_cube(score_cube, object$lev, object$ncomp, class_bias = bias, top = top)
+      if (isTRUE(raw_scores)) {
+        res$Yscore <- score_cube
+      }
+      res$Ypred <- top_res$Ypred
+      res$Ypred_index <- top_res$Ypred_index
+      if (!is.null(top_res$Ypred_top)) {
+        res$Ypred_top <- top_res$Ypred_top
+        res$Ypred_top_score <- top_res$Ypred_top_score
+      }
     }
   }
   res
@@ -2313,7 +2845,7 @@ kernel_pls_r <- function(Xtrain,
                          gaussian_y = FALSE,
                          gaussian_y_dim = NULL,
                           gaussian_y_seed = seed,
-	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
@@ -2349,14 +2881,22 @@ kernel_pls_cpp <- function(Xtrain,
                            gaussian_y = FALSE,
                            gaussian_y_dim = NULL,
 	                  gaussian_y_seed = seed,
-	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                  lda_ridge = 1e-8,
+	                  class_bias_method = c("iter_count_ratio", "count_ratio"),
+	                  class_bias_lambda = 0.05,
+	                  class_bias_iter = 1L,
+	                  class_bias_clip = Inf,
+	                  class_bias_eps = 1,
+	                  class_bias_calibration_fraction = 1,
+	                  class_bias_seed = seed,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
                            return_variance = TRUE,
                            proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
+  class_bias_method <- .normalize_class_bias_method(class_bias_method)
   svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
   if (isTRUE(gaussian_y) && is.null(gaussian_y_dim)) {
     gaussian_y_dim <- .gaussian_y_default_dim(Xtrain, NULL)
@@ -2382,6 +2922,13 @@ kernel_pls_cpp <- function(Xtrain,
       gaussian_y_seed = gaussian_y_seed,
       classifier = classifier,
       lda_ridge = lda_ridge,
+      class_bias_method = class_bias_method,
+      class_bias_lambda = class_bias_lambda,
+      class_bias_iter = class_bias_iter,
+      class_bias_clip = class_bias_clip,
+      class_bias_eps = class_bias_eps,
+      class_bias_calibration_fraction = class_bias_calibration_fraction,
+      class_bias_seed = class_bias_seed,
       return_variance = return_variance
     )
   )
@@ -2408,7 +2955,7 @@ kernel_pls_cuda <- function(Xtrain,
                             gaussian_y = FALSE,
                             gaussian_y_dim = NULL,
 	                  gaussian_y_seed = seed,
-	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
@@ -2572,7 +3119,7 @@ opls_r <- function(Xtrain,
                    gaussian_y = FALSE,
                    gaussian_y_dim = NULL,
                    gaussian_y_seed = seed,
-                   classifier = c("argmax", "lda_cpp", "lda_cuda"),
+                   classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
                    lda_ridge = 1e-8,
                    fit = FALSE,
                    return_variance = TRUE,
@@ -2604,13 +3151,21 @@ opls_cpp <- function(Xtrain,
                      gaussian_y = FALSE,
                      gaussian_y_dim = NULL,
                      gaussian_y_seed = seed,
-                     classifier = c("argmax", "lda_cpp", "lda_cuda"),
+                     classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
                      lda_ridge = 1e-8,
+                     class_bias_method = c("iter_count_ratio", "count_ratio"),
+                     class_bias_lambda = 0.05,
+                     class_bias_iter = 1L,
+                     class_bias_clip = Inf,
+                     class_bias_eps = 1,
+                     class_bias_calibration_fraction = 1,
+                     class_bias_seed = seed,
                      fit = FALSE,
                      return_variance = TRUE,
                      proj = FALSE) {
   method <- match.arg(method)
   classifier <- .normalize_classifier(classifier)
+  class_bias_method <- .normalize_class_bias_method(class_bias_method)
   svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
   .opls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north, fit, proj,
@@ -2633,6 +3188,13 @@ opls_cpp <- function(Xtrain,
       gaussian_y_seed = gaussian_y_seed,
       classifier = classifier,
       lda_ridge = lda_ridge,
+      class_bias_method = class_bias_method,
+      class_bias_lambda = class_bias_lambda,
+      class_bias_iter = class_bias_iter,
+      class_bias_clip = class_bias_clip,
+      class_bias_eps = class_bias_eps,
+      class_bias_calibration_fraction = class_bias_calibration_fraction,
+      class_bias_seed = class_bias_seed,
       return_variance = return_variance
     )
   )
@@ -2656,7 +3218,7 @@ opls_cuda <- function(Xtrain,
                       gaussian_y = FALSE,
                       gaussian_y_dim = NULL,
                       gaussian_y_seed = seed,
-	                  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                  lda_ridge = 1e-8,
 	                  regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                  fit = FALSE,
@@ -2786,8 +3348,15 @@ simpls_gpu = function(Xtrain,
                       gaussian_y = FALSE,
                       gaussian_y_dim = NULL,
 	                      gaussian_y_seed = seed,
-	                      classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                      classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                      lda_ridge = 1e-8,
+	                      class_bias_method = c("iter_count_ratio", "count_ratio"),
+	                      class_bias_lambda = 0.05,
+	                      class_bias_iter = 1L,
+	                      class_bias_clip = Inf,
+	                      class_bias_eps = 1,
+	                      class_bias_calibration_fraction = 1,
+	                      class_bias_seed = seed,
 	                      regression_head = c("standard", "linear_cpp", "linear_cuda"),
                           return_variance = TRUE) {
   if (!has_cuda()) {
@@ -2796,10 +3365,40 @@ simpls_gpu = function(Xtrain,
 	  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
 	  classifier <- .normalize_classifier(classifier)
 	  regression_head <- .normalize_regression_head(regression_head)
+	  class_bias_method <- .normalize_class_bias_method(class_bias_method)
 
-  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-  Xtrain <- as.matrix(Xtrain)
-  Ytrain_original <- Ytrain
+	  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
+	  Xtrain <- as.matrix(Xtrain)
+	  if (is.factor(Ytrain) &&
+	      !isTRUE(gaussian_y) &&
+	      !isTRUE(fit) &&
+	      classifier %in% c("argmax", "class_bias_cpp", "class_bias_cuda") &&
+	      .should_use_label_aware_plssvd(nrow(Xtrain), nlevels(Ytrain))) {
+	    model <- .plssvd_label_aware_stream_model(
+	      Xtrain,
+	      Ytrain,
+	      ncomp = as.integer(ncomp),
+	      scaling = scal,
+	      backend = "cuda"
+	    )
+	    model <- .attach_lda_classifier(
+	      model,
+	      Xtrain,
+	      Ytrain,
+	      classifier,
+	      lda_ridge,
+	      class_bias_method = class_bias_method,
+	      class_bias_lambda = class_bias_lambda,
+	      class_bias_iter = class_bias_iter,
+	      class_bias_clip = class_bias_clip,
+	      class_bias_eps = class_bias_eps,
+	      class_bias_calibration_fraction = class_bias_calibration_fraction,
+	      class_bias_seed = class_bias_seed
+	    )
+	    model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
+	    return(model)
+	  }
+	  Ytrain_original <- Ytrain
   yprep <- .prepare_gaussian_y(
     Ytrain,
     Xtrain,
@@ -2894,7 +3493,20 @@ simpls_gpu = function(Xtrain,
   model <- .enable_flash_prediction(model, "cuda")
 	  model <- .attach_gaussian_y(model, yprep$gaussian)
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
-	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
+	  model <- .attach_lda_classifier(
+	    model,
+	    Xtrain,
+	    Ytrain_original,
+	    classifier,
+	    lda_ridge,
+	    class_bias_method = class_bias_method,
+	    class_bias_lambda = class_bias_lambda,
+	    class_bias_iter = class_bias_iter,
+	    class_bias_clip = class_bias_clip,
+	    class_bias_eps = class_bias_eps,
+	    class_bias_calibration_fraction = class_bias_calibration_fraction,
+	    class_bias_seed = class_bias_seed
+	  )
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
@@ -2968,8 +3580,15 @@ plssvd_gpu = function(Xtrain,
                       gaussian_y = FALSE,
                       gaussian_y_dim = NULL,
 	                      gaussian_y_seed = seed,
-	                      classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                      classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                      lda_ridge = 1e-8,
+	                      class_bias_method = c("iter_count_ratio", "count_ratio"),
+	                      class_bias_lambda = 0.05,
+	                      class_bias_iter = 1L,
+	                      class_bias_clip = Inf,
+	                      class_bias_eps = 1,
+	                      class_bias_calibration_fraction = 1,
+	                      class_bias_seed = seed,
 	                      regression_head = c("standard", "linear_cpp", "linear_cuda"),
                           return_variance = TRUE) {
   if (!has_cuda()) {
@@ -2978,6 +3597,7 @@ plssvd_gpu = function(Xtrain,
 	  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
 	  classifier <- .normalize_classifier(classifier)
 	  regression_head <- .normalize_regression_head(regression_head)
+	  class_bias_method <- .normalize_class_bias_method(class_bias_method)
 
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   Xtrain <- as.matrix(Xtrain)
@@ -3059,7 +3679,20 @@ plssvd_gpu = function(Xtrain,
   model <- .enable_flash_prediction(model, "cuda")
 	  model <- .attach_gaussian_y(model, yprep$gaussian)
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
-	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
+	  model <- .attach_lda_classifier(
+	    model,
+	    Xtrain,
+	    Ytrain_original,
+	    classifier,
+	    lda_ridge,
+	    class_bias_method = class_bias_method,
+	    class_bias_lambda = class_bias_lambda,
+	    class_bias_iter = class_bias_iter,
+	    class_bias_clip = class_bias_clip,
+	    class_bias_eps = class_bias_eps,
+	    class_bias_calibration_fraction = class_bias_calibration_fraction,
+	    class_bias_seed = class_bias_seed
+	  )
 	  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
@@ -5119,10 +5752,27 @@ pls_r <- function(...) {
 #'   discriminant scoring when CUDA is available. For high-throughput PLS-DA on
 #'   GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
 #'   and `classifier = "lda_cuda"`; the compiled CPU fallback is
-#'   `classifier = "lda_cpp"`. The experimental fused
-#'   CUDA PLS+LDA path can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the
-#'   optimized standard CUDA LDA route remains the default.
+#'   `classifier = "lda_cpp"`. `"class_bias_cpp"` and `"class_bias_cuda"` keep
+#'   the PLS response-score classifier but add calibrated per-class score
+#'   offsets before ranking classes. The experimental fused CUDA PLS+LDA path
+#'   can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard
+#'   CUDA LDA route remains the default.
 #' @param lda_ridge Relative diagonal ridge added to the pooled LDA covariance.
+#' @param class_bias_method Calibration rule for class-bias prediction.
+#'   `"iter_count_ratio"` repeats the count-balancing update
+#'   `class_bias_iter` times; `"count_ratio"` applies one
+#'   `lambda * log(true_count / predicted_count)` update.
+#' @param class_bias_lambda Calibration strength for
+#'   `classifier = "class_bias_cpp"` or `"class_bias_cuda"`.
+#' @param class_bias_iter Number of iterative class-bias calibration passes.
+#' @param class_bias_clip Optional absolute clipping value for class-bias
+#'   offsets; `Inf` disables clipping.
+#' @param class_bias_eps Positive smoothing constant used when estimating
+#'   class-bias offsets from prediction counts.
+#' @param class_bias_calibration_fraction Stratified fraction of the training
+#'   set used to estimate class-bias offsets. Use values below 1 to mimic a
+#'   held-out calibration split while still fitting PLS on all training rows.
+#' @param class_bias_seed Seed used for the stratified calibration split.
 #' @param regression_head Regression prediction head. `"standard"` keeps the
 #'   usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
 #'   least-squares linear model on the latent scores with compiled C++ code.
@@ -5139,6 +5789,9 @@ pls_r <- function(...) {
 #' @param fast_defl_cache Deprecated and ignored. `simpls` now permanently uses
 #'   the former incdefl profile.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
+#' @param return_variance Compute predictor-space latent-variable variance
+#'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
+#'   plotting variance metadata.
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param perm.test Run permutation test.
 #' @param times Number of permutations.
@@ -5188,8 +5841,15 @@ pls =  function (Xtrain,
                  gaussian_y = FALSE,
                  gaussian_y_dim = NULL,
 	                 gaussian_y_seed = seed,
-	                 classifier = c("argmax", "lda_cpp", "lda_cuda"),
+	                 classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
 	                 lda_ridge = 1e-8,
+	                 class_bias_method = c("iter_count_ratio", "count_ratio"),
+	                 class_bias_lambda = 0.05,
+	                 class_bias_iter = 1L,
+	                 class_bias_clip = Inf,
+	                 class_bias_eps = 1,
+	                 class_bias_calibration_fraction = 1,
+	                 class_bias_seed = seed,
 	                 regression_head = c("standard", "linear_cpp", "linear_cuda"),
 	                 fit = FALSE,
                  return_variance = TRUE,
@@ -5216,6 +5876,43 @@ pls =  function (Xtrain,
 	  inner.method <- match.arg(inner.method)
 	  classifier <- .normalize_classifier(classifier)
 	  regression_head <- .normalize_regression_head(regression_head)
+	  class_bias_method <- .normalize_class_bias_method(class_bias_method)
+	  class_bias_lambda <- as.numeric(class_bias_lambda)[1L]
+	  class_bias_iter <- max(1L, as.integer(class_bias_iter)[1L])
+	  class_bias_clip <- as.numeric(class_bias_clip)[1L]
+	  class_bias_eps <- as.numeric(class_bias_eps)[1L]
+	  class_bias_calibration_fraction <- as.numeric(class_bias_calibration_fraction)[1L]
+	  class_bias_seed <- as.integer(class_bias_seed)[1L]
+	  if (!is.finite(class_bias_lambda) || class_bias_lambda < 0) {
+	    stop("class_bias_lambda must be a finite non-negative number", call. = FALSE)
+	  }
+	  if (is.na(class_bias_iter) || class_bias_iter < 1L) {
+	    stop("class_bias_iter must be a positive integer", call. = FALSE)
+	  }
+	  if (is.na(class_bias_clip) || class_bias_clip < 0) {
+	    stop("class_bias_clip must be non-negative or Inf", call. = FALSE)
+	  }
+	  if (!is.finite(class_bias_eps) || class_bias_eps <= 0) {
+	    stop("class_bias_eps must be a finite positive number", call. = FALSE)
+	  }
+	  if (!is.finite(class_bias_calibration_fraction) ||
+	      class_bias_calibration_fraction <= 0 ||
+	      class_bias_calibration_fraction > 1) {
+	    stop("class_bias_calibration_fraction must be in (0, 1]", call. = FALSE)
+	  }
+	  if (is.na(class_bias_seed)) {
+	    stop("class_bias_seed must be an integer seed", call. = FALSE)
+	  }
+	  old_class_bias_options <- options(
+	    fastPLS.class_bias_method = class_bias_method,
+	    fastPLS.class_bias_lambda = class_bias_lambda,
+	    fastPLS.class_bias_iter = class_bias_iter,
+	    fastPLS.class_bias_clip = class_bias_clip,
+	    fastPLS.class_bias_eps = class_bias_eps,
+	    fastPLS.class_bias_calibration_fraction = class_bias_calibration_fraction,
+	    fastPLS.class_bias_seed = class_bias_seed
+	  )
+	  on.exit(options(old_class_bias_options), add = TRUE)
 
   if (identical(requested_method, "opls")) {
     fit_fun <- switch(backend, cpp = opls_cpp, cuda = opls_cuda)
@@ -5225,7 +5922,14 @@ pls =  function (Xtrain,
       rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
       svds_tol = svds_tol, seed = seed, fast_block = fast_block,
       gaussian_y = gaussian_y, gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj
+      gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj,
+      class_bias_method = class_bias_method,
+      class_bias_lambda = class_bias_lambda,
+      class_bias_iter = class_bias_iter,
+      class_bias_clip = class_bias_clip,
+      class_bias_eps = class_bias_eps,
+      class_bias_calibration_fraction = class_bias_calibration_fraction,
+      class_bias_seed = class_bias_seed
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
     args$return_variance <- return_variance
@@ -5258,7 +5962,14 @@ pls =  function (Xtrain,
       rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
       svds_tol = svds_tol, seed = seed, fast_block = fast_block,
       gaussian_y = gaussian_y, gaussian_y_dim = gaussian_y_dim,
-      gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj
+      gaussian_y_seed = gaussian_y_seed, fit = fit, proj = proj,
+      class_bias_method = class_bias_method,
+      class_bias_lambda = class_bias_lambda,
+      class_bias_iter = class_bias_iter,
+      class_bias_clip = class_bias_clip,
+      class_bias_eps = class_bias_eps,
+      class_bias_calibration_fraction = class_bias_calibration_fraction,
+      class_bias_seed = class_bias_seed
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
     args$return_variance <- return_variance
@@ -5306,6 +6017,13 @@ pls =  function (Xtrain,
         gaussian_y_seed = gaussian_y_seed,
 	        classifier = classifier,
 	        lda_ridge = lda_ridge,
+	        class_bias_method = class_bias_method,
+	        class_bias_lambda = class_bias_lambda,
+	        class_bias_iter = class_bias_iter,
+	        class_bias_clip = class_bias_clip,
+	        class_bias_eps = class_bias_eps,
+	        class_bias_calibration_fraction = class_bias_calibration_fraction,
+	        class_bias_seed = class_bias_seed,
 	        regression_head = regression_head,
             return_variance = return_variance
 	      ))
@@ -5339,6 +6057,13 @@ pls =  function (Xtrain,
       gaussian_y_seed = gaussian_y_seed,
 	      classifier = classifier,
 	      lda_ridge = lda_ridge,
+	      class_bias_method = class_bias_method,
+	      class_bias_lambda = class_bias_lambda,
+	      class_bias_iter = class_bias_iter,
+	      class_bias_clip = class_bias_clip,
+	      class_bias_eps = class_bias_eps,
+	      class_bias_calibration_fraction = class_bias_calibration_fraction,
+	      class_bias_seed = class_bias_seed,
 	      regression_head = regression_head,
           return_variance = return_variance
 	    ))
@@ -5529,7 +6254,20 @@ pls =  function (Xtrain,
   model$classification=classification
   model$lev=lev
 	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
-	  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
+	  model <- .attach_lda_classifier(
+	    model,
+	    Xtrain,
+	    Ytrain_original,
+	    classifier,
+	    lda_ridge,
+	    class_bias_method = class_bias_method,
+	    class_bias_lambda = class_bias_lambda,
+	    class_bias_iter = class_bias_iter,
+	    class_bias_clip = class_bias_clip,
+	    class_bias_eps = class_bias_eps,
+	    class_bias_calibration_fraction = class_bias_calibration_fraction,
+	    class_bias_seed = class_bias_seed
+	  )
 		  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 
@@ -5862,7 +6600,7 @@ pls.double.cv = function(Xdata,
                          gamma = NULL,
                          degree = 3L,
                          coef0 = 1,
-                         classifier = c("argmax", "lda_cpp", "lda_cuda"),
+                         classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
                          lda_ridge = 1e-8,
                          regression_head = c("standard", "linear_cpp", "linear_cuda"),
                          xprod = NULL,

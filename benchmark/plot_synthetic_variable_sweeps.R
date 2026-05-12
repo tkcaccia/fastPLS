@@ -25,7 +25,12 @@ if ("implementation" %in% names(ok) && any(ok$implementation == "R")) {
   )
 }
 if (!"classifier" %in% names(ok)) ok[, classifier := "argmax"]
-ok[, classifier_label := fifelse(classifier == "argmax", "argmax", "LDA")]
+ok[, classifier_label := fcase(
+  classifier == "argmax", "argmax",
+  grepl("^lda", classifier), "LDA",
+  grepl("^class_bias", classifier), "class-bias",
+  default = classifier
+)]
 ok[, backend_algorithm := fifelse(
   backend_algorithm == "gpu_native",
   "rsvd_cuda",
@@ -40,7 +45,8 @@ backend_cols <- c(
 )
 classifier_lines <- c(
   argmax = "solid",
-  LDA = "longdash"
+  LDA = "longdash",
+  "class-bias" = "dotdash"
 )
 method_levels <- c("plssvd", "simpls", "opls", "kernelpls")
 method_labels <- c(

@@ -31,8 +31,15 @@ pls(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
   lda_ridge = 1e-08,
+  class_bias_method = c("iter_count_ratio", "count_ratio"),
+  class_bias_lambda = 0.05,
+  class_bias_iter = 1L,
+  class_bias_clip = Inf,
+  class_bias_eps = 1,
+  class_bias_calibration_fraction = 1,
+  class_bias_seed = seed,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
   return_variance = TRUE,
@@ -126,11 +133,35 @@ same LDA model and CUDA matrix multiplication for latent projection and
 discriminant scoring when CUDA is available. For high-throughput PLS-DA on
 GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
 and `classifier = "lda_cuda"`; the compiled CPU fallback is
-`classifier = "lda_cpp"`. The experimental fused
-CUDA PLS+LDA path can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the
-optimized standard CUDA LDA route remains the default.}
+`classifier = "lda_cpp"`. `"class_bias_cpp"` and `"class_bias_cuda"` keep
+the PLS response-score classifier but add calibrated per-class score
+offsets before ranking classes. The experimental fused CUDA PLS+LDA path
+can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard
+CUDA LDA route remains the default.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+
+\item{class_bias_method}{Calibration rule for class-bias prediction.
+`"iter_count_ratio"` repeats the count-balancing update
+`class_bias_iter` times; `"count_ratio"` applies one
+`lambda * log(true_count / predicted_count)` update.}
+
+\item{class_bias_lambda}{Calibration strength for
+`classifier = "class_bias_cpp"` or `"class_bias_cuda"`.}
+
+\item{class_bias_iter}{Number of iterative class-bias calibration passes.}
+
+\item{class_bias_clip}{Optional absolute clipping value for class-bias
+offsets; `Inf` disables clipping.}
+
+\item{class_bias_eps}{Positive smoothing constant used when estimating
+class-bias offsets from prediction counts.}
+
+\item{class_bias_calibration_fraction}{Stratified fraction of the training
+set used to estimate class-bias offsets. Use values below 1 to mimic a
+held-out calibration split while still fitting PLS on all training rows.}
+
+\item{class_bias_seed}{Seed used for the stratified calibration split.}
 
 \item{regression_head}{Regression prediction head. `"standard"` keeps the
 usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
@@ -180,8 +211,8 @@ finalization.}
 }
 \value{
 A `fastPLS` object. Fitted objects include `variance_explained`,
-`cumulative_variance_explained`, and matching `x_*` aliases containing the
-fraction of training predictor variance explained by each latent variable.
+  `cumulative_variance_explained`, and matching `x_*` aliases containing the
+  fraction of training predictor variance explained by each latent variable.
 }
 \description{
 `pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,

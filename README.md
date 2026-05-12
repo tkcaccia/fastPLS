@@ -67,6 +67,39 @@ fallback. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
+For PLS-DA response-score prediction, `classifier = "class_bias_cpp"` or
+`classifier = "class_bias_cuda"` keeps the standard PLS score classifier but
+learns per-class score offsets from calibrated prediction counts. The supported
+calibration rules are `class_bias_method = "count_ratio"` and
+`"iter_count_ratio"`; the latter repeats the update controlled by
+`class_bias_lambda`, `class_bias_iter`, `class_bias_clip`, and
+`class_bias_eps`. `class_bias_calibration_fraction` can reserve a stratified
+fraction of the training set for estimating these offsets while still fitting
+PLS on all rows. The offsets are added before ranking classes, which can correct
+systematic class-frequency or score-calibration bias without changing the fitted
+PLS model. `predict()` also supports `top` and `top5 = TRUE` to return ranked
+class labels and scores for ImageNet-style top-5 evaluation.
+
+For large classification problems, such as ImageNet-scale DINOv2 feature
+matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
+label-aware PLSSVD route when the dense one-hot response would exceed the memory
+threshold. This route streams class-wise cross-products from the label vector,
+never materializes the dense `n x classes` response matrix, stores only compact
+low-rank prediction factors, and performs class-bias calibration in row blocks.
+The default threshold is controlled by `FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`
+and calibration block size by `FASTPLS_CLASS_BIAS_BLOCK_SIZE`.
+
+For the ImageNet/DINOv2 experiments, the strongest PLS-only classifier is not
+the simple response-score class-bias rule above. It is a latent-score classifier:
+PLS scores are first used to build CUDA prototype scores, uncertain samples are
+reranked by CUDA candidate kNN within the PLS score space, and an iterative
+class-count calibration is applied to those candidate scores. The reproducible
+benchmark entry point is
+`benchmark/benchmark_imagenet_pls_candidate_class_bias.R`, with a launcher in
+`scripts/run_imagenet_candidate_class_bias.sh`. This keeps the high-accuracy
+ImageNet path separate from the lighter generic `predict.fastPLS()` score-bias
+classifier.
+
 Example:
 
 ```r
