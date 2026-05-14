@@ -123,6 +123,46 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// candidate_knn_predict_cpp
+Rcpp::List candidate_knn_predict_cpp(const arma::mat& Ttest_norm, const arma::mat& Ttrain_norm, const arma::ivec& y_codes, const arma::mat& centroids, const arma::vec& candidate_bias, int top_k, int top_m, int knn_k, double tau, double alpha);
+RcppExport SEXP _fastPLS_candidate_knn_predict_cpp(SEXP Ttest_normSEXP, SEXP Ttrain_normSEXP, SEXP y_codesSEXP, SEXP centroidsSEXP, SEXP candidate_biasSEXP, SEXP top_kSEXP, SEXP top_mSEXP, SEXP knn_kSEXP, SEXP tauSEXP, SEXP alphaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest_norm(Ttest_normSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain_norm(Ttrain_normSEXP);
+    Rcpp::traits::input_parameter< const arma::ivec& >::type y_codes(y_codesSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type centroids(centroidsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type candidate_bias(candidate_biasSEXP);
+    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
+    Rcpp::traits::input_parameter< int >::type top_m(top_mSEXP);
+    Rcpp::traits::input_parameter< int >::type knn_k(knn_kSEXP);
+    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    rcpp_result_gen = Rcpp::wrap(candidate_knn_predict_cpp(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha));
+    return rcpp_result_gen;
+END_RCPP
+}
+// candidate_knn_predict_cuda
+Rcpp::List candidate_knn_predict_cuda(const arma::mat& Ttest_norm, const arma::mat& Ttrain_norm, const arma::ivec& y_codes, const arma::mat& centroids, const arma::vec& candidate_bias, int top_k, int top_m, int knn_k, double tau, double alpha);
+RcppExport SEXP _fastPLS_candidate_knn_predict_cuda(SEXP Ttest_normSEXP, SEXP Ttrain_normSEXP, SEXP y_codesSEXP, SEXP centroidsSEXP, SEXP candidate_biasSEXP, SEXP top_kSEXP, SEXP top_mSEXP, SEXP knn_kSEXP, SEXP tauSEXP, SEXP alphaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest_norm(Ttest_normSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain_norm(Ttrain_normSEXP);
+    Rcpp::traits::input_parameter< const arma::ivec& >::type y_codes(y_codesSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type centroids(centroidsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type candidate_bias(candidate_biasSEXP);
+    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
+    Rcpp::traits::input_parameter< int >::type top_m(top_mSEXP);
+    Rcpp::traits::input_parameter< int >::type knn_k(knn_kSEXP);
+    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    rcpp_result_gen = Rcpp::wrap(candidate_knn_predict_cuda(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cuda_thin_qr
 arma::mat cuda_thin_qr(const arma::mat& A);
 RcppExport SEXP _fastPLS_cuda_thin_qr(SEXP ASEXP) {
@@ -763,6 +803,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
     {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
+    {"_fastPLS_candidate_knn_predict_cpp", (DL_FUNC) &_fastPLS_candidate_knn_predict_cpp, 10},
+    {"_fastPLS_candidate_knn_predict_cuda", (DL_FUNC) &_fastPLS_candidate_knn_predict_cuda, 10},
     {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
     {"_fastPLS_lda_train_cpp", (DL_FUNC) &_fastPLS_lda_train_cpp, 4},
     {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},

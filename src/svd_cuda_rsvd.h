@@ -55,6 +55,17 @@ arma::imat cuda_flash_lowrank_predict_classes(
   const arma::ivec& ncomp
 );
 Mat cuda_matrix_multiply(const Mat& A, const Mat& B);
+Mat cuda_candidate_knn_scores(
+  const Mat& Ttest,
+  const Mat& Ttrain,
+  const arma::ivec& y,
+  const arma::imat& candidates,
+  const Mat& candidate_base,
+  const Vec& bias,
+  int knn_k,
+  double tau,
+  double alpha
+);
 Mat cuda_thin_qr(const Mat& A);
 std::vector<LDAGPUModel> cuda_lda_train_prefix(
   const Mat& Ttrain,

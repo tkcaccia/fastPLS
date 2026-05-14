@@ -32,12 +32,17 @@ export FASTPLS_RUN_TIMEOUT_SEC="${FASTPLS_RUN_TIMEOUT_SEC:-1200}"
 export FASTPLS_SAVE_PREDICTIONS="${FASTPLS_SAVE_PREDICTIONS:-false}"
 export FASTPLS_SKIP_PLOT="${FASTPLS_SKIP_PLOT:-false}"
 export FASTPLS_SKIP_HEAVY_R="${FASTPLS_SKIP_HEAVY_R:-false}"
+export FASTPLS_CANDIDATE_KNN_K="${FASTPLS_CANDIDATE_KNN_K:-10}"
+export FASTPLS_CANDIDATE_TAU="${FASTPLS_CANDIDATE_TAU:-0.2}"
+export FASTPLS_CANDIDATE_ALPHA="${FASTPLS_CANDIDATE_ALPHA:-0.75}"
+export FASTPLS_CANDIDATE_TOP_M="${FASTPLS_CANDIDATE_TOP_M:-20}"
 
 echo "[INFO] Starting real-dataset benchmark with dataset-specific ncomp grids"
 bash "${REPO_ROOT}/scripts/remote_run_dataset_memory_compare.sh" >"${RUN_ROOT}/logs/real_datasets.log" 2>&1
 
-# Simulated datasets: sweep n, p, and q.  By default we run both 5 and 50
-# components in separate result folders, matching the previous reporting style.
+# Simulated datasets: sweep n, p, and q.  By default we run only 5
+# components; pass FASTPLS_SYNTH_NCOMP_LIST explicitly to request 50 or
+# other component counts.
 export FASTPLS_SYNTH_VAR_REPS="${FASTPLS_SYNTH_VAR_REPS:-3}"
 export FASTPLS_SYNTH_VAR_TIMEOUT_SEC="${FASTPLS_SYNTH_VAR_TIMEOUT_SEC:-1200}"
 export FASTPLS_SYNTH_VAR_MAX_HOST_RSS_MB="${FASTPLS_SYNTH_VAR_MAX_HOST_RSS_MB:-10240}"
@@ -46,7 +51,7 @@ export FASTPLS_SYNTH_VAR_INCLUDE_R="${FASTPLS_SYNTH_VAR_INCLUDE_R:-false}"
 export FASTPLS_SYNTH_VAR_INCLUDE_PLS_PKG="${FASTPLS_SYNTH_VAR_INCLUDE_PLS_PKG:-true}"
 export FASTPLS_SYNTH_VAR_FAMILIES="${FASTPLS_SYNTH_VAR_FAMILIES:-reg_n,reg_p,reg_q,class_n,class_p,class_q}"
 
-SYNTH_NCOMP_LIST="${FASTPLS_SYNTH_NCOMP_LIST:-5,50}"
+SYNTH_NCOMP_LIST="${FASTPLS_SYNTH_NCOMP_LIST:-5}"
 for synth_ncomp in $(printf '%s' "${SYNTH_NCOMP_LIST}" | tr ',' ' '); do
   export OUTROOT="${FASTPLS_SYNTH_RESULTS_DIR:-${RUN_ROOT}/simulated_datasets}/ncomp_${synth_ncomp}"
   export FASTPLS_SYNTH_VAR_NCOMP="${synth_ncomp}"

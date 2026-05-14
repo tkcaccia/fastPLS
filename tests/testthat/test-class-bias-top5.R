@@ -23,7 +23,7 @@ test_that("top-k classification prediction preserves argmax by default", {
   expect_equal(dim(top5$Ypred_top_score[[1]]), c(length(idx), 5L))
 })
 
-test_that("class-bias classifier is fitted and can be used for top-k prediction", {
+test_that("candidate-kNN classifier is fitted and can be used for top-k prediction", {
   set.seed(20260512)
   X <- matrix(rnorm(90 * 9), nrow = 90, ncol = 9)
   y <- factor(sample(c("A", "B", "C"), 90, replace = TRUE))
@@ -35,38 +35,26 @@ test_that("class-bias classifier is fitted and can be used for top-k prediction"
     ncomp = 1:2,
     method = "simpls",
     svd.method = "cpu_rsvd",
-    classifier = "class_bias_cpp",
-    class_bias_method = "iter_count_ratio",
-    class_bias_lambda = 0.025,
-    class_bias_iter = 3L,
-    class_bias_clip = 0.2,
-    class_bias_calibration_fraction = 0.5,
+    classifier = "candidate_knn_cpp",
+    candidate_knn_k = 10L,
+    candidate_tau = 0.2,
+    candidate_alpha = 0.75,
     seed = 123L
   )
 
-  expect_equal(fit$classification_rule, "class_bias_cpp")
-  expect_true(is.matrix(fit$class_bias))
-  expect_equal(dim(fit$class_bias), c(nlevels(y), 2L))
-  expect_equal(fit$class_bias_parameters$method, "iter_count_ratio")
-  expect_equal(fit$class_bias_parameters$iter, 3L)
-  expect_equal(fit$class_bias_parameters$lambda, 0.025)
-  expect_equal(fit$class_bias_parameters$clip, 0.2)
-  expect_true(fit$class_bias_parameters$n_calibration < length(y[-idx]))
+  expect_equal(fit$classification_rule, "candidate_knn_cpp")
+  expect_true(is.list(fit$candidate_knn))
+  expect_equal(fit$candidate_knn$parameters$knn_k, 10L)
+  expect_equal(fit$candidate_knn$parameters$tau, 0.2)
+  expect_equal(fit$candidate_knn$parameters$alpha, 0.75)
+  expect_null(fit$candidate_knn$parameters$bias_method)
 
   pred <- predict(fit, X[idx, , drop = FALSE], top = 3L)
   expect_true(is.data.frame(pred$Ypred))
   expect_equal(dim(pred$Ypred_top[[1]]), c(length(idx), 3L))
-
-  forced <- predict(
-    fit,
-    X[idx, , drop = FALSE],
-    class_bias = NULL,
-    raw_scores = TRUE
-  )
-  expect_true(is.data.frame(forced$Ypred))
 })
 
-test_that("count-ratio class-bias calibration records one pass", {
+test_that("candidate-kNN stores no class-bias offsets", {
   set.seed(20260513)
   X <- matrix(rnorm(72 * 8), nrow = 72, ncol = 8)
   y <- factor(sample(c("A", "B", "C", "D"), 72, replace = TRUE))
@@ -77,18 +65,16 @@ test_that("count-ratio class-bias calibration records one pass", {
     ncomp = 2,
     method = "plssvd",
     svd.method = "cpu_rsvd",
-    classifier = "class_bias_cpp",
-    class_bias_method = "count_ratio",
-    class_bias_lambda = 0.01,
-    class_bias_iter = 5L,
+    classifier = "candidate_knn_cpp",
     return_variance = FALSE,
     seed = 321L
   )
 
-  expect_equal(fit$class_bias_parameters$method, "count_ratio")
-  expect_equal(fit$class_bias_parameters$iter, 1L)
-  expect_equal(fit$class_bias_parameters$n_calibration, length(y))
-  expect_true(all(is.finite(fit$class_bias)))
+  expect_true(is.null(fit$class_bias))
+  expect_true(is.null(fit$class_bias_parameters))
+  expect_true(all(vapply(fit$candidate_knn$models, function(x) is.null(x$bias), logical(1))))
+  pred <- predict(fit, X, top5 = TRUE)
+  expect_equal(dim(pred$Ypred_top[[1]]), c(nrow(X), 4L))
 })
 
 test_that("label-aware PLSSVD model avoids dense response storage", {

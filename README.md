@@ -67,38 +67,33 @@ fallback. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
-For PLS-DA response-score prediction, `classifier = "class_bias_cpp"` or
-`classifier = "class_bias_cuda"` keeps the standard PLS score classifier but
-learns per-class score offsets from calibrated prediction counts. The supported
-calibration rules are `class_bias_method = "count_ratio"` and
-`"iter_count_ratio"`; the latter repeats the update controlled by
-`class_bias_lambda`, `class_bias_iter`, `class_bias_clip`, and
-`class_bias_eps`. `class_bias_calibration_fraction` can reserve a stratified
-fraction of the training set for estimating these offsets while still fitting
-PLS on all rows. The offsets are added before ranking classes, which can correct
-systematic class-frequency or score-calibration bias without changing the fitted
-PLS model. `predict()` also supports `top` and `top5 = TRUE` to return ranked
-class labels and scores for ImageNet-style top-5 evaluation.
+For PLS-DA latent-score prediction, `classifier = "candidate_knn_cpp"` or
+`classifier = "candidate_knn_cuda"` uses the PLS-score candidate-kNN classifier.
+The model first ranks classes by centroids in the supervised PLS score space and
+then reranks every sample by same-class kNN among the top candidate classes. The
+default tuning is the ImageNet setting `candidate_knn_k = 10`,
+`candidate_tau = 0.2`, and `candidate_alpha = 0.75`; `candidate_top_m` controls
+the number of candidate classes. `predict()` also supports `top` and
+`top5 = TRUE` to return ranked class labels and scores for ImageNet-style top-5
+evaluation.
 
 For large classification problems, such as ImageNet-scale DINOv2 feature
 matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
 label-aware PLSSVD route when the dense one-hot response would exceed the memory
 threshold. This route streams class-wise cross-products from the label vector,
 never materializes the dense `n x classes` response matrix, stores only compact
-low-rank prediction factors, and performs class-bias calibration in row blocks.
+low-rank prediction factors, and can train the candidate-kNN classifier from
+compact latent scores.
 The default threshold is controlled by `FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`
-and calibration block size by `FASTPLS_CLASS_BIAS_BLOCK_SIZE`.
+and the candidate-kNN cache is stored in compact latent-score form.
 
-For the ImageNet/DINOv2 experiments, the strongest PLS-only classifier is not
-the simple response-score class-bias rule above. It is a latent-score classifier:
-PLS scores are first used to build CUDA prototype scores, uncertain samples are
-reranked by CUDA candidate kNN within the PLS score space, and an iterative
-class-count calibration is applied to those candidate scores. The reproducible
-benchmark entry point is
-`benchmark/benchmark_imagenet_pls_candidate_class_bias.R`, with a launcher in
-`scripts/run_imagenet_candidate_class_bias.sh`. This keeps the high-accuracy
-ImageNet path separate from the lighter generic `predict.fastPLS()` score-bias
-classifier.
+For the ImageNet/DINOv2 experiments, the strongest PLS-only classifier is the
+same latent-score candidate-kNN idea at larger scale: PLS scores are first used
+to build CUDA prototype scores and every sample is reranked by CUDA candidate
+kNN within the PLS score space. The obsolete gated/calibrated class-bias variants
+have been removed; tune only `candidate_knn_k`, `candidate_tau`, and
+`candidate_alpha`. The generic `pls()` API exposes the same decision rule through
+`classifier = "candidate_knn_cpp"` or `"candidate_knn_cuda"`.
 
 Example:
 

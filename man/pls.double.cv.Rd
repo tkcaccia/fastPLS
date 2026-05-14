@@ -39,7 +39,8 @@ pls.double.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
+    "candidate_knn_cuda"),
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   xprod = NULL,
@@ -128,14 +129,11 @@ the former incdefl profile.}
 standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
 on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
 same LDA model and CUDA matrix multiplication for latent projection and
-discriminant scoring when CUDA is available. For high-throughput PLS-DA on
-GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
-and `classifier = "lda_cuda"`; the compiled CPU fallback is
-`classifier = "lda_cpp"`. `"class_bias_cpp"` and `"class_bias_cuda"` keep
-the PLS response-score classifier but add calibrated per-class score
-offsets before ranking classes. The experimental fused CUDA PLS+LDA path
-can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard
-CUDA LDA route remains the default.}
+discriminant scoring when CUDA is available. `"candidate_knn_cpp"` and
+`"candidate_knn_cuda"` use the PLS-score candidate-kNN classifier: class
+centroids in PLS score space choose candidate classes, then every sample is
+reranked by within-candidate kNN in the same PLS score space. No additional
+class-bias calibration is estimated.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 

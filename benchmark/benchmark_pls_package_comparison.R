@@ -58,17 +58,28 @@ base_method_ids <- c(
   "chemometrics_pls2_nipals", "spls_spls", "ropls_pls", "ropls_opls"
 )
 classification_only_method_ids <- c(
+  "fastPLS_simpls_candidate_knn", "fastPLS_plssvd_candidate_knn",
+  "fastPLS_opls_candidate_knn", "fastPLS_kernelpls_candidate_knn",
+  "fastPLS_simpls_candidate_knn_cuda", "fastPLS_plssvd_candidate_knn_cuda",
+  "fastPLS_opls_candidate_knn_cuda", "fastPLS_kernelpls_candidate_knn_cuda",
   "plsgenomics_pls_lda", "mixOmics_plsda", "mixOmics_splsda", "spls_splsda"
 )
 
 if (identical(mode, "list_methods")) {
-  task_type_guess <- if (dataset_id %in% c("singlecell", "cifar100", "metref")) {
-    "classification"
-  } else {
-    "regression"
+  classification_dataset_ids <- c(
+    "cbmc_citeseq", "ccle", "cifar100", "gtex_v8", "imagenet",
+    "metref", "singlecell", "tcga_brca", "tcga_hnsc_methylation",
+    "tcga_pan_cancer"
+  )
+  regression_dataset_ids <- c("nmr", "prism")
+  is_classification <- dataset_id %in% classification_dataset_ids ||
+    grepl("^class", dataset_id) || grepl("classification", dataset_id)
+  if (dataset_id %in% regression_dataset_ids ||
+      grepl("^reg", dataset_id) || grepl("regression", dataset_id)) {
+    is_classification <- FALSE
   }
   method_ids <- base_method_ids
-  if (identical(task_type_guess, "classification")) {
+  if (isTRUE(is_classification)) {
     method_ids <- c(method_ids, classification_only_method_ids)
   }
   cat(paste(method_ids, collapse = "\n"))
@@ -246,19 +257,41 @@ decode_fastpls <- function(model) {
   as.matrix(pred)
 }
 
-run_fastpls <- function(method_name) {
+run_fastpls <- function(method_name,
+                        backend = "cpp",
+                        classifier = "argmax",
+                        candidate_knn_k = as.integer(arg("candidate_knn_k", "10")),
+                        candidate_tau = as.numeric(arg("candidate_tau", "0.2")),
+                        candidate_alpha = as.numeric(arg("candidate_alpha", "0.75")),
+                        candidate_top_m = as.integer(arg("candidate_top_m", "20"))) {
+  if (!identical(task_type, "classification") && !identical(classifier, "argmax")) {
+    stop("candidate-kNN fastPLS benchmark variants require classification data.")
+  }
+  if (!is.finite(candidate_knn_k) || is.na(candidate_knn_k)) candidate_knn_k <- 10L
+  if (!is.finite(candidate_tau) || is.na(candidate_tau)) candidate_tau <- 0.2
+  if (!is.finite(candidate_alpha) || is.na(candidate_alpha)) candidate_alpha <- 0.75
+  if (!is.finite(candidate_top_m) || is.na(candidate_top_m)) candidate_top_m <- 20L
   args <- list(
     Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
-    ncomp = ncomp_requested, method = method_name, backend = "cpp",
+    ncomp = ncomp_requested, method = method_name, backend = backend,
     svd.method = "cpu_rsvd", scaling = "centering", fit = FALSE, proj = FALSE,
-    seed = 123L + replicate_id
+    seed = 123L + replicate_id, classifier = classifier,
+    candidate_knn_k = max(1L, candidate_knn_k),
+    candidate_tau = candidate_tau,
+    candidate_alpha = candidate_alpha,
+    candidate_top_m = max(1L, candidate_top_m)
   )
   if (identical(method_name, "opls")) args$north <- min(1L, max(0L, ncomp_requested - 1L))
   fastPLS::pls(
     args$Xtrain, args$Ytrain, args$Xtest, args$Ytest,
     ncomp = args$ncomp, method = args$method, backend = args$backend,
     svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
-    proj = args$proj, seed = args$seed, north = args$north %||% 1L
+    proj = args$proj, seed = args$seed, north = args$north %||% 1L,
+    classifier = args$classifier,
+    candidate_knn_k = args$candidate_knn_k,
+    candidate_tau = args$candidate_tau,
+    candidate_alpha = args$candidate_alpha,
+    candidate_top_m = args$candidate_top_m
   )
 }
 
@@ -497,6 +530,38 @@ method_specs_all <- function(task_type) {
   )
   if (identical(task_type, "classification")) {
     specs <- c(specs, list(
+      list(id = "fastPLS_simpls_candidate_knn", package = "fastPLS", algorithm = "SIMPLS + candidate-kNN",
+           function_name = "fastPLS::pls(method='simpls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
+           runner = function() list(fit = run_fastpls("simpls", classifier = "candidate_knn_cpp"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_plssvd_candidate_knn", package = "fastPLS", algorithm = "PLSSVD + candidate-kNN",
+           function_name = "fastPLS::pls(method='plssvd', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
+           runner = function() list(fit = run_fastpls("plssvd", classifier = "candidate_knn_cpp"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_opls_candidate_knn", package = "fastPLS", algorithm = "OPLS + candidate-kNN",
+           function_name = "fastPLS::pls(method='opls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
+           runner = function() list(fit = run_fastpls("opls", classifier = "candidate_knn_cpp"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_kernelpls_candidate_knn", package = "fastPLS", algorithm = "kernel PLS + candidate-kNN",
+           function_name = "fastPLS::pls(method='kernelpls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
+           runner = function() list(fit = run_fastpls("kernelpls", classifier = "candidate_knn_cpp"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_simpls_candidate_knn_cuda", package = "fastPLS", algorithm = "SIMPLS + candidate-kNN CUDA",
+           function_name = "fastPLS::pls(method='simpls', backend='cuda', classifier='candidate_knn_cuda')",
+           runner = function() list(fit = run_fastpls("simpls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_plssvd_candidate_knn_cuda", package = "fastPLS", algorithm = "PLSSVD + candidate-kNN CUDA",
+           function_name = "fastPLS::pls(method='plssvd', backend='cuda', classifier='candidate_knn_cuda')",
+           runner = function() list(fit = run_fastpls("plssvd", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_opls_candidate_knn_cuda", package = "fastPLS", algorithm = "OPLS + candidate-kNN CUDA",
+           function_name = "fastPLS::pls(method='opls', backend='cuda', classifier='candidate_knn_cuda')",
+           runner = function() list(fit = run_fastpls("opls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+           decoder = decode_fastpls),
+      list(id = "fastPLS_kernelpls_candidate_knn_cuda", package = "fastPLS", algorithm = "kernel PLS + candidate-kNN CUDA",
+           function_name = "fastPLS::pls(method='kernelpls', backend='cuda', classifier='candidate_knn_cuda')",
+           runner = function() list(fit = run_fastpls("kernelpls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+           decoder = decode_fastpls),
       list(id = "plsgenomics_pls_lda", package = "plsgenomics", algorithm = "PLS-LDA",
            function_name = "plsgenomics::pls.lda", runner = runner_plsgenomics_lda),
       list(id = "mixOmics_plsda", package = "mixOmics", algorithm = "PLS-DA",
@@ -586,6 +651,17 @@ measure_once <- function(fun) {
 run_one <- function(method_id) {
   spec <- method_specs[[method_id]]
   if (is.null(spec)) {
+    if (grepl("candidate_knn", method_id, fixed = TRUE) &&
+        !identical(task_type, "classification")) {
+      spec <- list(
+        id = method_id, package = "fastPLS", function_name = "fastPLS::pls",
+        algorithm = "candidate-kNN"
+      )
+      return(empty_row(
+        spec, "skipped_classifier_nonclassification",
+        "candidate-kNN is only meaningful for classification tasks."
+      ))
+    }
     spec <- list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)
     return(empty_row(spec, "error", paste("Unknown method_id:", method_id)))
   }

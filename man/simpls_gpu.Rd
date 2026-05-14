@@ -32,15 +32,9 @@ simpls_gpu(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
+    "candidate_knn_cuda"),
   lda_ridge = 1e-08,
-  class_bias_method = c("iter_count_ratio", "count_ratio"),
-  class_bias_lambda = 0.05,
-  class_bias_iter = 1L,
-  class_bias_clip = Inf,
-  class_bias_eps = 1,
-  class_bias_calibration_fraction = 1,
-  class_bias_seed = seed,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   return_variance = TRUE
 )

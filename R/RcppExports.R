@@ -40,6 +40,14 @@ cuda_matrix_multiply <- function(A, B) {
     .Call(`_fastPLS_cuda_matrix_multiply`, A, B)
 }
 
+candidate_knn_predict_cpp <- function(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha) {
+    .Call(`_fastPLS_candidate_knn_predict_cpp`, Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha)
+}
+
+candidate_knn_predict_cuda <- function(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha) {
+    .Call(`_fastPLS_candidate_knn_predict_cuda`, Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha)
+}
+
 cuda_thin_qr <- function(A) {
     .Call(`_fastPLS_cuda_thin_qr`, A)
 }

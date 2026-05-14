@@ -36,7 +36,8 @@ kernel_pls_r(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
+    "candidate_knn_cuda"),
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
@@ -70,15 +71,9 @@ kernel_pls_cpp(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
+    "candidate_knn_cuda"),
   lda_ridge = 1e-08,
-  class_bias_method = c("iter_count_ratio", "count_ratio"),
-  class_bias_lambda = 0.05,
-  class_bias_iter = 1L,
-  class_bias_clip = Inf,
-  class_bias_eps = 1,
-  class_bias_calibration_fraction = 1,
-  class_bias_seed = seed,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
   return_variance = TRUE,
@@ -105,7 +100,8 @@ kernel_pls_cuda(
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
   gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "class_bias_cpp", "class_bias_cuda"),
+  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
+    "candidate_knn_cuda"),
   lda_ridge = 1e-08,
   regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
@@ -205,14 +201,11 @@ sketch.}
 standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
 on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
 same LDA model and CUDA matrix multiplication for latent projection and
-discriminant scoring when CUDA is available. For high-throughput PLS-DA on
-GPU, the recommended route is `method = "plssvd"`, `backend = "cuda"`,
-and `classifier = "lda_cuda"`; the compiled CPU fallback is
-`classifier = "lda_cpp"`. `"class_bias_cpp"` and `"class_bias_cuda"` keep
-the PLS response-score classifier but add calibrated per-class score
-offsets before ranking classes. The experimental fused CUDA PLS+LDA path
-can be enabled with `FASTPLS_FUSED_CUDA_LDA=1`, but the optimized standard
-CUDA LDA route remains the default.}
+discriminant scoring when CUDA is available. `"candidate_knn_cpp"` and
+`"candidate_knn_cuda"` use the PLS-score candidate-kNN classifier: class
+centroids in PLS score space choose candidate classes, then every sample is
+reranked by within-candidate kNN in the same PLS score space. No additional
+class-bias calibration is estimated.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
@@ -229,28 +222,6 @@ explained. Set to `FALSE` for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
 \item{proj}{Return projected `Ttest` when `TRUE`.}
-
-\item{class_bias_method}{Calibration rule for class-bias prediction.
-`"iter_count_ratio"` repeats the count-balancing update
-`class_bias_iter` times; `"count_ratio"` applies one
-`lambda * log(true_count / predicted_count)` update.}
-
-\item{class_bias_lambda}{Calibration strength for
-`classifier = "class_bias_cpp"` or `"class_bias_cuda"`.}
-
-\item{class_bias_iter}{Number of iterative class-bias calibration passes.}
-
-\item{class_bias_clip}{Optional absolute clipping value for class-bias
-offsets; `Inf` disables clipping.}
-
-\item{class_bias_eps}{Positive smoothing constant used when estimating
-class-bias offsets from prediction counts.}
-
-\item{class_bias_calibration_fraction}{Stratified fraction of the training
-set used to estimate class-bias offsets. Use values below 1 to mimic a
-held-out calibration split while still fitting PLS on all training rows.}
-
-\item{class_bias_seed}{Seed used for the stratified calibration split.}
 
 \item{...}{Additional arguments passed to the inner PLS fit.}
 }

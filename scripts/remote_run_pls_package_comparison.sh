@@ -7,12 +7,21 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 RESULTS_DIR="${FASTPLS_PKG_COMPARE_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_pls_package_comparison}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-}"
-DATASETS="${FASTPLS_PKG_COMPARE_DATASETS:-singlecell,nmr}"
-REPS="${FASTPLS_PKG_COMPARE_REPS:-3}"
+
+# Real-dataset package comparison.  ImageNet is opt-in because several
+# independent R PLS packages materialize dense workspaces and are not practical
+# on that dataset; set FASTPLS_PKG_COMPARE_INCLUDE_IMAGENET=true to include it.
+DATASETS="${FASTPLS_PKG_COMPARE_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,singlecell,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
+if [ "${FASTPLS_PKG_COMPARE_INCLUDE_IMAGENET:-false}" = "true" ]; then
+  DATASETS="${DATASETS},imagenet"
+fi
+
+REPS="${FASTPLS_PKG_COMPARE_REPS:-1}"
 TIMEOUT_SEC="${FASTPLS_PKG_COMPARE_TIMEOUT_SEC:-1200}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+METHOD_FILTER="${FASTPLS_PKG_COMPARE_METHODS:-}"
 
 mkdir -p "${RESULTS_DIR}/run_rows" "${RESULTS_DIR}/logs"
 
@@ -44,12 +53,34 @@ with open(raw, "w", newline="") as fh:
 PY
 }
 
-for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
-  case "${dataset}" in
-    nmr) ncomp="${FASTPLS_PKG_COMPARE_NMR_NCOMP:-100}" ;;
-    singlecell) ncomp="${FASTPLS_PKG_COMPARE_SINGLECELL_NCOMP:-50}" ;;
-    *) ncomp="${FASTPLS_PKG_COMPARE_NCOMP:-50}" ;;
+ncomp_for_dataset() {
+  case "$1" in
+    metref) echo "${FASTPLS_PKG_COMPARE_METREF_NCOMP:-22}" ;;
+    cbmc_citeseq) echo "${FASTPLS_PKG_COMPARE_CBMC_CITESEQ_NCOMP:-50}" ;;
+    ccle) echo "${FASTPLS_PKG_COMPARE_CCLE_NCOMP:-50}" ;;
+    cifar100) echo "${FASTPLS_PKG_COMPARE_CIFAR100_NCOMP:-100}" ;;
+    gtex_v8) echo "${FASTPLS_PKG_COMPARE_GTEX_V8_NCOMP:-32}" ;;
+    imagenet) echo "${FASTPLS_PKG_COMPARE_IMAGENET_NCOMP:-100}" ;;
+    nmr) echo "${FASTPLS_PKG_COMPARE_NMR_NCOMP:-50}" ;;
+    prism) echo "${FASTPLS_PKG_COMPARE_PRISM_NCOMP:-5}" ;;
+    singlecell) echo "${FASTPLS_PKG_COMPARE_SINGLECELL_NCOMP:-50}" ;;
+    tcga_brca) echo "${FASTPLS_PKG_COMPARE_TCGA_BRCA_NCOMP:-5}" ;;
+    tcga_hnsc_methylation) echo "${FASTPLS_PKG_COMPARE_TCGA_HNSC_METHYLATION_NCOMP:-2}" ;;
+    tcga_pan_cancer) echo "${FASTPLS_PKG_COMPARE_TCGA_PAN_CANCER_NCOMP:-50}" ;;
+    *) echo "${FASTPLS_PKG_COMPARE_NCOMP:-50}" ;;
   esac
+}
+
+method_selected() {
+  method_id="$1"
+  if [ -z "${METHOD_FILTER}" ]; then
+    return 0
+  fi
+  printf '%s' "${METHOD_FILTER}" | tr ',' '\n' | grep -qx "${method_id}"
+}
+
+for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
+  ncomp="$(ncomp_for_dataset "${dataset}")"
 
   methods_file="${RESULTS_DIR}/logs/${dataset}_methods.txt"
   Rscript "${REPO_ROOT}/benchmark/benchmark_pls_package_comparison.R" \
@@ -57,6 +88,9 @@ for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
 
   while IFS= read -r method_id; do
     [ -n "${method_id}" ] || continue
+    if ! method_selected "${method_id}"; then
+      continue
+    fi
     rep_id=1
     while [ "${rep_id}" -le "${REPS}" ]; do
       run_id="${dataset}__${method_id}__n${ncomp}__rep${rep_id}"

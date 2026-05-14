@@ -16,6 +16,21 @@ suppressPackageStartupMessages({
   library(fastPLS)
 })
 
+candidate_knn_k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
+candidate_tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
+candidate_alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
+candidate_top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
+if (!is.finite(candidate_knn_k_default) || is.na(candidate_knn_k_default) || candidate_knn_k_default < 1L) candidate_knn_k_default <- 10L
+if (!is.finite(candidate_tau_default) || is.na(candidate_tau_default) || candidate_tau_default <= 0) candidate_tau_default <- 0.2
+if (!is.finite(candidate_alpha_default) || is.na(candidate_alpha_default)) candidate_alpha_default <- 0.75
+if (!is.finite(candidate_top_m_default) || is.na(candidate_top_m_default) || candidate_top_m_default < 1L) candidate_top_m_default <- 20L
+options(
+  fastPLS.candidate_knn_k = candidate_knn_k_default,
+  fastPLS.candidate_tau = candidate_tau_default,
+  fastPLS.candidate_alpha = candidate_alpha_default,
+  fastPLS.candidate_top_m = candidate_top_m_default
+)
+
 `%||%` <- function(x, y) {
   if (is.null(x) || length(x) == 0L) return(y)
   if (length(x) == 1L && is.na(x)) return(y)
@@ -495,11 +510,11 @@ variant_specs <- function(task) {
       lda_specs[, classifier := ifelse(implementation == "cuda", "lda_cuda", "lda_cpp")]
       specs <- rbind(specs, lda_specs, fill = TRUE)
     }
-    class_bias_specs <- copy(specs[implementation %in% c("cpp", "cuda") & classifier == "argmax"])
-    if (nrow(class_bias_specs)) {
-      class_bias_specs[, variant_name := paste0(variant_name, "_class_bias")]
-      class_bias_specs[, classifier := ifelse(implementation == "cuda", "class_bias_cuda", "class_bias_cpp")]
-      specs <- rbind(specs, class_bias_specs, fill = TRUE)
+    candidate_specs <- copy(specs[implementation %in% c("cpp", "cuda") & classifier == "argmax"])
+    if (nrow(candidate_specs)) {
+      candidate_specs[, variant_name := paste0(variant_name, "_candidate_knn")]
+      candidate_specs[, classifier := ifelse(implementation == "cuda", "candidate_knn_cuda", "candidate_knn_cpp")]
+      specs <- rbind(specs, candidate_specs, fill = TRUE)
     }
   }
   specs[]

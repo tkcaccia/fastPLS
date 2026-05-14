@@ -28,7 +28,7 @@ if (!"classifier" %in% names(ok)) ok[, classifier := "argmax"]
 ok[, classifier_label := fcase(
   classifier == "argmax", "argmax",
   grepl("^lda", classifier), "LDA",
-  grepl("^class_bias", classifier), "class-bias",
+  grepl("^candidate_knn", classifier), "candidate-kNN",
   default = classifier
 )]
 ok[, backend_algorithm := fifelse(
@@ -46,7 +46,7 @@ backend_cols <- c(
 classifier_lines <- c(
   argmax = "solid",
   LDA = "longdash",
-  "class-bias" = "dotdash"
+  "candidate-kNN" = "dotdash"
 )
 method_levels <- c("plssvd", "simpls", "opls", "kernelpls")
 method_labels <- c(

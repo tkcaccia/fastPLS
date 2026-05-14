@@ -91,6 +91,24 @@ SVDResult finalize_from_q_bsmall(const arma::mat& Q, const arma::mat& B, int k, 
   return out;
 }
 
+arma::mat plssvd_latent_coeff_from_gram(const arma::mat& G_full,
+                                        const arma::vec& singular_values,
+                                        int mc) {
+  arma::mat G = G_full.submat(0, 0, mc - 1, mc - 1);
+  arma::mat D(mc, mc, arma::fill::zeros);
+  D.diag() = singular_values.subvec(0, mc - 1);
+
+  arma::mat C;
+  bool solved = arma::solve(C, G, D, arma::solve_opts::likely_sympd);
+  if (!solved) {
+    solved = arma::solve(C, G, D);
+  }
+  if (!solved) {
+    C = arma::pinv(G) * D;
+  }
+  return C;
+}
+
 void throw_cuda_error(cudaError_t code, const char* where) {
   throw std::runtime_error(std::string(where) + ": " + cudaGetErrorString(code));
 }
@@ -177,6 +195,22 @@ void fastpls_cuda_lda_score_argmax(double* scores,
                                    int n,
                                    int n_classes,
                                    cudaStream_t stream);
+void fastpls_cuda_candidate_knn_scores(const double* Ttest,
+                                       const double* Ttrain,
+                                       const int* y,
+                                       const int* candidates,
+                                       const double* candidate_base,
+                                       const double* bias,
+                                       int ntest,
+                                       int ntrain,
+                                       int kdim,
+                                       int n_classes,
+                                       int top_m,
+                                       int knn_k,
+                                       double tau,
+                                       double alpha,
+                                       double* out_scores,
+                                       cudaStream_t stream);
 }
 
 void check_kernel_launch(const char* where) {
@@ -919,6 +953,11 @@ class CudaRSVDWorkspace {
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
     );
+    arma::mat G_full_host(static_cast<arma::uword>(target), static_cast<arma::uword>(target), arma::fill::zeros);
+    check_cuda(
+      cudaMemcpy(G_full_host.memptr(), dQQmat_, bytes_for(target, target), cudaMemcpyDeviceToHost),
+      "cudaMemcpy(G_full_plssvd)"
+    );
 
     PLSSVDGPUResult out;
     out.R.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(target));
@@ -962,6 +1001,8 @@ class CudaRSVDWorkspace {
     for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
       const int requested_mc = static_cast<int>(ncomp(a));
       const int mc = std::min(std::max(requested_mc, 1), target);
+      arma::mat c_host = plssvd_latent_coeff_from_gram(G_full_host, s_host, mc);
+      out.C_latent.slice(a).submat(0, 0, mc - 1, mc - 1) = c_host;
       check_cuda(
         cudaMemcpy2D(
           dGram_,
@@ -1081,6 +1122,11 @@ class CudaRSVDWorkspace {
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, target, target, n, &alpha, dRRmat_, n, dRRmat_, n, &beta, dQQmat_, target),
       "cublasDgemm(G=T^T*T)"
     );
+    arma::mat G_full_host(static_cast<arma::uword>(target), static_cast<arma::uword>(target), arma::fill::zeros);
+    check_cuda(
+      cudaMemcpy(G_full_host.memptr(), dQQmat_, bytes_for(target, target), cudaMemcpyDeviceToHost),
+      "cudaMemcpy(G_full_plssvd)"
+    );
 
     ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
     if (fit) {
@@ -1129,6 +1175,8 @@ class CudaRSVDWorkspace {
     for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
       const int requested_mc = static_cast<int>(ncomp(a));
       const int mc = std::min(std::max(requested_mc, 1), target);
+      arma::mat c_host = plssvd_latent_coeff_from_gram(G_full_host, s_host, mc);
+      out.C_latent.slice(a).submat(0, 0, mc - 1, mc - 1) = c_host;
       check_cuda(
         cudaMemcpy2D(
           dGram_,
@@ -2128,6 +2176,147 @@ Mat cuda_matrix_multiply(const Mat& A, const Mat& B) {
     cleanup();
     throw;
   }
+}
+
+Mat cuda_candidate_knn_scores(
+  const Mat& Ttest,
+  const Mat& Ttrain,
+  const arma::ivec& y,
+  const arma::imat& candidates,
+  const Mat& candidate_base,
+  const Vec& bias,
+  int knn_k,
+  double tau,
+  double alpha
+) {
+#ifndef FASTPLS_HAS_CUDA_KERNELS
+  (void)Ttest;
+  (void)Ttrain;
+  (void)y;
+  (void)candidates;
+  (void)candidate_base;
+  (void)bias;
+  (void)knn_k;
+  (void)tau;
+  (void)alpha;
+  throw std::runtime_error("CUDA candidate-kNN kernels not compiled");
+#else
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (Ttest.n_cols != Ttrain.n_cols) {
+    throw std::runtime_error("cuda_candidate_knn_scores: score dimensions do not match");
+  }
+  if (Ttrain.n_rows != y.n_elem) {
+    throw std::runtime_error("cuda_candidate_knn_scores: y length does not match training rows");
+  }
+  if (candidates.n_rows != Ttest.n_rows || candidate_base.n_rows != Ttest.n_rows ||
+      candidates.n_cols != candidate_base.n_cols) {
+    throw std::runtime_error("cuda_candidate_knn_scores: candidate dimensions do not match");
+  }
+  if (bias.n_elem < 1) {
+    throw std::runtime_error("cuda_candidate_knn_scores: empty bias vector");
+  }
+  if (Ttest.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Ttrain.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      Ttest.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      candidates.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      bias.n_elem > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_candidate_knn_scores: matrix dimension exceeds CUDA int limits");
+  }
+
+  const int ntest = static_cast<int>(Ttest.n_rows);
+  const int ntrain = static_cast<int>(Ttrain.n_rows);
+  const int kdim = static_cast<int>(Ttest.n_cols);
+  const int n_classes = static_cast<int>(bias.n_elem);
+  const int top_m = static_cast<int>(candidates.n_cols);
+  if (ntest < 1 || ntrain < 1 || kdim < 1 || top_m < 1) {
+    return Mat(Ttest.n_rows, candidates.n_cols, arma::fill::value(-std::numeric_limits<double>::infinity()));
+  }
+
+  const size_t bytes_test = sizeof(double) * static_cast<size_t>(ntest) * static_cast<size_t>(kdim);
+  const size_t bytes_train = sizeof(double) * static_cast<size_t>(ntrain) * static_cast<size_t>(kdim);
+  const size_t bytes_y = sizeof(int) * static_cast<size_t>(ntrain);
+  const size_t bytes_candidates = sizeof(int) * static_cast<size_t>(ntest) * static_cast<size_t>(top_m);
+  const size_t bytes_base = sizeof(double) * static_cast<size_t>(ntest) * static_cast<size_t>(top_m);
+  const size_t bytes_bias = sizeof(double) * static_cast<size_t>(n_classes);
+  std::vector<int> y32(static_cast<std::size_t>(ntrain));
+  for (int i = 0; i < ntrain; ++i) {
+    y32[static_cast<std::size_t>(i)] = static_cast<int>(y(static_cast<arma::uword>(i)));
+  }
+  std::vector<int> candidates32(static_cast<std::size_t>(ntest) * static_cast<std::size_t>(top_m));
+  for (int j = 0; j < top_m; ++j) {
+    for (int i = 0; i < ntest; ++i) {
+      candidates32[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(ntest)] =
+        static_cast<int>(candidates(static_cast<arma::uword>(i), static_cast<arma::uword>(j)));
+    }
+  }
+
+  double* dTtest = nullptr;
+  double* dTtrain = nullptr;
+  int* dY = nullptr;
+  int* dCandidates = nullptr;
+  double* dCandidateBase = nullptr;
+  double* dBias = nullptr;
+  double* dScores = nullptr;
+  cudaStream_t stream = nullptr;
+
+  auto cleanup = [&]() {
+    if (dTtest) cudaFree(dTtest);
+    if (dTtrain) cudaFree(dTtrain);
+    if (dY) cudaFree(dY);
+    if (dCandidates) cudaFree(dCandidates);
+    if (dCandidateBase) cudaFree(dCandidateBase);
+    if (dBias) cudaFree(dBias);
+    if (dScores) cudaFree(dScores);
+    if (stream) cudaStreamDestroy(stream);
+  };
+
+  try {
+    Mat out(Ttest.n_rows, candidates.n_cols, arma::fill::none);
+    check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_candidate_knn_scores)");
+    check_cuda(cudaMalloc(&dTtest, bytes_test), "cudaMalloc(cuda_candidate_knn_scores Ttest)");
+    check_cuda(cudaMalloc(&dTtrain, bytes_train), "cudaMalloc(cuda_candidate_knn_scores Ttrain)");
+    check_cuda(cudaMalloc(&dY, bytes_y), "cudaMalloc(cuda_candidate_knn_scores y)");
+    check_cuda(cudaMalloc(&dCandidates, bytes_candidates), "cudaMalloc(cuda_candidate_knn_scores candidates)");
+    check_cuda(cudaMalloc(&dCandidateBase, bytes_base), "cudaMalloc(cuda_candidate_knn_scores base)");
+    check_cuda(cudaMalloc(&dBias, bytes_bias), "cudaMalloc(cuda_candidate_knn_scores bias)");
+    check_cuda(cudaMalloc(&dScores, bytes_base), "cudaMalloc(cuda_candidate_knn_scores scores)");
+    check_cuda(cudaMemcpyAsync(dTtest, Ttest.memptr(), bytes_test, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores Ttest)");
+    check_cuda(cudaMemcpyAsync(dTtrain, Ttrain.memptr(), bytes_train, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores Ttrain)");
+    check_cuda(cudaMemcpyAsync(dY, y32.data(), bytes_y, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores y)");
+    check_cuda(cudaMemcpyAsync(dCandidates, candidates32.data(), bytes_candidates, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores candidates)");
+    check_cuda(cudaMemcpyAsync(dCandidateBase, candidate_base.memptr(), bytes_base, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores base)");
+    check_cuda(cudaMemcpyAsync(dBias, bias.memptr(), bytes_bias, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores bias)");
+
+    fastpls_cuda_candidate_knn_scores(
+      dTtest,
+      dTtrain,
+      dY,
+      dCandidates,
+      dCandidateBase,
+      dBias,
+      ntest,
+      ntrain,
+      kdim,
+      n_classes,
+      top_m,
+      knn_k,
+      tau,
+      alpha,
+      dScores,
+      stream
+    );
+    check_kernel_launch("fastpls_cuda_candidate_knn_scores");
+    check_cuda(cudaMemcpyAsync(out.memptr(), dScores, bytes_base, cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores scores)");
+    check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(cuda_candidate_knn_scores)");
+    cleanup();
+    return out;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
 }
 
 Mat cuda_thin_qr(const Mat& A) {
@@ -3813,6 +4002,20 @@ arma::imat cuda_flash_lowrank_predict_classes(
 }
 
 Mat cuda_matrix_multiply(const Mat&, const Mat&) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+Mat cuda_candidate_knn_scores(
+  const Mat&,
+  const Mat&,
+  const arma::ivec&,
+  const arma::imat&,
+  const Mat&,
+  const Vec&,
+  int,
+  double,
+  double
+) {
   throw std::runtime_error("CUDA backend not compiled");
 }
 

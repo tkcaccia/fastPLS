@@ -165,6 +165,79 @@ __global__ void fastpls_lda_score_argmax_kernel(double* scores,
   pred[row] = best + 1;
 }
 
+__device__ void fastpls_candidate_insert(double value, double* top_vals, int top_k) {
+  for (int j = 0; j < top_k; ++j) {
+    if (value > top_vals[j]) {
+      for (int h = top_k - 1; h > j; --h) {
+        top_vals[h] = top_vals[h - 1];
+      }
+      top_vals[j] = value;
+      return;
+    }
+  }
+}
+
+__global__ void fastpls_candidate_knn_scores_kernel(const double* Ttest,
+                                                    const double* Ttrain,
+                                                    const int* y,
+                                                    const int* candidates,
+                                                    const double* candidate_base,
+                                                    const double* bias,
+                                                    int ntest,
+                                                    int ntrain,
+                                                    int kdim,
+                                                    int n_classes,
+                                                    int top_m,
+                                                    int knn_k,
+                                                    double tau,
+                                                    double alpha,
+                                                    double* out_scores) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  const int total = ntest * top_m;
+  if (idx >= total) return;
+  const int row = idx % ntest;
+  const int cand_slot = idx / ntest;
+  const int cls = candidates[row + cand_slot * ntest];
+  if (cls < 1 || cls > n_classes) {
+    out_scores[idx] = -INFINITY;
+    return;
+  }
+
+  const int use_k = max(1, min(knn_k, 32));
+  double top_vals[32];
+  for (int j = 0; j < use_k; ++j) top_vals[j] = -INFINITY;
+  int found = 0;
+
+  for (int tr = 0; tr < ntrain; ++tr) {
+    if (y[tr] != cls) continue;
+    double dot = 0.0;
+    for (int d = 0; d < kdim; ++d) {
+      dot += Ttest[row + d * ntest] * Ttrain[tr + d * ntrain];
+    }
+    fastpls_candidate_insert(dot, top_vals, use_k);
+    ++found;
+  }
+
+  if (found < 1 || !isfinite(top_vals[0])) {
+    out_scores[idx] = -INFINITY;
+    return;
+  }
+  const int denom = max(1, min(use_k, found));
+  double local = 0.0;
+  if (!isfinite(tau) || tau <= 0.0) {
+    for (int j = 0; j < denom; ++j) local += top_vals[j];
+    local /= static_cast<double>(denom);
+  } else {
+    const double mx = top_vals[0];
+    double acc = 0.0;
+    for (int j = 0; j < denom; ++j) {
+      acc += exp((top_vals[j] - mx) / tau);
+    }
+    local = mx + tau * log(acc / static_cast<double>(denom));
+  }
+  out_scores[idx] = local + alpha * candidate_base[idx] + bias[cls - 1];
+}
+
 void fastpls_cuda_lda_means(double* means,
                             const double* counts,
                             int kmax,
@@ -264,6 +337,43 @@ void fastpls_cuda_lda_score_argmax(double* scores,
   const int threads = 256;
   const int blocks = (n + threads - 1) / threads;
   fastpls_lda_score_argmax_kernel<<<blocks, threads, 0, stream>>>(scores, constants, pred, n, n_classes);
+}
+
+void fastpls_cuda_candidate_knn_scores(const double* Ttest,
+                                       const double* Ttrain,
+                                       const int* y,
+                                       const int* candidates,
+                                       const double* candidate_base,
+                                       const double* bias,
+                                       int ntest,
+                                       int ntrain,
+                                       int kdim,
+                                       int n_classes,
+                                       int top_m,
+                                       int knn_k,
+                                       double tau,
+                                       double alpha,
+                                       double* out_scores,
+                                       cudaStream_t stream) {
+  const int threads = 128;
+  const int blocks = (ntest * top_m + threads - 1) / threads;
+  fastpls_candidate_knn_scores_kernel<<<blocks, threads, 0, stream>>>(
+    Ttest,
+    Ttrain,
+    y,
+    candidates,
+    candidate_base,
+    bias,
+    ntest,
+    ntrain,
+    kdim,
+    n_classes,
+    top_m,
+    knn_k,
+    tau,
+    alpha,
+    out_scores
+  );
 }
 
 }
