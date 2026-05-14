@@ -7,7 +7,7 @@
 svd_run(
   A,
   k,
-  method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
+  method = c("cpu_rsvd", "irlba", "cuda_rsvd", "metal_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,

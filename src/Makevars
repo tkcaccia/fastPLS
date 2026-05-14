@@ -5,4 +5,8 @@ PKG_CPPFLAGS =
 PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
 OBJECTS = RcppExports.o export-inline-header.o fastPLS.o irlba.o \
-	svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o svd_cuda_rsvd.o
+	svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o svd_cuda_rsvd.o \
+	svd_metal_api.o svd_metal_backend_stub.o
+
+%.o: %.mm
+	$(CXX17) -std=gnu++17 $(ALL_CPPFLAGS) $(PKG_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) $(PKG_CXXFLAGS) -x objective-c++ -fobjc-arc -c $< -o $@

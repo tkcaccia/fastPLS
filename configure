@@ -5,11 +5,14 @@ use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
 openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
 cuda_root="${CUDA_ROOT:-/usr/local/cuda}"
+use_metal="${FASTPLS_USE_METAL:-auto}"
 
 pkg_cxxflags=""
 pkg_cppflags=""
 pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 cuda_objects=""
+metal_objects=" svd_metal_backend_stub.o"
+metal_mm_rule=""
 
 if [ "${use_openblas}" = "1" ]; then
   pkg_cppflags="-I${openblas_root}/include"
@@ -42,12 +45,42 @@ if [ "${have_cuda}" = "1" ]; then
   pkg_libs="-L${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
 fi
 
+have_metal=0
+if [ "$(uname -s)" = "Darwin" ]; then
+  metal_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  if [ "${use_metal}" = "1" ]; then
+    have_metal=1
+  elif [ "${use_metal}" = "auto" ] && [ -n "${metal_sdk}" ] && [ -d "${metal_sdk}/System/Library/Frameworks/Metal.framework" ]; then
+    have_metal=1
+  fi
+fi
+
+if [ "${have_metal}" = "1" ]; then
+  metal_objects=" svd_metal_backend.o"
+  metal_flags="-DFASTPLS_HAS_METAL"
+  if [ -n "${pkg_cppflags}" ]; then
+    pkg_cppflags="${pkg_cppflags} ${metal_flags}"
+  else
+    pkg_cppflags="${metal_flags}"
+  fi
+  pkg_cxxflags="${pkg_cxxflags} ${metal_flags}"
+  pkg_libs="${pkg_libs} -framework Foundation -framework Metal -framework MetalPerformanceShaders"
+  metal_mm_rule='
+%.o: %.mm
+	$(CXX17) -std=gnu++17 $(ALL_CPPFLAGS) $(PKG_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) $(PKG_CXXFLAGS) -x objective-c++ -fobjc-arc -c $< -o $@'
+fi
+
 sed \
   -e "s|@FASTPLS_PKG_CXXFLAGS@|${pkg_cxxflags}|g" \
   -e "s|@FASTPLS_PKG_CPPFLAGS@|${pkg_cppflags}|g" \
+  -e "s|@FASTPLS_METAL_OBJECTS@|${metal_objects}|g" \
   -e "s|@FASTPLS_CUDA_OBJECTS@|${cuda_objects}|g" \
   -e "s|@FASTPLS_PKG_LIBS@|${pkg_libs}|g" \
   src/Makevars.in > src/Makevars
+
+if [ -n "${metal_mm_rule}" ]; then
+  printf "%s\n" "${metal_mm_rule}" >> src/Makevars
+fi
 
 if [ -n "${cuda_objects}" ]; then
   cat >> src/Makevars <<EOF

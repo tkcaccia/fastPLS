@@ -44,7 +44,7 @@ pls(
   proj = FALSE,
   perm.test = FALSE,
   times = 100,
-  backend = c("cpp", "cuda"),
+  backend = c("cpp", "cuda", "metal"),
   inner.method = c("simpls", "plssvd"),
   north = 1L,
   kernel = c("linear", "rbf", "poly"),
@@ -166,8 +166,9 @@ plotting variance metadata.}
 
 \item{times}{Number of permutations.}
 
-\item{backend}{Implementation backend: `"cpp"` for compiled CPU or `"cuda"`
-for GPU-native fitting.}
+\item{backend}{Implementation backend: `"cpp"` for compiled CPU, `"cuda"`
+for CUDA-native fitting, or experimental `"metal"` for Apple Metal
+randomized-SVD/GEMM acceleration.}
 
 \item{inner.method}{Inner PLS core used by `method = "opls"` or
 `method = "kernelpls"`.}

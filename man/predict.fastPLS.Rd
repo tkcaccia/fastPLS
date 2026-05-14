@@ -11,7 +11,7 @@
   newdata,
   Ytest = NULL,
   proj = FALSE,
-  predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
+  predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
   flash.block_size = NULL,
   top = 1L,
   top5 = FALSE,
@@ -33,8 +33,8 @@
 \item{proj}{Logical; return projected `Ttest` when `TRUE`.}
 
 \item{predict.backend}{Prediction backend. `"auto"` uses FlashSVD-style
-low-rank prediction when compact factors are available and the low-rank
-application is expected to be beneficial.}
+low-rank prediction or Metal prediction when compact factors are available and
+the selected fitted object requests it.}
 
 \item{flash.block_size}{Row block size for `"cpu_flash"` prediction.}
 

@@ -7,7 +7,7 @@ fastsvd(
   nu = NULL,
   nv = NULL,
   ncomp = NULL,
-  method = c("irlba", "cpu_rsvd", "cuda_rsvd"),
+  method = c("irlba", "cpu_rsvd", "cuda_rsvd", "metal_rsvd"),
   rsvd_oversample = 10L,
   rsvd_power = 1L,
   svds_tol = 0,
@@ -19,7 +19,7 @@ fastsvd(
 \item{nu}{Number of left singular vectors to return.}
 \item{nv}{Number of right singular vectors to return.}
 \item{ncomp}{Optional truncated rank. When supplied, it overrides the decomposition rank implied by \code{nu} and \code{nv}.}
-\item{method}{SVD backend: \code{"irlba"}, \code{"cpu_rsvd"}, or \code{"cuda_rsvd"}.}
+\item{method}{SVD backend: \code{"irlba"}, \code{"cpu_rsvd"}, \code{"cuda_rsvd"}, or \code{"metal_rsvd"}.}
 \item{rsvd_oversample}{Randomized SVD oversampling.}
 \item{rsvd_power}{Randomized SVD power iterations.}
 \item{svds_tol}{Iterative backend tolerance.}
@@ -31,6 +31,7 @@ A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 }
 \description{
 User-facing SVD wrapper for the fastPLS bundled IRLBA-style, CPU randomized
-SVD, and CUDA randomized SVD backends. It is intentionally named
-\code{fastsvd()} so loading fastPLS does not mask \code{base::svd()}.
+SVD, CUDA randomized SVD, and Apple Metal randomized SVD backends. It is
+intentionally named \code{fastsvd()} so loading fastPLS does not mask
+\code{base::svd()}.
 }

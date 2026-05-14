@@ -62,8 +62,9 @@ Ytest_cls <- Y_cls[test_id]
 ## Fit PLS Models
 
 The `method` argument selects the outer PLS algorithm. The `backend` argument
-selects the implementation: `"cpp"` for the compiled CPU implementation and
-`"cuda"` for GPU-native execution when available.
+selects the implementation: `"cpp"` for the compiled CPU implementation,
+`"cuda"` for GPU-native execution when available, and experimental `"metal"`
+for Apple Metal acceleration on Apple Silicon.
 
 The `svd.method` argument selects the CPU singular-vector backend for CPU
 models: `"irlba"` or `"cpu_rsvd"`.
@@ -107,6 +108,21 @@ sketch of the target matrix, optionally applies power iterations,
 orthonormalizes the sketch, and solves the final SVD in the small projected
 space. Its accuracy is controlled mainly by `rsvd_oversample`, `rsvd_power`,
 and `seed`.
+
+On Apple Silicon, `fastsvd()` and `pca()` can also use `method = "metal_rsvd"`.
+This backend keeps the same randomized SVD mathematics as `cpu_rsvd`, but sends
+the large sketching matrix multiplications to Apple Metal Performance Shaders.
+The QR decomposition and final small SVD remain on the CPU. Because matrices are
+copied between R and Metal buffers, this backend is most useful for larger
+matrices where the GPU multiplication work is large enough to dominate transfer
+overhead.
+
+The experimental PLS Metal backend, `pls(..., backend = "metal")`, extends the
+same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
+score projections, deflation matrix products, and prediction matrix products
+are dispatched through Metal. Small decompositions, scalar reductions, and some
+kernel-centering operations remain CPU-side until dedicated Metal kernels are
+added.
 
 For CUDA builds, GPU execution is selected with `backend = "cuda"`. The removed
 hybrid route `svd.method = "cuda_rsvd"` is not part of the public API; instead,

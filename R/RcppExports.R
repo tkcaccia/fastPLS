@@ -204,3 +204,19 @@ pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfo
     .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes)
 }
 
+has_metal <- function() {
+    .Call(`_fastPLS_has_metal`)
+}
+
+metal_matrix_multiply_cpp <- function(A, B) {
+    .Call(`_fastPLS_metal_matrix_multiply_cpp`, A, B)
+}
+
+metal_crossprod_cpp <- function(A, B) {
+    .Call(`_fastPLS_metal_crossprod_cpp`, A, B)
+}
+
+metal_simpls_resident_cpp <- function(X, Y, ncomp, power_iters = 2L, seed = 1L) {
+    .Call(`_fastPLS_metal_simpls_resident_cpp`, X, Y, ncomp, power_iters, seed)
+}
+

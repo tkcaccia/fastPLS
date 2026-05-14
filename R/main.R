@@ -2550,7 +2550,7 @@ pls.model2.fast.gpu =
 #'   optional LDA scores for LDA classification models.
 #' @export
 predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
-                           predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash"),
+                           predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
                            flash.block_size = NULL, top = 1L, top5 = FALSE,
                            raw_scores = FALSE, ...) {
   if (!is(object, "fastPLS")) {
@@ -2566,6 +2566,10 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
   use_cpu_flash <- identical(predict.backend, "cpu_flash") ||
     (identical(predict.backend, "auto") &&
        .should_use_cpu_flash_prediction(object, Xtest))
+  use_metal <- (identical(predict.backend, "metal") ||
+    (identical(predict.backend, "auto") &&
+      identical(object$predict_backend, "metal"))) &&
+    isTRUE(has_metal())
   if (is.null(flash.block_size)) {
     flash.block_size <- object$flash_block_size
   }
@@ -2621,6 +2625,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	      is.null(Ytest) &&
 	      !isTRUE(raw_scores) &&
 	      !isTRUE(object$gaussian_y) &&
+	      !isTRUE(use_metal) &&
 	      (is.null(object$classification_rule) ||
 	         identical(object$classification_rule, "argmax"))) {
 	    pred_backend <- if (identical(object$predict_backend, "cuda_flash") && isTRUE(has_cuda())) {
@@ -2660,7 +2665,9 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	    }
 	    return(res)
 	  }
-	  res <- if (isTRUE(use_cuda_flash)) {
+	  res <- if (isTRUE(use_metal)) {
+    .pls_predict_metal(object, Xtest, proj)
+  } else if (isTRUE(use_cuda_flash)) {
     tryCatch(
       pls_predict_flash_cuda(object, Xtest, proj),
       error = function(e) {
@@ -3175,7 +3182,10 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
     stop("object is not a fastPLSKernel object", call. = FALSE)
   }
   Xnew <- .fastpls_preprocess_test(newdata, object$mX, object$vX)
-  if (identical(object$kernel_engine, "R")) {
+  if (identical(object$kernel_engine, "metal")) {
+    Ktest <- .kernel_matrix_metal(Xnew, object$Xref, object$kernel, object$gamma, object$degree, object$coef0)
+    Ktest <- .center_kernel_test_r(Ktest, object$kernel_center$col_means, object$kernel_center$grand_mean)
+  } else if (identical(object$kernel_engine, "R")) {
     Ktest <- .kernel_matrix_r(Xnew, object$Xref, object$kernel, object$gamma, object$degree, object$coef0)
     Ktest <- .center_kernel_test_r(Ktest, object$kernel_center$col_means, object$kernel_center$grand_mean)
   } else {
@@ -3413,7 +3423,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   if (!is(object, "fastPLSOpls")) {
     stop("object is not a fastPLSOpls object", call. = FALSE)
   }
-  Xnew <- if (identical(object$opls_engine, "R")) {
+  Xnew <- if (identical(object$opls_engine, "metal")) {
+    .opls_apply_filter_metal(newdata, object$mX, object$vX, object$W_orth, object$P_orth)
+  } else if (identical(object$opls_engine, "R")) {
     .opls_apply_filter_r(newdata, object$mX, object$vX, object$W_orth, object$P_orth)
   } else {
     opls_apply_filter_cpp(as.matrix(newdata), object$mX, object$vX, object$W_orth, object$P_orth)
@@ -4439,8 +4451,8 @@ kernelpls_cv_cuda <- function(Xdata, Ydata, constrain = NULL, ncomp = 2L, kfold 
 
 kernel_pls_cv_cuda <- kernelpls_cv_cuda
 
-.svd_methods_internal <- c("exact", "irlba", "cpu_rsvd", "cuda_rsvd")
-.svd_methods_public <- c("irlba", "cpu_rsvd")
+.svd_methods_internal <- c("exact", "irlba", "cpu_rsvd", "cuda_rsvd", "metal_rsvd")
+.svd_methods_public <- c("irlba", "cpu_rsvd", "metal_rsvd")
 .svd_methods_cpu <- c("irlba", "cpu_rsvd")
 
 .svd_method_id <- function(method) {
@@ -4451,7 +4463,8 @@ kernel_pls_cv_cuda <- kernelpls_cv_cuda
     exact = 3L,
     irlba = 1L,
     cpu_rsvd = 4L,
-    cuda_rsvd = 5L
+    cuda_rsvd = 5L,
+    metal_rsvd = 6L
   )
 }
 
@@ -4466,10 +4479,71 @@ svd_methods <- function() {
   methods <- .svd_methods_public
   enabled <- rep(TRUE, length(methods))
   names(enabled) <- methods
+  if ("metal_rsvd" %in% methods) {
+    enabled[["metal_rsvd"]] <- isTRUE(has_metal())
+  }
   data.frame(
     method = methods,
     enabled = as.logical(enabled),
     stringsAsFactors = FALSE
+  )
+}
+
+.truncated_rsvd_metal <- function(A,
+                                  k,
+                                  rsvd_oversample = 10L,
+                                  rsvd_power = 1L,
+                                  seed = 1L,
+                                  left_only = FALSE) {
+  if (!isTRUE(has_metal())) {
+    stop("method='metal_rsvd' requires a macOS build with Apple Metal support.", call. = FALSE)
+  }
+
+  A <- as.matrix(A)
+  max_rank <- min(nrow(A), ncol(A))
+  target <- min(max_rank, max(1L, as.integer(k)[1L]))
+  sketch_rank <- min(max_rank, target + max(0L, as.integer(rsvd_oversample)[1L]))
+
+  if (max_rank <= .metal_exact_max_rank() || sketch_rank >= max_rank) {
+    exact <- svd(A, nu = target, nv = if (isTRUE(left_only)) 0L else target)
+    return(list(
+      U = exact$u[, seq_len(target), drop = FALSE],
+      s = exact$d[seq_len(target)],
+      Vt = if (isTRUE(left_only)) NULL else t(exact$v[, seq_len(target), drop = FALSE])
+    ))
+  }
+
+  set.seed(as.integer(seed)[1L])
+  omega <- matrix(rnorm(ncol(A) * sketch_rank), nrow = ncol(A), ncol = sketch_rank)
+  Y <- metal_matrix_multiply_cpp(A, omega)
+
+  power_iters <- max(0L, as.integer(rsvd_power)[1L])
+  if (power_iters == 1L) {
+    Y <- metal_matrix_multiply_cpp(A, metal_crossprod_cpp(A, Y))
+  } else if (power_iters > 1L) {
+    for (i in seq_len(power_iters)) {
+      Z <- metal_crossprod_cpp(A, Y)
+      Qz <- qr.Q(qr(Z))
+      Y <- metal_matrix_multiply_cpp(A, Qz)
+    }
+  }
+
+  Q <- qr.Q(qr(Y))
+  B <- metal_crossprod_cpp(Q, A)
+  small <- svd(B, nu = target, nv = if (isTRUE(left_only)) 0L else target)
+
+  usable <- min(target, length(small$d), ncol(small$u))
+  U <- Q %*% small$u[, seq_len(usable), drop = FALSE]
+  Vt <- if (isTRUE(left_only)) {
+    NULL
+  } else {
+    t(small$v[, seq_len(usable), drop = FALSE])
+  }
+
+  list(
+    U = U,
+    s = small$d[seq_len(usable)],
+    Vt = Vt
   )
 }
 
@@ -4489,7 +4563,7 @@ svd_methods <- function() {
 #' @keywords internal
 svd_run <- function(A,
                     k,
-                    method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
+                    method = c("cpu_rsvd", "irlba", "cuda_rsvd", "metal_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -4499,6 +4573,29 @@ svd_run <- function(A,
   method <- match.arg(method)
   if (identical(method, "cuda_rsvd") && !has_cuda()) {
     stop("method='cuda_rsvd' requires a CUDA-enabled fastPLS build.", call. = FALSE)
+  }
+  if (identical(method, "metal_rsvd") && !has_metal()) {
+    stop("method='metal_rsvd' requires a macOS build with Apple Metal support.", call. = FALSE)
+  }
+  if (identical(method, "metal_rsvd")) {
+    A <- as.matrix(A)
+    t_elapsed <- system.time({
+      out <- .truncated_rsvd_metal(
+        A = A,
+        k = as.integer(k),
+        rsvd_oversample = as.integer(rsvd_oversample),
+        rsvd_power = as.integer(rsvd_power),
+        seed = as.integer(seed),
+        left_only = isTRUE(left_only)
+      )
+    })["elapsed"]
+    return(list(
+      U = out$U,
+      s = as.vector(out$s),
+      Vt = out$Vt,
+      method = method,
+      elapsed = as.numeric(t_elapsed)
+    ))
   }
   svdmeth <- .svd_method_id(method)
   if (is.na(svdmeth)) {
@@ -4571,6 +4668,30 @@ svd_benchmark <- function(A,
     elapsed <- numeric(reps)
     status <- rep("ok", reps)
     for (r in seq_len(reps)) {
+      if (identical(method, "metal_rsvd")) {
+        tr <- try(
+          system.time(
+            svd_run(
+              A = A,
+              k = as.integer(k),
+              method = method,
+              rsvd_oversample = as.integer(rsvd_oversample),
+              rsvd_power = as.integer(rsvd_power),
+              svds_tol = as.numeric(svds_tol),
+              seed = as.integer(seed + r - 1L),
+              left_only = isTRUE(left_only)
+            )
+          )["elapsed"],
+          silent = TRUE
+        )
+        if (inherits(tr, "try-error")) {
+          elapsed[r] <- NA_real_
+          status[r] <- "error"
+        } else {
+          elapsed[r] <- as.numeric(tr)
+        }
+        next
+      }
       tr <- try(
         system.time(
           truncated_svd_debug(
@@ -4614,7 +4735,8 @@ svd_benchmark <- function(A,
 #' @param nv Number of right singular vectors to return.
 #' @param ncomp Optional truncated rank. When supplied, it overrides `nu`/`nv`
 #'   for the decomposition rank.
-#' @param method One of `"irlba"`, `"cpu_rsvd"`, or `"cuda_rsvd"`.
+#' @param method One of `"irlba"`, `"cpu_rsvd"`, `"cuda_rsvd"`, or
+#'   `"metal_rsvd"`.
 #' @param rsvd_oversample Randomized SVD oversampling.
 #' @param rsvd_power Randomized SVD power iterations.
 #' @param svds_tol Iterative backend tolerance.
@@ -4626,7 +4748,7 @@ fastsvd <- function(x,
                     nu = NULL,
                     nv = NULL,
                     ncomp = NULL,
-                    method = c("irlba", "cpu_rsvd", "cuda_rsvd"),
+                    method = c("irlba", "cpu_rsvd", "cuda_rsvd", "metal_rsvd"),
                     rsvd_oversample = 10L,
                     rsvd_power = 1L,
                     svds_tol = 0,
@@ -4636,9 +4758,12 @@ fastsvd <- function(x,
   p <- ncol(x)
   if (is.null(nu)) nu <- min(n, p)
   if (is.null(nv)) nv <- min(n, p)
-  method <- match.arg(.normalize_svd_method(method), c("irlba", "cpu_rsvd", "cuda_rsvd"))
+  method <- match.arg(.normalize_svd_method(method), c("irlba", "cpu_rsvd", "cuda_rsvd", "metal_rsvd"))
   if (identical(method, "cuda_rsvd") && !has_cuda()) {
     stop("method='cuda_rsvd' requires a CUDA-enabled fastPLS build.", call. = FALSE)
+  }
+  if (identical(method, "metal_rsvd") && !has_metal()) {
+    stop("method='metal_rsvd' requires a macOS build with Apple Metal support.", call. = FALSE)
   }
   if (is.null(ncomp)) {
     k <- max(as.integer(nu), as.integer(nv), 1L)
@@ -4689,7 +4814,7 @@ pca <- function(x,
                 ncomp = 2L,
                 center = TRUE,
                 scale. = FALSE,
-                svd.method = c("cpu_rsvd", "irlba", "cuda_rsvd"),
+                svd.method = c("cpu_rsvd", "irlba", "cuda_rsvd", "metal_rsvd"),
                 ...) {
   x <- as.matrix(x)
   ncomp <- max(1L, min(as.integer(ncomp)[1L], nrow(x), ncol(x)))
@@ -5254,7 +5379,7 @@ plot.fastPLS <- function(x,
     G_mc <- G_full[seq_len(mc), seq_len(mc), drop = FALSE]
     D_mc <- diag(s$d[seq_len(mc)], nrow = mc, ncol = mc)
     coeff_latent <- solve(G_mc, D_mc)
-    C_i <- C_latent[, , i, drop = FALSE][, , 1]
+    C_i <- matrix(0, nrow = max_ncomp_eff, ncol = max_ncomp_eff)
     C_i[seq_len(mc), seq_len(mc)] <- coeff_latent
     C_latent[, , i] <- C_i
     W_i <- coeff_latent %*% t(Q_mc)
@@ -5494,7 +5619,7 @@ plot.fastPLS <- function(x,
     G_mc <- crossprod(T_mc)
     D_mc <- diag(s$d[seq_len(mc)], nrow = mc, ncol = mc)
     coeff_latent <- solve(G_mc, D_mc)
-    C_i <- C_latent[, , i, drop = FALSE][, , 1]
+    C_i <- matrix(0, nrow = max_ncomp_eff, ncol = max_ncomp_eff)
     C_i[seq_len(mc), seq_len(mc)] <- coeff_latent
     C_latent[, , i] <- C_i
     W_i <- coeff_latent %*% t(Q_mc)
@@ -5795,6 +5920,681 @@ plot.fastPLS <- function(x,
   out
 }
 
+.metal_mm <- function(A, B) {
+  if (!isTRUE(has_metal())) {
+    stop("backend='metal' requires Apple Metal support.", call. = FALSE)
+  }
+  A <- as.matrix(A)
+  B <- as.matrix(B)
+  if (!.metal_should_use_mm(nrow(A), ncol(A), ncol(B))) {
+    return(A %*% B)
+  }
+  metal_matrix_multiply_cpp(A, B)
+}
+
+.metal_crossprod <- function(A, B) {
+  if (!isTRUE(has_metal())) {
+    stop("backend='metal' requires Apple Metal support.", call. = FALSE)
+  }
+  A <- as.matrix(A)
+  B <- as.matrix(B)
+  if (!.metal_should_use_mm(ncol(A), nrow(A), ncol(B))) {
+    return(crossprod(A, B))
+  }
+  metal_crossprod_cpp(A, B)
+}
+
+.metal_outer <- function(a, b) {
+  tcrossprod(as.numeric(a), as.numeric(b))
+}
+
+.metal_min_flops <- function() {
+  val <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_METAL_MIN_FLOPS", "200000000")))
+  if (!is.finite(val) || val < 0) 2e8 else val
+}
+
+.metal_exact_max_rank <- function() {
+  val <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_METAL_EXACT_MAX_RANK", "256")))
+  if (!is.finite(val) || is.na(val) || val < 0L) 256L else val
+}
+
+.metal_should_use_mm <- function(m, k, n) {
+  m <- as.numeric(m); k <- as.numeric(k); n <- as.numeric(n)
+  if (!is.finite(m) || !is.finite(k) || !is.finite(n)) return(FALSE)
+  if (m <= 0 || k <= 0 || n <= 0) return(FALSE)
+  # Matrix-vector and very thin products spend more time copying/dispatching
+  # than computing unless the matrix is very large. BLAS is safer there.
+  if (min(m, n) <= 1 && (m * k * n) < (.metal_min_flops() * 4)) return(FALSE)
+  (2 * m * k * n) >= .metal_min_flops()
+}
+
+.metal_experimental_iterative_enabled <- function() {
+  tolower(Sys.getenv("FASTPLS_METAL_EXPERIMENTAL_ITERATIVE", "false")) %in%
+    c("1", "true", "yes", "y")
+}
+
+.metal_resident_simpls_enabled <- function() {
+  !tolower(Sys.getenv("FASTPLS_METAL_RESIDENT_SIMPLS", "true")) %in%
+    c("0", "false", "no", "n")
+}
+
+.pls_model1_metal <- function(Xtrain,
+                              Ytrain,
+                              ncomp,
+                              scaling,
+                              fit,
+                              rsvd_oversample,
+                              rsvd_power,
+                              seed) {
+  n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
+  ncomp <- as.integer(ncomp)
+  max_ncomp <- max(ncomp)
+  max_ncomp_eff <- min(max_ncomp, n, p, m)
+  if (max_ncomp_eff < 1L) stop("plssvd effective rank is < 1")
+  length_ncomp <- length(ncomp)
+
+  mX <- matrix(0, nrow = 1, ncol = p)
+  if (scaling < 3L) {
+    mX <- matrix(colMeans(Xtrain), nrow = 1)
+    Xtrain <- sweep(Xtrain, 2, mX[1, ], "-")
+  }
+  vX <- matrix(1, nrow = 1, ncol = p)
+  if (scaling == 2L) {
+    vX <- matrix(apply(Xtrain, 2, sd), nrow = 1)
+    vX[!is.finite(vX) | vX == 0] <- 1
+    Xtrain <- sweep(Xtrain, 2, vX[1, ], "/")
+  }
+
+  mY <- matrix(colMeans(Ytrain), nrow = 1)
+  Yc <- sweep(Ytrain, 2, mY[1, ], "-")
+
+  S <- .metal_crossprod(Xtrain, Yc)
+  s <- .truncated_rsvd_metal(
+    S,
+    max_ncomp_eff,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    seed = seed
+  )
+  max_ncomp_eff <- min(max_ncomp_eff, ncol(s$U), nrow(s$Vt))
+  R <- s$U[, seq_len(max_ncomp_eff), drop = FALSE]
+  Q <- t(s$Vt[seq_len(max_ncomp_eff), , drop = FALSE])
+  Ttrain <- .metal_mm(Xtrain, R)
+  G_full <- .metal_crossprod(Ttrain, Ttrain)
+
+  store_B <- .should_store_coefficients(p, m, length_ncomp, TRUE)
+  B <- if (store_B) array(0, dim = c(p, m, length_ncomp)) else NULL
+  C_latent <- array(0, dim = c(max_ncomp_eff, max_ncomp_eff, length_ncomp))
+  W_latent <- array(0, dim = c(max_ncomp_eff, m, length_ncomp))
+  Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
+  R2Y <- rep(NA_real_, length_ncomp)
+
+  for (i in seq_len(length_ncomp)) {
+    mc <- min(ncomp[i], max_ncomp_eff)
+    R_mc <- R[, seq_len(mc), drop = FALSE]
+    Q_mc <- Q[, seq_len(mc), drop = FALSE]
+    G_mc <- G_full[seq_len(mc), seq_len(mc), drop = FALSE]
+    D_mc <- diag(s$s[seq_len(mc)], nrow = mc, ncol = mc)
+    coeff_latent <- solve(G_mc, D_mc)
+    C_i <- matrix(0, nrow = max_ncomp_eff, ncol = max_ncomp_eff)
+    C_i[seq_len(mc), seq_len(mc)] <- coeff_latent
+    C_latent[, , i] <- C_i
+    W_i <- coeff_latent %*% t(Q_mc)
+    W_latent[seq_len(mc), , i] <- W_i
+    if (store_B) {
+      B[, , i] <- .metal_mm(R_mc, W_i)
+    }
+    if (fit) {
+      yf <- .metal_mm(Ttrain[, seq_len(mc), drop = FALSE], W_i)
+      R2Y[i] <- RQ(Yc, yf)
+      Yfit[, , i] <- sweep(yf, 2, mY[1, ], "+")
+    }
+  }
+
+  out <- list(
+    C_latent = C_latent,
+    W_latent = W_latent,
+    Q = Q,
+    Ttrain = Ttrain,
+    R = R,
+    mX = mX,
+    vX = vX,
+    mY = mY,
+    p = p,
+    m = m,
+    ncomp = ncomp,
+    Yfit = Yfit,
+    R2Y = R2Y,
+    backend = "metal",
+    svd.method = "metal_rsvd"
+  )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
+  class(out) <- "fastPLS"
+  out
+}
+
+.pls_model2_fast_metal <- function(Xtrain,
+                                   Ytrain,
+                                   ncomp,
+                                   scaling,
+                                   fit,
+                                   rsvd_oversample,
+                                   rsvd_power,
+                                   seed,
+                                   fast_block = 1L) {
+  n <- nrow(Xtrain); p <- ncol(Xtrain); m <- ncol(Ytrain)
+  ncomp <- sort(unique(as.integer(ncomp)))
+  max_ncomp <- max(ncomp)
+  length_ncomp <- length(ncomp)
+
+  mX <- matrix(0, nrow = 1, ncol = p)
+  if (scaling < 3L) {
+    mX <- matrix(colMeans(Xtrain), nrow = 1)
+    Xtrain <- sweep(Xtrain, 2, mX[1, ], "-")
+  }
+  vX <- matrix(1, nrow = 1, ncol = p)
+  if (scaling == 2L) {
+    vX <- matrix(apply(Xtrain, 2, sd), nrow = 1)
+    vX[!is.finite(vX) | vX == 0] <- 1
+    Xtrain <- sweep(Xtrain, 2, vX[1, ], "/")
+  }
+
+  mY <- matrix(colMeans(Ytrain), nrow = 1)
+  Y <- sweep(Ytrain, 2, mY[1, ], "-")
+  max_ncomp_eff <- min(max_ncomp, n - 1L, p)
+  if (max_ncomp_eff < 1L) {
+    stop("SIMPLS Metal effective rank is < 1", call. = FALSE)
+  }
+  native <- metal_simpls_resident_cpp(
+    Xtrain,
+    Y,
+    as.integer(max_ncomp_eff),
+    as.integer(max(2L, rsvd_power + 1L)),
+    as.integer(seed)
+  )
+  RR <- native$R
+  QQ <- native$Q
+  Bfull <- native$B
+  max_ncomp_eff <- dim(Bfull)[3L]
+  ncomp <- pmin(ncomp, max_ncomp_eff)
+  store_B <- TRUE
+  B <- array(0, dim = c(p, m, length_ncomp))
+  Yfit <- if (fit) array(0, dim = c(n, m, length_ncomp)) else NULL
+  R2Y <- rep(NA_real_, length_ncomp)
+  for (i in seq_len(length_ncomp)) {
+    mc <- max(1L, min(ncomp[i], max_ncomp_eff))
+    B[, , i] <- Bfull[, , mc]
+    if (fit) {
+      yf <- Xtrain %*% B[, , i]
+      Yfit[, , i] <- sweep(yf, 2, mY[1, ], "+")
+      R2Y[i] <- RQ(Ytrain, matrix(Yfit[, , i], nrow = n, ncol = m))
+    }
+  }
+
+  out <- list(
+    P = matrix(0, nrow = 0, ncol = 0),
+    Q = QQ,
+    Ttrain = matrix(0, nrow = 0, ncol = 0),
+    R = RR,
+    mX = mX,
+    vX = vX,
+    mY = mY,
+    p = p,
+    m = m,
+    ncomp = ncomp,
+    Yfit = Yfit,
+    R2Y = R2Y,
+    backend = "metal",
+    svd.method = "metal_resident_simpls"
+  )
+  if (store_B) {
+    out$B <- B
+  }
+  out <- .annotate_coefficient_storage(out, store_B)
+  class(out) <- "fastPLS"
+  out
+}
+
+.pls_predict_metal <- function(object, Xtest, proj = FALSE) {
+  Xscaled <- .fastpls_preprocess_test(Xtest, object$mX, object$vX)
+  ncomp <- as.integer(object$ncomp)
+  ns <- length(ncomp)
+  n <- nrow(Xscaled)
+  m <- as.integer(object$m)
+  Ypred <- array(0, dim = c(n, m, ns))
+
+  Tfull <- NULL
+  if (!is.null(object$R) && length(object$R) > 0L) {
+    maxc <- min(max(ncomp), ncol(object$R))
+    Tfull <- .metal_mm(Xscaled, object$R[, seq_len(maxc), drop = FALSE])
+  }
+
+  for (i in seq_len(ns)) {
+    mc <- min(ncomp[i], if (!is.null(Tfull)) ncol(Tfull) else dim(object$B)[3L])
+    if (!is.null(object$W_latent) && !is.null(Tfull)) {
+      W <- matrix(object$W_latent[seq_len(mc), , i], nrow = mc, ncol = m)
+      y <- .metal_mm(Tfull[, seq_len(mc), drop = FALSE], W)
+    } else if (!is.null(object$B)) {
+      B_i <- matrix(object$B[, , i], nrow = object$p, ncol = object$m)
+      y <- .metal_mm(Xscaled, B_i)
+    } else if (!is.null(object$R) && !is.null(object$Q) && !is.null(Tfull)) {
+      B_i <- .metal_mm(
+        object$R[, seq_len(mc), drop = FALSE],
+        t(object$Q[, seq_len(mc), drop = FALSE])
+      )
+      y <- .metal_mm(Xscaled, B_i)
+    } else {
+      stop("Metal prediction requires compact factors or coefficients.", call. = FALSE)
+    }
+    Ypred[, , i] <- sweep(y, 2, as.numeric(object$mY[1, ]), "+")
+  }
+  out <- list(Ypred = Ypred)
+  if (isTRUE(proj) && !is.null(Tfull)) {
+    out$Ttest <- Tfull
+  }
+  out
+}
+
+.opls_filter_metal <- function(X, Y, north, scaling) {
+  prep <- .fastpls_preprocess_train(X, scaling)
+  Xf <- prep$X
+  Yc <- sweep(as.matrix(Y), 2, colMeans(as.matrix(Y)), "-")
+  north <- as.integer(north)
+  W_orth <- matrix(0, nrow = ncol(Xf), ncol = max(0L, north))
+  P_orth <- matrix(0, nrow = ncol(Xf), ncol = max(0L, north))
+  used <- 0L
+  if (north > 0L) {
+    for (a in seq_len(north)) {
+      s <- fastsvd(.metal_crossprod(Xf, Yc), ncomp = 1L, method = "metal_rsvd", rsvd_power = 1L)
+      w <- s$u[, 1L, drop = FALSE]
+      w_norm <- sqrt(sum(w * w))
+      if (!is.finite(w_norm) || w_norm <= 0) break
+      w <- w / w_norm
+      tt <- .metal_mm(Xf, w)
+      tt_ss <- drop(crossprod(tt))
+      if (!is.finite(tt_ss) || tt_ss <= 0) break
+      pp <- .metal_crossprod(Xf, tt) / tt_ss
+      w_orth <- pp - w %*% crossprod(w, pp) / drop(crossprod(w))
+      wo_norm <- sqrt(sum(w_orth * w_orth))
+      if (!is.finite(wo_norm) || wo_norm <= 0) break
+      w_orth <- w_orth / wo_norm
+      t_orth <- .metal_mm(Xf, w_orth)
+      to_ss <- drop(crossprod(t_orth))
+      if (!is.finite(to_ss) || to_ss <= 0) break
+      p_orth <- .metal_crossprod(Xf, t_orth) / to_ss
+      Xf <- Xf - .metal_outer(t_orth, p_orth)
+      used <- used + 1L
+      W_orth[, used] <- w_orth[, 1L]
+      P_orth[, used] <- p_orth[, 1L]
+    }
+  }
+  if (used == 0L) {
+    W_orth <- matrix(0, nrow = ncol(Xf), ncol = 0L)
+    P_orth <- matrix(0, nrow = ncol(Xf), ncol = 0L)
+  } else {
+    W_orth <- W_orth[, seq_len(used), drop = FALSE]
+    P_orth <- P_orth[, seq_len(used), drop = FALSE]
+  }
+  list(X = Xf, mX = prep$mX, vX = prep$vX, W_orth = W_orth, P_orth = P_orth, north = used)
+}
+
+.opls_apply_filter_metal <- function(X, mX, vX, W_orth, P_orth) {
+  Xf <- .fastpls_preprocess_test(X, mX, vX)
+  if (ncol(W_orth) > 0L) {
+    for (a in seq_len(ncol(W_orth))) {
+      t_orth <- .metal_mm(Xf, W_orth[, a, drop = FALSE])
+      Xf <- Xf - .metal_outer(t_orth, P_orth[, a, drop = FALSE])
+    }
+  }
+  Xf
+}
+
+.kernel_matrix_metal <- function(X1, X2, kernel, gamma, degree, coef0) {
+  dots <- .metal_mm(X1, t(X2))
+  if (identical(kernel, "linear")) {
+    return(dots)
+  }
+  if (identical(kernel, "poly")) {
+    return((gamma * dots + coef0)^as.integer(degree))
+  }
+  n1 <- rowSums(X1 * X1)
+  n2 <- rowSums(X2 * X2)
+  dist2 <- outer(n1, n2, "+") - 2 * dots
+  dist2[dist2 < 0 & dist2 > -1e-10] <- 0
+  exp(-gamma * dist2)
+}
+
+.pls_metal_fit_core <- function(Xtrain,
+                                Ytrain,
+                                ncomp,
+                                scaling,
+                                method,
+                                fit,
+                                rsvd_oversample,
+                                rsvd_power,
+                                seed,
+                                fast_block) {
+  if (identical(method, "plssvd")) {
+    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
+    max_eff <- min(max(cap$ncomp), nrow(Xtrain), ncol(Xtrain), ncol(Ytrain))
+    use_metal_plssvd <- .metal_should_use_mm(ncol(Xtrain), nrow(Xtrain), ncol(Ytrain)) ||
+      .metal_should_use_mm(nrow(Xtrain), ncol(Xtrain), max_eff)
+    if (!isTRUE(use_metal_plssvd)) {
+      model <- pls.model1(
+        Xtrain,
+        Ytrain,
+        ncomp = cap$ncomp,
+        fit = fit,
+        scaling = scaling,
+        svd.method = .svd_method_id("cpu_rsvd"),
+        rsvd_oversample = rsvd_oversample,
+        rsvd_power = rsvd_power,
+        svds_tol = 0,
+        seed = seed
+      )
+      model$backend <- "metal_adaptive_cpu"
+      model$svd.method <- "cpu_rsvd"
+      model$metal_fallback_reason <- "PLSSVD problem is too small for Metal; used compiled CPU rSVD"
+      return(model)
+    }
+    return(.pls_model1_metal(
+      Xtrain, Ytrain, cap$ncomp, scaling, fit,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      seed = seed
+    ))
+  }
+  if (!isTRUE(.metal_resident_simpls_enabled()) &&
+      !isTRUE(.metal_experimental_iterative_enabled())) {
+    model <- pls.model2.fast(
+      Xtrain,
+      Ytrain,
+      ncomp = ncomp,
+      fit = fit,
+      scaling = scaling,
+      svd.method = .svd_method_id("cpu_rsvd"),
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = 0,
+      seed = seed,
+      fast_block = fast_block,
+      return_ttrain = FALSE
+    )
+    model$backend <- "metal_adaptive_cpu"
+    model$svd.method <- "cpu_rsvd"
+    model$metal_fallback_reason <- paste(
+      "iterative SIMPLS-family Metal path is experimental;",
+      "using compiled CPU core to preserve speed and accuracy"
+    )
+    return(model)
+  }
+  .pls_model2_fast_metal(
+    Xtrain, Ytrain, ncomp, scaling, fit,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    seed = seed,
+    fast_block = fast_block
+  )
+}
+
+.pls_metal_finish <- function(model,
+                              Xtrain,
+                              Ytrain_original,
+                              yprep,
+                              classifier,
+                              lda_ridge,
+                              regression_head,
+                              return_variance,
+                              Xtest,
+                              Ytest,
+                              proj) {
+  if (is.null(model$metal_fallback_reason)) {
+    model$predict_backend <- "metal"
+    model$backend <- "metal"
+    model$svd.method <- "metal_rsvd"
+    model$predict_latent_ok <- TRUE
+    model <- .enable_flash_prediction(model, "cpu")
+    model$predict_backend <- "metal"
+  } else {
+    model$predict_backend <- "cpu"
+    model$predict_latent_ok <- TRUE
+    model <- .enable_flash_prediction(model, "cpu")
+  }
+  model <- .attach_gaussian_y(model, yprep$gaussian)
+  model$classification <- yprep$classification
+  model$lev <- yprep$lev
+  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
+  model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
+  model <- .attach_linear_regression_head(model, Xtrain, Ytrain_original, regression_head)
+  model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
+  class(model) <- "fastPLS"
+  if (!is.null(Xtest)) {
+    res <- predict(model, Xtest, Ytest = Ytest, proj = proj)
+    model <- c(model, res)
+    class(model) <- "fastPLS"
+  }
+  model
+}
+
+.pls_metal <- function(Xtrain,
+                       Ytrain,
+                       Xtest = NULL,
+                       Ytest = NULL,
+                       ncomp = 2,
+                       scaling = c("centering", "autoscaling", "none"),
+                       method = c("simpls", "plssvd", "opls", "kernelpls"),
+                       inner.method = c("simpls", "plssvd"),
+                       north = 1L,
+                       kernel = c("linear", "rbf", "poly"),
+                       gamma = NULL,
+                       degree = 3L,
+                       coef0 = 1,
+                       rsvd_oversample = 10L,
+                       rsvd_power = 1L,
+                       seed = 1L,
+                       fast_block = 1L,
+                       gaussian_y = FALSE,
+                       gaussian_y_dim = NULL,
+                       gaussian_y_seed = seed,
+                       classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp", "candidate_knn_cuda"),
+                       lda_ridge = 1e-8,
+                       regression_head = c("standard", "linear_cpp", "linear_cuda"),
+                       fit = FALSE,
+                       return_variance = TRUE,
+                       proj = FALSE) {
+  if (!isTRUE(has_metal())) {
+    stop("backend='metal' requires Apple Metal support.", call. = FALSE)
+  }
+  method <- match.arg(method)
+  inner.method <- match.arg(inner.method)
+  scaling <- match.arg(scaling)
+  kernel <- match.arg(kernel)
+  classifier <- .normalize_classifier(classifier)
+  if (identical(classifier, "lda_cuda")) classifier <- "lda_cpp"
+  if (identical(classifier, "candidate_knn_cuda")) classifier <- "candidate_knn_cpp"
+  regression_head <- .normalize_regression_head(regression_head)
+  if (identical(regression_head, "linear_cuda")) regression_head <- "linear_cpp"
+
+  if (!isTRUE(.metal_resident_simpls_enabled()) &&
+      !isTRUE(.metal_experimental_iterative_enabled()) &&
+      identical(method, "opls")) {
+    out <- opls_cpp(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      ncomp = ncomp,
+      north = north,
+      scaling = scaling,
+      method = inner.method,
+      svd.method = "cpu_rsvd",
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      seed = seed,
+      fast_block = fast_block,
+      gaussian_y = gaussian_y,
+      gaussian_y_dim = gaussian_y_dim,
+      gaussian_y_seed = gaussian_y_seed,
+      classifier = classifier,
+      lda_ridge = lda_ridge,
+      fit = fit,
+      return_variance = return_variance,
+      proj = proj
+    )
+    out$backend <- "metal_adaptive_cpu"
+    out$metal_fallback_reason <- "OPLS Metal path is experimental; used compiled CPU core"
+    return(out)
+  }
+
+  if (!isTRUE(.metal_resident_simpls_enabled()) &&
+      !isTRUE(.metal_experimental_iterative_enabled()) &&
+      identical(method, "kernelpls")) {
+    out <- kernel_pls_cpp(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      ncomp = ncomp,
+      scaling = scaling,
+      kernel = kernel,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0,
+      method = inner.method,
+      svd.method = "cpu_rsvd",
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      seed = seed,
+      fast_block = fast_block,
+      gaussian_y = gaussian_y,
+      gaussian_y_dim = gaussian_y_dim,
+      gaussian_y_seed = gaussian_y_seed,
+      classifier = classifier,
+      lda_ridge = lda_ridge,
+      regression_head = regression_head,
+      fit = fit,
+      return_variance = return_variance,
+      proj = proj
+    )
+    out$backend <- "metal_adaptive_cpu"
+    out$metal_fallback_reason <- "kernelPLS Metal path is experimental; used compiled CPU core"
+    return(out)
+  }
+
+  Xtrain <- as.matrix(Xtrain)
+  Ytrain_original <- Ytrain
+  yprep <- .prepare_gaussian_y(
+    Ytrain,
+    Xtrain,
+    gaussian_y = gaussian_y,
+    gaussian_y_dim = gaussian_y_dim,
+    gaussian_y_seed = gaussian_y_seed,
+    backend = "cpu"
+  )
+  Ymat <- yprep$Ytrain
+  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
+
+  if (identical(method, "opls")) {
+    filt <- .opls_filter_metal(Xtrain, .supervised_response_matrix(Ytrain_original), north, scaling)
+    inner <- .pls_metal_fit_core(
+      filt$X, Ymat, ncomp, 3L, inner.method, fit,
+      rsvd_oversample, rsvd_power, seed, fast_block
+    )
+    inner <- .pls_metal_finish(
+      inner, filt$X, Ytrain_original, yprep, classifier, lda_ridge,
+      regression_head, return_variance, NULL, NULL, FALSE
+    )
+    out <- list(
+      inner_model = inner,
+      mX = filt$mX,
+      vX = filt$vX,
+      W_orth = filt$W_orth,
+      P_orth = filt$P_orth,
+      north = filt$north,
+      opls_engine = "metal",
+      ncomp = inner$ncomp,
+      backend = "metal",
+      predict_backend = "metal",
+      svd.method = inner$svd.method
+    )
+    out <- .inherit_inner_variance_explained(out, inner)
+    class(out) <- c("fastPLSOpls", "fastPLS")
+    if (!is.null(Xtest)) {
+      res <- predict(out, Xtest, Ytest = Ytest, proj = proj)
+      out <- c(out, res)
+      class(out) <- c("fastPLSOpls", "fastPLS")
+    }
+    return(out)
+  }
+
+  if (identical(method, "kernelpls")) {
+    if (identical(kernel, "linear")) {
+      model <- .pls_metal_fit_core(
+        Xtrain, Ymat, ncomp, scal, inner.method, fit,
+        rsvd_oversample, rsvd_power, seed, fast_block
+      )
+      model$kernel <- "linear"
+      model$kernel_engine <- "metal_direct"
+      model$kernel_linear_direct <- TRUE
+      return(.pls_metal_finish(
+        model, Xtrain, Ytrain_original, yprep, classifier, lda_ridge,
+        regression_head, return_variance, Xtest, Ytest, proj
+      ))
+    }
+
+    prep <- .fastpls_preprocess_train(Xtrain, scaling)
+    gamma <- .kernel_pls_gamma(gamma, prep$X)
+    K <- .kernel_matrix_metal(prep$X, prep$X, kernel, gamma, degree, coef0)
+    kc <- .center_kernel_train_r(K)
+    inner <- .pls_metal_fit_core(
+      kc$K, Ymat, ncomp, 3L, inner.method, fit,
+      rsvd_oversample, rsvd_power, seed, fast_block
+    )
+    inner <- .pls_metal_finish(
+      inner, kc$K, Ytrain_original, yprep, classifier, lda_ridge,
+      regression_head, return_variance, NULL, NULL, FALSE
+    )
+    out <- list(
+      inner_model = inner,
+      Xref = prep$X,
+      mX = prep$mX,
+      vX = prep$vX,
+      kernel = kernel,
+      kernel_id = .kernel_pls_kernel_id(kernel),
+      gamma = gamma,
+      degree = as.integer(degree),
+      coef0 = coef0,
+      kernel_center = kc,
+      kernel_engine = "metal",
+      ncomp = inner$ncomp,
+      backend = "metal",
+      predict_backend = "metal",
+      svd.method = inner$svd.method
+    )
+    out <- .inherit_inner_variance_explained(out, inner)
+    class(out) <- c("fastPLSKernel", "fastPLS")
+    if (!is.null(Xtest)) {
+      res <- predict(out, Xtest, Ytest = Ytest, proj = proj)
+      out <- c(out, res)
+      class(out) <- c("fastPLSKernel", "fastPLS")
+    }
+    return(out)
+  }
+
+  model <- .pls_metal_fit_core(
+    Xtrain, Ymat, ncomp, scal, method, fit,
+    rsvd_oversample, rsvd_power, seed, fast_block
+  )
+  model$pls_method <- method
+  .pls_metal_finish(
+    model, Xtrain, Ytrain_original, yprep, classifier, lda_ridge,
+    regression_head, return_variance, Xtest, Ytest, proj
+  )
+}
+
 #' Removed pure-R PLS reference implementation
 #'
 #' The pure-R PLS implementation was removed from the public package. Use
@@ -5887,8 +6687,9 @@ pls_r <- function(...) {
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param perm.test Run permutation test.
 #' @param times Number of permutations.
-#' @param backend Implementation backend: `"cpp"` for compiled CPU or `"cuda"`
-#'   for GPU-native fitting.
+#' @param backend Implementation backend: `"cpp"` for compiled CPU, `"cuda"`
+#'   for CUDA-native fitting, or experimental `"metal"` for Apple Metal
+#'   randomized-SVD/GEMM acceleration.
 #' @param inner.method Inner PLS core used by `method = "opls"` or
 #'   `method = "kernelpls"`.
 #' @param north Number of orthogonal components removed by OPLS.
@@ -5945,7 +6746,7 @@ pls =  function (Xtrain,
                  proj = FALSE,
                  perm.test = FALSE,
                  times = 100,
-                 backend = c("cpp", "cuda"),
+                 backend = c("cpp", "cuda", "metal"),
                  inner.method = c("simpls", "plssvd"),
                  north = 1L,
                  kernel = c("linear", "rbf", "poly"),
@@ -5982,6 +6783,37 @@ pls =  function (Xtrain,
 		    fastPLS.candidate_top_m = candidate_top_m
 	  )
 	  on.exit(options(old_class_bias_options), add = TRUE)
+
+  if (identical(backend, "metal")) {
+    return(.pls_metal(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      ncomp = ncomp,
+      scaling = scaling,
+      method = requested_method,
+      inner.method = inner.method,
+      north = north,
+      kernel = kernel,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      seed = seed,
+      fast_block = fast_block,
+      gaussian_y = gaussian_y,
+      gaussian_y_dim = gaussian_y_dim,
+      gaussian_y_seed = gaussian_y_seed,
+      classifier = classifier,
+      lda_ridge = lda_ridge,
+      regression_head = regression_head,
+      fit = fit,
+      return_variance = return_variance,
+      proj = proj
+    ))
+  }
 
   if (identical(requested_method, "opls")) {
     fit_fun <- switch(backend, cpp = opls_cpp, cuda = opls_cuda)

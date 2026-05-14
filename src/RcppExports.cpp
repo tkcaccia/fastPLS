@@ -792,6 +792,55 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// has_metal
+bool has_metal();
+RcppExport SEXP _fastPLS_has_metal() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(has_metal());
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_matrix_multiply_cpp
+arma::mat metal_matrix_multiply_cpp(const arma::mat& A, const arma::mat& B);
+RcppExport SEXP _fastPLS_metal_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_matrix_multiply_cpp(A, B));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_crossprod_cpp
+arma::mat metal_crossprod_cpp(const arma::mat& A, const arma::mat& B);
+RcppExport SEXP _fastPLS_metal_crossprod_cpp(SEXP ASEXP, SEXP BSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_crossprod_cpp(A, B));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_simpls_resident_cpp
+Rcpp::List metal_simpls_resident_cpp(const arma::mat& X, const arma::mat& Y, int ncomp, int power_iters, int seed);
+RcppExport SEXP _fastPLS_metal_simpls_resident_cpp(SEXP XSEXP, SEXP YSEXP, SEXP ncompSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_simpls_resident_cpp(X, Y, ncomp, power_iters, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_light", (DL_FUNC) &_fastPLS_pls_light, 4},
@@ -844,6 +893,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
     {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
     {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 19},
+    {"_fastPLS_has_metal", (DL_FUNC) &_fastPLS_has_metal, 0},
+    {"_fastPLS_metal_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_matrix_multiply_cpp, 2},
+    {"_fastPLS_metal_crossprod_cpp", (DL_FUNC) &_fastPLS_metal_crossprod_cpp, 2},
+    {"_fastPLS_metal_simpls_resident_cpp", (DL_FUNC) &_fastPLS_metal_simpls_resident_cpp, 5},
     {NULL, NULL, 0}
 };
 
