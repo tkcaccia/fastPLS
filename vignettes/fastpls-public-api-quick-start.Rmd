@@ -97,14 +97,16 @@ The same call can fit the four model families by changing `method`:
 
 The PLS algorithms in `fastPLS` are separated from the inner singular-vector
 backend. The compiled CPU implementation supports two truncated SVD routes:
-`irlba` and `cpu_rsvd`. The `irlba` backend is a bundled IRLBA-style implicitly
-restarted Lanczos bidiagonalization solver. It estimates only the leading
-singular triplets needed by the requested PLS components, rather than computing
-a full dense SVD. The randomized SVD backend, `cpu_rsvd`, draws a Gaussian test
-matrix, forms a low-dimensional sketch of the target matrix, optionally applies
-power iterations, orthonormalizes the sketch, and solves the final SVD in the
-small projected space. Its accuracy is controlled mainly by `rsvd_oversample`,
-`rsvd_power`, and `seed`.
+`irlba` and `cpu_rsvd`. The `irlba` backend follows the implicitly restarted
+Lanczos bidiagonalization strategy of Baglama and Reichel (2005). It estimates
+only the leading singular triplets needed by the requested PLS components,
+rather than computing a full dense SVD. The randomized SVD backend, `cpu_rsvd`,
+follows the randomized range-finder framework described by Halko, Martinsson,
+and Tropp (2011): it draws a Gaussian test matrix, forms a low-dimensional
+sketch of the target matrix, optionally applies power iterations,
+orthonormalizes the sketch, and solves the final SVD in the small projected
+space. Its accuracy is controlled mainly by `rsvd_oversample`, `rsvd_power`,
+and `seed`.
 
 For CUDA builds, GPU execution is selected with `backend = "cuda"`. The removed
 hybrid route `svd.method = "cuda_rsvd"` is not part of the public API; instead,
@@ -114,13 +116,18 @@ matrix-free `xprod` route. In that route, the code avoids explicitly storing
 `S` and evaluates the products required by the SVD through identities such as
 \(Sv = X^T(Yv)\) and \(S^Tu = Y^T(Xu)\). For classification problems with many
 classes, label-aware products can avoid materializing a dense one-hot response
-matrix.
+matrix. The low-rank streamed prediction path is inspired by the FlashSVD
+streaming low-rank inference design of Shao et al. (2025), but is adapted here
+to the PLS prediction factors exposed by `fastPLS`.
 
 ### PLSSVD
 
 `method = "plssvd"` implements the direct cross-covariance SVD formulation of
-PLS. After preprocessing, the algorithm computes the dominant singular subspace
-of \(X^T Y\) and reuses that subspace to generate the requested component path.
+PLS, within the same broad PLS regression and PLS-DA framework described by
+Wold, Sjostrom, and Eriksson (2001), Barker and Rayens (2003), and Boulesteix
+and Strimmer (2007). After preprocessing, the algorithm computes the dominant
+singular subspace of \(X^T Y\) and reuses that subspace to generate the
+requested component path.
 The maximum meaningful number of PLSSVD components is capped by
 `min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
 uses the valid internal rank and records the capped component count.
@@ -135,10 +142,10 @@ unless the legacy dense route is explicitly needed.
 ### SIMPLS
 
 `method = "simpls"` is the optimized fastPLS SIMPLS core. Statistically, it
-keeps the de Jong SIMPLS idea: one supervised latent direction is appended at a
-time, the score and loading vectors are computed, an orthogonal loading
-direction is constructed, and the cross-covariance is deflated before the next
-component.
+keeps the de Jong (1993) SIMPLS idea: one supervised latent direction is
+appended at a time, the score and loading vectors are computed, an orthogonal
+loading direction is constructed, and the cross-covariance is deflated before
+the next component.
 
 The implementation differs from a naive classical SIMPLS loop in how it obtains
 new singular directions. Instead of always calling the SVD backend for one fresh
@@ -160,31 +167,36 @@ the SIMPLS optimizations only when their `inner.method` is `"simpls"`.
 
 ### OPLS
 
-`method = "opls"` first removes response-orthogonal variation from `X` and then
-fits the selected inner PLS core to the filtered matrix. The number of
-orthogonal components is controlled by `north`. The filtering step estimates
-orthogonal scores and loadings, subtracts the corresponding variation from `X`,
-and stores the orthogonal filter so the same transformation is applied at
-prediction time. After filtering, the model dispatches to either PLSSVD or
-SIMPLS through `inner.method`.
+`method = "opls"` follows the orthogonal PLS idea introduced by Trygg and Wold
+(2002). It first removes response-orthogonal variation from `X` and then fits
+the selected inner PLS core to the filtered matrix. The number of orthogonal
+components is controlled by `north`. The filtering step estimates orthogonal
+scores and loadings, subtracts the corresponding variation from `X`, and stores
+the orthogonal filter so the same transformation is applied at prediction time.
+After filtering, the model dispatches to either PLSSVD or SIMPLS through
+`inner.method`.
 
 ### Kernel PLS
 
-`method = "kernelpls"` constructs a kernel representation before applying the
-selected inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and
-`"poly"`. For nonlinear kernels, the training kernel matrix is centered and the
-inner PLS model is fitted in kernel space. For the linear kernel, fastPLS avoids
+`method = "kernelpls"` follows the kernel PLS formulation of Rosipal and Trejo
+(2001). It constructs a kernel representation before applying the selected
+inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
+For nonlinear kernels, the training kernel matrix is centered and the inner PLS
+model is fitted in kernel space. For the linear kernel, fastPLS avoids
 unnecessary kernel materialization and uses the ordinary linear PLS path.
 
 ### Classification heads
 
 For classification, factor responses are treated as PLS-DA targets. The default
 classifier, `classifier = "argmax"`, predicts the class with the largest
-predicted dummy-response score. This is the classical PLS-DA decision rule.
+predicted dummy-response score. This is the classical PLS-DA decision rule
+described in chemometric discrimination work such as Barker and Rayens (2003)
+and reviewed by Boulesteix and Strimmer (2007).
 
 The LDA heads, `classifier = "lda_cpp"` and `classifier = "lda_cuda"`, fit a
-regularized linear discriminant model on the PLS latent scores. For each class,
-fastPLS estimates a score-space mean, an empirical prior, and a common pooled
+regularized linear discriminant model on the PLS latent scores, following the
+linear discriminant principle of Fisher (1936). For each class, fastPLS
+estimates a score-space mean, an empirical prior, and a common pooled
 within-class covariance matrix. A small ridge term scaled by the average
 covariance diagonal is added for numerical stability. Prediction uses the
 standard LDA discriminant score and returns the largest-scoring class. The CUDA
@@ -195,7 +207,9 @@ The candidate-kNN heads, `classifier = "candidate_knn_cpp"` and
 `classifier = "candidate_knn_cuda"`, are designed for large multiclass PLS-DA.
 They first score classes by centroids in supervised PLS score space, keep the
 top candidate classes, and then rerank those candidates by same-class nearest
-neighbours in the PLS score space. The default tuning parameters are
+neighbours in the PLS score space, using the nearest-neighbour classification
+principle of Cover and Hart (1967) after a supervised PLS compression step. The
+default tuning parameters are
 `candidate_knn_k = 10`, `candidate_tau = 0.2`, `candidate_alpha = 0.75`, and
 `candidate_top_m = 20`. `predict()` can also return ranked predictions by using
 `top` or `top5 = TRUE`.
@@ -314,7 +328,8 @@ table(pred_cls$Ypred[[2]], Ytest_cls)
 `plot()` is an S3 method for both fitted PLS models and PCA objects. For PLS
 models, refit with `fit = TRUE` to store training scores, or predict with
 `proj = TRUE` to store test scores. Ellipses can be ordinary confidence
-ellipses or Hotelling T2 ellipses.
+ellipses or Hotelling T2 ellipses, following the multivariate confidence
+region idea introduced by Hotelling (1931).
 
 ```{r fig.width = 5, fig.height = 4}
 plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
@@ -463,7 +478,8 @@ cv_double$bcomp
 ## PCA and SVD Utilities
 
 `fastsvd()` provides direct access to the same SVD backends used by PLS.
-`pca()` builds PCA scores and loadings from those backends.
+`pca()` builds PCA scores and loadings from those backends, following the
+classical principal-component construction of Pearson (1901).
 
 ```{r}
 s <- fastsvd(Xtrain, ncomp = 3, method = "cpu_rsvd", seed = 104)
@@ -479,8 +495,11 @@ plot(pc, groups = Ytrain_cls, ellipse = TRUE)
 
 For high-dimensional responses, `gaussian_y = TRUE` compresses `Y` to a smaller
 random Gaussian response space before fitting and decodes predictions back to
-the original response scale or class labels. By default, the number of Gaussian
-dimensions is `min(ncol(Xtrain), 100)` unless `gaussian_y_dim` is supplied.
+the original response scale or class labels. This option uses the random
+projection idea underlying the Johnson-Lindenstrauss lemma (Johnson and
+Lindenstrauss, 1984) as a practical response-side compression device. By
+default, the number of Gaussian dimensions is `min(ncol(Xtrain), 100)` unless
+`gaussian_y_dim` is supplied.
 
 ```{r}
 Y_multi <- cbind(Ytrain_reg, Ytrain_reg^2, sin(Ytrain_reg))
@@ -538,8 +557,10 @@ if (has_cuda()) {
 ## Helper Functions
 
 `fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
-importance in projection trajectories for fitted PLS models. These functions are
-ordinary R-level helpers and are independent of CUDA availability.
+importance in projection trajectories for fitted PLS models, following the
+standard VIP interpretation used for PLS variable ranking (Wold, Sjostrom, and
+Eriksson, 2001; Chong and Jun, 2005). These functions are ordinary R-level
+helpers and are independent of CUDA availability.
 
 ```{r}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
@@ -550,3 +571,52 @@ dim(C)
 vip <- ViP(fit_reg)
 dim(vip)
 ```
+
+## Method References
+
+The implementation in `fastPLS` is not a line-by-line copy of the papers below;
+rather, these papers define the statistical algorithms or numerical building
+blocks that the package implements and accelerates.
+
+- Baglama, J. and Reichel, L. (2005). Augmented implicitly restarted Lanczos
+  bidiagonalization methods. *SIAM Journal on Scientific Computing*, 27,
+  19-42.
+- Barker, M. and Rayens, W. (2003). Partial least squares for discrimination.
+  *Journal of Chemometrics*, 17, 166-173.
+- Boulesteix, A.-L. and Strimmer, K. (2007). Partial least squares: a versatile
+  tool for the analysis of high-dimensional genomic data. *Briefings in
+  Bioinformatics*, 8, 32-44.
+- Chong, I.-G. and Jun, C.-H. (2005). Performance of some variable selection
+  methods when multicollinearity is present. *Chemometrics and Intelligent
+  Laboratory Systems*, 78, 103-112.
+- Cover, T. and Hart, P. (1967). Nearest neighbor pattern classification.
+  *IEEE Transactions on Information Theory*, 13, 21-27.
+- de Jong, S. (1993). SIMPLS: an alternative approach to partial least squares
+  regression. *Chemometrics and Intelligent Laboratory Systems*, 18, 251-263.
+- Fisher, R. A. (1936). The use of multiple measurements in taxonomic problems.
+  *Annals of Eugenics*, 7, 179-188.
+- Geladi, P. and Kowalski, B. R. (1986). Partial least-squares regression: a
+  tutorial. *Analytica Chimica Acta*, 185, 1-17.
+- Halko, N., Martinsson, P.-G., and Tropp, J. A. (2011). Finding structure with
+  randomness: probabilistic algorithms for constructing approximate matrix
+  decompositions. *SIAM Review*, 53, 217-288.
+- Hotelling, H. (1931). The generalization of Student's ratio. *Annals of
+  Mathematical Statistics*, 2, 360-378.
+- Johnson, W. B. and Lindenstrauss, J. (1984). Extensions of Lipschitz mappings
+  into a Hilbert space. *Contemporary Mathematics*, 26, 189-206.
+- Mevik, B.-H. and Wehrens, R. (2007). The pls package: principal component and
+  partial least squares regression in R. *Journal of Statistical Software*, 18,
+  1-23.
+- Pearson, K. (1901). On lines and planes of closest fit to systems of points
+  in space. *Philosophical Magazine*, 2, 559-572.
+- Rosipal, R. and Trejo, L. J. (2001). Kernel partial least squares regression
+  in reproducing kernel Hilbert space. *Journal of Machine Learning Research*,
+  2, 97-123.
+- Shao, Z., Wang, Y., Wang, Q., Jiang, T., Du, Z., Ye, H., Zhuo, D., Chen, Y.,
+  and Li, H. (2025). FlashSVD: memory-efficient inference with streaming for
+  low-rank models. arXiv:2508.01506.
+- Trygg, J. and Wold, S. (2002). Orthogonal projections to latent structures
+  (O-PLS). *Journal of Chemometrics*, 16, 119-128.
+- Wold, S., Sjostrom, M., and Eriksson, L. (2001). PLS-regression: a basic tool
+  of chemometrics. *Chemometrics and Intelligent Laboratory Systems*, 58,
+  109-130.
