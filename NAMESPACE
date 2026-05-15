@@ -6,7 +6,7 @@ importFrom("methods", "is")
 import(Matrix)
 
 #exportPattern("^[[:alpha:]]+")
-export(fastcor,fastsvd,has_cuda,optim.pls.cv,pca,pls,pls.double.cv,pls.single.cv,ViP)
+export(fastcor,fastsvd,has_cuda,has_metal,optim.pls.cv,pca,pls,pls.double.cv,pls.single.cv,ViP)
 
 
 S3method(predict,fastPLS)

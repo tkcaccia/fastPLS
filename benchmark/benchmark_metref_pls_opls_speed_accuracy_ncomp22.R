@@ -339,12 +339,12 @@ make_fastpls_specs <- function() {
   k <- 1L
   for (method_name in methods) {
     for (svd_method in c("irlba", "cpu_rsvd")) {
-      for (classifier in c("argmax", "lda_cpp")) {
+      for (classifier in c("argmax", "lda")) {
         specs[[k]] <- make_fastpls_spec(method_name, "cpp", svd_method, classifier)
         k <- k + 1L
       }
     }
-    for (classifier in c("argmax", "lda_cuda")) {
+    for (classifier in c("argmax", "lda")) {
       specs[[k]] <- make_fastpls_spec(method_name, "cuda", "cuda_rsvd", classifier)
       k <- k + 1L
     }

@@ -482,14 +482,10 @@ variant_specs <- function() {
   names(out) <- c("variant_name", "method_family", "engine", "backend", "implementation_label", "classifier")
   lda_rows <- out[out$implementation_label %in% c("Cpp", "CUDA 64-bit"), , drop = FALSE]
   lda_rows$variant_name <- paste0(lda_rows$variant_name, "_lda")
-  lda_rows$classifier <- ifelse(lda_rows$engine == "GPU", "lda_cuda", "lda_cpp")
+  lda_rows$classifier <- "lda"
   candidate_rows <- out[out$implementation_label %in% c("Cpp", "CUDA 64-bit"), , drop = FALSE]
-  candidate_rows$variant_name <- paste0(candidate_rows$variant_name, "_candidate_knn")
-  candidate_rows$classifier <- ifelse(
-    candidate_rows$engine == "GPU",
-    "candidate_knn_cuda",
-    "candidate_knn_cpp"
-  )
+  candidate_rows$variant_name <- paste0(candidate_rows$variant_name, "_cknn")
+  candidate_rows$classifier <- "cknn"
   out <- rbind(out, lda_rows, candidate_rows)
   out
 }

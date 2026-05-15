@@ -35,7 +35,7 @@ test_that("candidate-kNN classifier is fitted and can be used for top-k predicti
     ncomp = 1:2,
     method = "simpls",
     svd.method = "cpu_rsvd",
-    classifier = "candidate_knn_cpp",
+    classifier = "cknn",
     candidate_knn_k = 10L,
     candidate_tau = 0.2,
     candidate_alpha = 0.75,
@@ -65,7 +65,7 @@ test_that("candidate-kNN stores no class-bias offsets", {
     ncomp = 2,
     method = "plssvd",
     svd.method = "cpu_rsvd",
-    classifier = "candidate_knn_cpp",
+    classifier = "cknn",
     return_variance = FALSE,
     seed = 321L
   )

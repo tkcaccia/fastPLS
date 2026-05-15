@@ -11,24 +11,9 @@ pls.double.cv(
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = c("cpp", "cuda"),
-  inner.method = c("simpls", "plssvd"),
-  svd.method = c("irlba", "cpu_rsvd"),
-  rsvd_oversample = 10L,
-  rsvd_power = 1L,
-  svds_tol = 0,
-  irlba_work = 0L,
-  irlba_maxit = 1000L,
-  irlba_tol = 1e-05,
-  irlba_eps = 1e-09,
-  irlba_svtol = 1e-05,
+  backend = c("cpu", "cuda", "metal"),
+  svd.method = c("irlba", "rsvd"),
   seed = 1L,
-  fast_block = 1L,
-  fast_center_t = FALSE,
-  fast_reorth_v = FALSE,
-  fast_incremental = TRUE,
-  fast_inc_iters = 2L,
-  fast_defl_cache = TRUE,
   perm.test = FALSE,
   times = 100,
   runn = 10,
@@ -39,10 +24,8 @@ pls.double.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
-    "candidate_knn_cuda"),
+  classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
-  regression_head = c("standard", "linear_cpp", "linear_cuda"),
   xprod = NULL,
   ...
 )
@@ -54,56 +37,24 @@ pls.double.cv(
 
 \item{ncomp}{Number of components (scalar or vector).}
 
-\item{constrain}{Grouping vector for constrained splitting.}
+\item{constrain}{Grouping vector for grouped cross-validation. It must have
+one value per sample. Samples with the same value are assigned to the same
+fold, so all rows from the same patient, subject, batch, or technical
+replicate stay together in training or test data. The default
+\code{1:nrow(Xdata)} treats every sample as an independent group.}
 
-\item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
+\item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
-\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.}
+\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.}
 
-\item{backend}{Implementation backend: `"cpp"` or `"cuda"`.}
+\item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or \code{metal}.}
 
-\item{inner.method}{Inner PLS core used by `method = "opls"` or
-`method = "kernelpls"`.}
+\item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
+\code{rsvd}. Use CUDA or Metal backends for native GPU
+fits where available.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
-The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
-from `pls()`; use `backend = "cuda"` for GPU-native fits.}
-
-\item{rsvd_oversample}{RSVD oversampling.}
-
-\item{rsvd_power}{RSVD power iterations.}
-
-\item{svds_tol}{Reserved backend tolerance placeholder.}
-
-\item{irlba_work}{IRLBA work subspace size; `0` lets the backend choose.}
-
-\item{irlba_maxit}{Maximum IRLBA iterations.}
-
-\item{irlba_tol}{IRLBA convergence tolerance.}
-
-\item{irlba_eps}{IRLBA orthogonality threshold.}
-
-\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
-
-\item{seed}{RSVD seed.}
-
-\item{fast_block}{Refresh block size for the fastPLS `simpls` core; use `1L` for the
-most accuracy-stable per-component refresh.}
-
-\item{fast_center_t}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_reorth_v}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_incremental}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_inc_iters}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_defl_cache}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
+\item{seed}{Random seed used for outer/inner fold assignment and randomized
+SVD steps.}
 
 \item{perm.test}{Run permutation test.}
 
@@ -111,48 +62,58 @@ the former incdefl profile.}
 
 \item{runn}{Number of repeated runs.}
 
-\item{kfold_inner}{Inner-fold count.}
+\item{kfold_inner}{Inner-fold count, or \code{"loocv"} to leave out one
+constraint group at a time inside each outer training set.}
 
-\item{kfold_outer}{Outer-fold count.}
+\item{kfold_outer}{Outer-fold count, or \code{"loocv"} to leave out one
+constraint group at a time in the outer loop. In both loops, samples
+sharing the same constraint value are never split across training and test.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{kernel}{Kernel type for kernel PLS: `"linear"`, `"rbf"`, or `"poly"`.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
 
-\item{gamma}{Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.}
+\item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}.}
 
 \item{degree}{Polynomial kernel degree.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{classifier}{Classification decision rule. `"argmax"` keeps the
-standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
-on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
-same LDA model and CUDA matrix multiplication for latent projection and
-discriminant scoring when CUDA is available. `"candidate_knn_cpp"` and
-`"candidate_knn_cuda"` use the PLS-score candidate-kNN classifier: class
-centroids in PLS score space choose candidate classes, then every sample is
-reranked by within-candidate kNN in the same PLS score space. No additional
-class-bias calibration is estimated.}
+\item{classifier}{Classification decision rule. \code{argmax} keeps the
+standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
+the PLS latent scores. \code{cknn} is the compact name for the PLS-score
+candidate-kNN classifier: class centroids in PLS score space choose candidate
+classes, then every sample is reranked by within-candidate kNN in the same PLS score
+space. The compiled implementation is selected automatically from
+\code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
+where available.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
-\item{regression_head}{Regression prediction head. `"standard"` keeps the
-usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
-least-squares linear model on the latent scores with compiled C++ code.
-`"linear_cuda"` uses CUDA matrix multiplication for latent projection and
-prediction when CUDA is available.}
-
 \item{xprod}{Use the matrix-free cross-product route where available for
-inner component optimization. `NULL` applies fastPLS defaults.}
+inner component optimization. \code{NULL} applies fastPLS defaults.}
 
-\item{...}{Additional backend tuning arguments.}
+\item{...}{Optional SVD tuning controls forwarded to the selected backend.
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+and \code{svtol}.}
 }
 \value{
 List of nested CV outputs and summaries.
 }
 \description{
 Runs outer/inner CV loops for performance estimation and component selection.
-Inner component optimization uses the same compiled C++/CUDA CV core as
-[pls.single.cv()] and [optim.pls.cv()].
+Inner component optimization uses the same compiled C++/CUDA/Metal CV core as
+\code{\link[=pls.single.cv]{pls.single.cv()}} and \code{\link[=optim.pls.cv]{optim.pls.cv()}}.
+Nonlinear Metal kernel CV still uses the public \code{\link[=pls]{pls()}}
+backend inside R-level folds.
+}
+\examples{
+idx <- c(1:10, 51:60, 101:110)
+X <- as.matrix(iris[idx, 1:4])
+y <- factor(iris[idx, 5])
+dcv <- pls.double.cv(X, y, ncomp = 1:2, runn = 1, kfold_inner = 2,
+                     kfold_outer = 2, method = "simpls", backend = "cpu",
+                     svd.method = "rsvd", seed = 1)
+names(dcv)
 }

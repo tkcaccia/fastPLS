@@ -11,25 +11,23 @@ optim.pls.cv(
   constrain = NULL,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = c("cpp", "cuda"),
-  svd.method = c("irlba", "cpu_rsvd"),
-  rsvd_oversample = 10L,
-  rsvd_power = 1L,
-  svds_tol = 0,
-  irlba_work = 0L,
-  irlba_maxit = 1000L,
-  irlba_tol = 1e-05,
-  irlba_eps = 1e-09,
-  irlba_svtol = 1e-05,
+  backend = c("cpu", "cuda", "metal"),
+  svd.method = c("irlba", "rsvd"),
   seed = 1L,
-  fast_block = 1L,
-  fast_center_t = FALSE,
-  fast_reorth_v = FALSE,
-  fast_incremental = TRUE,
-  fast_inc_iters = 2L,
-  fast_defl_cache = TRUE,
   kfold = 10,
   north = 1L,
+  kernel = c("linear", "rbf", "poly"),
+  gamma = NULL,
+  degree = 3L,
+  coef0 = 1,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
+  classifier = c("argmax", "lda", "cknn"),
+  lda_ridge = 1e-08,
+  candidate_knn_k = 10L,
+  candidate_tau = 0.2,
+  candidate_alpha = 0.75,
+  candidate_top_m = 20L,
   return_scores = FALSE,
   xprod = NULL,
   ...
@@ -42,71 +40,80 @@ optim.pls.cv(
 
 \item{ncomp}{Number of components (scalar or vector).}
 
-\item{constrain}{Optional grouping vector for constrained splitting.}
+\item{constrain}{Optional grouping vector for grouped cross-validation. It
+must have one value per sample. Samples with the same value are assigned to
+the same fold, so all rows from the same patient, subject, batch, or
+technical replicate stay together in training or test data. When \code{NULL},
+each sample is treated as its own group.}
 
-\item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
+\item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
-\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.}
+\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.}
 
-\item{backend}{Implementation backend: `"cpp"` or `"cuda"`.}
+\item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or \code{metal}.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
-The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
-from `pls()`; use `backend = "cuda"` for GPU-native fits.}
+\item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
+\code{rsvd}. Use CUDA or Metal backends for native GPU
+fits where available.}
 
-\item{rsvd_oversample}{RSVD oversampling.}
+\item{seed}{Random seed used for fold assignment and randomized SVD steps.}
 
-\item{rsvd_power}{RSVD power iterations.}
-
-\item{svds_tol}{Reserved backend tolerance placeholder.}
-
-\item{irlba_work}{IRLBA work subspace size; `0` lets the backend choose.}
-
-\item{irlba_maxit}{Maximum IRLBA iterations.}
-
-\item{irlba_tol}{IRLBA convergence tolerance.}
-
-\item{irlba_eps}{IRLBA orthogonality threshold.}
-
-\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
-
-\item{seed}{RSVD seed.}
-
-\item{fast_block}{Refresh block size for the fastPLS `simpls` core; use `1L` for the
-most accuracy-stable per-component refresh.}
-
-\item{fast_center_t}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_reorth_v}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_incremental}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_inc_iters}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_defl_cache}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{kfold}{Number of folds.}
+\item{kfold}{Number of folds, or \code{"loocv"} for leave-one-out
+cross-validation. When \code{constrain} is supplied, LOOCV means
+leave-one-constraint-group-out: samples sharing the same constraint value
+are always held out together and are never split across training and test.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{return_scores}{Store score predictions for classification when `TRUE`.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
+
+\item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}.}
+
+\item{degree}{Polynomial kernel degree.}
+
+\item{coef0}{Polynomial kernel offset.}
+
+\item{gaussian_y}{Logical; when \code{TRUE}, fit PLS to a Gaussian random
+low-dimensional response sketch and decode predictions back to the original
+response scale or class labels. The default is \code{FALSE}.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When \code{NULL},
+the default is \code{min(ncol(Xdata), 100)}.}
+
+\item{classifier}{Classification rule for factor responses: \code{"argmax"},
+\code{"lda"}, or \code{"cknn"}.}
+
+\item{lda_ridge}{Ridge added to the pooled LDA covariance diagonal.}
+
+\item{candidate_knn_k, candidate_tau, candidate_alpha, candidate_top_m}{Candidate-kNN
+controls used when \code{classifier = "cknn"}.}
+
+\item{return_scores}{Store score predictions for classification when \code{TRUE}.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
-`NULL` applies fastPLS defaults.}
+\code{NULL} applies fastPLS defaults.}
 
-\item{...}{Additional backend tuning arguments.}
+\item{...}{Optional SVD tuning controls forwarded to the selected backend.
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+and \code{svtol}.}
 }
 \value{
-List with `optim_comp`, decoded `pred`, `metrics`, legacy
-  `Q2Y`/`R2Y` metric vectors, `fold`, backend metadata, and `Ypred` when
-  score predictions are stored.
+List with \code{optim_comp}, decoded \code{pred}, \code{metrics}, legacy
+\code{Q2Y}/\code{R2Y} metric vectors, \code{fold}, backend metadata, and \code{Ypred} when
+score predictions are stored.
 }
 \description{
 Performs k-fold CV over candidate component counts using the compiled
-C++/CUDA CV core shared with [pls.single.cv()].
+C++/CUDA/Metal CV core shared with \code{\link[=pls.single.cv]{pls.single.cv()}}.
+Nonlinear Metal kernel CV still uses the public \code{\link[=pls]{pls()}}
+backend inside an R-level fold loop.
+}
+\examples{
+idx <- c(1:12, 51:62, 101:112)
+X <- as.matrix(iris[idx, 1:4])
+y <- factor(iris[idx, 5])
+opt <- optim.pls.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+                    backend = "cpu", svd.method = "rsvd", seed = 1)
+opt$optim_comp
 }

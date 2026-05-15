@@ -109,7 +109,7 @@ measure_memory <- bool_env("FASTPLS_MEASURE_MEMORY", TRUE)
 cuda_ok <- tryCatch(isTRUE(fastPLS::has_cuda()), error = function(e) FALSE)
 if (isTRUE(include_r)) {
   warning(
-    "FASTPLS_SYNTH_VAR_INCLUDE_R is ignored because pure-R PLS implementations were removed; using cpp/cuda/pls_pkg only.",
+    "FASTPLS_SYNTH_VAR_INCLUDE_R is ignored; using cpp/cuda/pls_pkg only.",
     call. = FALSE
   )
   include_r <- FALSE
@@ -507,13 +507,13 @@ variant_specs <- function(task) {
     lda_specs <- copy(specs[implementation %in% c("cpp", "cuda")])
     if (nrow(lda_specs)) {
       lda_specs[, variant_name := paste0(variant_name, "_lda")]
-      lda_specs[, classifier := ifelse(implementation == "cuda", "lda_cuda", "lda_cpp")]
+      lda_specs[, classifier := "lda"]
       specs <- rbind(specs, lda_specs, fill = TRUE)
     }
     candidate_specs <- copy(specs[implementation %in% c("cpp", "cuda") & classifier == "argmax"])
     if (nrow(candidate_specs)) {
-      candidate_specs[, variant_name := paste0(variant_name, "_candidate_knn")]
-      candidate_specs[, classifier := ifelse(implementation == "cuda", "candidate_knn_cuda", "candidate_knn_cpp")]
+      candidate_specs[, variant_name := paste0(variant_name, "_cknn")]
+      candidate_specs[, classifier := "cknn"]
       specs <- rbind(specs, candidate_specs, fill = TRUE)
     }
   }
@@ -560,10 +560,10 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
         return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = "cuda", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", inner.method = "simpls", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", inner.method = "simpls", kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
     }
 
@@ -573,10 +573,10 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
       return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "opls")) {
-      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = backend, inner.method = "simpls", north = opls_layout$north, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = backend, north = opls_layout$north, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     if (identical(spec$method_panel, "kernelpls")) {
-      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = backend, inner.method = "simpls", kernel = "linear", svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+      return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = backend, kernel = "linear", svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
     stop("Unsupported method panel: ", spec$method_panel)
   }

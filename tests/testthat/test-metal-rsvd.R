@@ -1,14 +1,15 @@
 test_that("Metal rSVD backend returns a valid decomposition when available", {
-  skip_if_not(fastPLS:::has_metal(), "Metal backend is not available")
+  skip_if_not(fastPLS::has_metal(), "Metal backend is not available")
 
   set.seed(42)
   A <- matrix(rnorm(80 * 25), 80, 25)
   decomp <- fastPLS::fastsvd(
     A,
     ncomp = 5,
-    method = "metal_rsvd",
-    rsvd_oversample = 8,
-    rsvd_power = 1,
+    backend = "metal",
+    method = "rsvd",
+    oversample = 8,
+    power = 1,
     seed = 123
   )
 

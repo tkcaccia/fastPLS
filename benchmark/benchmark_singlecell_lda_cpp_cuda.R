@@ -79,16 +79,16 @@ accuracy <- function(pred) {
 
 variants <- list(
   list(name = "cpp_plssvd_argmax", method = "plssvd", backend = "cpp", classifier = "argmax"),
-  list(name = "cpp_plssvd_lda_cpp", method = "plssvd", backend = "cpp", classifier = "lda_cpp"),
+  list(name = "cpp_plssvd_lda", method = "plssvd", backend = "cpu", classifier = "lda"),
   list(name = "cpp_simpls_argmax", method = "simpls", backend = "cpp", classifier = "argmax"),
-  list(name = "cpp_simpls_lda_cpp", method = "simpls", backend = "cpp", classifier = "lda_cpp")
+  list(name = "cpp_simpls_lda", method = "simpls", backend = "cpu", classifier = "lda")
 )
 if (isTRUE(has_cuda())) {
   variants <- c(variants, list(
     list(name = "cuda_plssvd_argmax", method = "plssvd", backend = "cuda", classifier = "argmax"),
-    list(name = "cuda_plssvd_lda_cuda", method = "plssvd", backend = "cuda", classifier = "lda_cuda"),
+    list(name = "cuda_plssvd_lda", method = "plssvd", backend = "cuda", classifier = "lda"),
     list(name = "cuda_simpls_argmax", method = "simpls", backend = "cuda", classifier = "argmax"),
-    list(name = "cuda_simpls_lda_cuda", method = "simpls", backend = "cuda", classifier = "lda_cuda")
+    list(name = "cuda_simpls_lda", method = "simpls", backend = "cuda", classifier = "lda")
   ))
 }
 

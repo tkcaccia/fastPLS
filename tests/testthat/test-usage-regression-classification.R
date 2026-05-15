@@ -134,11 +134,11 @@ test_that("compiled CV reports the prediction backend", {
     ncomp = 2,
     kfold = 3,
     method = "plssvd",
-    backend = "cpp",
+    backend = "cpu",
     svd.method = "cpu_rsvd",
     seed = 123L
   )
-  expect_identical(cpu_cv$backend, "cpp")
+  expect_identical(cpu_cv$backend, "cpu")
   expect_identical(cpu_cv$prediction_backend, "cpu")
 
   cpu_opt <- optim.pls.cv(
@@ -147,11 +147,11 @@ test_that("compiled CV reports the prediction backend", {
     ncomp = 1:2,
     kfold = 3,
     method = "plssvd",
-    backend = "cpp",
+    backend = "cpu",
     svd.method = "cpu_rsvd",
     seed = 123L
   )
-  expect_identical(cpu_opt$backend, "cpp")
+  expect_identical(cpu_opt$backend, "cpu")
   expect_length(cpu_opt$optim_comp, 1L)
 
   cpu_double <- pls.double.cv(
@@ -162,11 +162,11 @@ test_that("compiled CV reports the prediction backend", {
     kfold_inner = 3,
     kfold_outer = 3,
     method = "plssvd",
-    backend = "cpp",
+    backend = "cpu",
     svd.method = "cpu_rsvd",
     seed = 123L
   )
-  expect_identical(cpu_double$backend, "cpp")
+  expect_identical(cpu_double$backend, "cpu")
   expect_true(is.factor(cpu_double$Ypred))
 
   skip_if_not(has_cuda(), "CUDA backend unavailable")
@@ -199,13 +199,16 @@ test_that("SVD utilities and helper functions are usable in practice", {
   set.seed(1005)
   A <- matrix(rnorm(70 * 14), nrow = 70, ncol = 14)
 
-  sr <- fastsvd(A, ncomp = 4, method = "cpu_rsvd")
+  sr <- fastsvd(A, ncomp = 4, backend = "cpu", method = "rsvd")
   expect_true(is.list(sr))
-  expect_true(all(c("u", "d", "v", "method", "elapsed") %in% names(sr)))
+  expect_true(all(c("u", "d", "v", "backend", "method", "svd.method", "elapsed") %in% names(sr)))
+  expect_identical(sr$backend, "cpu")
+  expect_identical(sr$method, "rsvd")
+  expect_identical(sr$svd.method, "cpu_rsvd")
   expect_equal(ncol(sr$u), 4L)
   expect_equal(length(sr$d), 4L)
 
-  pc <- pca(A, ncomp = 3, svd.method = "cpu_rsvd")
+  pc <- pca(A, ncomp = 3, backend = "cpu", method = "rsvd")
   expect_s3_class(pc, "fastPLSPCA")
   expect_equal(ncol(pc$scores), 3L)
   y <- factor(sample(c("a", "b", "c"), nrow(A), replace = TRUE))

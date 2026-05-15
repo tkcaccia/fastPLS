@@ -222,7 +222,7 @@ result_row <- tryCatch({
   kernel_fit <- function(backend, method, svd_method = "cpu_rsvd") {
     fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = "kernelpls", backend = backend, inner.method = method,
+      method = "kernelpls", backend = backend,
       kernel = "linear", svd.method = svd_method, fit = FALSE,
       classifier = spec$classifier,
       return_variance = FALSE,
@@ -233,14 +233,14 @@ result_row <- tryCatch({
   opls_fit <- function(backend, method, svd_method = "cpu_rsvd") {
     fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(opls_layout$predictive_ncomp),
-      method = "opls", backend = backend, inner.method = method,
+      method = "opls", backend = backend,
       svd.method = svd_method, north = as.integer(opls_layout$north),
       fit = FALSE, classifier = spec$classifier, return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
     )
   }
 
-    base_variant_name <- sub("_(lda|candidate_knn)$", "", variant_name)
+    base_variant_name <- sub("_(lda|cknn|candidate_knn)$", "", variant_name)
   fit_fun <- switch(
     base_variant_name,
     cpp_plssvd_cpu_rsvd = function() fastpls_fit("plssvd", "cpu_rsvd"),

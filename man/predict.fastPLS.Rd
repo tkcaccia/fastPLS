@@ -11,7 +11,7 @@
   newdata,
   Ytest = NULL,
   proj = FALSE,
-  predict.backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
+  backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
   flash.block_size = NULL,
   top = 1L,
   top5 = FALSE,
@@ -24,37 +24,45 @@
 \method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
-\item{object}{A fitted `fastPLS`, `fastPLSKernel`, or `fastPLSOpls` object.}
+\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or \code{fastPLSOpls} object.}
 
 \item{newdata}{Numeric predictor matrix.}
 
-\item{Ytest}{Optional observed response used to compute `Q2Y`.}
+\item{Ytest}{Optional observed response used to compute \code{Q2Y}.}
 
-\item{proj}{Logical; return projected `Ttest` when `TRUE`.}
+\item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
-\item{predict.backend}{Prediction backend. `"auto"` uses FlashSVD-style
-low-rank prediction or Metal prediction when compact factors are available and
-the selected fitted object requests it.}
+\item{backend}{Prediction backend. \code{auto} uses FlashSVD-style
+low-rank prediction when compact factors are available and the low-rank
+application is expected to be beneficial.}
 
-\item{flash.block_size}{Row block size for `"cpu_flash"` prediction.}
+\item{flash.block_size}{Row block size for \code{cpu_flash} prediction.}
 
 \item{top}{Number of ranked classes to return for classification.}
 
-\item{top5}{Convenience flag equivalent to `top = max(top, 5)`.}
+\item{top5}{Convenience flag equivalent to \code{top = max(top, 5)}.}
 
-\item{raw_scores}{If `TRUE`, keep raw classification score cubes as
-`Yscore` when available.}
+\item{raw_scores}{If \code{TRUE}, keep raw classification score cubes as
+\code{Yscore} when available.}
 
 \item{...}{Unused.}
 }
 \value{
-A list containing `Ypred`, optional `Q2Y`, optional `Ttest`, and
-  optional LDA scores for LDA classification models.
+A list containing \code{Ypred}, optional \code{Q2Y}, optional \code{Ttest}, and
+optional LDA scores for LDA classification models.
 }
 \description{
 Applies stored preprocessing and coefficient factors to produce test
 predictions. For kernel PLS and OPLS fits, the corresponding preprocessing or
-filtering step is applied before dispatching to the inner `fastPLS`
+filtering step is applied before dispatching to the inner \code{fastPLS}
 predictor. For classification models, response scores are converted to labels
 by argmax over response columns unless an LDA classifier was fitted.
+}
+\examples{
+X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
+y <- mtcars$mpg
+fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
+           svd.method = "rsvd", return_variance = FALSE)
+pred <- predict(fit, X[1:3, , drop = FALSE])
+pred$Ypred
 }

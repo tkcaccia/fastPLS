@@ -18,11 +18,9 @@ has_cuda()
 \item CUDA runtime reports at least one available device.
 }
 
-\code{has_cuda()} is mainly relevant for \code{\link{pls}} with
-\code{backend = "cuda"}, and for \code{\link{fastsvd}} or \code{\link{pca}} calls
-that request CUDA SVD. The former hybrid CUDA route through
-\code{pls(..., svd.method = "cuda_rsvd")} has been removed from the high-level
-PLS/CV APIs.
+If either condition is not met, the function returns \code{FALSE}. The result
+describes backend availability for the current R session; it does not select a
+device, allocate GPU memory, or run a test computation.
 }
 
 \value{A length-1 logical.}

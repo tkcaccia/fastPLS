@@ -14,6 +14,7 @@
 #include "fastPLS.h"
 #include "svd_iface.h"
 #include "svd_cuda_rsvd.h"
+#include "svd_metal_backend.h"
 
 extern "C" {
 #include "irlba.h"
@@ -2226,108 +2227,6 @@ Rcpp::List lda_project_predict_cuda(const arma::mat& Xtest,
 }
 
 // [[Rcpp::export]]
-Rcpp::List linear_train_prefix_cpp(const arma::mat& Ttrain,
-                                   const arma::mat& Ytrain,
-                                   const Rcpp::IntegerVector& ncomp) {
-  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
-    stop("linear_train_prefix_cpp requires a non-empty score matrix");
-  }
-  if (Ytrain.n_rows != Ttrain.n_rows || Ytrain.n_cols == 0) {
-    stop("linear_train_prefix_cpp requires one response row per training score row");
-  }
-  if (ncomp.size() < 1) {
-    stop("linear_train_prefix_cpp requires at least one component count");
-  }
-
-  int kmax_i = 0;
-  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
-    if (ncomp[i] > kmax_i) kmax_i = ncomp[i];
-  }
-  if (kmax_i < 1 || kmax_i > static_cast<int>(Ttrain.n_cols)) {
-    stop("linear_train_prefix_cpp component counts must be in 1..ncol(Ttrain)");
-  }
-
-  const arma::uword n = Ttrain.n_rows;
-  const arma::uword kmax = static_cast<arma::uword>(kmax_i);
-  arma::mat Tk = Ttrain.cols(0, kmax - 1);
-  arma::rowvec mean_t = arma::mean(Tk, 0);
-  arma::rowvec mean_y = arma::mean(Ytrain, 0);
-  arma::mat cross_tt = arma::symmatu(Tk.t() * Tk);
-  arma::mat cross_ty = Tk.t() * Ytrain;
-
-  Rcpp::List models(ncomp.size());
-  Rcpp::CharacterVector model_names(ncomp.size());
-  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
-    const int kk_i = ncomp[idx];
-    if (kk_i < 1 || kk_i > kmax_i) {
-      stop("linear_train_prefix_cpp component counts must be in 1..max(ncomp)");
-    }
-    const arma::uword kk = static_cast<arma::uword>(kk_i);
-    arma::rowvec mt = mean_t.cols(0, kk - 1);
-    arma::mat xtx = cross_tt.submat(0, 0, kk - 1, kk - 1) -
-      static_cast<double>(n) * (mt.t() * mt);
-    arma::mat xty = cross_ty.rows(0, kk - 1) -
-      static_cast<double>(n) * (mt.t() * mean_y);
-
-    arma::mat coef;
-    bool ok = arma::solve(coef, xtx, xty, arma::solve_opts::likely_sympd);
-    if (!ok || !coef.is_finite()) {
-      coef = arma::pinv(xtx) * xty;
-    }
-    arma::rowvec intercept = mean_y - mt * coef;
-
-    models[idx] = Rcpp::List::create(
-      Rcpp::Named("coef") = coef,
-      Rcpp::Named("intercept") = intercept
-    );
-    model_names[idx] = std::to_string(kk_i);
-  }
-  models.attr("names") = model_names;
-  return models;
-}
-
-// [[Rcpp::export]]
-arma::mat linear_predict_cpp(const arma::mat& Ttest,
-                             const Rcpp::List& linear_model) {
-  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
-    stop("linear_predict_cpp requires a non-empty score matrix");
-  }
-  arma::mat coef = Rcpp::as<arma::mat>(linear_model["coef"]);
-  arma::rowvec intercept = Rcpp::as<arma::rowvec>(linear_model["intercept"]);
-  if (Ttest.n_cols != coef.n_rows) {
-    stop("linear_predict_cpp score dimension does not match the linear model");
-  }
-  if (intercept.n_elem != coef.n_cols) {
-    stop("linear_predict_cpp has inconsistent intercept length");
-  }
-  arma::mat pred = Ttest * coef;
-  pred.each_row() += intercept;
-  return pred;
-}
-
-// [[Rcpp::export]]
-arma::mat linear_predict_cuda(const arma::mat& Ttest,
-                              const Rcpp::List& linear_model) {
-  if (!fastpls_svd::has_cuda_backend()) {
-    return linear_predict_cpp(Ttest, linear_model);
-  }
-  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
-    stop("linear_predict_cuda requires a non-empty score matrix");
-  }
-  arma::mat coef = Rcpp::as<arma::mat>(linear_model["coef"]);
-  arma::rowvec intercept = Rcpp::as<arma::rowvec>(linear_model["intercept"]);
-  if (Ttest.n_cols != coef.n_rows) {
-    stop("linear_predict_cuda score dimension does not match the linear model");
-  }
-  if (intercept.n_elem != coef.n_cols) {
-    stop("linear_predict_cuda has inconsistent intercept length");
-  }
-  arma::mat pred = fastpls_svd::cuda_matrix_multiply(Ttest, coef);
-  pred.each_row() += intercept;
-  return pred;
-}
-
-// [[Rcpp::export]]
 Rcpp::List truncated_svd_debug(
   const arma::mat& A,
   int k,
@@ -2626,7 +2525,7 @@ List pls_model2_fast(
 
   // Inspired by block-Krylov randomized SVD literature (e.g. arXiv:1504.05477):
   // refresh a small block of singular vectors to reduce per-component SVD overhead.
-  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 1, 1, 16);
+  const int refresh_block = 1;
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
   const int incremental_svd = 1;
@@ -2960,7 +2859,7 @@ List pls_model2_fast_gpu(
   }
   int i_out = 0;
 
-  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 1, 1, 16);
+  const int refresh_block = 1;
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
@@ -4661,6 +4560,12 @@ List optim_pls_cv(
   }
   
   int xsa_t = indices.size();
+  const bool leave_one_group_out = kfold < 0 || kfold >= xsa_t;
+  if (leave_one_group_out) {
+    kfold = std::max(xsa_t, 1);
+  } else if (kfold < 2) {
+    kfold = 2;
+  }
   
   
   IntegerVector frame = seq_len(xsa_t);
@@ -4668,8 +4573,9 @@ List optim_pls_cv(
   int mm=constrain2.size();
   
   arma::ivec fold(mm);
-  for (int i=0; i<mm; i++) 
-    fold[i]=v[constrain2(i)-1]%kfold;
+  for (int i=0; i<mm; i++) {
+    fold[i] = leave_one_group_out ? (constrain2(i) - 1) : (v[constrain2(i)-1] % kfold);
+  }
   
   for (int i=0; i<kfold; i++) {
     
@@ -4767,6 +4673,12 @@ List double_pls_cv(
   }
   
   int xsa_t = indices.size();
+  const bool leave_one_group_out = kfold_outer < 0 || kfold_outer >= xsa_t;
+  if (leave_one_group_out) {
+    kfold_outer = std::max(xsa_t, 1);
+  } else if (kfold_outer < 2) {
+    kfold_outer = 2;
+  }
   
   
   IntegerVector frame = seq_len(xsa_t);
@@ -4774,8 +4686,9 @@ List double_pls_cv(
   int mm=constrain2.size();
   
   arma::ivec fold(mm);
-  for (int i=0; i<mm; i++) 
-    fold[i]=v[constrain2(i)-1]%kfold_outer;
+  for (int i=0; i<mm; i++) {
+    fold[i] = leave_one_group_out ? (constrain2(i) - 1) : (v[constrain2(i)-1] % kfold_outer);
+  }
 
   
   
@@ -5072,6 +4985,200 @@ List pls_model1(
   return out;
 }
 
+List pls_model1_metal_cv(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed
+) {
+  if (!fastpls_svd::has_metal_backend()) {
+    stop("Metal CV requires a macOS build with Apple Metal support");
+  }
+
+  const int n = Xtrain.n_rows;
+  const int p = Xtrain.n_cols;
+  const int m = Ytrain.n_cols;
+  if (ncomp.n_elem < 1) stop("ncomp must contain at least one value");
+
+  const int max_plssvd_rank = std::min(n, std::min(p, m));
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) > max_plssvd_rank) ncomp(i) = max_plssvd_rank;
+    if (ncomp(i) < 1) ncomp(i) = 1;
+  }
+  const int max_ncomp = max(ncomp);
+  int max_ncomp_eff = std::min(max_ncomp, max_plssvd_rank);
+  if (max_ncomp_eff < 1) stop("plssvd Metal CV effective rank is < 1");
+
+  arma::mat mX(1, p, arma::fill::zeros);
+  if (scaling < 3) {
+    mX = mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+  arma::mat vX(1, p, arma::fill::ones);
+  if (scaling == 2) {
+    vX = variance(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+
+  arma::mat mY = mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  arma::mat S = fastpls_svd::metal_crossprod(Xtrain, Ytrain);
+  fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+    S,
+    max_ncomp_eff,
+    fastpls_svd::SVD_METHOD_CPU_RSVD,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    static_cast<unsigned int>(seed),
+    false,
+    plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_CPU_RSVD)
+  );
+
+  arma::mat R = svd_res.U;
+  arma::vec s = svd_res.s;
+  arma::mat Q = svd_res.Vt.t();
+  max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(R.n_cols));
+  if (Q.n_cols > 0) {
+    max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(Q.n_cols));
+  }
+  if (max_ncomp_eff < 1) stop("plssvd Metal CV effective rank is < 1 after SVD");
+  R = R.cols(0, max_ncomp_eff - 1);
+  Q = Q.cols(0, max_ncomp_eff - 1);
+
+  arma::mat T = fastpls_svd::metal_matrix_multiply(Xtrain, R);
+  arma::mat G = fastpls_svd::metal_crossprod(T, T);
+  const int length_ncomp = ncomp.n_elem;
+  arma::cube B(p, m, length_ncomp, arma::fill::zeros);
+  arma::cube C_latent(max_ncomp_eff, max_ncomp_eff, length_ncomp, arma::fill::zeros);
+  arma::cube W_latent(max_ncomp_eff, m, length_ncomp, arma::fill::zeros);
+  arma::vec R2Y(length_ncomp, arma::fill::zeros);
+
+  for (int a = 0; a < length_ncomp; ++a) {
+    const int mc = std::min(static_cast<int>(ncomp(a)), max_ncomp_eff);
+    arma::mat G_a = G.submat(0, 0, mc - 1, mc - 1);
+    arma::mat D_a(mc, mc, arma::fill::zeros);
+    D_a.diag() = s.subvec(0, mc - 1);
+    arma::mat coeff_latent;
+    bool solved = arma::solve(coeff_latent, G_a, D_a, arma::solve_opts::likely_sympd);
+    if (!solved) solved = arma::solve(coeff_latent, G_a, D_a);
+    if (!solved) stop("plssvd Metal CV latent solve failed");
+    C_latent.slice(a).submat(0, 0, mc - 1, mc - 1) = coeff_latent;
+    arma::mat W_a = coeff_latent * Q.cols(0, mc - 1).t();
+    W_latent.slice(a).submat(0, 0, mc - 1, m - 1) = W_a;
+    B.slice(a) = fastpls_svd::metal_matrix_multiply(R.cols(0, mc - 1), W_a);
+  }
+
+  List out = List::create(
+    Named("C_latent") = C_latent,
+    Named("W_latent") = W_latent,
+    Named("Q") = Q,
+    Named("Ttrain") = arma::mat(),
+    Named("R") = R,
+    Named("mX") = mX,
+    Named("vX") = vX,
+    Named("mY") = mY,
+    Named("p") = p,
+    Named("m") = m,
+    Named("ncomp") = ncomp,
+    Named("B") = B,
+    Named("Yfit") = arma::cube(),
+    Named("R2Y") = R2Y,
+    Named("backend") = "metal",
+    Named("svd.method") = "metal_rsvd",
+    Named("pls_method") = "plssvd",
+    Named("predict_latent_ok") = true
+  );
+  annotate_coefficient_storage(out, true);
+  return out;
+}
+
+List pls_model2_fast_metal_cv(
+  arma::mat Xtrain,
+  arma::mat Ytrain,
+  arma::ivec ncomp,
+  int scaling,
+  int rsvd_power,
+  int seed
+) {
+  if (!fastpls_svd::has_metal_backend()) {
+    stop("Metal CV requires a macOS build with Apple Metal support");
+  }
+
+  const int n = Xtrain.n_rows;
+  const int p = Xtrain.n_cols;
+  const int m = Ytrain.n_cols;
+  if (ncomp.n_elem < 1) stop("ncomp must contain at least one value");
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) < 1) ncomp(i) = 1;
+  }
+
+  arma::mat mX(1, p, arma::fill::zeros);
+  if (scaling < 3) {
+    mX = mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+  arma::mat vX(1, p, arma::fill::ones);
+  if (scaling == 2) {
+    vX = variance(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+
+  arma::mat mY = mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  const int max_ncomp_req = std::max(1, static_cast<int>(max(ncomp)));
+  const int max_ncomp_eff = std::max(1, std::min(max_ncomp_req, std::min(p, n - 1)));
+  List native = fastpls_svd::metal_simpls_resident(
+    Xtrain,
+    Ytrain,
+    max_ncomp_eff,
+    std::max(1, rsvd_power + 1),
+    seed
+  );
+
+  arma::mat R = Rcpp::as<arma::mat>(native["R"]);
+  arma::mat Q = Rcpp::as<arma::mat>(native["Q"]);
+  arma::cube Bfull = Rcpp::as<arma::cube>(native["B"]);
+  const int available = std::max(1, std::min(static_cast<int>(Bfull.n_slices), max_ncomp_eff));
+  const int length_ncomp = ncomp.n_elem;
+  arma::cube B(p, m, length_ncomp, arma::fill::zeros);
+  for (int a = 0; a < length_ncomp; ++a) {
+    const int mc = std::max(1, std::min(static_cast<int>(ncomp(a)), available));
+    ncomp(a) = mc;
+    B.slice(a) = Bfull.slice(static_cast<arma::uword>(mc - 1));
+  }
+  if (R.n_cols > static_cast<arma::uword>(available)) R = R.cols(0, available - 1);
+  if (Q.n_cols > static_cast<arma::uword>(available)) Q = Q.cols(0, available - 1);
+
+  List out = List::create(
+    Named("P") = arma::mat(),
+    Named("Q") = Q,
+    Named("Ttrain") = arma::mat(),
+    Named("R") = R,
+    Named("mX") = mX,
+    Named("vX") = vX,
+    Named("mY") = mY,
+    Named("p") = p,
+    Named("m") = m,
+    Named("ncomp") = ncomp,
+    Named("B") = B,
+    Named("Yfit") = arma::cube(),
+    Named("R2Y") = arma::vec(length_ncomp, arma::fill::zeros),
+    Named("backend") = "metal",
+    Named("svd.method") = "metal_resident_simpls",
+    Named("pls_method") = "simpls_fast",
+    Named("predict_latent_ok") = true
+  );
+  annotate_coefficient_storage(out, true);
+  return out;
+}
+
 List pls_model1_rsvd_xprod_precision_view_impl(
   SEXP XtrainSEXP,
   SEXP YtrainSEXP,
@@ -5286,7 +5393,7 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
   }
   int i_out = 0;
 
-  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 1, 1, 16);
+  const int refresh_block = 1;
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
@@ -5670,7 +5777,7 @@ List pls_model2_fast_rsvd_xprod_precision(
   }
   int i_out = 0;
 
-  const int refresh_block = env_int_or("FASTPLS_FAST_BLOCK", 1, 1, 16);
+  const int refresh_block = 1;
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
   const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
@@ -6335,6 +6442,175 @@ List pls_lda_gpu_native(
   return model;
 }
 
+arma::cube pls_predict_scores_b_metal_cv(List& model, arma::mat Xtest) {
+  if (!fastpls_svd::has_metal_backend()) {
+    stop("Metal CV prediction requires a macOS build with Apple Metal support");
+  }
+
+  const int m = Rcpp::as<int>(model["m"]);
+  arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
+  const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
+
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  Xtest.each_row() -= mX;
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  Xtest.each_row() /= vX;
+  Rcpp::NumericVector mY_vec = model["mY"];
+  arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
+
+  Rcpp::NumericVector B_vec = model["B"];
+  Rcpp::IntegerVector B_dim = B_vec.attr("dim");
+  if (B_dim.size() != 3L ||
+      B_dim[0] != Xtest.n_cols ||
+      B_dim[1] != m ||
+      B_dim[2] < static_cast<int>(length_ncomp)) {
+    stop("Metal CV model coefficients are not compatible with prediction");
+  }
+  const arma::cube B(
+    B_vec.begin(),
+    static_cast<arma::uword>(B_dim[0]),
+    static_cast<arma::uword>(B_dim[1]),
+    static_cast<arma::uword>(B_dim[2]),
+    false,
+    true
+  );
+
+  arma::cube Ypred(Xtest.n_rows, static_cast<arma::uword>(m), length_ncomp, arma::fill::none);
+  for (arma::uword a = 0; a < length_ncomp; ++a) {
+    arma::mat y = fastpls_svd::metal_matrix_multiply(Xtest, B.slice(a));
+    y.each_row() += mY;
+    Ypred.slice(a) = y;
+  }
+  return Ypred;
+}
+
+static arma::mat cv_row_l2_normalize(arma::mat X) {
+  for (arma::uword i = 0; i < X.n_rows; ++i) {
+    const double nrm = std::sqrt(arma::accu(arma::square(X.row(i))));
+    if (std::isfinite(nrm) && nrm > 0.0) {
+      X.row(i) /= nrm;
+    }
+  }
+  return X;
+}
+
+static arma::mat cv_candidate_centroids(const arma::mat& Ttrain_norm,
+                                        const arma::ivec& y_codes,
+                                        const int n_classes) {
+  arma::mat sums(static_cast<arma::uword>(n_classes), Ttrain_norm.n_cols, arma::fill::zeros);
+  arma::vec counts(static_cast<arma::uword>(n_classes), arma::fill::zeros);
+  for (arma::uword i = 0; i < Ttrain_norm.n_rows; ++i) {
+    const int cls = y_codes(i);
+    if (cls >= 1 && cls <= n_classes) {
+      sums.row(static_cast<arma::uword>(cls - 1)) += Ttrain_norm.row(i);
+      counts(static_cast<arma::uword>(cls - 1)) += 1.0;
+    }
+  }
+  for (int cls = 0; cls < n_classes; ++cls) {
+    const arma::uword c = static_cast<arma::uword>(cls);
+    if (counts(c) > 0.0) {
+      sums.row(c) /= counts(c);
+    }
+  }
+  return cv_row_l2_normalize(std::move(sums));
+}
+
+static arma::mat cv_projection_matrix(List& model, const int kmax, const arma::uword p) {
+  Rcpp::NumericVector R_vec = model["R"];
+  Rcpp::IntegerVector R_dim = R_vec.attr("dim");
+  if (R_dim.size() != 2L || R_dim[0] != static_cast<int>(p) || R_dim[1] < kmax) {
+    Rcpp::stop("CV classifier requires a compatible latent projection matrix R");
+  }
+  const arma::mat R(
+    R_vec.begin(),
+    static_cast<arma::uword>(R_dim[0]),
+    static_cast<arma::uword>(R_dim[1]),
+    false,
+    true
+  );
+  arma::mat R_predict = R.cols(0, static_cast<arma::uword>(kmax) - 1);
+  Rcpp::NumericVector vX_vec = model["vX"];
+  arma::rowvec vX(vX_vec.begin(), vX_vec.size(), false, true);
+  if (vX.n_elem == R_predict.n_rows) {
+    for (arma::uword j = 0; j < R_predict.n_rows; ++j) {
+      double s = vX(j);
+      if (!std::isfinite(s) || s == 0.0) s = 1.0;
+      R_predict.row(j) /= s;
+    }
+  }
+  return R_predict;
+}
+
+static arma::rowvec cv_projection_offset(List& model, const arma::mat& R_predict) {
+  arma::rowvec offset(R_predict.n_cols, arma::fill::zeros);
+  Rcpp::NumericVector mX_vec = model["mX"];
+  arma::rowvec mX(mX_vec.begin(), mX_vec.size(), false, true);
+  if (mX.n_elem == R_predict.n_rows) {
+    offset = mX * R_predict;
+  }
+  return offset;
+}
+
+static arma::mat cv_latent_scores(List& model,
+                                  const arma::mat& X,
+                                  const int kmax,
+                                  const bool prefer_stored_ttrain) {
+  if (prefer_stored_ttrain && model.containsElementNamed("Ttrain")) {
+    arma::mat Ttrain = Rcpp::as<arma::mat>(model["Ttrain"]);
+    if (Ttrain.n_rows == X.n_rows && Ttrain.n_cols >= static_cast<arma::uword>(kmax)) {
+      return Ttrain.cols(0, static_cast<arma::uword>(kmax) - 1);
+    }
+  }
+  arma::mat R_predict = cv_projection_matrix(model, kmax, X.n_cols);
+  arma::rowvec offset = cv_projection_offset(model, R_predict);
+  arma::mat T = X * R_predict;
+  if (offset.n_elem >= static_cast<arma::uword>(kmax)) {
+    T.each_row() -= offset;
+  }
+  return T;
+}
+
+static arma::mat cv_candidate_score_space(List& model,
+                                          const arma::mat& T,
+                                          const int kk,
+                                          const int ncomp_slice_index) {
+  arma::mat out = T.cols(0, static_cast<arma::uword>(kk) - 1);
+  std::string pls_method;
+  if (model.containsElementNamed("pls_method")) {
+    pls_method = Rcpp::as<std::string>(model["pls_method"]);
+  }
+  if (pls_method != "plssvd" || !model.containsElementNamed("C_latent")) {
+    return out;
+  }
+  Rcpp::NumericVector C_vec = model["C_latent"];
+  Rcpp::IntegerVector C_dim = C_vec.attr("dim");
+  if (C_dim.size() != 3L ||
+      C_dim[0] < kk ||
+      C_dim[1] < kk ||
+      C_dim[2] <= ncomp_slice_index) {
+    return out;
+  }
+  const arma::cube C(
+    C_vec.begin(),
+    static_cast<arma::uword>(C_dim[0]),
+    static_cast<arma::uword>(C_dim[1]),
+    static_cast<arma::uword>(C_dim[2]),
+    false,
+    true
+  );
+  arma::mat Ck = C.slice(static_cast<arma::uword>(ncomp_slice_index)).submat(
+    0, 0,
+    static_cast<arma::uword>(kk) - 1,
+    static_cast<arma::uword>(kk) - 1
+  );
+  if (!Ck.is_finite()) {
+    return out;
+  }
+  return out * Ck;
+}
+
 // [[Rcpp::export]]
 List pls_cv_predict_compiled(
   arma::mat Xdata,
@@ -6355,7 +6631,13 @@ List pls_cv_predict_compiled(
   bool xprod,
   int opls_north,
   bool return_scores,
-  arma::mat class_codes
+  arma::mat class_codes,
+  int classifier,
+  double lda_ridge,
+  int candidate_knn_k,
+  double candidate_tau,
+  double candidate_alpha,
+  int candidate_top_m
 ) {
   const int nsamples = Xdata.n_rows;
   const bool label_classification = classification && Ydata.n_cols == 1;
@@ -6382,16 +6664,25 @@ List pls_cv_predict_compiled(
     stop("constrain must have one value for each sample");
   }
   if (ncomp.n_elem < 1) stop("ncomp must contain at least one value");
-  if (kfold < 2) kfold = 2;
+  const bool requested_leave_one_group_out = kfold < 0;
+  if (!requested_leave_one_group_out && kfold < 2) kfold = 2;
   if (method < 1 || method > 5) {
     stop("method must be 1=plssvd, 2=simpls, 3=simpls_fast, 4=opls, or 5=kernelpls");
   }
-  if (backend < 0 || backend > 1) stop("backend must be 0=cpp or 1=cuda");
+  if (backend < 0 || backend > 2) stop("backend must be 0=cpp, 1=cuda, or 2=metal");
+  if (classifier < 0 || classifier > 2) classifier = 0;
+  if (!classification) classifier = 0;
+  if (use_class_codes && classifier != 0) {
+    stop("LDA and candidate-kNN CV are not available with Gaussian/code response compression");
+  }
   if (backend == 1 && method == 2) {
     stop("CUDA classic SIMPLS is not implemented; use simpls_fast CUDA instead");
   }
   if (backend == 1 && !fastpls_svd::has_cuda_backend()) {
     stop("CUDA CV requires a CUDA-enabled fastPLS build");
+  }
+  if (backend == 2 && !fastpls_svd::has_metal_backend()) {
+    stop("Metal CV requires a macOS build with Apple Metal support");
   }
   if (method == 1) {
     const int max_plssvd_rank = std::min(
@@ -6434,8 +6725,16 @@ List pls_cv_predict_compiled(
   }
 
   const int ngroups = unique_groups.n_elem;
+  const bool leave_one_group_out = requested_leave_one_group_out || kfold >= ngroups;
+  if (leave_one_group_out) {
+    kfold = std::max(ngroups, 1);
+  }
   arma::ivec group_fold(ngroups, arma::fill::zeros);
-  if (classification && n_classes > 1) {
+  if (leave_one_group_out) {
+    for (int j = 0; j < ngroups; ++j) {
+      group_fold(j) = j;
+    }
+  } else if (classification && n_classes > 1) {
     std::vector<std::vector<int> > groups_by_class(static_cast<std::size_t>(n_classes));
     for (int j = 0; j < ngroups; ++j) {
       arma::uvec ind = arma::find(constrain2 == (j + 1));
@@ -6470,7 +6769,8 @@ List pls_cv_predict_compiled(
   }
 
   const int length_ncomp = ncomp.n_elem;
-  const bool store_score_predictions = (!classification) || return_scores;
+  const bool store_score_predictions = (!classification) || (return_scores && classifier == 0);
+  const bool latent_classifier_cv = classification && !store_score_predictions && classifier != 0;
   arma::cube Ypred;
   if (store_score_predictions) {
     Ypred.zeros(nsamples, ncolY, length_ncomp);
@@ -6590,25 +6890,44 @@ List pls_cv_predict_compiled(
       fit_method = 3;
     }
 
+    auto fit_input_X = [&](arma::mat& X) -> arma::mat {
+      if (latent_classifier_cv) {
+        return X;
+      }
+      return std::move(X);
+    };
+
     List model;
     if (backend == 1) {
       if (fit_method == 1) {
         if (xprod) {
           model = pls_model1_gpu_implicit_xprod(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         } else {
           model = pls_model1_gpu(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
       } else {
         model = pls_model2_fast_gpu(
-          std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+          fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
           fastpls_svd::SVD_METHOD_CUDA_RSVD,
           rsvd_oversample, rsvd_power, svds_tol, seed + f
+        );
+      }
+    } else if (backend == 2) {
+      if (fit_method == 1) {
+        model = pls_model1_metal_cv(
+          fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling,
+          rsvd_oversample, rsvd_power, svds_tol, seed + f
+        );
+      } else {
+        model = pls_model2_fast_metal_cv(
+          fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling,
+          rsvd_power, seed + f
         );
       }
     } else {
@@ -6616,30 +6935,30 @@ List pls_cv_predict_compiled(
         if (xprod) {
           const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
           model = pls_model1_rsvd_xprod_precision(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model1(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
       } else if (fit_method == 2) {
         model = pls_model2(
-          std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
+          fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
           rsvd_oversample, rsvd_power, svds_tol, seed + f
         );
       } else {
         if (xprod) {
           const int xprod_precision = (svd_method == fastpls_svd::SVD_METHOD_IRLBA) ? 5 : 3;
           model = pls_model2_fast_rsvd_xprod_precision(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
             rsvd_oversample, rsvd_power, svds_tol, seed + f, xprod_precision
           );
         } else {
           model = pls_model2_fast(
-            std::move(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
+            fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false, svd_method,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }
@@ -6653,7 +6972,101 @@ List pls_cv_predict_compiled(
 
     if (classification && !store_score_predictions) {
       arma::imat fold_class_pred;
-      if (use_class_codes) {
+      if (classifier == 1) {
+        int kmax = 0;
+        for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
+          if (ncomp(a) > kmax) kmax = ncomp(a);
+        }
+        arma::mat Ttrain = cv_latent_scores(model, Xtrain, kmax, true);
+        arma::mat Ttest = cv_latent_scores(model, Xtest, kmax, false);
+        Rcpp::IntegerVector y_train_vec(train_idx.n_elem);
+        for (arma::uword ii = 0; ii < train_idx.n_elem; ++ii) {
+          y_train_vec[static_cast<R_xlen_t>(ii)] = class_label_at_sample(train_idx(ii));
+        }
+        Rcpp::IntegerVector ncomp_vec(ncomp.n_elem);
+        for (arma::uword s = 0; s < ncomp.n_elem; ++s) {
+          ncomp_vec[static_cast<R_xlen_t>(s)] = ncomp(s);
+        }
+        Rcpp::List lda_models = (backend == 1) ?
+          lda_train_prefix_cuda(Ttrain, y_train_vec, n_classes, ncomp_vec, lda_ridge) :
+          lda_train_prefix_cpp(Ttrain, y_train_vec, n_classes, ncomp_vec, lda_ridge);
+        fold_class_pred.set_size(test_idx.n_elem, length_ncomp);
+        for (int s = 0; s < length_ncomp; ++s) {
+          const int kk = ncomp(static_cast<arma::uword>(s));
+          Rcpp::List lda_model = lda_models[s];
+          arma::mat Ttest_k = Ttest.cols(0, static_cast<arma::uword>(kk) - 1);
+          Rcpp::IntegerVector pred = (backend == 1) ?
+            lda_predict_labels_cuda(Ttest_k, lda_model) :
+            lda_predict_labels_cpp(Ttest_k, lda_model);
+          for (R_xlen_t ii = 0; ii < pred.size(); ++ii) {
+            fold_class_pred(static_cast<arma::uword>(ii), static_cast<arma::uword>(s)) = pred[ii];
+          }
+        }
+      } else if (classifier == 2) {
+        int kmax = 0;
+        for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
+          if (ncomp(a) > kmax) kmax = ncomp(a);
+        }
+        arma::mat Ttrain = cv_latent_scores(model, Xtrain, kmax, true);
+        arma::mat Ttest = cv_latent_scores(model, Xtest, kmax, false);
+        arma::ivec y_train_codes(train_idx.n_elem);
+        for (arma::uword ii = 0; ii < train_idx.n_elem; ++ii) {
+          y_train_codes(ii) = class_label_at_sample(train_idx(ii));
+        }
+        fold_class_pred.set_size(test_idx.n_elem, length_ncomp);
+        arma::vec zero_bias(static_cast<arma::uword>(n_classes), arma::fill::zeros);
+        for (int s = 0; s < length_ncomp; ++s) {
+          const int kk = ncomp(static_cast<arma::uword>(s));
+          arma::mat Ttrain_k = cv_row_l2_normalize(
+            cv_candidate_score_space(model, Ttrain, kk, s)
+          );
+          arma::mat Ttest_k = cv_row_l2_normalize(
+            cv_candidate_score_space(model, Ttest, kk, s)
+          );
+          arma::mat centroids = cv_candidate_centroids(Ttrain_k, y_train_codes, n_classes);
+          Rcpp::List pred = (backend == 1) ?
+            candidate_knn_predict_cuda(
+              Ttest_k,
+              Ttrain_k,
+              y_train_codes,
+              centroids,
+              zero_bias,
+              1,
+              candidate_top_m,
+              candidate_knn_k,
+              candidate_tau,
+              candidate_alpha
+            ) :
+            candidate_knn_predict_cpp(
+              Ttest_k,
+              Ttrain_k,
+              y_train_codes,
+              centroids,
+              zero_bias,
+              1,
+              candidate_top_m,
+              candidate_knn_k,
+              candidate_tau,
+              candidate_alpha
+            );
+          arma::imat top_index = Rcpp::as<arma::imat>(pred["top_index"]);
+          fold_class_pred.col(static_cast<arma::uword>(s)) = top_index.col(0);
+        }
+      } else if (backend == 2) {
+        arma::cube fold_scores = pls_predict_scores_b_metal_cv(model, std::move(Xtest));
+        fold_class_pred.set_size(fold_scores.n_rows, fold_scores.n_slices);
+        for (arma::uword s = 0; s < fold_scores.n_slices; ++s) {
+          if (use_class_codes) {
+            arma::ivec fold_class = nearest_code_classes(fold_scores.slice(s), class_codes);
+            fold_class_pred.col(s) = fold_class;
+          } else {
+            for (arma::uword ii = 0; ii < fold_scores.n_rows; ++ii) {
+              fold_class_pred(ii, s) =
+                static_cast<int>(fold_scores.slice(s).row(ii).index_max()) + 1;
+            }
+          }
+        }
+      } else if (use_class_codes) {
         fold_class_pred = (backend == 1) ?
           pls_predict_code_classes_compact_cuda(model, std::move(Xtest), class_codes) :
           pls_predict_code_classes_compact_cpu(model, std::move(Xtest), class_codes);
@@ -6669,10 +7082,15 @@ List pls_cv_predict_compiled(
         }
       }
     } else {
-      List pred = (backend == 1) ?
-        pls_predict_flash_cuda(model, std::move(Xtest), false) :
-        pls_predict(model, std::move(Xtest), false);
-      arma::cube fold_pred = pred["Ypred"];
+      arma::cube fold_pred;
+      if (backend == 2) {
+        fold_pred = pls_predict_scores_b_metal_cv(model, std::move(Xtest));
+      } else {
+        List pred = (backend == 1) ?
+          pls_predict_flash_cuda(model, std::move(Xtest), false) :
+          pls_predict(model, std::move(Xtest), false);
+        fold_pred = Rcpp::as<arma::cube>(pred["Ypred"]);
+      }
       const int ncopy = std::min(length_ncomp, static_cast<int>(fold_pred.n_slices));
       for (int s = 0; s < ncopy; ++s) {
         if (classification) {
@@ -6703,13 +7121,22 @@ List pls_cv_predict_compiled(
     status(f) = 1; // ok
   }
 
+  const char* classifier_name = (classifier == 1) ? "lda" : ((classifier == 2) ? "cknn" : "argmax");
+  const char* prediction_backend =
+    (classifier == 1 && backend == 1) ? "cuda_lda_cv" :
+    (classifier == 1 ? "cpp_lda_cv" :
+    (classifier == 2 && backend == 1) ? "cuda_candidate_knn_cv" :
+    (classifier == 2 ? "cpp_candidate_knn_cv" :
+    (backend == 1 ? "cuda_flash" : (backend == 2 ? "metal" : "cpu"))));
+
   List out = List::create(
     Named("fold") = fold + 1,
     Named("status") = status,
     Named("ncomp") = ncomp,
     Named("method") = method_name,
-    Named("backend") = (backend == 1 ? "cuda" : "cpp"),
-    Named("prediction_backend") = (backend == 1 ? "cuda_flash" : "cpu"),
+    Named("backend") = (backend == 1 ? "cuda" : (backend == 2 ? "metal" : "cpp")),
+    Named("prediction_backend") = prediction_backend,
+    Named("classifier") = classifier_name,
     Named("xprod") = xprod,
     Named("stratified_folds") = classification,
     Named("score_predictions_stored") = store_score_predictions

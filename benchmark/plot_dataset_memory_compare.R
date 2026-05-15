@@ -24,7 +24,7 @@ if (!"classifier" %in% names(dt)) dt[, classifier := "argmax"]
 dt[, classifier_label := fcase(
   classifier == "argmax", "argmax",
   grepl("^lda", classifier), "LDA",
-  grepl("^candidate_knn", classifier), "candidate-kNN",
+  grepl("^(cknn|candidate_knn)", classifier), "cKNN",
   default = classifier
 )]
 if (any(grepl("^R", dt$implementation_label))) {
@@ -44,7 +44,7 @@ backend_cols <- c(
 classifier_lines <- c(
   argmax = "solid",
   LDA = "longdash",
-  "candidate-kNN" = "dotdash"
+  "cKNN" = "dotdash"
 )
 
 dt[, backend_algorithm := fcase(

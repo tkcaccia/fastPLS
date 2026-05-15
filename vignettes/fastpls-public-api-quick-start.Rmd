@@ -30,6 +30,7 @@ selected through the user-facing functions below.
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
+| `has_metal()` | Check whether Apple Metal-native fastPLS support is available. |
 
 ## Example Data
 
@@ -62,12 +63,14 @@ Ytest_cls <- Y_cls[test_id]
 ## Fit PLS Models
 
 The `method` argument selects the outer PLS algorithm. The `backend` argument
-selects the implementation: `"cpp"` for the compiled CPU implementation,
+selects the implementation: `"cpu"` for the compiled CPU implementation,
 `"cuda"` for GPU-native execution when available, and experimental `"metal"`
 for Apple Metal acceleration on Apple Silicon.
 
 The `svd.method` argument selects the CPU singular-vector backend for CPU
-models: `"irlba"` or `"cpu_rsvd"`.
+models. Backend-specific controls are supplied through `...` using the same
+compact names as `fastsvd()`, for example `oversample`, `power`, `maxit`,
+`tol`, `svtol`, and `seed`.
 
 ```{r}
 fit_reg <- pls(
@@ -77,7 +80,7 @@ fit_reg <- pls(
   Ytest_reg,
   ncomp = 1:3,
   method = "simpls",
-  backend = "cpp",
+  backend = "cpu",
   svd.method = "irlba",
   fit = TRUE
 )
@@ -90,7 +93,7 @@ The same call can fit the four model families by changing `method`:
 - `method = "plssvd"`: direct cross-covariance SVD PLS.
 - `method = "simpls"`: accelerated compiled SIMPLS implementation.
 - `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
-- `method = "kernelpls"`: kernel PLS; the quick-start examples use the linear kernel.
+- `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial kernels.
 
 ## Implementation of the Main Methods
 
@@ -98,24 +101,26 @@ The same call can fit the four model families by changing `method`:
 
 The PLS algorithms in `fastPLS` are separated from the inner singular-vector
 backend. The compiled CPU implementation supports two truncated SVD routes:
-`irlba` and `cpu_rsvd`. The `irlba` backend follows the implicitly restarted
-Lanczos bidiagonalization strategy of Baglama and Reichel (2005). It estimates
-only the leading singular triplets needed by the requested PLS components,
-rather than computing a full dense SVD. The randomized SVD backend, `cpu_rsvd`,
+`irlba` and randomized SVD. The `irlba` backend follows the implicitly
+restarted Lanczos bidiagonalization strategy of Baglama and Reichel (2005). It
+estimates only the leading singular triplets needed by the requested PLS
+components, rather than computing a full dense SVD. The randomized SVD backend
 follows the randomized range-finder framework described by Halko, Martinsson,
 and Tropp (2011): it draws a Gaussian test matrix, forms a low-dimensional
 sketch of the target matrix, optionally applies power iterations,
 orthonormalizes the sketch, and solves the final SVD in the small projected
-space. Its accuracy is controlled mainly by `rsvd_oversample`, `rsvd_power`,
-and `seed`.
+space. In `pls()` and the cross-validation helpers, these controls are supplied
+directly through `...`; in stand-alone SVD calls they are supplied directly to
+`fastsvd()`.
 
-On Apple Silicon, `fastsvd()` and `pca()` can also use `method = "metal_rsvd"`.
-This backend keeps the same randomized SVD mathematics as `cpu_rsvd`, but sends
-the large sketching matrix multiplications to Apple Metal Performance Shaders.
-The QR decomposition and final small SVD remain on the CPU. Because matrices are
-copied between R and Metal buffers, this backend is most useful for larger
-matrices where the GPU multiplication work is large enough to dominate transfer
-overhead.
+On Apple Silicon builds where `has_metal()` returns `TRUE`,
+`fastsvd(backend = "metal", method = "rsvd")` and
+`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This backend keeps the same
+randomized SVD mathematics as the CPU backend, but sends the large sketching matrix
+multiplications to Apple Metal Performance Shaders. The QR decomposition and
+final small SVD remain on the CPU. Because matrices are copied between R and
+Metal buffers, this backend is most useful for larger matrices where the GPU
+multiplication work is large enough to dominate transfer overhead.
 
 The experimental PLS Metal backend, `pls(..., backend = "metal")`, extends the
 same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
@@ -124,9 +129,8 @@ are dispatched through Metal. Small decompositions, scalar reductions, and some
 kernel-centering operations remain CPU-side until dedicated Metal kernels are
 added.
 
-For CUDA builds, GPU execution is selected with `backend = "cuda"`. The removed
-hybrid route `svd.method = "cuda_rsvd"` is not part of the public API; instead,
-the main matrix operations are performed by GPU-native PLS routines. When the
+For CUDA builds, GPU execution is selected with `backend = "cuda"`, so the main
+matrix operations are performed by GPU-native PLS routines. When the
 cross-covariance \(S = X^T Y\) would be large, selected backends can use the
 matrix-free `xprod` route. In that route, the code avoids explicitly storing
 `S` and evaluates the products required by the SVD through identities such as
@@ -178,28 +182,29 @@ dominant direction.
 
 These block-refresh, warm-start, and cached-deflation optimizations are
 SIMPLS-specific because SIMPLS is a sequential deflation method. PLSSVD uses a
-different one-shot cross-covariance SVD strategy. OPLS and kernel PLS inherit
-the SIMPLS optimizations only when their `inner.method` is `"simpls"`.
+different one-shot cross-covariance SVD strategy. OPLS and kernel PLS reuse the
+same optimized compiled building blocks where their internal fitting step is
+linear PLS-like.
 
 ### OPLS
 
 `method = "opls"` follows the orthogonal PLS idea introduced by Trygg and Wold
 (2002). It first removes response-orthogonal variation from `X` and then fits
-the selected inner PLS core to the filtered matrix. The number of orthogonal
+the optimized PLS core to the filtered matrix. The number of orthogonal
 components is controlled by `north`. The filtering step estimates orthogonal
 scores and loadings, subtracts the corresponding variation from `X`, and stores
 the orthogonal filter so the same transformation is applied at prediction time.
-After filtering, the model dispatches to either PLSSVD or SIMPLS through
-`inner.method`.
+Users select OPLS with `method = "opls"`; the lower-level implementation details
+are handled internally.
 
 ### Kernel PLS
 
 `method = "kernelpls"` follows the kernel PLS formulation of Rosipal and Trejo
 (2001). It constructs a kernel representation before applying the selected
 inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
-For nonlinear kernels, the training kernel matrix is centered and the inner PLS
-model is fitted in kernel space. For the linear kernel, fastPLS avoids
-unnecessary kernel materialization and uses the ordinary linear PLS path.
+For nonlinear kernels, the training kernel matrix is centered and the PLS model
+is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
+kernel materialization and uses the ordinary linear PLS path.
 
 ### Classification heads
 
@@ -209,20 +214,19 @@ predicted dummy-response score. This is the classical PLS-DA decision rule
 described in chemometric discrimination work such as Barker and Rayens (2003)
 and reviewed by Boulesteix and Strimmer (2007).
 
-The LDA heads, `classifier = "lda_cpp"` and `classifier = "lda_cuda"`, fit a
+The LDA head, `classifier = "lda"`, fits a
 regularized linear discriminant model on the PLS latent scores, following the
 linear discriminant principle of Fisher (1936). For each class, fastPLS
 estimates a score-space mean, an empirical prior, and a common pooled
 within-class covariance matrix. A small ridge term scaled by the average
 covariance diagonal is added for numerical stability. Prediction uses the
 standard LDA discriminant score and returns the largest-scoring class. The CUDA
-variant performs latent projection and discriminant scoring with native CUDA
-kernels when available.
+and Metal routes are selected automatically from `backend` when available.
 
-The candidate-kNN heads, `classifier = "candidate_knn_cpp"` and
-`classifier = "candidate_knn_cuda"`, are designed for large multiclass PLS-DA.
-They first score classes by centroids in supervised PLS score space, keep the
-top candidate classes, and then rerank those candidates by same-class nearest
+The cKNN head, `classifier = "cknn"`, is the short public name for the
+candidate-kNN classifier used in large multiclass PLS-DA.
+It first scores classes by centroids in supervised PLS score space, keeps the
+top candidate classes, and then reranks those candidates by same-class nearest
 neighbours in the PLS score space, using the nearest-neighbour classification
 principle of Cover and Hart (1967) after a supervised PLS compression step. The
 default tuning parameters are
@@ -238,8 +242,8 @@ fit_cls <- pls(
   Ytest_cls,
   ncomp = 1:2,
   method = "plssvd",
-  backend = "cpp",
-  svd.method = "cpu_rsvd",
+  backend = "cpu",
+  svd.method = "rsvd",
   seed = 100
 )
 
@@ -258,34 +262,34 @@ fit_cls_lda_gpu <- pls(
   ncomp = 50,
   method = "plssvd",
   backend = "cuda",
-  classifier = "lda_cuda"
+  classifier = "lda"
 )
 ```
 
 When CUDA is unavailable, the compiled CPU fallback is:
 
 ```{r}
-fit_cls_lda_cpp <- pls(
+fit_cls_lda_cpu <- pls(
   Xtrain,
   Ytrain_cls,
   Xtest,
   Ytest_cls,
   ncomp = 1:2,
   method = "plssvd",
-  backend = "cpp",
-  svd.method = "cpu_rsvd",
-  classifier = "lda_cpp",
-  seed = 100
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 100,
+  classifier = "lda"
 )
 
-head(fit_cls_lda_cpp$Ypred)
+head(fit_cls_lda_cpu$Ypred)
 ```
 
 ## OPLS and Kernel PLS
 
-OPLS and kernel PLS are accessed through the same `pls()` function. The
-`inner.method` argument selects whether their internal PLS model uses PLSSVD or
-SIMPLS.
+OPLS and kernel PLS are accessed through the same `pls()` function. Use
+`method = "opls"` for orthogonal filtering before PLS, and
+`method = "kernelpls"` for the kernel representation.
 
 ```{r}
 fit_opls <- pls(
@@ -295,38 +299,50 @@ fit_opls <- pls(
   Ytest_reg,
   ncomp = 1:2,
   method = "opls",
-  inner.method = "simpls",
   north = 1,
-  svd.method = "cpu_rsvd",
+  svd.method = "rsvd",
   seed = 101
 )
 
 class(fit_opls)
 ```
 
-```{r}
-fit_kernel <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "kernelpls",
-  kernel = "linear",
-  inner.method = "simpls",
-  svd.method = "cpu_rsvd",
-  seed = 102
-)
+Kernel PLS changes the representation of the samples before the inner PLS fit.
+The `linear` kernel is equivalent to an ordinary inner-product representation
+and is useful as a fast baseline. The `rbf` kernel uses a radial-basis
+similarity and can capture smooth nonlinear class boundaries; its scale is
+controlled by `gamma`. The `poly` kernel uses polynomial interactions among
+features and is controlled by `degree`, `gamma`, and `coef0`.
 
-head(fit_kernel$Ypred)
+```{r}
+kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
+  pls(
+    Xtrain, Ytrain_cls, Xtest, Ytest_cls,
+    ncomp = 1:2,
+    method = "kernelpls",
+    kernel = k,
+    gamma = 1 / ncol(Xtrain),
+    degree = 2,
+    coef0 = 1,
+    svd.method = "rsvd",
+    seed = 102
+  )
+})
+names(kernel_fits) <- c("linear", "rbf", "poly")
+
+kernel_accuracy <- vapply(kernel_fits, function(fit) {
+  mean(fit$Ypred[, ncol(fit$Ypred)] == Ytest_cls)
+}, numeric(1))
+kernel_accuracy
 ```
 
 ## Prediction
 
 `predict()` applies the preprocessing stored in the fitted object. If `Ytest` is
 supplied, predictive metrics are returned when available. The optional
-`predict.backend` argument can select the ordinary CPU path, the compact
-FlashSVD-style CPU path, or CUDA prediction on CUDA-enabled builds.
+`backend` argument can select the ordinary CPU path, the compact
+FlashSVD-style CPU path, CUDA prediction on CUDA-enabled builds, or Metal
+prediction on Apple Metal-enabled builds.
 
 ```{r}
 pred_reg <- predict(fit_reg, Xtest, Ytest = Ytest_reg, proj = TRUE)
@@ -351,59 +367,40 @@ region idea introduced by Hotelling (1931).
 plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
-The next example uses the two-class `Colon` gene-expression dataset from the
-plsgenomics package. Each column is one PLS family, the top row shows training
-scores colored by the training class, and the bottom row shows test scores
-colored by the predicted class.
+The next example uses the bundled two-class colon gene-expression data. The
+same `plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
+`"kernelpls"`; here we keep the code short and show one fitted model.
 
-```{r colon-binary-pls-plots, fig.width = 11, fig.height = 6}
-data("Colon", package = "plsgenomics")
+```{r colon-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
+data("colon", package = "fastPLS")
 set.seed(200)
-X_two <- as.matrix(Colon$X)
-y_two <- factor(Colon$Y, labels = c("normal", "tumor"))
+X_two <- as.matrix(colon$X)
+y_two <- colon$y
 train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
   sample(i, floor(0.7 * length(i)))
 }))
 
-families <- c("plssvd", "simpls", "opls", "kernelpls")
-labels <- c("PLSSVD", "SIMPLS", "OPLS", "kernelPLS")
-fits_two <- lapply(seq_along(families), function(i) {
-  pls(
-    X_two[train_two, , drop = FALSE], y_two[train_two],
-    X_two[-train_two, , drop = FALSE], y_two[-train_two],
-    ncomp = 1:2, method = families[[i]], backend = "cpp",
-    svd.method = "cpu_rsvd", fit = TRUE, proj = TRUE,
-    north = 1L, kernel = "linear", seed = 200 + i
-  )
-})
+fit_two <- pls(
+  X_two[train_two, , drop = FALSE], y_two[train_two],
+  X_two[-train_two, , drop = FALSE], y_two[-train_two],
+  ncomp = 1:2, method = "simpls", backend = "cpu",
+  svd.method = "rsvd", fit = TRUE, proj = TRUE, seed = 200
+)
 
-old_par <- par(mfrow = c(2, 4), mar = c(4.2, 4.2, 2.2, 0.8), oma = c(0, 0, 1.2, 0))
-for (i in seq_along(families)) {
-  plot(fits_two[[i]], score.set = "train", groups = y_two[train_two], ellipse = TRUE, main = paste(labels[[i]], "training"))
-}
-for (i in seq_along(families)) {
-  plot(
-    fits_two[[i]],
-    score.set = "test",
-    groups = fits_two[[i]]$Ypred[[length(fits_two[[i]]$ncomp)]],
-    main = paste(labels[[i]], "test prediction")
-  )
-}
-mtext("Two-class colon gene-expression train/test PLS score plots", outer = TRUE, font = 2)
-par(old_par)
+plot(fit_two, score.set = "train", groups = y_two[train_two],
+     ellipse = TRUE, main = "Colon, two classes")
 ```
 
-The second example uses the three breast-cancer subtypes in the
-`breast.TCGA` multi-omics dataset from mixOmics and fits OPLS with two
-orthogonal components (`north = 2`). The example uses the dataset's predefined
-training and test sets.
+The second example uses a bundled three-subtype breast-cancer expression
+example and fits OPLS with two orthogonal components (`north = 2`). The example
+uses predefined training and test sets.
 
 ```{r breast-tcga-three-class-opls, fig.width = 7.5, fig.height = 4}
-data("breast.TCGA", package = "mixOmics")
-X_three <- as.matrix(breast.TCGA$data.train$mrna)
-y_three <- droplevels(breast.TCGA$data.train$subtype)
-X_three_test <- as.matrix(breast.TCGA$data.test$mrna)
-y_three_test <- factor(breast.TCGA$data.test$subtype, levels = levels(y_three))
+data("breast", package = "fastPLS")
+X_three <- as.matrix(breast$X_train)
+y_three <- breast$y_train
+X_three_test <- as.matrix(breast$X_test)
+y_three_test <- breast$y_test
 
 opls_three <- pls(
   X_three,
@@ -412,8 +409,8 @@ opls_three <- pls(
   y_three_test,
   ncomp = 1:2,
   method = "opls",
-  backend = "cpp",
-  svd.method = "cpu_rsvd",
+  backend = "cpu",
+  svd.method = "rsvd",
   fit = TRUE,
   proj = TRUE,
   north = 2L,
@@ -441,50 +438,133 @@ par(old_par)
 
 ## Cross-Validation
 
-Use `pls.single.cv()` when the number of components is already fixed. Use
-`optim.pls.cv()` to compare a grid of component counts. Use `pls.double.cv()`
-for a nested cross-validation workflow. All three helpers use the same compiled
-C++/CUDA CV core.
+`fastPLS` provides three cross-validation helpers. Use `pls.single.cv()` when
+the number of latent components is fixed before validation. Use
+`optim.pls.cv()` when the number of components should be selected from a grid.
+Use `pls.double.cv()` for nested validation, where an inner CV chooses the
+number of components and an outer CV estimates predictive performance. All
+three helpers support regression and classification and dispatch to the same
+compiled CPU/CUDA core when available.
+
+### Ordinary k-fold CV
+
+In ordinary k-fold CV, samples are split directly into `kfold` folds. The
+example below validates a fixed two-component SIMPLS classifier with five folds.
 
 ```{r}
-cv_fixed <- pls.single.cv(
+cv_kfold <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   ncomp = 2,
-  kfold = 3,
+  kfold = 5,
   method = "simpls",
-  backend = "cpp",
-  svd.method = "cpu_rsvd",
+  backend = "cpu",
+  svd.method = "rsvd",
+  oversample = 10L,
+  power = 1L,
   seed = 103
 )
 
-cv_fixed$metrics
+cv_kfold$metrics
 ```
+
+### Grouped k-fold CV with `constrain`
+
+The `constrain` argument controls grouped splitting. It is a vector with one
+entry per sample; samples with the same value are assigned to the same fold. In
+practice, this prevents leakage when multiple rows come from the same patient,
+subject, batch, or technical replicate. For example, if two spectra come from
+the same patient, giving them the same patient identifier in `constrain` ensures
+that both spectra are placed either in the training set or in the test set,
+never one in each.
+
+```{r}
+patient_id <- rep(seq_len(nrow(Xtrain) / 2), each = 2)
+
+cv_grouped <- pls.single.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  constrain = patient_id,
+  ncomp = 2,
+  kfold = 4,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 104
+)
+
+c(n_folds = length(unique(cv_grouped$fold)),
+  n_patient_groups = length(unique(patient_id)))
+```
+
+### Leave-one-out CV and leave-one-group-out CV
+
+Leave-one-out CV is requested with `kfold = "loocv"`. When `constrain` is not
+supplied, each sample is held out once. When `constrain` is supplied, LOOCV
+becomes leave-one-constraint-group-out CV, so a whole patient, subject, batch,
+or replicate group is held out together at each iteration. Numeric `kfold`
+values greater than or equal to the number of constraint groups are also treated
+as leave-one-group-out CV.
+
+```{r}
+cv_loocv <- pls.single.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  constrain = patient_id,
+  ncomp = 1,
+  kfold = "loocv",
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 105
+)
+
+c(n_loocv_folds = length(unique(cv_loocv$fold)),
+  n_patient_groups = length(unique(patient_id)))
+```
+
+### Component optimization CV
+
+`optim.pls.cv()` repeats the same CV splitting strategy over several candidate
+component counts and returns the best value according to the predictive metric:
+accuracy for classification, Q2 for univariate regression, and RMSD-style
+prediction error for multivariate regression outputs.
 
 ```{r}
 cv_opt <- optim.pls.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_reg,
   ncomp = 1:3,
-  kfold = 3,
+  kfold = 5,
   method = "plssvd",
-  svd.method = "irlba"
+  svd.method = "irlba",
+  maxit = 1000L
 )
 
 cv_opt$optim_comp
 ```
 
+### Nested or double CV
+
+`pls.double.cv()` separates model selection from performance estimation. The
+inner loop selects the best number of components, while the outer loop evaluates
+the selected model on held-out data. Both `kfold_inner` and `kfold_outer` can be
+ordinary fold counts or `"loocv"`, and both respect `constrain`.
+
 ```{r}
 cv_double <- pls.double.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
+  constrain = patient_id,
   ncomp = 1:2,
   runn = 1,
   kfold_inner = 3,
   kfold_outer = 3,
   method = "simpls",
-  backend = "cpp",
-  svd.method = "cpu_rsvd",
+  backend = "cpu",
+  svd.method = "rsvd",
+  oversample = 10L,
+  power = 1L,
   seed = 104
 )
 
@@ -498,12 +578,12 @@ cv_double$bcomp
 classical principal-component construction of Pearson (1901).
 
 ```{r}
-s <- fastsvd(Xtrain, ncomp = 3, method = "cpu_rsvd", seed = 104)
+s <- fastsvd(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 104)
 length(s$d)
 ```
 
 ```{r fig.width = 5, fig.height = 4}
-pc <- pca(Xtrain, ncomp = 3, svd.method = "cpu_rsvd", seed = 105)
+pc <- pca(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 105)
 plot(pc, groups = Ytrain_cls, ellipse = TRUE)
 ```
 
@@ -528,10 +608,10 @@ fit_gaussian <- pls(
   Y_multi_test,
   ncomp = 1:2,
   method = "simpls",
-  svd.method = "cpu_rsvd",
+  svd.method = "rsvd",
   gaussian_y = TRUE,
   gaussian_y_dim = 3,
-  gaussian_y_seed = 106
+  seed = 106
 )
 
 dim(fit_gaussian$Ypred)
@@ -565,7 +645,7 @@ if (has_cuda()) {
     ncomp = 1:2,
     method = "plssvd",
     backend = "cuda",
-    classifier = "lda_cuda"
+    classifier = "lda"
   )
 }
 ```

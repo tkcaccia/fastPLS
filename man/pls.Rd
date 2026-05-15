@@ -12,50 +12,27 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  svd.method = c("irlba", "cpu_rsvd"),
-  rsvd_oversample = 10L,
-  rsvd_power = 1L,
-  svds_tol = 0,
-  irlba_work = 0L,
-  irlba_maxit = 1000L,
-  irlba_tol = 1e-05,
-  irlba_eps = 1e-09,
-  irlba_svtol = 1e-05,
-  seed = 1L,
-  fast_block = 1L,
-  fast_center_t = FALSE,
-  fast_reorth_v = FALSE,
-  fast_incremental = TRUE,
-  fast_inc_iters = 2L,
-  fast_defl_cache = TRUE,
+  svd.method = c("irlba", "rsvd"),
   gaussian_y = FALSE,
   gaussian_y_dim = NULL,
-  gaussian_y_seed = seed,
-  classifier = c("argmax", "lda_cpp", "lda_cuda", "candidate_knn_cpp",
-    "candidate_knn_cuda"),
+  classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
   candidate_knn_k = 10L,
   candidate_tau = 0.2,
   candidate_alpha = 0.75,
   candidate_top_m = 20L,
-  regression_head = c("standard", "linear_cpp", "linear_cuda"),
   fit = FALSE,
   return_variance = TRUE,
   proj = FALSE,
   perm.test = FALSE,
   times = 100,
-  backend = c("cpp", "cuda", "metal"),
-  inner.method = c("simpls", "plssvd"),
+  backend = c("cpu", "cuda", "metal"),
   north = 1L,
   kernel = c("linear", "rbf", "poly"),
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  gpu_device_state = TRUE,
-  gpu_qr = TRUE,
-  gpu_eig = TRUE,
-  gpu_qless_qr = FALSE,
-  gpu_finalize_threshold = 32L
+  ...
 )
 }
 \arguments{
@@ -65,74 +42,34 @@ pls(
 
 \item{Xtest}{Optional test predictor matrix.}
 
-\item{Ytest}{Optional test response for `Q2Y`.}
+\item{Ytest}{Optional test response for \code{Q2Y}.}
 
 \item{ncomp}{Number of components (scalar or vector).}
 
-\item{scaling}{One of `"centering"`, `"autoscaling"`, `"none"`.}
+\item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
-\item{method}{One of `"simpls"`, `"plssvd"`, `"opls"`, or `"kernelpls"`.
-`simpls` uses the fastPLS accelerated SIMPLS core.}
+\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.
+\code{simpls} uses the fastPLS accelerated SIMPLS core.}
 
-\item{svd.method}{One of `"irlba"` or `"cpu_rsvd"`.
-The former hybrid CUDA route via `svd.method = "cuda_rsvd"` has been removed
-from `pls()`; use `backend = "cuda"` for GPU-native fits.}
+\item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
+\code{rsvd}. Use CUDA or Metal backends for native GPU
+fits where available.}
 
-\item{rsvd_oversample}{RSVD oversampling.}
-
-\item{rsvd_power}{RSVD power iterations.}
-
-\item{svds_tol}{Reserved backend tolerance placeholder.}
-
-\item{irlba_work}{IRLBA work subspace size; `0` lets the backend choose.}
-
-\item{irlba_maxit}{Maximum IRLBA iterations.}
-
-\item{irlba_tol}{IRLBA convergence tolerance.}
-
-\item{irlba_eps}{IRLBA orthogonality threshold.}
-
-\item{irlba_svtol}{IRLBA singular-value convergence tolerance.}
-
-\item{seed}{RSVD seed.}
-
-\item{fast_block}{Refresh block size for the fastPLS `simpls` core; use `1L` for the
-most accuracy-stable per-component refresh.}
-
-\item{fast_center_t}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_reorth_v}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_incremental}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_inc_iters}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{fast_defl_cache}{Deprecated and ignored. `simpls` now permanently uses
-the former incdefl profile.}
-
-\item{gaussian_y}{Logical; when `TRUE`, fit PLS to a Gaussian random
+\item{gaussian_y}{Logical; when \code{TRUE}, fit PLS to a Gaussian random
 low-dimensional response sketch and decode predictions back to the original
-response scale or class labels. The default is `FALSE`.}
+response scale or class labels. The default is \code{FALSE}.}
 
-\item{gaussian_y_dim}{Number of Gaussian response dimensions. When `NULL`,
-the default is `min(ncol(Xtrain), 100)`.}
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When \code{NULL},
+the default is \code{min(ncol(Xtrain), 100)}.}
 
-\item{gaussian_y_seed}{Random seed used to generate the Gaussian response
-sketch.}
-
-\item{classifier}{Classification decision rule. `"argmax"` keeps the
-standard PLS-DA response-score argmax. `"lda_cpp"` fits an LDA classifier
-on the PLS latent scores with compiled C++ code. `"lda_cuda"` uses the
-same LDA model and CUDA matrix multiplication for latent projection and
-discriminant scoring when CUDA is available. `"candidate_knn_cpp"` and
-`"candidate_knn_cuda"` use the PLS-score candidate-kNN classifier: class
-centroids in PLS score space choose candidate classes, then every sample is
-reranked by within-candidate kNN in the same PLS score space. No additional
-class-bias calibration is estimated.}
+\item{classifier}{Classification decision rule. \code{argmax} keeps the
+standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
+the PLS latent scores. \code{cknn} is the compact name for the PLS-score
+candidate-kNN classifier: class centroids in PLS score space choose candidate
+classes, then every sample is reranked by within-candidate kNN in the same PLS score
+space. The compiled implementation is selected automatically from
+\code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
+where available.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
@@ -148,60 +85,51 @@ added to the local kNN score.}
 \item{candidate_top_m}{Number of centroid-ranked candidate classes passed to
 the kNN reranker.}
 
-\item{regression_head}{Regression prediction head. `"standard"` keeps the
-usual PLS coefficient-path prediction. `"linear_cpp"` fits an ordinary
-least-squares linear model on the latent scores with compiled C++ code.
-`"linear_cuda"` uses CUDA matrix multiplication for latent projection and
-prediction when CUDA is available.}
-
-\item{fit}{Return fitted values and `R2Y` when `TRUE`.}
+\item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 
 \item{return_variance}{Compute predictor-space latent-variable variance
-explained. Set to `FALSE` for timing/memory benchmarks that do not need
+explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
-\item{proj}{Return projected `Ttest` when `TRUE`.}
+\item{proj}{Return projected \code{Ttest} when \code{TRUE}.}
 
 \item{perm.test}{Run permutation test.}
 
 \item{times}{Number of permutations.}
 
-\item{backend}{Implementation backend: `"cpp"` for compiled CPU, `"cuda"`
-for CUDA-native fitting, or experimental `"metal"` for Apple Metal
+\item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
+for CUDA-native fitting, or experimental \code{metal} for Apple Metal
 randomized-SVD/GEMM acceleration.}
-
-\item{inner.method}{Inner PLS core used by `method = "opls"` or
-`method = "kernelpls"`.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{kernel}{Kernel type for kernel PLS: `"linear"`, `"rbf"`, or `"poly"`.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
 
-\item{gamma}{Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.}
+\item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xtrain)}.}
 
 \item{degree}{Polynomial kernel degree.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{gpu_device_state}{Keep selected SIMPLS GPU workspaces resident when
-using `backend = "cuda"`.}
-
-\item{gpu_qr}{Use GPU QR finalization when available.}
-
-\item{gpu_eig}{Use GPU eigensolver finalization when available.}
-
-\item{gpu_qless_qr}{Use the q-less GPU QR path when available.}
-
-\item{gpu_finalize_threshold}{Component threshold controlling GPU-side
-finalization.}
+\item{...}{Optional SVD tuning controls forwarded to the selected backend.
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+\code{svtol}, and \code{seed}.}
 }
 \value{
-A `fastPLS` object. Fitted objects include `variance_explained`,
-  `cumulative_variance_explained`, and matching `x_*` aliases containing the
-  fraction of training predictor variance explained by each latent variable.
+A \code{fastPLS} object. Fitted objects include \code{variance_explained},
+\code{cumulative_variance_explained}, and matching \verb{x_*} aliases containing the
+fraction of training predictor variance explained by each latent variable.
 }
 \description{
-`pls()` is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
-and kernel PLS through the selected compiled CPU or CUDA backend while
-keeping low-level implementation functions internal.
+\code{pls()} is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
+and kernel PLS through the selected CPU, CUDA, or Metal backend while keeping
+low-level implementation functions internal.
+}
+\examples{
+X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
+y <- mtcars$mpg
+fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
+           svd.method = "rsvd", return_variance = FALSE)
+head(predict(fit, X)$Ypred)
 }

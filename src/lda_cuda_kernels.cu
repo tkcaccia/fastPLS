@@ -179,7 +179,8 @@ __device__ void fastpls_candidate_insert(double value, double* top_vals, int top
 
 __global__ void fastpls_candidate_knn_scores_kernel(const double* Ttest,
                                                     const double* Ttrain,
-                                                    const int* y,
+                                                    const int* class_offsets,
+                                                    const int* class_indices,
                                                     const int* candidates,
                                                     const double* candidate_base,
                                                     const double* bias,
@@ -206,16 +207,19 @@ __global__ void fastpls_candidate_knn_scores_kernel(const double* Ttest,
   const int use_k = max(1, min(knn_k, 32));
   double top_vals[32];
   for (int j = 0; j < use_k; ++j) top_vals[j] = -INFINITY;
-  int found = 0;
+  const int cls0 = cls - 1;
+  const int start = class_offsets[cls0];
+  const int end = class_offsets[cls0 + 1];
+  const int found = max(0, end - start);
 
-  for (int tr = 0; tr < ntrain; ++tr) {
-    if (y[tr] != cls) continue;
+  for (int pos = start; pos < end; ++pos) {
+    const int tr = class_indices[pos];
+    if (tr < 0 || tr >= ntrain) continue;
     double dot = 0.0;
     for (int d = 0; d < kdim; ++d) {
       dot += Ttest[row + d * ntest] * Ttrain[tr + d * ntrain];
     }
     fastpls_candidate_insert(dot, top_vals, use_k);
-    ++found;
   }
 
   if (found < 1 || !isfinite(top_vals[0])) {
@@ -341,7 +345,8 @@ void fastpls_cuda_lda_score_argmax(double* scores,
 
 void fastpls_cuda_candidate_knn_scores(const double* Ttest,
                                        const double* Ttrain,
-                                       const int* y,
+                                       const int* class_offsets,
+                                       const int* class_indices,
                                        const int* candidates,
                                        const double* candidate_base,
                                        const double* bias,
@@ -355,12 +360,13 @@ void fastpls_cuda_candidate_knn_scores(const double* Ttest,
                                        double alpha,
                                        double* out_scores,
                                        cudaStream_t stream) {
-  const int threads = 128;
+  const int threads = 256;
   const int blocks = (ntest * top_m + threads - 1) / threads;
   fastpls_candidate_knn_scores_kernel<<<blocks, threads, 0, stream>>>(
     Ttest,
     Ttrain,
-    y,
+    class_offsets,
+    class_indices,
     candidates,
     candidate_base,
     bias,

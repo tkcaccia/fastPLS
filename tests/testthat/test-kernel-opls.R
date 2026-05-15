@@ -13,7 +13,6 @@ test_that("kernel PLS C++ wrapper predicts classification labels", {
     method = "kernelpls",
     backend = "cpp",
     kernel = "rbf",
-    inner.method = "simpls",
     svd.method = "cpu_rsvd"
   )
 
@@ -36,7 +35,6 @@ test_that("kernelpls high-level wrapper dispatches to simpls", {
     ncomp = 1:2,
     method = "kernelpls",
     backend = "cpp",
-    inner.method = "simpls",
     kernel = "rbf",
     svd.method = "cpu_rsvd"
   )
@@ -60,7 +58,6 @@ test_that("OPLS C++ wrapper predicts regression matrices", {
     method = "opls",
     backend = "cpp",
     north = 1L,
-    inner.method = "simpls",
     svd.method = "cpu_rsvd"
   )
 
@@ -83,7 +80,6 @@ test_that("opls high-level wrapper dispatches to simpls", {
     ncomp = 1:2,
     method = "opls",
     backend = "cpp",
-    inner.method = "simpls",
     north = 1L,
     svd.method = "cpu_rsvd"
   )

@@ -58,10 +58,10 @@ base_method_ids <- c(
   "chemometrics_pls2_nipals", "spls_spls", "ropls_pls", "ropls_opls"
 )
 classification_only_method_ids <- c(
-  "fastPLS_simpls_candidate_knn", "fastPLS_plssvd_candidate_knn",
-  "fastPLS_opls_candidate_knn", "fastPLS_kernelpls_candidate_knn",
-  "fastPLS_simpls_candidate_knn_cuda", "fastPLS_plssvd_candidate_knn_cuda",
-  "fastPLS_opls_candidate_knn_cuda", "fastPLS_kernelpls_candidate_knn_cuda",
+  "fastPLS_simpls_cknn", "fastPLS_plssvd_cknn",
+  "fastPLS_opls_cknn", "fastPLS_kernelpls_cknn",
+  "fastPLS_simpls_cknn_cuda", "fastPLS_plssvd_cknn_cuda",
+  "fastPLS_opls_cknn_cuda", "fastPLS_kernelpls_cknn_cuda",
   "plsgenomics_pls_lda", "mixOmics_plsda", "mixOmics_splsda", "spls_splsda"
 )
 
@@ -530,37 +530,37 @@ method_specs_all <- function(task_type) {
   )
   if (identical(task_type, "classification")) {
     specs <- c(specs, list(
-      list(id = "fastPLS_simpls_candidate_knn", package = "fastPLS", algorithm = "SIMPLS + candidate-kNN",
-           function_name = "fastPLS::pls(method='simpls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
-           runner = function() list(fit = run_fastpls("simpls", classifier = "candidate_knn_cpp"), pred = NULL),
+      list(id = "fastPLS_simpls_cknn", package = "fastPLS", algorithm = "SIMPLS + cKNN",
+           function_name = "fastPLS::pls(method='simpls', svd.method='rsvd', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("simpls", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_plssvd_candidate_knn", package = "fastPLS", algorithm = "PLSSVD + candidate-kNN",
-           function_name = "fastPLS::pls(method='plssvd', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
-           runner = function() list(fit = run_fastpls("plssvd", classifier = "candidate_knn_cpp"), pred = NULL),
+      list(id = "fastPLS_plssvd_cknn", package = "fastPLS", algorithm = "PLSSVD + cKNN",
+           function_name = "fastPLS::pls(method='plssvd', svd.method='rsvd', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("plssvd", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_opls_candidate_knn", package = "fastPLS", algorithm = "OPLS + candidate-kNN",
-           function_name = "fastPLS::pls(method='opls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
-           runner = function() list(fit = run_fastpls("opls", classifier = "candidate_knn_cpp"), pred = NULL),
+      list(id = "fastPLS_opls_cknn", package = "fastPLS", algorithm = "OPLS + cKNN",
+           function_name = "fastPLS::pls(method='opls', svd.method='rsvd', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("opls", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_kernelpls_candidate_knn", package = "fastPLS", algorithm = "kernel PLS + candidate-kNN",
-           function_name = "fastPLS::pls(method='kernelpls', svd.method='cpu_rsvd', classifier='candidate_knn_cpp')",
-           runner = function() list(fit = run_fastpls("kernelpls", classifier = "candidate_knn_cpp"), pred = NULL),
+      list(id = "fastPLS_kernelpls_cknn", package = "fastPLS", algorithm = "kernel PLS + cKNN",
+           function_name = "fastPLS::pls(method='kernelpls', svd.method='rsvd', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("kernelpls", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_simpls_candidate_knn_cuda", package = "fastPLS", algorithm = "SIMPLS + candidate-kNN CUDA",
-           function_name = "fastPLS::pls(method='simpls', backend='cuda', classifier='candidate_knn_cuda')",
-           runner = function() list(fit = run_fastpls("simpls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+      list(id = "fastPLS_simpls_cknn_cuda", package = "fastPLS", algorithm = "SIMPLS + cKNN CUDA",
+           function_name = "fastPLS::pls(method='simpls', backend='cuda', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("simpls", backend = "cuda", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_plssvd_candidate_knn_cuda", package = "fastPLS", algorithm = "PLSSVD + candidate-kNN CUDA",
-           function_name = "fastPLS::pls(method='plssvd', backend='cuda', classifier='candidate_knn_cuda')",
-           runner = function() list(fit = run_fastpls("plssvd", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+      list(id = "fastPLS_plssvd_cknn_cuda", package = "fastPLS", algorithm = "PLSSVD + cKNN CUDA",
+           function_name = "fastPLS::pls(method='plssvd', backend='cuda', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("plssvd", backend = "cuda", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_opls_candidate_knn_cuda", package = "fastPLS", algorithm = "OPLS + candidate-kNN CUDA",
-           function_name = "fastPLS::pls(method='opls', backend='cuda', classifier='candidate_knn_cuda')",
-           runner = function() list(fit = run_fastpls("opls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+      list(id = "fastPLS_opls_cknn_cuda", package = "fastPLS", algorithm = "OPLS + cKNN CUDA",
+           function_name = "fastPLS::pls(method='opls', backend='cuda', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("opls", backend = "cuda", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
-      list(id = "fastPLS_kernelpls_candidate_knn_cuda", package = "fastPLS", algorithm = "kernel PLS + candidate-kNN CUDA",
-           function_name = "fastPLS::pls(method='kernelpls', backend='cuda', classifier='candidate_knn_cuda')",
-           runner = function() list(fit = run_fastpls("kernelpls", backend = "cuda", classifier = "candidate_knn_cuda"), pred = NULL),
+      list(id = "fastPLS_kernelpls_cknn_cuda", package = "fastPLS", algorithm = "kernel PLS + cKNN CUDA",
+           function_name = "fastPLS::pls(method='kernelpls', backend='cuda', classifier='cknn')",
+           runner = function() list(fit = run_fastpls("kernelpls", backend = "cuda", classifier = "cknn"), pred = NULL),
            decoder = decode_fastpls),
       list(id = "plsgenomics_pls_lda", package = "plsgenomics", algorithm = "PLS-LDA",
            function_name = "plsgenomics::pls.lda", runner = runner_plsgenomics_lda),
@@ -651,15 +651,15 @@ measure_once <- function(fun) {
 run_one <- function(method_id) {
   spec <- method_specs[[method_id]]
   if (is.null(spec)) {
-    if (grepl("candidate_knn", method_id, fixed = TRUE) &&
+    if (grepl("cknn", method_id, fixed = TRUE) &&
         !identical(task_type, "classification")) {
       spec <- list(
         id = method_id, package = "fastPLS", function_name = "fastPLS::pls",
-        algorithm = "candidate-kNN"
+        algorithm = "cKNN"
       )
       return(empty_row(
         spec, "skipped_classifier_nonclassification",
-        "candidate-kNN is only meaningful for classification tasks."
+        "cKNN is only meaningful for classification tasks."
       ))
     }
     spec <- list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)

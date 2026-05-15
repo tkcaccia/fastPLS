@@ -13,8 +13,17 @@ The current standard pipeline compares four model families:
 - `kernelpls`
 
 The `simpls` implementation is the optimized fastPLS SIMPLS core. Older
-low-level tuning arguments are kept only for source compatibility; new analyses
+low-level SIMPLS tuning arguments are not part of the public API; new analyses
 should use `method = "simpls"`.
+
+## Bundled data
+
+The package includes small, fixed benchmark/example datasets that can be loaded
+with `data()`: `colon`, `breast`, `ccle`, `gtex_v8`, `tcga_brca`,
+`tcga_hnsc_methylation`, and `tcga_pan_cancer`. Each multi-split benchmark
+object contains `X_train`, `y_train`, `X_test`, `y_test`, and `metadata`.
+Source attribution and data-use notes are provided in the dataset help pages
+and in `inst/DATA_SOURCES.md`.
 
 ## Algorithms
 
@@ -40,8 +49,8 @@ unchanged unless it is requested explicitly.
 
 When `gaussian_y_dim = NULL`, fastPLS uses `min(ncol(Xtrain), 100)` compressed
 response dimensions. A positive integer can be passed to `gaussian_y_dim` to
-test a smaller or larger sketch. The projection is reproducible through
-`gaussian_y_seed`, which defaults to the model `seed`.
+test a smaller or larger sketch. The projection is reproducible through the
+model `seed`.
 
 For regression, the centered response matrix is multiplied by a Gaussian random
 projection before fitting. The fitted model stores a small ridge decoder that
@@ -59,16 +68,16 @@ and decoder construction when CUDA is available. The classification codebook is
 small and is built on the host before the GPU-native PLS fit.
 
 For PLS-DA with LDA classification, the recommended high-accuracy/high-speed
-configuration is `method = "plssvd", backend = "cuda", classifier = "lda_cuda"`.
+configuration is `method = "plssvd", backend = "cuda", classifier = "lda"`.
 This uses the optimized standard CUDA path for latent projection, LDA training,
 and discriminant scoring. If CUDA is unavailable, use
-`method = "plssvd", backend = "cpp", classifier = "lda_cpp"` as the compiled CPU
+`method = "plssvd", backend = "cpu", classifier = "lda"` as the compiled CPU
 fallback. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
-For PLS-DA latent-score prediction, `classifier = "candidate_knn_cpp"` or
-`classifier = "candidate_knn_cuda"` uses the PLS-score candidate-kNN classifier.
+For PLS-DA latent-score prediction, `classifier = "cknn"` uses cKNN, the short
+public name for the PLS-score candidate-kNN classifier.
 The model first ranks classes by centroids in the supervised PLS score space and
 then reranks every sample by same-class kNN among the top candidate classes. The
 default tuning is the ImageNet setting `candidate_knn_k = 10`,
@@ -93,7 +102,8 @@ to build CUDA prototype scores and every sample is reranked by CUDA candidate
 kNN within the PLS score space. The obsolete gated/calibrated class-bias variants
 have been removed; tune only `candidate_knn_k`, `candidate_tau`, and
 `candidate_alpha`. The generic `pls()` API exposes the same decision rule through
-`classifier = "candidate_knn_cpp"` or `"candidate_knn_cuda"`.
+`classifier = "cknn"` and chooses the C++/CUDA/Metal implementation
+from `backend`.
 
 Example:
 
@@ -104,7 +114,7 @@ fit <- pls(
   Xtest,
   Ytest,
   method = "simpls",
-  svd.method = "cpu_rsvd",
+  svd.method = "rsvd",
   ncomp = 50,
   gaussian_y = TRUE,
   gaussian_y_dim = 50
@@ -116,7 +126,7 @@ fit <- pls(
 CPU backends:
 
 - `irlba`: bundled internal IRLBA wrapper.
-- `cpu_rsvd`: randomized SVD with Gaussian sketching and optional power
+- `rsvd`: randomized SVD with Gaussian sketching and optional power
   iterations.
 Very small SVD inputs automatically fall back to a full dense decomposition
 inside the compiled backends when the truncated route is not meaningful, but
@@ -134,10 +144,10 @@ multiplying by the full coefficient matrix. This primarily reduces prediction
 time and RAM pressure during prediction; fit memory is still governed by the
 fitting backend.
 
-The removed hybrid `svd.method = "cuda_rsvd"` route through the CPU PLS fitter is
-no longer supported. Use `backend = "cuda"` for GPU-native PLS runs, or
-`fastsvd(..., method = "cuda_rsvd")` / `pca(..., svd.method = "cuda_rsvd")` for
-stand-alone GPU SVD/PCA when CUDA is available.
+Use `backend = "cuda"` for GPU-native PLS runs, or
+`fastsvd(..., backend = "cuda", method = "rsvd")` /
+`pca(..., backend = "cuda", method = "rsvd")` for stand-alone GPU SVD/PCA when CUDA is
+available.
 
 ## Current API
 

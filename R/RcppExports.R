@@ -96,18 +96,6 @@ lda_project_predict_cuda <- function(Xtest, R, offset, lda, return_scores = FALS
     .Call(`_fastPLS_lda_project_predict_cuda`, Xtest, R, offset, lda, return_scores)
 }
 
-linear_train_prefix_cpp <- function(Ttrain, Ytrain, ncomp) {
-    .Call(`_fastPLS_linear_train_prefix_cpp`, Ttrain, Ytrain, ncomp)
-}
-
-linear_predict_cpp <- function(Ttest, linear_model) {
-    .Call(`_fastPLS_linear_predict_cpp`, Ttest, linear_model)
-}
-
-linear_predict_cuda <- function(Ttest, linear_model) {
-    .Call(`_fastPLS_linear_predict_cuda`, Ttest, linear_model)
-}
-
 truncated_svd_debug <- function(A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only) {
     .Call(`_fastPLS_truncated_svd_debug`, A, k, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, left_only)
 }
@@ -200,8 +188,8 @@ pls_lda_gpu_native <- function(Xtrain, Ytrain, y, Xtest, ncomp, n_classes, metho
     .Call(`_fastPLS_pls_lda_gpu_native`, Xtrain, Ytrain, y, Xtest, ncomp, n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge)
 }
 
-pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes) {
-    .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes)
+pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, candidate_knn_k, candidate_tau, candidate_alpha, candidate_top_m) {
+    .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, candidate_knn_k, candidate_tau, candidate_alpha, candidate_top_m)
 }
 
 has_metal <- function() {

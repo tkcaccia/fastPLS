@@ -28,9 +28,9 @@
 \item{x}{A \code{fastPLSPCA} or \code{fastPLS} object.}
 \item{comps}{Two component indices to plot.}
 \item{groups}{Optional grouping vector for color and grouped ellipses.}
-\item{score.set}{For PLS objects, plot \code{"train"} scores, \code{"test"} scores, or \code{"auto"} to use training scores when available.}
+\item{score.set}{For PLS objects, plot \code{train} scores, \code{test} scores, or \code{auto} to use training scores when available.}
 \item{ellipse}{Logical; draw confidence ellipses when \code{TRUE}.}
-\item{ellipse.type}{Either \code{"confidence"} for a covariance confidence ellipse or \code{"hotelling"} for a Hotelling's T2 ellipse.}
+\item{ellipse.type}{Either \code{confidence} for a covariance confidence ellipse or \code{hotelling} for a Hotelling's T2 ellipse.}
 \item{conf}{Confidence level.}
 \item{...}{Additional arguments passed to \code{plot()}.}
 }
@@ -44,4 +44,9 @@ score ellipse. Grouped points use filled plotting symbols by default, with the
 group color assigned to \code{bg} and a black point contour assigned to
 \code{col}. Axis labels include the predictor-space variance explained by each
 plotted PCA component or PLS latent variable when available.
+}
+\examples{
+pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
+          method = "rsvd", seed = 1)
+plot(pc, groups = iris$Species, ellipse = TRUE)
 }

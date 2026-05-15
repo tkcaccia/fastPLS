@@ -99,7 +99,7 @@ test_that("optim.pls.cv and pls.double.cv support accelerated simpls", {
   }
 })
 
-test_that("removed pure-R backend is rejected", {
+test_that("unsupported backend labels are rejected", {
   set.seed(20260321)
   X <- matrix(rnorm(24 * 6), nrow = 24, ncol = 6)
   Y <- matrix(rnorm(24), ncol = 1)

@@ -134,7 +134,7 @@ run_head_benchmark <- function(task, method, ncomp = 50L, reps = 3L) {
 run_end_to_end <- function(task, method, ncomp = 50L) {
   rows <- list()
   i <- 1L
-  for (classifier in c("argmax", "lda_cpp", "lda_cuda")) {
+  for (classifier in c("argmax", "lda")) {
     gc()
     start <- proc.time()[["elapsed"]]
     rows[[i]] <- tryCatch({

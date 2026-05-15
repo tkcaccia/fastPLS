@@ -9,9 +9,12 @@
 ^benchmark_results$
 ^benchmark_results_local$
 ^chiamaka_plot_check_
+^dummy_benchmark_results$
+^package_check_artifacts.*$
 ^scripts$
 ^fastPLS[.]Rcheck$
 ^fastPLS-src[.]Rcheck$
+^fastPLS_[0-9].*[.]tar[.]gz$
 ^src/.*\.(o|so)$
 ^src/symbols[.]rds$
 ^src/Makevars$

@@ -116,24 +116,8 @@ test_that("Gaussian response compression is available through OPLS and kernelPLS
     gaussian_y = TRUE,
     gaussian_y_dim = 6
   )
-  kernel_svd_fit <- pls(
-    X,
-    Y,
-    Xtest,
-    Ytest,
-    ncomp = 2,
-    method = "kernelpls",
-    backend = "cpp",
-    kernel = "linear",
-    inner.method = "plssvd",
-    gaussian_y = TRUE,
-    gaussian_y_dim = 6
-  )
-
   expect_equal(dim(opls_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
   expect_equal(dim(kernel_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
-  expect_equal(dim(kernel_svd_fit$Ypred), c(nrow(Xtest), ncol(Y), 1L))
   expect_true(isTRUE(opls_fit$inner_model$gaussian_y))
   expect_true(isTRUE(kernel_fit$gaussian_y))
-  expect_true(isTRUE(kernel_svd_fit$gaussian_y))
 })

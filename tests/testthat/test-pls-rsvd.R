@@ -24,6 +24,48 @@ test_that("default svd.method behavior remains unchanged", {
   expect_equal(align_signs(m_default$Q, m_explicit$Q), m_default$Q)
 })
 
+test_that("pls accepts SVD tuning through compact dots", {
+  set.seed(43)
+  X <- matrix(rnorm(72 * 20), nrow = 72, ncol = 20)
+  Y <- matrix(rnorm(72 * 5), nrow = 72, ncol = 5)
+
+  compact <- pls(
+    X,
+    Y,
+    ncomp = 1:3,
+    fit = TRUE,
+    svd.method = "cpu_rsvd",
+    oversample = 8L,
+    power = 2L,
+    seed = 123L
+  )
+  aliased <- pls(
+    X,
+    Y,
+    ncomp = 1:3,
+    fit = TRUE,
+    svd.method = "cpu_rsvd",
+    oversample = 8L,
+    power = 2L,
+    seed = 123L
+  )
+  internal_names <- pls(
+    X,
+    Y,
+    ncomp = 1:3,
+    fit = TRUE,
+    svd.method = "cpu_rsvd",
+    rsvd_oversample = 8L,
+    rsvd_power = 2L,
+    seed = 123L
+  )
+
+  expect_equal(aliased$B, compact$B)
+  expect_equal(aliased$R, compact$R)
+  expect_equal(internal_names$B, compact$B)
+  expect_equal(internal_names$R, compact$R)
+})
+
 test_that("cpu_rsvd tracks irlba on PLS outputs", {
   set.seed(99)
   X <- matrix(rnorm(80 * 24), nrow = 80, ncol = 24)
@@ -155,7 +197,7 @@ test_that("CPU FlashSVD prediction is the default for compiled PLS", {
       rsvd_power = 1L,
       seed = 17L
     )
-    pred_ref <- predict(ref, X[idx, , drop = FALSE], predict.backend = "cpu")
+    pred_ref <- predict(ref, X[idx, , drop = FALSE], backend = "cpu")
     pred_flash <- predict(flash, X[idx, , drop = FALSE])
 
     expect_s3_class(flash, "fastPLS")
@@ -168,15 +210,21 @@ test_that("CPU FlashSVD prediction is the default for compiled PLS", {
   }
 })
 
-test_that("has_cuda returns scalar logical and hybrid cuda path is removed from pls", {
+test_that("GPU availability helpers return scalar logical values", {
   flag <- has_cuda()
   expect_type(flag, "logical")
   expect_length(flag, 1L)
 
+  metal_flag <- has_metal()
+  expect_type(metal_flag, "logical")
+  expect_length(metal_flag, 1L)
+})
+
+test_that("pls validates svd.method through the compact CPU backend choices", {
   set.seed(1)
   X <- matrix(rnorm(40 * 10), nrow = 40, ncol = 10)
   Y <- matrix(rnorm(40 * 3), nrow = 40, ncol = 3)
-  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "removed")
+  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "should be one of")
 })
 
 test_that("simpls path uses the SVD backend selector", {
@@ -222,7 +270,7 @@ test_that("simpls path uses the SVD backend selector", {
       rsvd_power = 1L,
       seed = 99L
     ),
-    "removed"
+    "should be one of"
   )
 })
 

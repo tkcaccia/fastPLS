@@ -197,7 +197,8 @@ void fastpls_cuda_lda_score_argmax(double* scores,
                                    cudaStream_t stream);
 void fastpls_cuda_candidate_knn_scores(const double* Ttest,
                                        const double* Ttrain,
-                                       const int* y,
+                                       const int* class_offsets,
+                                       const int* class_indices,
                                        const int* candidates,
                                        const double* candidate_base,
                                        const double* bias,
@@ -2236,14 +2237,33 @@ Mat cuda_candidate_knn_scores(
 
   const size_t bytes_test = sizeof(double) * static_cast<size_t>(ntest) * static_cast<size_t>(kdim);
   const size_t bytes_train = sizeof(double) * static_cast<size_t>(ntrain) * static_cast<size_t>(kdim);
-  const size_t bytes_y = sizeof(int) * static_cast<size_t>(ntrain);
   const size_t bytes_candidates = sizeof(int) * static_cast<size_t>(ntest) * static_cast<size_t>(top_m);
   const size_t bytes_base = sizeof(double) * static_cast<size_t>(ntest) * static_cast<size_t>(top_m);
   const size_t bytes_bias = sizeof(double) * static_cast<size_t>(n_classes);
-  std::vector<int> y32(static_cast<std::size_t>(ntrain));
+
+  std::vector<int> class_counts(static_cast<std::size_t>(n_classes), 0);
   for (int i = 0; i < ntrain; ++i) {
-    y32[static_cast<std::size_t>(i)] = static_cast<int>(y(static_cast<arma::uword>(i)));
+    const int cls = static_cast<int>(y(static_cast<arma::uword>(i)));
+    if (cls < 1 || cls > n_classes) {
+      throw std::runtime_error("cuda_candidate_knn_scores: labels must be encoded as 1..n_classes");
+    }
+    ++class_counts[static_cast<std::size_t>(cls - 1)];
   }
+  std::vector<int> class_offsets(static_cast<std::size_t>(n_classes + 1), 0);
+  for (int cls = 0; cls < n_classes; ++cls) {
+    class_offsets[static_cast<std::size_t>(cls + 1)] =
+      class_offsets[static_cast<std::size_t>(cls)] + class_counts[static_cast<std::size_t>(cls)];
+  }
+  std::vector<int> class_cursor = class_offsets;
+  std::vector<int> class_indices(static_cast<std::size_t>(ntrain), 0);
+  for (int i = 0; i < ntrain; ++i) {
+    const int cls = static_cast<int>(y(static_cast<arma::uword>(i))) - 1;
+    const int pos = class_cursor[static_cast<std::size_t>(cls)]++;
+    class_indices[static_cast<std::size_t>(pos)] = i;
+  }
+  const size_t bytes_offsets = sizeof(int) * static_cast<size_t>(n_classes + 1);
+  const size_t bytes_indices = sizeof(int) * static_cast<size_t>(ntrain);
+
   std::vector<int> candidates32(static_cast<std::size_t>(ntest) * static_cast<std::size_t>(top_m));
   for (int j = 0; j < top_m; ++j) {
     for (int i = 0; i < ntest; ++i) {
@@ -2254,7 +2274,8 @@ Mat cuda_candidate_knn_scores(
 
   double* dTtest = nullptr;
   double* dTtrain = nullptr;
-  int* dY = nullptr;
+  int* dClassOffsets = nullptr;
+  int* dClassIndices = nullptr;
   int* dCandidates = nullptr;
   double* dCandidateBase = nullptr;
   double* dBias = nullptr;
@@ -2264,7 +2285,8 @@ Mat cuda_candidate_knn_scores(
   auto cleanup = [&]() {
     if (dTtest) cudaFree(dTtest);
     if (dTtrain) cudaFree(dTtrain);
-    if (dY) cudaFree(dY);
+    if (dClassOffsets) cudaFree(dClassOffsets);
+    if (dClassIndices) cudaFree(dClassIndices);
     if (dCandidates) cudaFree(dCandidates);
     if (dCandidateBase) cudaFree(dCandidateBase);
     if (dBias) cudaFree(dBias);
@@ -2277,14 +2299,16 @@ Mat cuda_candidate_knn_scores(
     check_cuda(cudaStreamCreate(&stream), "cudaStreamCreate(cuda_candidate_knn_scores)");
     check_cuda(cudaMalloc(&dTtest, bytes_test), "cudaMalloc(cuda_candidate_knn_scores Ttest)");
     check_cuda(cudaMalloc(&dTtrain, bytes_train), "cudaMalloc(cuda_candidate_knn_scores Ttrain)");
-    check_cuda(cudaMalloc(&dY, bytes_y), "cudaMalloc(cuda_candidate_knn_scores y)");
+    check_cuda(cudaMalloc(&dClassOffsets, bytes_offsets), "cudaMalloc(cuda_candidate_knn_scores class_offsets)");
+    check_cuda(cudaMalloc(&dClassIndices, bytes_indices), "cudaMalloc(cuda_candidate_knn_scores class_indices)");
     check_cuda(cudaMalloc(&dCandidates, bytes_candidates), "cudaMalloc(cuda_candidate_knn_scores candidates)");
     check_cuda(cudaMalloc(&dCandidateBase, bytes_base), "cudaMalloc(cuda_candidate_knn_scores base)");
     check_cuda(cudaMalloc(&dBias, bytes_bias), "cudaMalloc(cuda_candidate_knn_scores bias)");
     check_cuda(cudaMalloc(&dScores, bytes_base), "cudaMalloc(cuda_candidate_knn_scores scores)");
     check_cuda(cudaMemcpyAsync(dTtest, Ttest.memptr(), bytes_test, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores Ttest)");
     check_cuda(cudaMemcpyAsync(dTtrain, Ttrain.memptr(), bytes_train, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores Ttrain)");
-    check_cuda(cudaMemcpyAsync(dY, y32.data(), bytes_y, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores y)");
+    check_cuda(cudaMemcpyAsync(dClassOffsets, class_offsets.data(), bytes_offsets, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores class_offsets)");
+    check_cuda(cudaMemcpyAsync(dClassIndices, class_indices.data(), bytes_indices, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores class_indices)");
     check_cuda(cudaMemcpyAsync(dCandidates, candidates32.data(), bytes_candidates, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores candidates)");
     check_cuda(cudaMemcpyAsync(dCandidateBase, candidate_base.memptr(), bytes_base, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores base)");
     check_cuda(cudaMemcpyAsync(dBias, bias.memptr(), bytes_bias, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(cuda_candidate_knn_scores bias)");
@@ -2292,7 +2316,8 @@ Mat cuda_candidate_knn_scores(
     fastpls_cuda_candidate_knn_scores(
       dTtest,
       dTtrain,
-      dY,
+      dClassOffsets,
+      dClassIndices,
       dCandidates,
       dCandidateBase,
       dBias,

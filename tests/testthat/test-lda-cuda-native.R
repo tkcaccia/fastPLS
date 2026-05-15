@@ -93,7 +93,7 @@ test_that("projected native CUDA LDA agrees with explicit-score C++ LDA", {
   }
 })
 
-test_that("pls classifier='lda_cuda' preserves lda_cpp predictions", {
+test_that("pls classifier='lda' with backend='cuda' preserves CUDA LDA predictions", {
   skip_if_not(has_cuda())
   skip_if_not(exists("lda_cuda_native_available", envir = asNamespace("fastPLS"), inherits = FALSE))
   skip_if_not(fastPLS:::lda_cuda_native_available())
@@ -120,7 +120,7 @@ test_that("pls classifier='lda_cuda' preserves lda_cpp predictions", {
     ncomp = 4,
     method = "simpls",
     backend = "cuda",
-    classifier = "lda_cuda",
+    classifier = "lda",
     fit = FALSE,
     proj = FALSE,
     seed = 123L
@@ -157,7 +157,7 @@ test_that("fused native CUDA PLS+LDA preserves standard CUDA LDA predictions", {
     ncomp = 4,
     method = "plssvd",
     backend = "cuda",
-    classifier = "lda_cuda",
+    classifier = "lda",
     fit = FALSE,
     proj = FALSE,
     seed = 123L
@@ -172,7 +172,7 @@ test_that("fused native CUDA PLS+LDA preserves standard CUDA LDA predictions", {
     ncomp = 4,
     method = "plssvd",
     backend = "cuda",
-    classifier = "lda_cuda",
+    classifier = "lda",
     fit = FALSE,
     proj = FALSE,
     seed = 123L
@@ -212,7 +212,7 @@ test_that("standard CUDA LDA remains the default implementation", {
     ncomp = 4,
     method = "plssvd",
     backend = "cuda",
-    classifier = "lda_cuda",
+    classifier = "lda",
     fit = FALSE,
     proj = FALSE,
     seed = 123L

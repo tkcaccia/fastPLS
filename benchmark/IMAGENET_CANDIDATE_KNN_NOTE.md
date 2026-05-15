@@ -1,8 +1,11 @@
-# ImageNet DINOv2 PLS Candidate-kNN Benchmark
+# ImageNet DINOv2 PLS cKNN Benchmark
 
 This benchmark describes the simplified ImageNet/DINOv2 PLS-only classifier
-used by `fastPLS::pls(classifier = "candidate_knn_cpp")` and
-`fastPLS::pls(classifier = "candidate_knn_cuda")`.
+used by `fastPLS::pls(classifier = "cknn")`. cKNN is the short public name for
+the candidate-kNN classifier. The implementation is
+selected from `backend`, so `backend = "cpu"` uses the compiled C++ path,
+`backend = "cuda"` uses the CUDA path, and `backend = "metal"` uses the Metal
+fit/projection path where available.
 
 ## Classifier
 
