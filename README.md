@@ -3,7 +3,7 @@
 `fastPLS` provides compiled C++ and CUDA implementations of partial least squares
 models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
-through `pls()`, `pls.single.cv()`, `pls.double.cv()`, `optim.pls.cv()`,
+through `pls()`, `single.pls.cv()`, `pls.double.cv()`,
 `fastsvd()`, and `pca()` instead of through low-level implementation wrappers.
 The current standard pipeline compares four model families:
 
@@ -18,12 +18,13 @@ should use `method = "simpls"`.
 
 ## Bundled data
 
-The package includes small, fixed benchmark/example datasets that can be loaded
-with `data()`: `colon`, `breast`, `ccle`, `gtex_v8`, `tcga_brca`,
-`tcga_hnsc_methylation`, and `tcga_pan_cancer`. Each multi-split benchmark
-object contains `X_train`, `y_train`, `X_test`, `y_test`, and `metadata`.
-Source attribution and data-use notes are provided in the dataset help pages
-and in `inst/DATA_SOURCES.md`.
+The package includes two small, fixed example datasets that can be loaded with
+`data()`: `colon` and `breast`. Larger real benchmark matrices such as CCLE,
+GTEx, and TCGA subsets are intentionally kept outside the source package to keep
+installation lightweight; the benchmark scripts load those matrices from the
+local benchmark data directories instead. Source attribution and data-use notes
+for bundled examples are provided in the dataset help pages and in
+`inst/DATA_SOURCES.md`.
 
 ## Algorithms
 
@@ -168,8 +169,7 @@ Prediction and utilities:
 
 Cross-validation:
 
-- `optim.pls.cv()`
-- `pls.single.cv()`
+- `single.pls.cv()`
 - `pls.double.cv()`
 
 All lower-level C++, CUDA, OPLS, kernel PLS, SVD-dispatch, and KODAMA-oriented

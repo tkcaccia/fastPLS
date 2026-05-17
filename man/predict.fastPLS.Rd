@@ -52,11 +52,10 @@ A list containing \code{Ypred}, optional \code{Q2Y}, optional \code{Ttest}, and
 optional LDA scores for LDA classification models.
 }
 \description{
-Applies stored preprocessing and coefficient factors to produce test
-predictions. For kernel PLS and OPLS fits, the corresponding preprocessing or
-filtering step is applied before dispatching to the inner \code{fastPLS}
-predictor. For classification models, response scores are converted to labels
-by argmax over response columns unless an LDA classifier was fitted.
+Generates predictions for new samples from fitted PLSSVD, SIMPLS, OPLS, or
+kernel PLS models. Stored centering, scaling, latent projections, and
+model-specific filtering are applied before producing numeric response
+predictions or classification labels.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])

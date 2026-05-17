@@ -260,26 +260,26 @@ decode_fastpls <- function(model) {
 run_fastpls <- function(method_name,
                         backend = "cpp",
                         classifier = "argmax",
-                        candidate_knn_k = as.integer(arg("candidate_knn_k", "10")),
-                        candidate_tau = as.numeric(arg("candidate_tau", "0.2")),
-                        candidate_alpha = as.numeric(arg("candidate_alpha", "0.75")),
-                        candidate_top_m = as.integer(arg("candidate_top_m", "20"))) {
+                        k = as.integer(arg("k", "10")),
+                        tau = as.numeric(arg("tau", "0.2")),
+                        alpha = as.numeric(arg("alpha", "0.75")),
+                        top_m = as.integer(arg("top_m", "20"))) {
   if (!identical(task_type, "classification") && !identical(classifier, "argmax")) {
     stop("candidate-kNN fastPLS benchmark variants require classification data.")
   }
-  if (!is.finite(candidate_knn_k) || is.na(candidate_knn_k)) candidate_knn_k <- 10L
-  if (!is.finite(candidate_tau) || is.na(candidate_tau)) candidate_tau <- 0.2
-  if (!is.finite(candidate_alpha) || is.na(candidate_alpha)) candidate_alpha <- 0.75
-  if (!is.finite(candidate_top_m) || is.na(candidate_top_m)) candidate_top_m <- 20L
+  if (!is.finite(k) || is.na(k)) k <- 10L
+  if (!is.finite(tau) || is.na(tau)) tau <- 0.2
+  if (!is.finite(alpha) || is.na(alpha)) alpha <- 0.75
+  if (!is.finite(top_m) || is.na(top_m)) top_m <- 20L
   args <- list(
     Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
     ncomp = ncomp_requested, method = method_name, backend = backend,
     svd.method = "cpu_rsvd", scaling = "centering", fit = FALSE, proj = FALSE,
     seed = 123L + replicate_id, classifier = classifier,
-    candidate_knn_k = max(1L, candidate_knn_k),
-    candidate_tau = candidate_tau,
-    candidate_alpha = candidate_alpha,
-    candidate_top_m = max(1L, candidate_top_m)
+    k = max(1L, k),
+    tau = tau,
+    alpha = alpha,
+    top_m = max(1L, top_m)
   )
   if (identical(method_name, "opls")) args$north <- min(1L, max(0L, ncomp_requested - 1L))
   fastPLS::pls(
@@ -288,10 +288,10 @@ run_fastpls <- function(method_name,
     svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
     proj = args$proj, seed = args$seed, north = args$north %||% 1L,
     classifier = args$classifier,
-    candidate_knn_k = args$candidate_knn_k,
-    candidate_tau = args$candidate_tau,
-    candidate_alpha = args$candidate_alpha,
-    candidate_top_m = args$candidate_top_m
+    k = args$k,
+    tau = args$tau,
+    alpha = args$alpha,
+    top_m = args$top_m
   )
 }
 

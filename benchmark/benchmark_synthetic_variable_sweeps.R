@@ -16,19 +16,19 @@ suppressPackageStartupMessages({
   library(fastPLS)
 })
 
-candidate_knn_k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
-candidate_tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
-candidate_alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
-candidate_top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
-if (!is.finite(candidate_knn_k_default) || is.na(candidate_knn_k_default) || candidate_knn_k_default < 1L) candidate_knn_k_default <- 10L
-if (!is.finite(candidate_tau_default) || is.na(candidate_tau_default) || candidate_tau_default <= 0) candidate_tau_default <- 0.2
-if (!is.finite(candidate_alpha_default) || is.na(candidate_alpha_default)) candidate_alpha_default <- 0.75
-if (!is.finite(candidate_top_m_default) || is.na(candidate_top_m_default) || candidate_top_m_default < 1L) candidate_top_m_default <- 20L
+k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
+tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
+alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
+top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
+if (!is.finite(k_default) || is.na(k_default) || k_default < 1L) k_default <- 10L
+if (!is.finite(tau_default) || is.na(tau_default) || tau_default <= 0) tau_default <- 0.2
+if (!is.finite(alpha_default) || is.na(alpha_default)) alpha_default <- 0.75
+if (!is.finite(top_m_default) || is.na(top_m_default) || top_m_default < 1L) top_m_default <- 20L
 options(
-  fastPLS.candidate_knn_k = candidate_knn_k_default,
-  fastPLS.candidate_tau = candidate_tau_default,
-  fastPLS.candidate_alpha = candidate_alpha_default,
-  fastPLS.candidate_top_m = candidate_top_m_default
+  fastPLS.k = k_default,
+  fastPLS.tau = tau_default,
+  fastPLS.alpha = alpha_default,
+  fastPLS.top_m = top_m_default
 )
 
 `%||%` <- function(x, y) {
@@ -106,10 +106,19 @@ include_r <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_R", FALSE)
 include_pls_pkg <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_PLS_PKG", TRUE)
 include_classification <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_CLASSIFICATION", TRUE)
 measure_memory <- bool_env("FASTPLS_MEASURE_MEMORY", TRUE)
-cuda_ok <- tryCatch(isTRUE(fastPLS::has_cuda()), error = function(e) FALSE)
+gpu_backend <- tolower(trimws(Sys.getenv("FASTPLS_GPU_BACKEND", "")))
+if (!gpu_backend %in% c("cuda", "metal")) {
+  gpu_backend <- if (identical(tolower(as.character(Sys.info()[["sysname"]])), "darwin")) "metal" else "cuda"
+}
+gpu_ok <- if (identical(gpu_backend, "metal")) {
+  tryCatch(isTRUE(fastPLS::has_metal()), error = function(e) FALSE)
+} else {
+  tryCatch(isTRUE(fastPLS::has_cuda()), error = function(e) FALSE)
+}
+gpu_backend_algorithm <- if (identical(gpu_backend, "metal")) "rsvd_metal" else "rsvd_cuda"
 if (isTRUE(include_r)) {
   warning(
-    "FASTPLS_SYNTH_VAR_INCLUDE_R is ignored; using cpp/cuda/pls_pkg only.",
+    "FASTPLS_SYNTH_VAR_INCLUDE_R is ignored; using cpp/GPU/pls_pkg only.",
     call. = FALSE
   )
   include_r <- FALSE
@@ -472,7 +481,7 @@ variant_specs <- function(task) {
     implementation = "cpp",
     backend_algorithm = c("rsvd_cpu", "irlba", "rsvd_cpu", "irlba", "rsvd_cpu", "irlba", "rsvd_cpu", "irlba")
   )
-  if (isTRUE(include_gpu) && isTRUE(cuda_ok)) {
+  if (isTRUE(include_gpu) && isTRUE(gpu_ok)) {
     specs <- rbind(
       specs,
       data.table(
@@ -483,8 +492,8 @@ variant_specs <- function(task) {
           "plssvd", "simpls", "opls", "kernelpls"
         ),
         engine = "GPU",
-        implementation = "cuda",
-        backend_algorithm = "rsvd_cuda"
+        implementation = gpu_backend,
+        backend_algorithm = gpu_backend_algorithm
       ),
       fill = TRUE
     )
@@ -504,13 +513,13 @@ variant_specs <- function(task) {
   }
   specs[, classifier := "argmax"]
   if (identical(task$task_type, "classification")) {
-    lda_specs <- copy(specs[implementation %in% c("cpp", "cuda")])
+    lda_specs <- copy(specs[implementation %in% c("cpp", gpu_backend)])
     if (nrow(lda_specs)) {
       lda_specs[, variant_name := paste0(variant_name, "_lda")]
       lda_specs[, classifier := "lda"]
       specs <- rbind(specs, lda_specs, fill = TRUE)
     }
-    candidate_specs <- copy(specs[implementation %in% c("cpp", "cuda") & classifier == "argmax"])
+    candidate_specs <- copy(specs[implementation %in% c("cpp", gpu_backend) & classifier == "argmax"])
     if (nrow(candidate_specs)) {
       candidate_specs[, variant_name := paste0(variant_name, "_cknn")]
       candidate_specs[, classifier := "cknn"]
@@ -554,16 +563,16 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   fit_call <- function() {
   if (identical(spec$engine, "GPU")) {
       if (identical(spec$method_panel, "plssvd")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = "cuda", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = gpu_backend, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "simpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = "cuda", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = gpu_backend, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = "cuda", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = gpu_backend, north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = "cuda", kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = gpu_backend, kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
     }
 
@@ -679,7 +688,7 @@ if (file.exists(progress_file)) unlink(progress_file)
 log_msg("Synthetic variable-sweep benchmark started")
 log_msg("out_dir=", out_dir)
 log_msg("families=", paste(families, collapse = ","))
-log_msg("reps=", reps, " ncomp=", ncomp, " timeout_sec=", timeout_sec, " max_host_rss_mb=", if (is.finite(max_host_rss_mb)) max_host_rss_mb else "Inf", " include_gpu=", include_gpu, " cuda_ok=", cuda_ok, " include_r=", include_r, " include_pls_pkg=", include_pls_pkg)
+log_msg("reps=", reps, " ncomp=", ncomp, " timeout_sec=", timeout_sec, " max_host_rss_mb=", if (is.finite(max_host_rss_mb)) max_host_rss_mb else "Inf", " include_gpu=", include_gpu, " gpu_backend=", gpu_backend, " gpu_ok=", gpu_ok, " include_r=", include_r, " include_pls_pkg=", include_pls_pkg)
 
 all_rows <- list()
 row_idx <- 0L
@@ -789,7 +798,8 @@ writeLines(c(
   sprintf("requested_ncomp = %d", ncomp),
   sprintf("timeout_sec = %.0f", timeout_sec),
   sprintf("max_host_rss_mb = %s", if (is.finite(max_host_rss_mb)) sprintf("%.0f", max_host_rss_mb) else "Inf"),
-  sprintf("cuda_available = %s", cuda_ok),
+  sprintf("gpu_backend = %s", gpu_backend),
+  sprintf("gpu_available = %s", gpu_ok),
   sprintf("include_gpu = %s", include_gpu),
   sprintf("include_r = %s", include_r),
   sprintf("include_pls_pkg = %s", include_pls_pkg),

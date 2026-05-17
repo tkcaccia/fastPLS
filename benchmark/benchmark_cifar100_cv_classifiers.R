@@ -108,8 +108,8 @@ extract_accuracy <- function(out) {
 
 run_one <- function(X, y, method, classifier, backend, svd_method, profile_name,
                     profile, ncomp, kfold, seed, timeout_sec,
-                    candidate_knn_k, candidate_tau, candidate_alpha,
-                    candidate_top_m) {
+                    k, tau, alpha,
+                    top_m) {
   if (backend %in% c("cuda", "metal") && identical(svd_method, "irlba")) {
     return(data.frame(
       method = method,
@@ -179,7 +179,7 @@ run_one <- function(X, y, method, classifier, backend, svd_method, profile_name,
     setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
   }, add = TRUE)
   tryCatch({
-    out <- pls.single.cv(
+    out <- single.pls.cv(
       X,
       y,
       ncomp = ncomp,
@@ -192,10 +192,10 @@ run_one <- function(X, y, method, classifier, backend, svd_method, profile_name,
       seed = seed,
       oversample = profile$oversample,
       power = profile$power,
-      candidate_knn_k = candidate_knn_k,
-      candidate_tau = candidate_tau,
-      candidate_alpha = candidate_alpha,
-      candidate_top_m = candidate_top_m,
+      k = k,
+      tau = tau,
+      alpha = alpha,
+      top_m = top_m,
       return_scores = FALSE
     )
     accuracy <- extract_accuracy(out)
@@ -299,10 +299,10 @@ reps <- int_env("FASTPLS_CIFAR100_CV_REPS", 1L)
 seed <- int_env("FASTPLS_CIFAR100_CV_SEED", 123L)
 timeout_sec <- num_env("FASTPLS_CIFAR100_CV_TIMEOUT", 1800)
 per_class <- int_env("FASTPLS_CIFAR100_CV_PER_CLASS", 0L)
-candidate_knn_k <- int_env("FASTPLS_CIFAR100_CV_CKNN_K", 10L)
-candidate_top_m <- int_env("FASTPLS_CIFAR100_CV_CKNN_TOP_M", 20L)
-candidate_tau <- num_env("FASTPLS_CIFAR100_CV_CKNN_TAU", 0.2)
-candidate_alpha <- num_env("FASTPLS_CIFAR100_CV_CKNN_ALPHA", 0.75)
+k <- int_env("FASTPLS_CIFAR100_CV_CKNN_K", 10L)
+top_m <- int_env("FASTPLS_CIFAR100_CV_CKNN_TOP_M", 20L)
+tau <- num_env("FASTPLS_CIFAR100_CV_CKNN_TAU", 0.2)
+alpha <- num_env("FASTPLS_CIFAR100_CV_CKNN_ALPHA", 0.75)
 methods <- csv_arg("FASTPLS_CIFAR100_CV_METHODS", "simpls,plssvd,opls,kernelpls")
 classifiers <- csv_arg("FASTPLS_CIFAR100_CV_CLASSIFIERS", "argmax,lda,cknn")
 backends <- csv_arg("FASTPLS_CIFAR100_CV_BACKENDS", "cpu")
@@ -321,7 +321,7 @@ params <- data.frame(
   parameter = c(
     "dataset_file", "subset", "n", "p", "classes", "ncomp", "kfold", "reps",
     "methods", "classifiers", "backends", "svd_methods", "profiles", "timeout_sec",
-    "candidate_knn_k", "candidate_top_m", "candidate_tau", "candidate_alpha"
+    "k", "top_m", "tau", "alpha"
   ),
   value = c(
     Sys.getenv("FASTPLS_CIFAR100_RDATA", "auto"),
@@ -338,10 +338,10 @@ params <- data.frame(
     paste(svd_methods, collapse = ","),
     paste(names(profiles), collapse = ","),
     timeout_sec,
-    candidate_knn_k,
-    candidate_top_m,
-    candidate_tau,
-    candidate_alpha
+    k,
+    top_m,
+    tau,
+    alpha
   )
 )
 write.csv(params, file.path(out_dir, "parameters.csv"), row.names = FALSE)
@@ -383,10 +383,10 @@ for (replicate in seq_len(reps)) {
               kfold = kfold,
               seed = seed + replicate - 1L,
               timeout_sec = timeout_sec,
-              candidate_knn_k = candidate_knn_k,
-              candidate_tau = candidate_tau,
-              candidate_alpha = candidate_alpha,
-              candidate_top_m = candidate_top_m
+              k = k,
+              tau = tau,
+              alpha = alpha,
+              top_m = top_m
             )
             res$replicate <- replicate
             res$n <- nrow(X)

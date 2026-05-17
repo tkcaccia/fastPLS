@@ -36,9 +36,9 @@ test_that("candidate-kNN classifier is fitted and can be used for top-k predicti
     method = "simpls",
     svd.method = "cpu_rsvd",
     classifier = "cknn",
-    candidate_knn_k = 10L,
-    candidate_tau = 0.2,
-    candidate_alpha = 0.75,
+    k = 10L,
+    tau = 0.2,
+    alpha = 0.75,
     seed = 123L
   )
 

@@ -64,7 +64,7 @@ test_that("Metal backend is available through public CV helpers", {
   y_num <- cbind(y_signal, 0.3 * X[, 3] + 0.2 * X[, 4] + rnorm(n, sd = 0.2))
   y_cls <- factor(ifelse(y_signal > median(y_signal), "hi", "lo"))
 
-  fixed <- fastPLS::pls.single.cv(
+  fixed <- fastPLS::single.pls.cv(
     Xdata = X,
     Ydata = y_cls,
     ncomp = 1:2,
@@ -78,7 +78,7 @@ test_that("Metal backend is available through public CV helpers", {
   expect_equal(nrow(fixed$metrics), 2L)
   expect_true(all(is.finite(fixed$metrics$metric_value)))
 
-  opt <- fastPLS::optim.pls.cv(
+  opt <- fastPLS::single.pls.cv(
     Xdata = X,
     Ydata = y_num,
     ncomp = 1:2,
@@ -89,7 +89,7 @@ test_that("Metal backend is available through public CV helpers", {
   )
   expect_identical(opt$backend, "metal")
   expect_identical(opt$prediction_backend, "metal")
-  expect_true(opt$optim_comp %in% 1:2)
+  expect_true(opt$best_ncomp %in% 1:2)
 
   nested <- fastPLS::pls.double.cv(
     Xdata = X,

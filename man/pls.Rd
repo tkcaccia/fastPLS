@@ -17,10 +17,10 @@ pls(
   gaussian_y_dim = NULL,
   classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
-  candidate_knn_k = 10L,
-  candidate_tau = 0.2,
-  candidate_alpha = 0.75,
-  candidate_top_m = 20L,
+  k = 10L,
+  tau = 0.2,
+  alpha = 0.75,
+  top_m = 20L,
   fit = FALSE,
   return_variance = TRUE,
   proj = FALSE,
@@ -65,24 +65,24 @@ the default is \code{min(ncol(Xtrain), 100)}.}
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
 the PLS latent scores. \code{cknn} is the compact name for the PLS-score
-candidate-kNN classifier: class centroids in PLS score space choose candidate
-classes, then every sample is reranked by within-candidate kNN in the same PLS score
-space. The compiled implementation is selected automatically from
+candidate-kNN classifier: class centroids in PLS score space choose
+candidate classes, then every sample is reranked by within-candidate kNN in
+the same PLS score space. The compiled implementation is selected automatically from
 \code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
 where available.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
-\item{candidate_knn_k}{Number of same-class PLS-score neighbours used by
+\item{k}{Number of same-class PLS-score neighbours used by
 the candidate-kNN classifier.}
 
-\item{candidate_tau}{Positive temperature used to smooth the neighbour
+\item{tau}{Positive temperature used to smooth the neighbour
 similarities in candidate-kNN scoring.}
 
-\item{candidate_alpha}{Weight of the centroid/prototype candidate score
+\item{alpha}{Weight of the centroid/prototype candidate score
 added to the local kNN score.}
 
-\item{candidate_top_m}{Number of centroid-ranked candidate classes passed to
+\item{top_m}{Number of centroid-ranked candidate classes passed to
 the kNN reranker.}
 
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
@@ -122,9 +122,10 @@ A \code{fastPLS} object. Fitted objects include \code{variance_explained},
 fraction of training predictor variance explained by each latent variable.
 }
 \description{
-\code{pls()} is the main fastPLS user entry point. It routes PLSSVD, SIMPLS, OPLS,
-and kernel PLS through the selected CPU, CUDA, or Metal backend while keeping
-low-level implementation functions internal.
+Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or
+classification using a selected CPU, CUDA, or Metal backend. The fitted model
+can include predictions for held-out samples, latent scores, fitted values,
+variance summaries, and optional classification heads.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])

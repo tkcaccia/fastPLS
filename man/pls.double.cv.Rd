@@ -24,8 +24,14 @@ pls.double.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
+  gaussian_y = FALSE,
+  gaussian_y_dim = NULL,
   classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
+  k = 10L,
+  tau = 0.2,
+  alpha = 0.75,
+  top_m = 20L,
   xprod = NULL,
   ...
 )
@@ -45,9 +51,11 @@ replicate stay together in training or test data. The default
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
-\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.}
+\item{method}{One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
+\code{kernelpls}. Multiple values are tuned in the inner loop.}
 
-\item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or \code{metal}.}
+\item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
+\code{metal}. Multiple values are tuned in the inner loop.}
 
 \item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
 \code{rsvd}. Use CUDA or Metal backends for native GPU
@@ -73,22 +81,42 @@ sharing the same constraint value are never split across training and test.}
 
 \item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
 
-\item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}.}
+\item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}. For
+\code{method = "kernelpls"}, multiple values are tuned in the inner loop.}
 
 \item{degree}{Polynomial kernel degree.}
 
 \item{coef0}{Polynomial kernel offset.}
 
+\item{gaussian_y}{Logical; when \code{TRUE}, fit PLS to a Gaussian random
+low-dimensional response sketch and decode predictions back to the original
+response scale or class labels. The default is \code{FALSE}.}
+
+\item{gaussian_y_dim}{Number of Gaussian response dimensions. When \code{NULL},
+the default is \code{min(ncol(Xtrain), 100)}.}
+
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
 the PLS latent scores. \code{cknn} is the compact name for the PLS-score
-candidate-kNN classifier: class centroids in PLS score space choose candidate
-classes, then every sample is reranked by within-candidate kNN in the same PLS score
-space. The compiled implementation is selected automatically from
+candidate-kNN classifier: class centroids in PLS score space choose
+candidate classes, then every sample is reranked by within-candidate kNN in
+the same PLS score space. The compiled implementation is selected automatically from
 \code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
 where available.}
 
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+
+\item{k}{Number of same-class PLS-score neighbours used by
+the candidate-kNN classifier.}
+
+\item{tau}{Positive temperature used to smooth the neighbour
+similarities in candidate-kNN scoring.}
+
+\item{alpha}{Weight of the centroid/prototype candidate score
+added to the local kNN score.}
+
+\item{top_m}{Number of centroid-ranked candidate classes passed to
+the kNN reranker.}
 
 \item{xprod}{Use the matrix-free cross-product route where available for
 inner component optimization. \code{NULL} applies fastPLS defaults.}
@@ -96,17 +124,18 @@ inner component optimization. \code{NULL} applies fastPLS defaults.}
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
 \code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
-and \code{svtol}.}
+and \code{svtol}. Vector values are tuned in the inner loop. Inner selection can
+also be controlled with \code{selection_metric = "auto"}, \code{"accuracy"}, \code{"r2"},
+\code{"q2"}, or \code{"rmsd"}; the selection metric itself is scalar.}
 }
 \value{
 List of nested CV outputs and summaries.
 }
 \description{
-Runs outer/inner CV loops for performance estimation and component selection.
-Inner component optimization uses the same compiled C++/CUDA/Metal CV core as
-\code{\link[=pls.single.cv]{pls.single.cv()}} and \code{\link[=optim.pls.cv]{optim.pls.cv()}}.
-Nonlinear Metal kernel CV still uses the public \code{\link[=pls]{pls()}}
-backend inside R-level folds.
+Performs nested grouped cross-validation with an outer loop for unbiased
+performance estimation and an inner loop for component and hyperparameter
+selection. Constraint groups are respected in both loops so related samples
+remain in the same fold.
 }
 \examples{
 idx <- c(1:10, 51:60, 101:110)

@@ -8,19 +8,19 @@ source(file.path(script_dir, "helpers_dataset_memory_compare.R"))
 args <- parse_kv_args()
 mode <- arg_value(args, "mode", required = TRUE)
 
-candidate_knn_k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
-candidate_tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
-candidate_alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
-candidate_top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
-if (!is.finite(candidate_knn_k_default) || is.na(candidate_knn_k_default) || candidate_knn_k_default < 1L) candidate_knn_k_default <- 10L
-if (!is.finite(candidate_tau_default) || is.na(candidate_tau_default) || candidate_tau_default <= 0) candidate_tau_default <- 0.2
-if (!is.finite(candidate_alpha_default) || is.na(candidate_alpha_default)) candidate_alpha_default <- 0.75
-if (!is.finite(candidate_top_m_default) || is.na(candidate_top_m_default) || candidate_top_m_default < 1L) candidate_top_m_default <- 20L
+k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
+tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
+alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
+top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
+if (!is.finite(k_default) || is.na(k_default) || k_default < 1L) k_default <- 10L
+if (!is.finite(tau_default) || is.na(tau_default) || tau_default <= 0) tau_default <- 0.2
+if (!is.finite(alpha_default) || is.na(alpha_default)) alpha_default <- 0.75
+if (!is.finite(top_m_default) || is.na(top_m_default) || top_m_default < 1L) top_m_default <- 20L
 options(
-  fastPLS.candidate_knn_k = candidate_knn_k_default,
-  fastPLS.candidate_tau = candidate_tau_default,
-  fastPLS.candidate_alpha = candidate_alpha_default,
-  fastPLS.candidate_top_m = candidate_top_m_default
+  fastPLS.k = k_default,
+  fastPLS.tau = tau_default,
+  fastPLS.alpha = alpha_default,
+  fastPLS.top_m = top_m_default
 )
 
 pls_pkg_fit <- function(task, effective_ncomp, fit_method = c("simpls", "kernelpls", "opls")) {
@@ -165,9 +165,19 @@ result_row <- tryCatch({
   suppressPackageStartupMessages(library("fastPLS", lib.loc = lib_loc, character.only = TRUE))
 
   skip_row <- NULL
-  if (identical(spec$engine, "GPU") && !isTRUE(fastPLS::has_cuda())) {
-    row_template$status <- "skipped_no_cuda"
-    row_template$msg <- sprintf("GPU backend not available for library at %s", lib_loc)
+  gpu_backend <- if ("native_backend" %in% names(spec) && nzchar(spec$native_backend[[1L]])) {
+    as.character(spec$native_backend[[1L]])
+  } else {
+    benchmark_gpu_backend()
+  }
+  gpu_available <- if (identical(gpu_backend, "metal")) {
+    isTRUE(fastPLS::has_metal())
+  } else {
+    isTRUE(fastPLS::has_cuda())
+  }
+  if (identical(spec$engine, "GPU") && !isTRUE(gpu_available)) {
+    row_template$status <- paste0("skipped_no_", gpu_backend)
+    row_template$msg <- sprintf("%s backend not available for library at %s", gpu_backend, lib_loc)
     skip_row <- row_template
   } else if (identical(spec$method_family, "plssvd") &&
              is.finite(requested_ncomp) &&
@@ -247,7 +257,7 @@ result_row <- tryCatch({
     cpp_plssvd_irlba = function() fastpls_fit("plssvd", "irlba"),
     gpu_plssvd_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = "plssvd", backend = "cuda", fit = FALSE,
+      method = "plssvd", backend = gpu_backend, fit = FALSE,
       classifier = spec$classifier,
       return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
@@ -256,7 +266,7 @@ result_row <- tryCatch({
     cpp_simpls_irlba = function() fastpls_fit("simpls", "irlba"),
     gpu_simpls_fp64 = function() fastPLS::pls(
       Xtrain = task$Xtrain, Ytrain = task$Ytrain, ncomp = as.integer(effective_cap),
-      method = "simpls", backend = "cuda", fit = FALSE,
+      method = "simpls", backend = gpu_backend, fit = FALSE,
       classifier = spec$classifier,
       return_variance = FALSE,
       seed = 123L + as.integer(replicate_id)
@@ -264,11 +274,11 @@ result_row <- tryCatch({
     pls_pkg_simpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "simpls"),
     cpp_kernelpls_cpu_rsvd = function() kernel_fit("cpp", "simpls", "cpu_rsvd"),
     cpp_kernelpls_irlba = function() kernel_fit("cpp", "simpls", "irlba"),
-    gpu_kernelpls_fp64 = function() kernel_fit("cuda", "simpls"),
+    gpu_kernelpls_fp64 = function() kernel_fit(gpu_backend, "simpls"),
     pls_pkg_kernelpls = function() pls_pkg_fit(task, effective_ncomp = effective_cap, fit_method = "kernelpls"),
     cpp_opls_cpu_rsvd = function() opls_fit("cpp", "simpls", "cpu_rsvd"),
     cpp_opls_irlba = function() opls_fit("cpp", "simpls", "irlba"),
-    gpu_opls_fp64 = function() opls_fit("cuda", "simpls"),
+    gpu_opls_fp64 = function() opls_fit(gpu_backend, "simpls"),
     # `pls::oscorespls.fit()` does not expose `north`, so keep benchmark
     # parity by reserving one total component slot for the orthogonal part.
     pls_pkg_opls = function() pls_pkg_fit(task, effective_ncomp = opls_layout$predictive_ncomp, fit_method = "opls"),

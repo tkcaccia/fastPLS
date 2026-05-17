@@ -22,8 +22,7 @@ selected through the user-facing functions below.
 | `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
 | `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
 | `plot()` | Plot PLS or PCA score maps, with optional confidence or Hotelling T2 ellipses. |
-| `pls.single.cv()` | Run fixed-component grouped cross-validation. |
-| `optim.pls.cv()` | Choose the best number of components by cross-validation. |
+| `single.pls.cv()` | Run grouped cross-validation and choose the best component count. |
 | `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
 | `pca()` | Compute PCA using the same SVD backend selector. |
@@ -230,8 +229,8 @@ top candidate classes, and then reranks those candidates by same-class nearest
 neighbours in the PLS score space, using the nearest-neighbour classification
 principle of Cover and Hart (1967) after a supervised PLS compression step. The
 default tuning parameters are
-`candidate_knn_k = 10`, `candidate_tau = 0.2`, `candidate_alpha = 0.75`, and
-`candidate_top_m = 20`. `predict()` can also return ranked predictions by using
+`k = 10`, `tau = 0.2`, `alpha = 0.75`, and
+`top_m = 20`. `predict()` can also return ranked predictions by using
 `top` or `top5 = TRUE`.
 
 ```{r}
@@ -438,12 +437,12 @@ par(old_par)
 
 ## Cross-Validation
 
-`fastPLS` provides three cross-validation helpers. Use `pls.single.cv()` when
-the number of latent components is fixed before validation. Use
-`optim.pls.cv()` when the number of components should be selected from a grid.
-Use `pls.double.cv()` for nested validation, where an inner CV chooses the
-number of components and an outer CV estimates predictive performance. All
-three helpers support regression and classification and dispatch to the same
+`fastPLS` provides two cross-validation helpers. Use `single.pls.cv()` for
+grouped k-fold or leave-one-group-out validation; pass a scalar `ncomp` for a
+fixed-component CV or a vector of candidates when the number of components
+should be selected from a grid. Use `pls.double.cv()` for nested validation,
+where an inner CV chooses the number of components and an outer CV estimates
+predictive performance. Both helpers support regression and classification and dispatch to the same
 compiled CPU/CUDA core when available.
 
 ### Ordinary k-fold CV
@@ -452,7 +451,7 @@ In ordinary k-fold CV, samples are split directly into `kfold` folds. The
 example below validates a fixed two-component SIMPLS classifier with five folds.
 
 ```{r}
-cv_kfold <- pls.single.cv(
+cv_kfold <- single.pls.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   ncomp = 2,
@@ -481,7 +480,7 @@ never one in each.
 ```{r}
 patient_id <- rep(seq_len(nrow(Xtrain) / 2), each = 2)
 
-cv_grouped <- pls.single.cv(
+cv_grouped <- single.pls.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   constrain = patient_id,
@@ -507,7 +506,7 @@ values greater than or equal to the number of constraint groups are also treated
 as leave-one-group-out CV.
 
 ```{r}
-cv_loocv <- pls.single.cv(
+cv_loocv <- single.pls.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   constrain = patient_id,
@@ -523,15 +522,17 @@ c(n_loocv_folds = length(unique(cv_loocv$fold)),
   n_patient_groups = length(unique(patient_id)))
 ```
 
-### Component optimization CV
+### Component and hyperparameter optimization CV
 
-`optim.pls.cv()` repeats the same CV splitting strategy over several candidate
+`single.pls.cv()` repeats the same CV splitting strategy over several candidate
 component counts and returns the best value according to the predictive metric:
 accuracy for classification, Q2 for univariate regression, and RMSD-style
-prediction error for multivariate regression outputs.
+prediction error for multivariate regression outputs. Predictive arguments can
+also be supplied as vectors to tune a compact grid. Fold-control arguments such
+as `kfold` remain single settings for the whole CV run.
 
 ```{r}
-cv_opt <- optim.pls.cv(
+cv_opt <- single.pls.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_reg,
   ncomp = 1:3,
@@ -541,15 +542,101 @@ cv_opt <- optim.pls.cv(
   maxit = 1000L
 )
 
-cv_opt$optim_comp
+cv_opt$best_ncomp
+```
+
+The selected component count can then be used to fit the final model on the
+training set and predict an independent test set. This is the usual workflow
+when cross-validation is used only for model selection.
+
+```{r}
+cv_select <- single.pls.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  ncomp = 1:3,
+  kfold = 5,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 106
+)
+
+fit_selected <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = cv_select$best_ncomp,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 106
+)
+
+data.frame(
+  best_ncomp = cv_select$best_ncomp,
+  test_accuracy = mean(fit_selected$Ypred[[1]] == Ytest_cls)
+)
+```
+
+For example, `kernelpls` can select the best combination of component count and
+kernel setting. The selected values are returned in `best_parameters`, which can
+be passed to the final `pls()` call.
+
+```{r}
+cv_kernel <- single.pls.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  ncomp = 1:3,
+  kfold = 5,
+  method = "kernelpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  kernel = c("linear", "rbf"),
+  gamma = c(0.1, 1),
+  seed = 107
+)
+
+bp <- cv_kernel$best_parameters
+
+fit_kernel <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = bp$ncomp,
+  method = bp$method,
+  backend = bp$backend,
+  svd.method = bp$svd.method,
+  kernel = bp$kernel,
+  gamma = if (is.na(bp$gamma)) NULL else bp$gamma,
+  seed = 107
+)
+
+data.frame(
+  best_ncomp = bp$ncomp,
+  best_kernel = bp$kernel,
+  test_accuracy = mean(fit_kernel$Ypred[[1]] == Ytest_cls)
+)
 ```
 
 ### Nested or double CV
 
-`pls.double.cv()` separates model selection from performance estimation. The
-inner loop selects the best number of components, while the outer loop evaluates
-the selected model on held-out data. Both `kfold_inner` and `kfold_outer` can be
-ordinary fold counts or `"loocv"`, and both respect `constrain`.
+Double cross-validation is a nested validation design for separating model
+optimization from the final estimate of predictive performance. This separation
+is especially important for PLS-DA because the number of latent variables and
+other modelling choices can otherwise be tuned on the same samples used to
+report performance, producing optimistic accuracy or Q2 estimates. In the
+terminology of Szymanska et al. (2012), the inner CV loop (`CV1`) is used to
+optimize model complexity, such as the number of latent variables, whereas the
+outer CV loop (`CV2`) holds out samples that are not used during optimization and
+therefore provides the performance estimate of the complete modelling strategy.
+In `fastPLS`, `pls.double.cv()` follows this idea: the inner loop calls
+`single.pls.cv()` to select the best number of components and any vector-valued
+predictive hyperparameters, while the outer loop refits the selected model on
+the corresponding outer training set and predicts the outer test fold. Both
+`kfold_inner` and `kfold_outer` can be ordinary fold counts or `"loocv"`, and
+both respect `constrain`.
 
 ```{r}
 cv_double <- pls.double.cv(
@@ -568,8 +655,74 @@ cv_double <- pls.double.cv(
   seed = 104
 )
 
-cv_double$bcomp
+data.frame(
+  selected_ncomp_mode = cv_double$bcomp,
+  outer_metric = cv_double$metric_name,
+  outer_accuracy = cv_double$Q2Y,
+  median_accuracy = cv_double$medianQ2Y,
+  ci95_low = cv_double$CI95Q2Y[1],
+  ci95_high = cv_double$CI95Q2Y[2]
+)
 ```
+
+The same interface can tune more than the component count. In this example the
+inner loop chooses the best combination of `ncomp`, `kernel`, and `gamma` for
+`kernelpls`. The outer loop then uses the selected combination for each held-out
+outer fold.
+
+```{r}
+cv_double_kernel <- pls.double.cv(
+  Xdata = Xtrain,
+  Ydata = Ytrain_cls,
+  constrain = patient_id,
+  ncomp = 1:2,
+  runn = 1,
+  kfold_inner = 3,
+  kfold_outer = 3,
+  method = "kernelpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  kernel = c("linear", "rbf"),
+  gamma = c(0.1, 1),
+  seed = 108
+)
+
+cv_double_kernel$results[[1]]$best_parameters
+```
+
+Important elements returned by `pls.double.cv()` are:
+
+- `results`: one entry per repeated outer CV run. Each entry stores `Ypred` and
+  `pred` for that run, the outer `fold` assignment, the `best_ncomp` selected
+  inside each outer fold, the full `best_parameters` selected inside each outer
+  fold, the complete inner-CV objects in `inner`, the run-level `metric_name`
+  and `metric_value`, and the fitted `backend` and `method`.
+- `Ypred`: the final cross-validated prediction for each sample. For
+  classification, repeated runs are combined by voting; for regression,
+  predictions are averaged across repeated runs.
+- `acc_tot`: classification-only text summary of the total number and
+  percentage of correctly classified samples.
+- `conf`: classification-only confusion matrix. Entries are printed as counts
+  and column percentages so that class-wise errors can be inspected.
+- `vote_counts`: classification-only matrix with one row per sample and one
+  column per class, showing how many repeated outer-CV runs voted for each
+  class.
+- `Q2Y` and `R2Y`: one outer-loop performance value per repeated run. For
+  classification these values are cross-validated accuracy. For regression they
+  contain the selected regression metric, such as Q2 or RMSD, depending on
+  `selection_metric`.
+- `metric_name`: the metric represented by each entry of `Q2Y` and `R2Y`.
+- `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, and `CI95R2Y`: summaries across repeated
+  outer CV runs. With one run, the confidence interval simply reflects the
+  single available value.
+- `bcomp`: the most frequently selected number of components across all outer
+  folds and repeated runs.
+- `backend` and `method`: the default backend and PLS method used by the call.
+  If vector-valued methods or backends are tuned in the inner loop, the selected
+  fold-level values are stored in `results[[run]]$best_parameters`.
+- `selection_metric`: the criterion used by the inner CV loop. The default
+  `"auto"` means accuracy for classification and RMSD-style prediction error for
+  multivariate regression.
 
 ## PCA and SVD Utilities
 
@@ -711,6 +864,9 @@ blocks that the package implements and accelerates.
 - Shao, Z., Wang, Y., Wang, Q., Jiang, T., Du, Z., Ye, H., Zhuo, D., Chen, Y.,
   and Li, H. (2025). FlashSVD: memory-efficient inference with streaming for
   low-rank models. arXiv:2508.01506.
+- Szymanska, E., Saccenti, E., Smilde, A. K., and Westerhuis, J. A. (2012).
+  Double-check: validation of diagnostic statistics for PLS-DA models in
+  metabolomics studies. *Metabolomics*, 8, S3-S16. doi:10.1007/s11306-011-0330-3.
 - Trygg, J. and Wold, S. (2002). Orthogonal projections to latent structures
   (O-PLS). *Journal of Chemometrics*, 16, 119-128.
 - Wold, S., Sjostrom, M., and Eriksson, L. (2001). PLS-regression: a basic tool

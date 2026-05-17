@@ -64,13 +64,13 @@ test_that("pls and predict support classification workflow", {
   expect_length(pr$Q2Y, 2L)
 })
 
-test_that("optim.pls.cv and pls.double.cv run in both contexts", {
+test_that("single.pls.cv and pls.double.cv run in both contexts", {
   set.seed(1004)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
   Yreg <- matrix(rnorm(60), ncol = 1)
   ycls <- factor(sample(c("L", "M", "H"), 60, replace = TRUE))
 
-  cv_reg <- optim.pls.cv(
+  cv_reg <- single.pls.cv(
     Xdata = X,
     Ydata = Yreg,
     ncomp = 1:2,
@@ -81,7 +81,7 @@ test_that("optim.pls.cv and pls.double.cv run in both contexts", {
   expect_true(is.list(cv_reg))
   expect_true("Q2Y" %in% names(cv_reg))
 
-  cv_cls <- optim.pls.cv(
+  cv_cls <- single.pls.cv(
     Xdata = X,
     Ydata = ycls,
     ncomp = 1:2,
@@ -128,7 +128,7 @@ test_that("compiled CV reports the prediction backend", {
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   y <- factor(sample(c("A", "B", "C"), 48, replace = TRUE))
 
-  cpu_cv <- pls.single.cv(
+  cpu_cv <- single.pls.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -141,7 +141,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cpu_cv$backend, "cpu")
   expect_identical(cpu_cv$prediction_backend, "cpu")
 
-  cpu_opt <- optim.pls.cv(
+  cpu_opt <- single.pls.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -152,7 +152,7 @@ test_that("compiled CV reports the prediction backend", {
     seed = 123L
   )
   expect_identical(cpu_opt$backend, "cpu")
-  expect_length(cpu_opt$optim_comp, 1L)
+  expect_length(cpu_opt$best_ncomp, 1L)
 
   cpu_double <- pls.double.cv(
     Xdata = X,
@@ -170,7 +170,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_true(is.factor(cpu_double$Ypred))
 
   skip_if_not(has_cuda(), "CUDA backend unavailable")
-  cuda_cv <- pls.single.cv(
+  cuda_cv <- single.pls.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -182,7 +182,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cuda_cv$backend, "cuda")
   expect_identical(cuda_cv$prediction_backend, "cuda_flash")
 
-  cuda_opt <- optim.pls.cv(
+  cuda_opt <- single.pls.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -192,7 +192,7 @@ test_that("compiled CV reports the prediction backend", {
     seed = 123L
   )
   expect_identical(cuda_opt$backend, "cuda")
-  expect_length(cuda_opt$optim_comp, 1L)
+  expect_length(cuda_opt$best_ncomp, 1L)
 })
 
 test_that("SVD utilities and helper functions are usable in practice", {

@@ -19,19 +19,19 @@ The classifier operates entirely in supervised PLS score space:
 The older gated/class-count-calibrated class-bias variants have been removed.
 The remaining tuning parameters are:
 
-- `candidate_knn_k`
-- `candidate_tau`
-- `candidate_alpha`
-- `candidate_top_m`
+- `k`
+- `tau`
+- `alpha`
+- `top_m`
 
 ## Current Reduced Tuning Grid
 
 For ImageNet/DINOv2 tuning on Chiamaka, test:
 
 - `ncomp = c(300, 500)`
-- `candidate_knn_k = c(3, 5, 10)`
-- `candidate_tau = c(0.05, 0.1, 0.2)`
-- `candidate_alpha = c(0.5, 0.75, 1)`
+- `k = c(3, 5, 10)`
+- `tau = c(0.05, 0.1, 0.2)`
+- `alpha = c(0.5, 0.75, 1)`
 
 For MetRef tuning, use the same grid except `ncomp = 50`.
 

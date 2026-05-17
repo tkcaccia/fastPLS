@@ -7,6 +7,7 @@
 ^\.git$
 ^benchmark$
 ^benchmark_results$
+^benchmark_results_.*
 ^benchmark_results_local$
 ^chiamaka_plot_check_
 ^dummy_benchmark_results$

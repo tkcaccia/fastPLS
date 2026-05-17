@@ -257,6 +257,34 @@ void metal_rank1_sub(id<MTLDevice> device,
   }
 }
 
+void project_left_inplace(arma::vec& x,
+                          const arma::mat& V,
+                          const int n_prev) {
+  if (n_prev <= 0) return;
+  const int use_prev = std::min<int>(n_prev, static_cast<int>(V.n_cols));
+  if (use_prev <= 0) return;
+  const arma::mat Vprev = V.cols(0, use_prev - 1);
+  x -= Vprev * (Vprev.t() * x);
+}
+
+MetalMatrix metal_crossprod_x_y_times(id<MTLDevice> device,
+                                      id<MTLCommandQueue> queue,
+                                      const MetalMatrix& X,
+                                      const MetalMatrix& Y,
+                                      const MetalMatrix& v) {
+  MetalMatrix yv = metal_matmul(device, queue, Y, v, false, false);
+  return metal_matmul(device, queue, X, yv, true, false);
+}
+
+MetalMatrix metal_tcrossprod_x_y_times(id<MTLDevice> device,
+                                       id<MTLCommandQueue> queue,
+                                       const MetalMatrix& X,
+                                       const MetalMatrix& Y,
+                                       const MetalMatrix& u) {
+  MetalMatrix xu = metal_matmul(device, queue, X, u, false, false);
+  return metal_matmul(device, queue, Y, xu, true, false);
+}
+
 } // namespace
 
 bool has_metal_backend() {
@@ -384,13 +412,19 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
 
     MetalMatrix Xg = make_matrix_from_arma(device, X);
     MetalMatrix Yg = make_matrix_from_arma(device, Y);
-    MetalMatrix Sg = metal_matmul(device, queue, Xg, Yg, true, false);
+
+    const double s_mb = static_cast<double>(X.n_cols) *
+      static_cast<double>(Y.n_cols) * sizeof(float) / 1024.0 / 1024.0;
+    const bool use_xprod = s_mb > 32.0;
+    MetalMatrix Sg;
+    if (!use_xprod) {
+      Sg = metal_matmul(device, queue, Xg, Yg, true, false);
+    }
 
     arma::mat RR(X.n_cols, max_comp, arma::fill::zeros);
     arma::mat QQ(Y.n_cols, max_comp, arma::fill::zeros);
     arma::mat VV(X.n_cols, max_comp, arma::fill::zeros);
-    arma::cube B(X.n_cols, Y.n_cols, max_comp, arma::fill::zeros);
-    arma::mat Bcur(X.n_cols, Y.n_cols, arma::fill::zeros);
+    int used_comp = 0;
 
     std::mt19937 rng(static_cast<unsigned int>(seed));
     std::normal_distribution<float> normal(0.0f, 1.0f);
@@ -414,17 +448,28 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       double rnorm = arma::norm(rr, 2);
       if (!std::isfinite(rnorm) || rnorm <= std::numeric_limits<double>::epsilon()) break;
       rr /= rnorm;
+      project_left_inplace(rr, VV, a);
+      rnorm = arma::norm(rr, 2);
+      if (!std::isfinite(rnorm) || rnorm <= std::numeric_limits<double>::epsilon()) break;
+      rr /= rnorm;
       write_metal_col_vector(rbuf, rr);
       for (int it = 0; it < iters; ++it) {
-        MetalMatrix zbuf = metal_matmul(device, queue, Sg, rbuf, true, false);
-        rbuf = metal_matmul(device, queue, Sg, zbuf, false, false);
+        if (use_xprod) {
+          MetalMatrix zbuf = metal_tcrossprod_x_y_times(device, queue, Xg, Yg, rbuf);
+          rbuf = metal_crossprod_x_y_times(device, queue, Xg, Yg, zbuf);
+        } else {
+          MetalMatrix zbuf = metal_matmul(device, queue, Sg, rbuf, true, false);
+          rbuf = metal_matmul(device, queue, Sg, zbuf, false, false);
+        }
         rr = copy_metal_vector(rbuf);
+        project_left_inplace(rr, VV, a);
         rnorm = arma::norm(rr, 2);
         if (!std::isfinite(rnorm) || rnorm <= std::numeric_limits<double>::epsilon()) break;
         rr /= rnorm;
         write_metal_col_vector(rbuf, rr);
       }
       rr = copy_metal_vector(rbuf);
+      project_left_inplace(rr, VV, a);
       rnorm = arma::norm(rr, 2);
       if (!std::isfinite(rnorm) || rnorm <= std::numeric_limits<double>::epsilon()) break;
       rr /= rnorm;
@@ -456,21 +501,26 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       vv /= vvnorm;
       write_metal_col_vector(vvbuf, vv);
 
-      MetalMatrix rowbuf = metal_matmul(device, queue, vvbuf, Sg, true, false);
-      metal_rank1_sub(device, queue, Sg, vvbuf, rowbuf);
+      if (!use_xprod) {
+        MetalMatrix rowbuf = metal_matmul(device, queue, vvbuf, Sg, true, false);
+        metal_rank1_sub(device, queue, Sg, vvbuf, rowbuf);
+      }
 
       RR.col(a) = rr;
       QQ.col(a) = qq;
       VV.col(a) = vv;
-      Bcur += rr * qq.t();
-      B.slice(a) = Bcur;
+      used_comp = a + 1;
     }
 
+    arma::mat RRout = used_comp > 0 ? RR.cols(0, used_comp - 1) : arma::mat(X.n_cols, 0);
+    arma::mat QQout = used_comp > 0 ? QQ.cols(0, used_comp - 1) : arma::mat(Y.n_cols, 0);
+    arma::mat VVout = used_comp > 0 ? VV.cols(0, used_comp - 1) : arma::mat(X.n_cols, 0);
+
     return Rcpp::List::create(
-      Rcpp::Named("R") = RR,
-      Rcpp::Named("Q") = QQ,
-      Rcpp::Named("V") = VV,
-      Rcpp::Named("B") = B
+      Rcpp::Named("R") = RRout,
+      Rcpp::Named("Q") = QQout,
+      Rcpp::Named("V") = VVout,
+      Rcpp::Named("ncomp") = used_comp
     );
   }
 }

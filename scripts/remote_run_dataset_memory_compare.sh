@@ -22,6 +22,13 @@ REPS="${FASTPLS_COMPARE_REPS:-3}"
 SPLIT_SEED="${FASTPLS_SPLIT_SEED:-123}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
+TIME_ARGS="${TIME_ARGS:--v}"
+if ! "${TIME_BIN}" ${TIME_ARGS} true >/dev/null 2>/tmp/fastpls_time_probe.$$; then
+  if "${TIME_BIN}" -l true >/dev/null 2>/tmp/fastpls_time_probe.$$; then
+    TIME_ARGS="-l"
+  fi
+fi
+rm -f /tmp/fastpls_time_probe.$$
 TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 RUN_TIMEOUT_SEC="${FASTPLS_RUN_TIMEOUT_SEC:-0}"
 VARIANTS_FILTER="${FASTPLS_VARIANTS:-}"
@@ -71,14 +78,22 @@ peak_gpu_from_log() {
 peak_rss_from_time_log() {
   time_log="$1"
   rss_kb="$(awk -F: '/Maximum resident set size/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' "${time_log}" 2>/dev/null || true)"
-  if [ -z "${rss_kb}" ]; then
-    echo "NA"
-  else
+  if [ -n "${rss_kb}" ]; then
     "${PYTHON_BIN}" - <<PY
 rss_kb = float("${rss_kb}")
 print(round(rss_kb / 1024.0, 3))
 PY
+    return
   fi
+  rss_bytes="$(awk '/maximum resident set size/ {print $1; exit}' "${time_log}" 2>/dev/null || true)"
+  if [ -n "${rss_bytes}" ]; then
+    "${PYTHON_BIN}" - <<PY
+rss_bytes = float("${rss_bytes}")
+print(round(rss_bytes / (1024.0 * 1024.0), 3))
+PY
+    return
+  fi
+  echo "NA"
 }
 
 row_status_from_csv() {
@@ -310,9 +325,9 @@ EOF
         chmod +x "${run_script}"
 
         if [ "${RUN_TIMEOUT_SEC}" -gt 0 ] 2>/dev/null; then
-          "${TIME_BIN}" -v "${TIMEOUT_BIN}" --signal=TERM --kill-after=30s "${RUN_TIMEOUT_SEC}" "${run_script}" >"${stdout_log}" 2>"${time_log}" &
+          "${TIME_BIN}" ${TIME_ARGS} "${TIMEOUT_BIN}" --signal=TERM --kill-after=30s "${RUN_TIMEOUT_SEC}" "${run_script}" >"${stdout_log}" 2>"${time_log}" &
         else
-          "${TIME_BIN}" -v "${run_script}" >"${stdout_log}" 2>"${time_log}" &
+          "${TIME_BIN}" ${TIME_ARGS} "${run_script}" >"${stdout_log}" 2>"${time_log}" &
         fi
         cmd_pid=$!
 

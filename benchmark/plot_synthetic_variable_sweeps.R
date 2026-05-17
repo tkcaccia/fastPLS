@@ -41,6 +41,7 @@ backend_cols <- c(
   irlba = "#0073C2FF",
   rsvd_cpu = "#EFC000FF",
   rsvd_cuda = "#CD534CFF",
+  rsvd_metal = "#7AA6DCFF",
   pls_pkg = "#868686FF"
 )
 classifier_lines <- c(

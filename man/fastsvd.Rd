@@ -84,11 +84,10 @@ A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{svd.method}, \code{elapsed}, and \code{ncomp}.
 }
 \description{
-Public interface to the truncated singular value decomposition engines used
-internally by fastPLS. The function returns a base-SVD-compatible object from
-the same CPU and accelerator implementations used by the PCA and PLS
-routines, making it useful for direct low-rank decompositions, backend
-checks, and numerical validation without masking \code{base::svd()}.
+Computes a truncated singular value decomposition of a dense numeric matrix
+with a selected CPU, CUDA, or Metal backend. The result contains singular
+values, requested singular vectors, decomposition rank, elapsed time, and
+backend metadata.
 }
 \examples{
 set.seed(1)

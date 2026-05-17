@@ -20,7 +20,8 @@ echo "[INFO] lib=${LIB_LOC}"
 echo "[INFO] Installing fastPLS into isolated benchmark library"
 R CMD INSTALL --preclean --library="${LIB_LOC}" "${REPO_ROOT}" >"${RUN_ROOT}/logs/install.log" 2>&1
 
-export R_LIBS_USER="${LIB_LOC}${R_LIBS_USER:+:${R_LIBS_USER}}"
+EXISTING_R_LIBS="$(Rscript -e 'cat(paste(.libPaths(), collapse = .Platform$path.sep))')"
+export R_LIBS_USER="${LIB_LOC}${EXISTING_R_LIBS:+:${EXISTING_R_LIBS}}"
 export FASTPLS_BENCH_LIB="${LIB_LOC}"
 
 # Real datasets: use dataset-specific component grids from

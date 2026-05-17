@@ -4,7 +4,7 @@ test_that("LOOCV leaves out one constraint group at a time", {
   y <- factor(iris[idx, 5])
   constrain <- rep(seq_len(nrow(X) / 2L), each = 2L)
 
-  cv <- pls.single.cv(
+  cv <- single.pls.cv(
     X,
     y,
     constrain = constrain,
@@ -29,7 +29,7 @@ test_that("numeric kfold at group count also means constrained LOOCV", {
   y <- factor(rep(letters[1:3], each = 8))
   constrain <- rep(seq_len(12), each = 2L)
 
-  opt <- optim.pls.cv(
+  opt <- single.pls.cv(
     X,
     y,
     constrain = constrain,
@@ -54,7 +54,7 @@ test_that("LOOCV grouped splitting also works for regression responses", {
   Y <- cbind(rnorm(20), rnorm(20))
   constrain <- rep(seq_len(10), each = 2L)
 
-  cv <- pls.single.cv(
+  cv <- single.pls.cv(
     X,
     Y,
     constrain = constrain,
@@ -98,13 +98,13 @@ test_that("double CV accepts LOOCV for the outer grouped split", {
   expect_true(all(vapply(fold_groups, function(z) length(unique(z)) == 1L, logical(1))))
 })
 
-test_that("legacy compiled CV also treats negative kfold as leave-one-constraint-group-out", {
+test_that("compiled single CV also treats negative kfold as leave-one-constraint-group-out", {
   set.seed(15)
   X <- matrix(rnorm(18 * 4), 18, 4)
   Y <- matrix(rnorm(18), 18, 1)
   constrain <- rep(c(101L, 203L, 307L, 409L, 503L, 601L), each = 3L)
 
-  opt <- fastPLS:::optim_pls_cv(
+  opt <- fastPLS:::single_pls_cv_cpp(
     Xdata = X,
     Ydata = Y,
     constrain = as.integer(constrain),

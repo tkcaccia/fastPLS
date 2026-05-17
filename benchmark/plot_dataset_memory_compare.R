@@ -38,6 +38,7 @@ backend_cols <- c(
   irlba = "#0073C2FF",
   rsvd_cpu = "#EFC000FF",
   rsvd_cuda = "#CD534CFF",
+  rsvd_metal = "#7AA6DCFF",
   pls_pkg = "#868686FF"
 )
 
@@ -51,12 +52,14 @@ dt[, backend_algorithm := fcase(
   backend == "pls_pkg", "pls_pkg",
   backend == "cpu_rsvd", "rsvd_cpu",
   backend == "gpu_native", "rsvd_cuda",
+  backend == "metal_native", "rsvd_metal",
   backend == "irlba", "irlba",
   default = backend
 )]
 
 dt[, implementation := fcase(
   grepl("^CUDA", implementation_label), "cuda",
+  grepl("^Metal", implementation_label), "metal",
   grepl("^Cpp", implementation_label), "cpp",
   default = "pls_pkg"
 )]
