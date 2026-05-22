@@ -28,6 +28,7 @@ single.pls.cv(
   tau = 0.2,
   alpha = 0.75,
   top_m = 20L,
+  cknn_memory = c("auto", "standard", "blocked", "streaming"),
   return_scores = FALSE,
   xprod = NULL,
   ...
@@ -90,6 +91,13 @@ the default is \code{min(ncol(Xdata), 100)}.}
 values are used only when \code{classifier = "lda"}.}
 
 \item{k, tau, alpha, top_m}{Candidate-kNN controls used when \code{classifier = "cknn"}.}
+
+\item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
+\code{standard} uses the historical one-pass candidate-kNN path.
+\code{blocked} predicts test samples in blocks, reducing test-side
+latent-score memory. \code{streaming} additionally builds the training
+candidate-score cache in blocks for scalar component counts. \code{auto}
+chooses a memory-aware strategy from the data size.}
 
 \item{return_scores}{Store score predictions for classification when \code{TRUE}.}
 

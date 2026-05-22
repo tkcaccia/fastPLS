@@ -57,11 +57,25 @@ find_dataset_rdata <- function(dataset_id) {
   home_dir <- path.expand("~")
   env_name <- sprintf("FASTPLS_%s_RDATA", toupper(dataset_id))
   fname <- dataset_filename(dataset_id)
+  fnames <- switch(
+    dataset_id,
+    metref = c(fname, "metref_remote_task.RData"),
+    gtex_v8 = c(fname, "gtex.RData"),
+    nmr = c(fname, "NMR.RData"),
+    fname
+  )
   candidates <- c(
     Sys.getenv(env_name, ""),
-    file.path(home_dir, "Documents", "Rdatasets", fname),
-    file.path(home_dir, "Documents", "fastpls", "data", fname),
-    file.path(home_dir, "GPUPLS", "Data", fname)
+    unlist(lapply(fnames, function(one_fname) {
+      c(
+        file.path(home_dir, "Documents", "Rdatasets", one_fname),
+        file.path(home_dir, "Documents", "fastpls", "data", one_fname),
+        file.path(home_dir, "Documents", "fastPLS", "data", one_fname),
+        file.path(home_dir, "Documents", "fastPLS", "Data", one_fname),
+        file.path(home_dir, "Documents", "GPUPLS", "Data", one_fname),
+        file.path(home_dir, "GPUPLS", "Data", one_fname)
+      )
+    }), use.names = FALSE)
   )
   candidates <- unique(Filter(nzchar, vapply(candidates, normalize_path_if_exists, character(1))))
   for (cand in candidates) {
@@ -69,7 +83,7 @@ find_dataset_rdata <- function(dataset_id) {
   }
   found <- list.files(
     home_dir,
-    pattern = sprintf("^%s$", gsub(".", "\\\\.", fname, fixed = TRUE)),
+    pattern = sprintf("^(%s)$", paste(gsub(".", "\\\\.", fnames, fixed = TRUE), collapse = "|")),
     full.names = TRUE,
     recursive = TRUE,
     ignore.case = TRUE

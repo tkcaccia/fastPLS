@@ -21,6 +21,7 @@ pls(
   tau = 0.2,
   alpha = 0.75,
   top_m = 20L,
+  cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = FALSE,
   return_variance = TRUE,
   proj = FALSE,
@@ -84,6 +85,13 @@ added to the local kNN score.}
 
 \item{top_m}{Number of centroid-ranked candidate classes passed to
 the kNN reranker.}
+
+\item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
+\code{standard} uses the historical one-pass candidate-kNN path.
+\code{blocked} predicts test samples in blocks, reducing test-side
+latent-score memory. \code{streaming} additionally builds the training
+candidate-score cache in blocks for scalar component counts. \code{auto}
+chooses a memory-aware strategy from the data size.}
 
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 

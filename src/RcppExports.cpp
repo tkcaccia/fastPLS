@@ -12,6 +12,20 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// label_crossprod_scaled_cpp
+List label_crossprod_scaled_cpp(SEXP XtrainSEXP, Rcpp::IntegerVector y, int n_classes, int scaling);
+RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP XtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP scalingSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    rcpp_result_gen = Rcpp::wrap(label_crossprod_scaled_cpp(XtrainSEXP, y, n_classes, scaling));
+    return rcpp_result_gen;
+END_RCPP
+}
 // RQ
 double RQ(arma::mat yData, arma::mat yPred);
 RcppExport SEXP _fastPLS_RQ(SEXP yDataSEXP, SEXP yPredSEXP) {
@@ -343,6 +357,27 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     rcpp_result_gen = Rcpp::wrap(pls_model2_fast_gpu(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_model2_fast_gpu_labels
+List pls_model2_fast_gpu_labels(SEXP XtrainSEXP, Rcpp::IntegerVector y, int n_classes, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2_fast_gpu_labels(SEXP XtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_gpu_labels(XtrainSEXP, y, n_classes, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -719,6 +754,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
     {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
@@ -742,6 +778,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
     {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
+    {"_fastPLS_pls_model2_fast_gpu_labels", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu_labels, 11},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
     {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},

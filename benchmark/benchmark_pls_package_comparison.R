@@ -51,27 +51,37 @@ status_override <- arg("status", "")
 message_override <- arg("message", "")
 
 base_method_ids <- c(
-  "fastPLS_simpls", "fastPLS_plssvd", "fastPLS_opls", "fastPLS_kernelpls",
+  "fastPLS_simpls_cpu_rsvd", "fastPLS_plssvd_cpu_rsvd", "fastPLS_opls_cpu_rsvd", "fastPLS_kernelpls_cpu_rsvd",
+  "fastPLS_simpls_cpu_irlba", "fastPLS_plssvd_cpu_irlba", "fastPLS_opls_cpu_irlba", "fastPLS_kernelpls_cpu_irlba",
+  "fastPLS_simpls_cuda_rsvd", "fastPLS_plssvd_cuda_rsvd", "fastPLS_opls_cuda_rsvd", "fastPLS_kernelpls_cuda_rsvd",
   "pls_simpls_fit", "pls_oscorespls_fit", "pls_kernelpls_fit",
   "mdatools_plsda_or_pls", "plsdepot_simpls", "pcv_simpls",
   "plsgenomics_pls_regression", "mixOmics_pls", "chemometrics_pls_eigen",
   "chemometrics_pls2_nipals", "spls_spls", "ropls_pls", "ropls_opls"
 )
 classification_only_method_ids <- c(
-  "fastPLS_simpls_cknn", "fastPLS_plssvd_cknn",
-  "fastPLS_opls_cknn", "fastPLS_kernelpls_cknn",
-  "fastPLS_simpls_cknn_cuda", "fastPLS_plssvd_cknn_cuda",
-  "fastPLS_opls_cknn_cuda", "fastPLS_kernelpls_cknn_cuda",
+  "fastPLS_simpls_cpu_rsvd_lda", "fastPLS_plssvd_cpu_rsvd_lda",
+  "fastPLS_opls_cpu_rsvd_lda", "fastPLS_kernelpls_cpu_rsvd_lda",
+  "fastPLS_simpls_cpu_irlba_lda", "fastPLS_plssvd_cpu_irlba_lda",
+  "fastPLS_opls_cpu_irlba_lda", "fastPLS_kernelpls_cpu_irlba_lda",
+  "fastPLS_simpls_cuda_rsvd_lda", "fastPLS_plssvd_cuda_rsvd_lda",
+  "fastPLS_opls_cuda_rsvd_lda", "fastPLS_kernelpls_cuda_rsvd_lda",
+  "fastPLS_simpls_cpu_rsvd_cknn", "fastPLS_plssvd_cpu_rsvd_cknn",
+  "fastPLS_opls_cpu_rsvd_cknn", "fastPLS_kernelpls_cpu_rsvd_cknn",
+  "fastPLS_simpls_cpu_irlba_cknn", "fastPLS_plssvd_cpu_irlba_cknn",
+  "fastPLS_opls_cpu_irlba_cknn", "fastPLS_kernelpls_cpu_irlba_cknn",
+  "fastPLS_simpls_cuda_rsvd_cknn", "fastPLS_plssvd_cuda_rsvd_cknn",
+  "fastPLS_opls_cuda_rsvd_cknn", "fastPLS_kernelpls_cuda_rsvd_cknn",
   "plsgenomics_pls_lda", "mixOmics_plsda", "mixOmics_splsda", "spls_splsda"
 )
 
 if (identical(mode, "list_methods")) {
   classification_dataset_ids <- c(
-    "cbmc_citeseq", "ccle", "cifar100", "gtex_v8", "imagenet",
+    "ccle", "cifar100", "gtex_v8", "imagenet",
     "metref", "singlecell", "tcga_brca", "tcga_hnsc_methylation",
     "tcga_pan_cancer"
   )
-  regression_dataset_ids <- c("nmr", "prism")
+  regression_dataset_ids <- c("cbmc_citeseq", "nmr", "prism")
   is_classification <- dataset_id %in% classification_dataset_ids ||
     grepl("^class", dataset_id) || grepl("classification", dataset_id)
   if (dataset_id %in% regression_dataset_ids ||
@@ -188,8 +198,13 @@ metric_from_prediction <- function(pred) {
   mae <- mean(abs(err), na.rm = TRUE)
   denom <- sum((obs - matrix(colMeans(Ytrain), nrow(obs), ncol(obs), byrow = TRUE))^2, na.rm = TRUE)
   q2 <- if (is.finite(denom) && denom > 0) 1 - sum(err^2, na.rm = TRUE) / denom else NA_real_
-  list(metric_name = "rmse", metric_value = rmse, accuracy = NA_real_,
-       rmse = rmse, q2 = q2, mae = mae)
+  if (ncol(obs) == 1L) {
+    list(metric_name = "q2", metric_value = q2, accuracy = NA_real_,
+         rmse = rmse, q2 = q2, mae = mae)
+  } else {
+    list(metric_name = "rmsd", metric_value = rmse, accuracy = NA_real_,
+         rmse = rmse, q2 = q2, mae = mae)
+  }
 }
 
 predict_from_pls_fit <- function(fit, Xnew, ncomp_eff) {
@@ -258,7 +273,8 @@ decode_fastpls <- function(model) {
 }
 
 run_fastpls <- function(method_name,
-                        backend = "cpp",
+                        backend = "cpu",
+                        svd_method = "rsvd",
                         classifier = "argmax",
                         k = as.integer(arg("k", "10")),
                         tau = as.numeric(arg("tau", "0.2")),
@@ -274,7 +290,7 @@ run_fastpls <- function(method_name,
   args <- list(
     Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
     ncomp = ncomp_requested, method = method_name, backend = backend,
-    svd.method = "cpu_rsvd", scaling = "centering", fit = FALSE, proj = FALSE,
+    svd.method = svd_method, scaling = "centering", fit = FALSE, proj = FALSE,
     seed = 123L + replicate_id, classifier = classifier,
     k = max(1L, k),
     tau = tau,
@@ -287,6 +303,7 @@ run_fastpls <- function(method_name,
     ncomp = args$ncomp, method = args$method, backend = args$backend,
     svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
     proj = args$proj, seed = args$seed, north = args$north %||% 1L,
+    return_variance = FALSE,
     classifier = args$classifier,
     k = args$k,
     tau = args$tau,
@@ -353,7 +370,11 @@ runner_chemometrics_pls_eigen <- function() {
   Xm <- attr(Xc, "scaled:center")
   Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
   Ym <- attr(Yc, "scaled:center")
-  fit <- chemometrics::pls_eigen(Xc, Yc, a = ncomp_requested)
+  # chemometrics::pls_eigen indexes the response-side latent dimension directly
+  # and fails when a exceeds q. Use the largest valid component count for this
+  # package rather than turning a package cap into an adapter error.
+  ncomp_eff <- min(ncomp_requested, ncol(Yc), nrow(Xc) - 1L, ncol(Xc))
+  fit <- chemometrics::pls_eigen(Xc, Yc, a = ncomp_eff)
   coef_t <- solve(crossprod(fit$T), crossprod(fit$T, Yc))
   pred <- (sweep(as.matrix(Xtest), 2L, Xm, "-") %*% fit$P) %*% coef_t
   pred <- sweep(pred, 2L, Ym, "+")
@@ -423,14 +444,21 @@ predict_from_scores_weights <- function(fit, Xfit, Yfit, Xnew, Ym) {
 
 runner_plsdepot_simpls <- function() {
   f <- get("simpls", envir = asNamespace("plsdepot"))
-  Xc <- scale(Xtrain, center = TRUE, scale = FALSE)
+  keep <- vapply(seq_len(ncol(Xtrain)), function(j) {
+    x <- Xtrain[, j]
+    all(is.finite(x)) && stats::sd(x) > sqrt(.Machine$double.eps)
+  }, logical(1))
+  if (!any(keep)) stop("package_limit: plsdepot::simpls has no finite non-constant predictor columns.")
+  Xtrain_use <- Xtrain[, keep, drop = FALSE]
+  Xtest_use <- Xtest[, keep, drop = FALSE]
+  Xc <- scale(Xtrain_use, center = TRUE, scale = FALSE)
   Xm <- attr(Xc, "scaled:center")
   Yc <- scale(Ytrain_dummy, center = TRUE, scale = FALSE)
   Ym <- attr(Yc, "scaled:center")
   fit <- f(as.matrix(Xc), as.matrix(Yc), comps = ncomp_requested)
   pred <- predict_from_scores_weights(
     fit, as.matrix(Xc), as.matrix(Yc),
-    sweep(as.matrix(Xtest), 2L, Xm, "-"), Ym
+    sweep(as.matrix(Xtest_use), 2L, Xm, "-"), Ym
   )
   list(fit = fit, pred = if (identical(task_type, "classification")) decode_scores(pred) else pred)
 }
@@ -450,6 +478,12 @@ runner_pcv_simpls <- function() {
 }
 
 runner_ropls <- function(orthoI = 0L) {
+  if (identical(task_type, "classification") && nlevels(Ytrain) > 2L) {
+    if (orthoI > 0L) {
+      stop("package_limit: ropls OPLS-DA is only available for binary classification.")
+    }
+    stop("package_limit: ropls PLS-DA adapter is not stable for this multiclass benchmark.")
+  }
   f <- get("opls", envir = asNamespace("ropls"))
   fit <- f(
     x = Xtrain, y = if (identical(task_type, "classification")) Ytrain else Ytrain_dummy,
@@ -487,20 +521,57 @@ runner_simple_named <- function(pkg, fun_name) {
   stop(last %||% "No compatible call signature found.")
 }
 
+fastpls_spec <- function(id_suffix, method_name, backend, svd_method,
+                         classifier = "argmax", algorithm_label = NULL) {
+  classifier_label <- if (identical(classifier, "argmax")) "" else paste0(" + ", toupper(classifier))
+  algorithm_label <- algorithm_label %||% paste0(toupper(method_name), classifier_label)
+  list(
+    id = paste0("fastPLS_", method_name, "_", id_suffix),
+    package = "fastPLS",
+    algorithm = algorithm_label,
+    function_name = sprintf(
+      "fastPLS::pls(method='%s', backend='%s', svd.method='%s', classifier='%s')",
+      method_name, backend, svd_method, classifier
+    ),
+    runner = function() {
+      list(
+        fit = run_fastpls(
+          method_name,
+          backend = backend,
+          svd_method = svd_method,
+          classifier = classifier
+        ),
+        pred = NULL
+      )
+    },
+    decoder = decode_fastpls
+  )
+}
+
+fastpls_method_specs <- function(classification = FALSE) {
+  methods <- c("simpls", "plssvd", "opls", "kernelpls")
+  labels <- c(simpls = "SIMPLS", plssvd = "PLSSVD", opls = "OPLS", kernelpls = "kernel PLS")
+  specs <- list()
+  for (method_name in methods) {
+    specs[[length(specs) + 1L]] <- fastpls_spec("cpu_rsvd", method_name, "cpu", "rsvd", "argmax", labels[[method_name]])
+    specs[[length(specs) + 1L]] <- fastpls_spec("cpu_irlba", method_name, "cpu", "irlba", "argmax", labels[[method_name]])
+    specs[[length(specs) + 1L]] <- fastpls_spec("cuda_rsvd", method_name, "cuda", "rsvd", "argmax", labels[[method_name]])
+    if (isTRUE(classification)) {
+      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_rsvd_lda", method_name, "cpu", "rsvd", "lda", paste0(labels[[method_name]], " + LDA"))
+      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_irlba_lda", method_name, "cpu", "irlba", "lda", paste0(labels[[method_name]], " + LDA"))
+      specs[[length(specs) + 1L]] <- fastpls_spec("cuda_rsvd_lda", method_name, "cuda", "rsvd", "lda", paste0(labels[[method_name]], " + LDA"))
+      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_rsvd_cknn", method_name, "cpu", "rsvd", "cknn", paste0(labels[[method_name]], " + cKNN"))
+      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_irlba_cknn", method_name, "cpu", "irlba", "cknn", paste0(labels[[method_name]], " + cKNN"))
+      specs[[length(specs) + 1L]] <- fastpls_spec("cuda_rsvd_cknn", method_name, "cuda", "rsvd", "cknn", paste0(labels[[method_name]], " + cKNN"))
+    }
+  }
+  specs
+}
+
 method_specs_all <- function(task_type) {
-  specs <- list(
-    list(id = "fastPLS_simpls", package = "fastPLS", algorithm = "SIMPLS",
-         function_name = "fastPLS::pls(method='simpls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("simpls"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_plssvd", package = "fastPLS", algorithm = "PLSSVD",
-         function_name = "fastPLS::pls(method='plssvd', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("plssvd"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_opls", package = "fastPLS", algorithm = "OPLS",
-         function_name = "fastPLS::pls(method='opls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("opls"), pred = NULL), decoder = decode_fastpls),
-    list(id = "fastPLS_kernelpls", package = "fastPLS", algorithm = "kernel PLS",
-         function_name = "fastPLS::pls(method='kernelpls', svd.method='cpu_rsvd')",
-         runner = function() list(fit = run_fastpls("kernelpls"), pred = NULL), decoder = decode_fastpls),
+  specs <- c(
+    fastpls_method_specs(identical(task_type, "classification")),
+    list(
     list(id = "pls_simpls_fit", package = "pls", algorithm = "SIMPLS",
          function_name = "pls::simpls.fit", runner = function() run_pls_fit(pls::simpls.fit)),
     list(id = "pls_oscorespls_fit", package = "pls", algorithm = "NIPALS/oscores PLS",
@@ -527,41 +598,9 @@ method_specs_all <- function(task_type) {
          function_name = "ropls::opls(orthoI=0)", runner = function() runner_ropls(0L)),
     list(id = "ropls_opls", package = "ropls", algorithm = "OPLS",
          function_name = "ropls::opls(orthoI=1)", runner = function() runner_ropls(1L))
-  )
+  ))
   if (identical(task_type, "classification")) {
     specs <- c(specs, list(
-      list(id = "fastPLS_simpls_cknn", package = "fastPLS", algorithm = "SIMPLS + cKNN",
-           function_name = "fastPLS::pls(method='simpls', svd.method='rsvd', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("simpls", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_plssvd_cknn", package = "fastPLS", algorithm = "PLSSVD + cKNN",
-           function_name = "fastPLS::pls(method='plssvd', svd.method='rsvd', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("plssvd", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_opls_cknn", package = "fastPLS", algorithm = "OPLS + cKNN",
-           function_name = "fastPLS::pls(method='opls', svd.method='rsvd', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("opls", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_kernelpls_cknn", package = "fastPLS", algorithm = "kernel PLS + cKNN",
-           function_name = "fastPLS::pls(method='kernelpls', svd.method='rsvd', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("kernelpls", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_simpls_cknn_cuda", package = "fastPLS", algorithm = "SIMPLS + cKNN CUDA",
-           function_name = "fastPLS::pls(method='simpls', backend='cuda', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("simpls", backend = "cuda", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_plssvd_cknn_cuda", package = "fastPLS", algorithm = "PLSSVD + cKNN CUDA",
-           function_name = "fastPLS::pls(method='plssvd', backend='cuda', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("plssvd", backend = "cuda", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_opls_cknn_cuda", package = "fastPLS", algorithm = "OPLS + cKNN CUDA",
-           function_name = "fastPLS::pls(method='opls', backend='cuda', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("opls", backend = "cuda", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
-      list(id = "fastPLS_kernelpls_cknn_cuda", package = "fastPLS", algorithm = "kernel PLS + cKNN CUDA",
-           function_name = "fastPLS::pls(method='kernelpls', backend='cuda', classifier='cknn')",
-           runner = function() list(fit = run_fastpls("kernelpls", backend = "cuda", classifier = "cknn"), pred = NULL),
-           decoder = decode_fastpls),
       list(id = "plsgenomics_pls_lda", package = "plsgenomics", algorithm = "PLS-LDA",
            function_name = "plsgenomics::pls.lda", runner = runner_plsgenomics_lda),
       list(id = "mixOmics_plsda", package = "mixOmics", algorithm = "PLS-DA",
@@ -674,11 +713,15 @@ run_one <- function(method_id) {
   row <- empty_row(spec, "ok")
   row$total_runtime_ms <- measured$elapsed_ms
   row$warning_message <- measured$warning
-  if (!is.null(measured$error)) {
-    row$status <- "error"
-    row$error_message <- measured$error
-    return(row)
-  }
+    if (!is.null(measured$error)) {
+      row$status <- "error"
+      row$error_message <- measured$error
+      if (startsWith(measured$error, "package_limit:")) {
+        row$status <- "package_limitation"
+        row$error_message <- sub("^package_limit:[[:space:]]*", "", measured$error)
+      }
+      return(row)
+    }
   pred <- tryCatch({
     if (!is.null(measured$value$pred)) measured$value$pred else spec$decoder(measured$value$fit)
   }, error = function(e) {
@@ -696,6 +739,179 @@ run_one <- function(method_id) {
     row$mae <- met$mae
   }
   row
+}
+
+pipeline2_method_family <- function(method_id, algorithm, function_name) {
+  method_id <- tolower(method_id)
+  algorithm <- tolower(algorithm)
+  function_name <- tolower(function_name)
+  if (grepl("plssvd", method_id, fixed = TRUE)) return("plssvd")
+  if (grepl("kernelpls|kernel_pls|kernelpls", method_id) ||
+      grepl("kernel", algorithm) || grepl("kernelpls", function_name)) return("kernelpls")
+  if (grepl("opls", method_id, fixed = TRUE) ||
+      grepl("\\bopls\\b", algorithm) || grepl("ropls::opls", function_name, fixed = TRUE)) return("opls")
+  "simpls"
+}
+
+pipeline2_short_fastpls <- function(method_id) {
+  x <- sub("^fastPLS_", "", method_id)
+  x <- gsub("_cpu_", " CPU ", x, fixed = TRUE)
+  x <- gsub("_cuda_", " CUDA ", x, fixed = TRUE)
+  x <- gsub("_irlba", " IRLBA", x, fixed = TRUE)
+  x <- gsub("_rsvd", " rSVD", x, fixed = TRUE)
+  x <- gsub("_cknn$", " cKNN", x)
+  x <- gsub("_lda$", " LDA", x)
+  x <- gsub("_", " ", x, fixed = TRUE)
+  paste("fastPLS", x)
+}
+
+pipeline2_method_label <- function(d) {
+  if (identical(d$package[[1]], "fastPLS")) return(pipeline2_short_fastpls(d$method_id[[1]]))
+  fn <- d$function_name[[1]]
+  alg <- d$algorithm[[1]]
+  pkg <- d$package[[1]]
+  if (is.na(fn) || !nzchar(fn)) fn <- d$method_id[[1]]
+  if (is.na(alg) || !nzchar(alg)) {
+    sprintf("%s: %s", pkg, fn)
+  } else {
+    sprintf("%s: %s (%s)", pkg, fn, alg)
+  }
+}
+
+pipeline2_format_number <- function(x, digits = 4) {
+  if (!is.finite(x) || is.na(x)) return("")
+  formatC(x, digits = digits, format = "fg", flag = "#")
+}
+
+pipeline2_format_time <- function(ms) {
+  if (!is.finite(ms) || is.na(ms)) return("")
+  sec <- ms / 1000
+  if (sec < 10) return(sprintf("%.3f s", sec))
+  if (sec < 100) return(sprintf("%.2f s", sec))
+  sprintf("%.1f s", sec)
+}
+
+pipeline2_format_error <- function(d) {
+  status <- d$status[[1]]
+  msg <- d$error_message[[1]]
+  if (is.na(msg) || !nzchar(msg)) msg <- d$warning_message[[1]]
+  if (is.na(msg) || !nzchar(msg)) msg <- status
+  paste0(status, ": ", msg)
+}
+
+pipeline2_metric_cell <- function(d) {
+  if (!identical(d$status[[1]], "ok")) return(pipeline2_format_error(d))
+  metric <- d$metric_value[[1]]
+  if (!is.finite(metric) || is.na(metric)) return("ok: metric unavailable")
+  metric_name <- d$metric_name[[1]]
+  if (identical(metric_name, "accuracy") || identical(metric_name, "q2")) {
+    pipeline2_format_number(metric, 4)
+  } else {
+    pipeline2_format_number(metric, 6)
+  }
+}
+
+pipeline2_time_cell <- function(d) {
+  if (!identical(d$status[[1]], "ok")) {
+    t <- pipeline2_format_time(d$total_runtime_ms[[1]])
+    if (nzchar(t)) return(paste0(pipeline2_format_error(d), " (", t, ")"))
+    return(pipeline2_format_error(d))
+  }
+  pipeline2_format_time(d$total_runtime_ms[[1]])
+}
+
+pipeline2_metric_label_for_dataset <- function(d) {
+  ok_metric <- d$metric_name[d$status == "ok" & nzchar(d$metric_name)]
+  if (length(ok_metric)) return(ok_metric[[1]])
+  if (identical(d$task_type[[1]], "classification")) return("accuracy")
+  "rmsd"
+}
+
+write_pipeline2_wide_tables <- function(raw, results_dir) {
+  out_dir <- file.path(results_dir, "rearranged_tables")
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  dataset_order <- c(
+    "metref", "ccle", "tcga_brca", "tcga_hnsc_methylation",
+    "gtex_v8", "tcga_pan_cancer", "singlecell", "cifar100",
+    "cbmc_citeseq", "prism", "nmr", "imagenet"
+  )
+  dataset_order <- c(intersect(dataset_order, unique(raw$dataset)), setdiff(unique(raw$dataset), dataset_order))
+  raw$family <- mapply(
+    pipeline2_method_family, raw$method_id, raw$algorithm, raw$function_name,
+    USE.NAMES = FALSE
+  )
+
+  metric_map <- do.call(rbind, lapply(dataset_order, function(ds) {
+    d <- raw[raw$dataset == ds, , drop = FALSE]
+    data.frame(
+      dataset = ds,
+      task_type = d$task_type[[1]],
+      displayed_metric = pipeline2_metric_label_for_dataset(d),
+      n_train = d$n_train[[1]],
+      n_test = d$n_test[[1]],
+      p = d$p[[1]],
+      n_response = d$n_response[[1]],
+      ncomp_requested = d$ncomp_requested[[1]],
+      stringsAsFactors = FALSE
+    )
+  }))
+  utils::write.csv(metric_map, file.path(out_dir, "pipeline2_package_dataset_metric_map.csv"), row.names = FALSE, na = "")
+
+  build_family_table <- function(family) {
+    d <- raw[raw$family == family, , drop = FALSE]
+    if (!nrow(d)) return(data.frame())
+    rows <- list()
+    idx <- 1L
+    for (key in unique(d$method_id)) {
+      dk <- d[d$method_id == key, , drop = FALSE]
+      metric_row <- data.frame(
+        function_package = pipeline2_method_label(dk),
+        measure = "metric",
+        stringsAsFactors = FALSE
+      )
+      time_row <- data.frame(
+        function_package = pipeline2_method_label(dk),
+        measure = "time",
+        stringsAsFactors = FALSE
+      )
+      for (ds in dataset_order) {
+        cell <- dk[dk$dataset == ds, , drop = FALSE]
+        if (!nrow(cell)) {
+          metric_row[[ds]] <- ""
+          time_row[[ds]] <- ""
+          next
+        }
+        cell <- cell[order(cell$replicate), , drop = FALSE][1L, , drop = FALSE]
+        metric_row[[ds]] <- pipeline2_metric_cell(cell)
+        time_row[[ds]] <- pipeline2_time_cell(cell)
+      }
+      rows[[idx]] <- metric_row
+      rows[[idx + 1L]] <- time_row
+      idx <- idx + 2L
+    }
+    out <- do.call(rbind, rows)
+    row.names(out) <- NULL
+    out
+  }
+
+  manifest <- data.frame()
+  for (family in c("plssvd", "simpls", "opls", "kernelpls")) {
+    tab <- build_family_table(family)
+    csv <- file.path(out_dir, paste0("pipeline2_", family, "_package_wide_table.csv"))
+    tsv <- file.path(out_dir, paste0("pipeline2_", family, "_package_wide_table.tsv"))
+    utils::write.csv(tab, csv, row.names = FALSE, quote = TRUE, na = "")
+    utils::write.table(tab, tsv, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    manifest <- rbind(manifest, data.frame(
+      family = family,
+      rows = nrow(tab),
+      csv = csv,
+      tsv = tsv,
+      stringsAsFactors = FALSE
+    ))
+  }
+  manifest_path <- file.path(out_dir, "pipeline2_package_wide_tables_manifest.csv")
+  utils::write.csv(manifest, manifest_path, row.names = FALSE)
+  message("Wrote pipeline 2 wide tables: ", out_dir)
 }
 
 summarize_results <- function(results_dir) {
@@ -733,6 +949,7 @@ summarize_results <- function(results_dir) {
   }
   summary_path <- file.path(results_dir, "pls_package_comparison_summary.csv")
   utils::write.csv(summary, summary_path, row.names = FALSE, quote = TRUE, na = "")
+  write_pipeline2_wide_tables(raw, results_dir)
 
   if (requireNamespace("ggplot2", quietly = TRUE) && nrow(ok)) {
     plot_dir <- file.path(results_dir, "plots")

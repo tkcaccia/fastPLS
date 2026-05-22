@@ -355,6 +355,80 @@ arma::rowvec variance_nocopy(const arma::mat& x) {
   return out;
 }
 
+List label_crossprod_scaled_cpp_impl(
+  SEXP XtrainSEXP,
+  Rcpp::IntegerVector y,
+  int n_classes,
+  int scaling
+) {
+  const arma::mat X = numeric_matrix_view(XtrainSEXP, "Xtrain");
+  const arma::uword n = X.n_rows;
+  const arma::uword p = X.n_cols;
+  if (y.size() != static_cast<int>(n)) {
+    stop("label_crossprod_scaled_cpp requires one label per training row");
+  }
+  if (n_classes < 2) {
+    stop("label_crossprod_scaled_cpp requires at least two classes");
+  }
+  arma::rowvec mX(p, arma::fill::zeros);
+  arma::rowvec vX(p, arma::fill::ones);
+  arma::rowvec sums(p, arma::fill::zeros);
+  arma::rowvec sums_sq(p, arma::fill::zeros);
+  arma::vec counts(static_cast<arma::uword>(n_classes), arma::fill::zeros);
+
+  for (arma::uword j = 0; j < p; ++j) {
+    double s = 0.0;
+    double ss = 0.0;
+    const double* col = X.colptr(j);
+    for (arma::uword i = 0; i < n; ++i) {
+      const double val = col[i];
+      s += val;
+      ss += val * val;
+    }
+    sums(j) = s;
+    sums_sq(j) = ss;
+  }
+  if (scaling < 3) {
+    mX = sums / static_cast<double>(n);
+  }
+  if (scaling == 2) {
+    for (arma::uword j = 0; j < p; ++j) {
+      const double centered_ss = std::max(0.0, sums_sq(j) - static_cast<double>(n) * mX(j) * mX(j));
+      double sd = std::sqrt(centered_ss / std::max(1.0, static_cast<double>(n) - 1.0));
+      if (!std::isfinite(sd) || sd <= 0.0) sd = 1.0;
+      vX(j) = sd;
+    }
+  }
+
+  arma::mat class_sums(p, static_cast<arma::uword>(n_classes), arma::fill::zeros);
+  for (int cls : y) {
+    if (IntegerVector::is_na(cls) || cls < 1 || cls > n_classes) {
+      stop("label_crossprod_scaled_cpp requires labels encoded as 1..n_classes");
+    }
+    counts(static_cast<arma::uword>(cls - 1)) += 1.0;
+  }
+  for (arma::uword j = 0; j < p; ++j) {
+    const double* col = X.colptr(j);
+    const double center = (scaling < 3) ? mX(j) : 0.0;
+    const double scale = (scaling == 2) ? vX(j) : 1.0;
+    for (arma::uword i = 0; i < n; ++i) {
+      const int cls = y[static_cast<int>(i)] - 1;
+      class_sums(j, static_cast<arma::uword>(cls)) += (col[i] - center) / scale;
+    }
+  }
+
+  arma::rowvec mY = counts.t() / static_cast<double>(n);
+  arma::vec total_sums = arma::sum(class_sums, 1);
+  arma::mat S = class_sums - total_sums * mY;
+  return List::create(
+    Named("S") = S,
+    Named("mX") = mX,
+    Named("vX") = vX,
+    Named("mY") = mY,
+    Named("counts") = counts
+  );
+}
+
 struct CenterScaleMatrixView {
   const arma::mat& X;
   arma::rowvec center;
@@ -1468,6 +1542,15 @@ Rcpp::List candidate_knn_predict_native_impl(
 
 } // namespace
 
+// [[Rcpp::export]]
+List label_crossprod_scaled_cpp(
+  SEXP XtrainSEXP,
+  Rcpp::IntegerVector y,
+  int n_classes,
+  int scaling
+) {
+  return label_crossprod_scaled_cpp_impl(XtrainSEXP, y, n_classes, scaling);
+}
 
 arma::mat ORTHOG(arma::mat& X, arma::mat& Y, arma::mat& T, int xm, int xn, int yn) {
 
@@ -3201,6 +3284,57 @@ List pls_model2_fast_gpu(
   }
   annotate_coefficient_storage(out, store_B);
   return out;
+}
+
+// [[Rcpp::export]]
+List pls_model2_fast_gpu_labels(
+  SEXP XtrainSEXP,
+  Rcpp::IntegerVector y,
+  int n_classes,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  double svds_tol,
+  int seed
+) {
+  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD || !fastpls_svd::has_cuda_backend()) {
+    stop("pls_model2_fast_gpu_labels requires svd.method='cuda_rsvd' with CUDA available");
+  }
+  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
+  const int n = static_cast<int>(Xview.n_rows);
+  if (y.size() != n) {
+    stop("pls_model2_fast_gpu_labels requires one label per training row");
+  }
+  if (n_classes < 2) {
+    stop("pls_model2_fast_gpu_labels requires at least two classes");
+  }
+  arma::mat Ytrain(
+    static_cast<arma::uword>(n),
+    static_cast<arma::uword>(n_classes),
+    arma::fill::zeros
+  );
+  for (int i = 0; i < n; ++i) {
+    const int cls = y[i];
+    if (IntegerVector::is_na(cls) || cls < 1 || cls > n_classes) {
+      stop("pls_model2_fast_gpu_labels requires labels encoded as 1..n_classes");
+    }
+    Ytrain(static_cast<arma::uword>(i), static_cast<arma::uword>(cls - 1)) = 1.0;
+  }
+  return pls_model2_fast_gpu(
+    Xview,
+    std::move(Ytrain),
+    ncomp,
+    scaling,
+    fit,
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    seed
+  );
 }
 
 

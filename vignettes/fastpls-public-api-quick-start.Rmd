@@ -233,6 +233,18 @@ default tuning parameters are
 `top_m = 20`. `predict()` can also return ranked predictions by using
 `top` or `top5 = TRUE`.
 
+For large multiclass data, cKNN can be memory-intensive because it uses PLS
+scores for both training and test samples. The `cknn_memory` argument controls
+how these score matrices are materialized. `cknn_memory = "standard"` uses the
+historical one-pass path. `cknn_memory = "blocked"` keeps the same classifier
+but predicts test samples in blocks, avoiding a full test-score matrix in
+memory. `cknn_memory = "streaming"` additionally builds the training
+candidate-score cache in row blocks for scalar `ncomp`, which is useful for
+ImageNet-scale feature matrices. The default, `cknn_memory = "auto"`, selects a
+memory-aware strategy from the size of the latent-score cache. These modes do
+not change the cKNN scoring rule; they only change when intermediate matrices
+are created.
+
 ```{r}
 fit_cls <- pls(
   Xtrain,
@@ -444,6 +456,13 @@ should be selected from a grid. Use `pls.double.cv()` for nested validation,
 where an inner CV chooses the number of components and an outer CV estimates
 predictive performance. Both helpers support regression and classification and dispatch to the same
 compiled CPU/CUDA core when available.
+
+The cKNN memory strategy can also be used during cross-validation. For example,
+`single.pls.cv(..., classifier = "cknn", cknn_memory = "blocked")` evaluates
+the same candidate-kNN classifier while reducing fold-level prediction memory.
+For very large scalar-component cKNN validations, `cknn_memory = "streaming"`
+can further reduce peak RAM by constructing the training score cache in blocks
+inside each fold.
 
 ### Ordinary k-fold CV
 
