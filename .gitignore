@@ -11,6 +11,7 @@
 *.Rproj.user/
 fastPLS.Rcheck/
 src/symbols.rds
+src/Makevars
 *_results/
 nvidia_*_results/
 .bench-lib*/
