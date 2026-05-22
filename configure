@@ -56,6 +56,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 if [ "${have_metal}" = "1" ]; then
+  cp src/svd_metal_backend.mm.in src/svd_metal_backend.mm
   metal_objects=" svd_metal_backend.o"
   metal_flags="-DFASTPLS_HAS_METAL"
   if [ -n "${pkg_cppflags}" ]; then
