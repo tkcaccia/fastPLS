@@ -1,0 +1,96 @@
+#!/usr/bin/env sh
+set -eu
+
+use_cuda="${FASTPLS_USE_CUDA:-auto}"
+cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
+
+normalize_path() {
+  p="$1"
+  p=$(printf "%s" "$p" | sed 's|\\|/|g')
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p" 2>/dev/null || printf "%s" "$p"
+  else
+    printf "%s" "$p"
+  fi
+}
+
+find_cuda_root() {
+  if [ -n "${cuda_root}" ]; then
+    normalize_path "${cuda_root}"
+    return
+  fi
+
+  for d in \
+    "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA"/v* \
+    "/C/Program Files/NVIDIA GPU Computing Toolkit/CUDA"/v* \
+    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA"/v*
+  do
+    if [ -d "$d" ]; then
+      normalize_path "$d"
+      return
+    fi
+  done
+}
+
+cuda_root="$(find_cuda_root || true)"
+have_cuda=0
+
+if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" != "FALSE" ]; then
+  if [ -n "${cuda_root}" ] &&
+     [ -f "${cuda_root}/include/cuda_runtime.h" ] &&
+     [ -d "${cuda_root}/lib/x64" ]; then
+    have_cuda=1
+  fi
+fi
+
+if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "ERROR: FASTPLS_USE_CUDA=1 but the CUDA Toolkit was not found." >&2
+  echo "Set CUDA_ROOT to the CUDA Toolkit directory, for example:" >&2
+  echo "  C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6" >&2
+  exit 1
+fi
+
+pkg_cppflags=""
+pkg_cxxflags=""
+pkg_libs=""
+cuda_objects=""
+cuda_rule=""
+
+if [ "${have_cuda}" = "1" ]; then
+  echo "fastPLS configure.win: CUDA Toolkit found at ${cuda_root}"
+  pkg_cppflags="-DFASTPLS_HAS_CUDA -I\"${cuda_root}/include\""
+  pkg_cxxflags="-DFASTPLS_HAS_CUDA"
+  pkg_libs="-L\"${cuda_root}/lib/x64\" -lcudart -lcublas -lcusolver -lcurand"
+
+  nvcc="${cuda_root}/bin/nvcc.exe"
+  if [ -f "${nvcc}" ]; then
+    pkg_cppflags="${pkg_cppflags} -DFASTPLS_HAS_CUDA_KERNELS"
+    pkg_cxxflags="${pkg_cxxflags} -DFASTPLS_HAS_CUDA_KERNELS"
+    cuda_objects=" lda_cuda_kernels.o"
+    cuda_rule='CUDA_NVCC = "'"${nvcc}"'"
+CUDA_NVCCFLAGS = -std=c++17 -I"'"${cuda_root}"'/include"
+
+%.o: %.cu
+	$(CUDA_NVCC) $(CUDA_NVCCFLAGS) -c $< -o $@'
+  else
+    echo "fastPLS configure.win: nvcc.exe not found; CUDA rSVD will build without native CUDA classifier kernels"
+  fi
+else
+  echo "fastPLS configure.win: CUDA Toolkit not found; building CPU-only Windows package"
+fi
+
+escape_sed() {
+  printf "%s" "$1" | sed 's/[&]/\\&/g'
+}
+
+sed \
+  -e "s|@FASTPLS_WIN_PKG_CPPFLAGS@|$(escape_sed "${pkg_cppflags}")|g" \
+  -e "s|@FASTPLS_WIN_PKG_CXXFLAGS@|$(escape_sed "${pkg_cxxflags}")|g" \
+  -e "s|@FASTPLS_WIN_PKG_LIBS@|$(escape_sed "${pkg_libs}")|g" \
+  -e "s|@FASTPLS_WIN_CUDA_OBJECTS@|$(escape_sed "${cuda_objects}")|g" \
+  -e "s|@FASTPLS_WIN_CUDA_RULE@||g" \
+  src/Makevars.win.in > src/Makevars.win
+
+if [ -n "${cuda_rule}" ]; then
+  printf "\n%s\n" "${cuda_rule}" >> src/Makevars.win
+fi

@@ -138,6 +138,22 @@ CUDA backend:
 - use `pls(..., backend = "cuda")` with `method = "plssvd"`, `"simpls"`,
   `"opls"`, or `"kernelpls"`.
 
+On Windows, the package installs CPU-only by default when CUDA is not available,
+so machines without NVIDIA hardware still build normally. On a Windows NVIDIA
+workstation, install the NVIDIA CUDA Toolkit and build with CUDA enabled, for
+example:
+
+```r
+Sys.setenv(
+  FASTPLS_USE_CUDA = "1",
+  CUDA_ROOT = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6"
+)
+remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
+```
+
+After installation, `has_cuda()` reports whether the package was compiled with
+CUDA support and can see a CUDA device at runtime.
+
 FlashSVD-style low-rank prediction is integrated into the standard prediction
 path. When compact latent factors are available, `predict.fastPLS()` can apply
 predictions through streamed low-rank products instead of materializing and
