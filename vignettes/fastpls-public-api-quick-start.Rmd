@@ -87,6 +87,63 @@ fit_reg <- pls(
 fit_reg$Q2Y
 ```
 
+## Evaluate Predictions
+
+Use `evaluate()` when you want a compact summary of prediction quality from
+observed and predicted values. For classification, it returns accuracy,
+balanced accuracy, macro-F1, Cohen's kappa, per-class summaries, and the
+confusion matrix.
+
+```{r}
+fit_eval_cls <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 101
+)
+evaluate(Ytest_cls, fit_eval_cls$Ypred[[length(fit_eval_cls$ncomp)]])$metrics
+```
+
+When predictions are class scores rather than final class labels, `top_k`
+reports whether the true class appears among the best `k` scored classes. This
+is useful for multiclass problems such as CIFAR-100 or ImageNet, where top-1
+and top-5 accuracy are often reported.
+
+```{r}
+iris_score <- matrix(
+  c(
+    0.70, 0.20, 0.10,
+    0.35, 0.40, 0.25,
+    0.20, 0.30, 0.50
+  ),
+  nrow = 3,
+  byrow = TRUE,
+  dimnames = list(NULL, levels(iris$Species))
+)
+
+evaluate(
+  observed = factor(c("setosa", "versicolor", "versicolor"),
+                    levels = levels(iris$Species)),
+  predicted = iris_score,
+  top_k = c(1, 2)
+)$topk
+```
+
+For numeric regression, `evaluate()` returns R2, Q2, RMSD/RMSE, MAE, bias,
+median relative error percentage, RPD, and correlations. If `ytrain` is
+supplied, Q2 is calculated relative to the training-set response mean; this is
+the preferred setting for independent test-set evaluation.
+
+```{r}
+pred_reg <- predict(fit_reg, Xtest)$Ypred[, , length(fit_reg$ncomp)]
+evaluate(Ytest_reg, pred_reg, ytrain = Ytrain_reg)$metrics
+```
+
 The same call can fit the four model families by changing `method`:
 
 - `method = "plssvd"`: direct cross-covariance SVD PLS.
@@ -564,6 +621,29 @@ cv_opt <- single.pls.cv(
 cv_opt$best_ncomp
 ```
 
+### Interpreting `R2Y`, `Q2Y`, and `RMSD`
+
+For regression models, `R2Y`, `Q2Y`, and `RMSD` answer different questions and
+should not usually be identical. `R2Y` is calculated from the model fitted on
+the training data and measures how much response variation is explained by the
+latent components. `Q2Y` is calculated from held-out cross-validation
+predictions and measures predictive performance on samples that were not used
+to fit the corresponding fold model. `RMSD` is the root mean squared deviation
+between held-out predictions and observed responses, so lower values are
+better. Consequently, `Q2Y` is usually lower than `R2Y`, and `RMSD` is on the
+response scale rather than on the explained-variance scale. For classification,
+`Q2Y` and `R2Y` report cross-validated accuracy for backward compatibility, and
+`RMSD` is not used.
+
+```{r}
+data.frame(
+  ncomp = cv_opt$ncomp,
+  training_R2Y = round(cv_opt$R2Y, 3),
+  heldout_Q2Y = round(cv_opt$Q2Y, 3),
+  heldout_RMSD = round(cv_opt$RMSD, 3)
+)
+```
+
 The selected component count can then be used to fit the final model on the
 training set and predict an independent test set. This is the usual workflow
 when cross-validation is used only for model selection.
@@ -726,11 +806,12 @@ Important elements returned by `pls.double.cv()` are:
 - `vote_counts`: classification-only matrix with one row per sample and one
   column per class, showing how many repeated outer-CV runs voted for each
   class.
-- `Q2Y` and `R2Y`: one outer-loop performance value per repeated run. For
-  classification these values are cross-validated accuracy. For regression they
-  contain the selected regression metric, such as Q2 or RMSD, depending on
-  `selection_metric`.
-- `metric_name`: the metric represented by each entry of `Q2Y` and `R2Y`.
+- `Q2Y`, `RMSD`, and `R2Y`: one value per repeated outer CV run. For
+  classification, `Q2Y` and `R2Y` report cross-validated accuracy and `RMSD`
+  is not used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports
+  held-out RMSD, and `R2Y` reports the mean training-fit R2 of the selected
+  outer-fold models.
+- `metric_name`: the held-out metric used for inner/outer model selection.
 - `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, and `CI95R2Y`: summaries across repeated
   outer CV runs. With one run, the confidence interval simply reflects the
   single available value.

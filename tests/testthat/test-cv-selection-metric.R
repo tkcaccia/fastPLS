@@ -116,3 +116,105 @@ test_that("SIMPLS metric-only CV matches stored prediction CV", {
   )
   expect_identical(metric_only$best_ncomp, stored$best_ncomp)
 })
+
+test_that("regression CV reports distinct training R2 and held-out Q2", {
+  set.seed(2104)
+  X <- matrix(rnorm(80 * 12), nrow = 80, ncol = 12)
+  beta <- matrix(rnorm(12 * 2), nrow = 12, ncol = 2)
+  Y <- X %*% beta + matrix(rnorm(80 * 2, sd = 2), nrow = 80, ncol = 2)
+
+  scalar_fit <- pls(
+    Xtrain = X,
+    Ytrain = Y,
+    ncomp = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = TRUE,
+    return_variance = FALSE,
+    seed = 31
+  )
+  path_fit <- pls(
+    Xtrain = X,
+    Ytrain = Y,
+    ncomp = 1:3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = TRUE,
+    return_variance = FALSE,
+    seed = 31
+  )
+  expect_equal(scalar_fit$R2Y[[1]], path_fit$R2Y[[3]], tolerance = 1e-10)
+
+  single <- single.pls.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    kfold = 4,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 32,
+    selection_metric = "q2"
+  )
+  expect_false(isTRUE(all.equal(single$Q2Y, single$R2Y)))
+  expect_false(isTRUE(all.equal(single$Q2Y, single$RMSD)))
+  expect_false(isTRUE(all.equal(single$R2Y, single$RMSD)))
+
+  nested <- pls.double.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    runn = 1,
+    kfold_inner = 3,
+    kfold_outer = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 33,
+    selection_metric = "q2"
+  )
+  expect_false(isTRUE(all.equal(nested$Q2Y, nested$R2Y)))
+  expect_false(isTRUE(all.equal(nested$Q2Y, nested$RMSD)))
+  expect_false(isTRUE(all.equal(nested$R2Y, nested$RMSD)))
+})
+
+test_that("RMSD selection does not overwrite Q2Y", {
+  set.seed(2105)
+  X <- matrix(rnorm(72 * 9), nrow = 72, ncol = 9)
+  beta <- matrix(rnorm(9 * 3), nrow = 9, ncol = 3)
+  Y <- X %*% beta + matrix(rnorm(72 * 3, sd = 1.5), nrow = 72, ncol = 3)
+
+  single <- single.pls.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    kfold = 4,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 34,
+    selection_metric = "rmsd"
+  )
+  expect_identical(single$best_metric_name, "rmsd")
+  expect_false(isTRUE(all.equal(single$Q2Y, single$RMSD)))
+  expect_equal(single$selection_values, single$RMSD, tolerance = 1e-10)
+
+  nested <- pls.double.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    runn = 1,
+    kfold_inner = 3,
+    kfold_outer = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 35,
+    selection_metric = "rmsd"
+  )
+  expect_identical(nested$metric_name[[1]], "rmsd")
+  expect_false(isTRUE(all.equal(nested$Q2Y, nested$RMSD)))
+  expect_equal(nested$results[[1]]$metric_value, nested$RMSD[[1]], tolerance = 1e-10)
+})

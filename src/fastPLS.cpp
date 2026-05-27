@@ -2725,13 +2725,15 @@ List pls_model2_fast(
     if (store_B) {
       Bcur += rr * qq.t();
     }
+    if (fit) {
+      Yfit_cur += tt * qq.t();
+    }
 
     while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
       if (store_B) {
         B.slice(i_out) = Bcur;
       }
       if (fit) {
-        Yfit_cur += tt * qq.t();
         R2Y(i_out) = RQ(Ytrain, Yfit_cur);
         arma::mat yf = Yfit_cur;
         yf.each_row() += mY;
@@ -5568,13 +5570,15 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
     if (store_B) {
       Bcur += rr * qq.t();
     }
+    if (fit) {
+      Yfit_cur += tt * qq.t();
+    }
 
     while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
       if (store_B) {
         B.slice(i_out) = Bcur;
       }
       if (fit) {
-        Yfit_cur += tt * qq.t();
         R2Y(i_out) = RQ(Ycentered, Yfit_cur);
         arma::mat yf = Yfit_cur;
         yf.each_row() += mY_row;
@@ -6013,13 +6017,15 @@ List pls_model2_fast_rsvd_xprod_precision(
     if (store_B) {
       Bcur += rr * qq.t();
     }
+    if (fit) {
+      Yfit_cur += tt * qq.t();
+    }
 
     while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
       if (store_B) {
         B.slice(i_out) = Bcur;
       }
       if (fit) {
-        Yfit_cur += tt * qq.t();
         R2Y(i_out) = RQ(Ytrain, Yfit_cur);
         arma::mat yf = Yfit_cur;
         yf.each_row() += mY;

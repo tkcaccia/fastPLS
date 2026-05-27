@@ -64,6 +64,40 @@ test_that("pls and predict support classification workflow", {
   expect_length(pr$Q2Y, 2L)
 })
 
+test_that("classification Yfit uses the same decoding as predict", {
+  X <- as.matrix(iris[, 1:4])
+  y <- iris$Species
+
+  fit_without_yfit <- pls(
+    Xtrain = X,
+    Ytrain = y,
+    ncomp = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    seed = 123
+  )
+  expect_true(all(is.na(fit_without_yfit$R2Y)))
+
+  fit <- pls(
+    Xtrain = X,
+    Ytrain = y,
+    ncomp = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    seed = 123,
+    fit = TRUE
+  )
+  pred <- predict(fit, X)
+
+  expect_true(is.data.frame(fit$Yfit))
+  expect_identical(as.character(fit$Yfit[[1]]), as.character(pred$Ypred[[1]]))
+  expect_true("setosa" %in% as.character(fit$Yfit[[1]]))
+})
+
 test_that("single.pls.cv and pls.double.cv run in both contexts", {
   set.seed(1004)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)

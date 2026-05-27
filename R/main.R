@@ -4285,6 +4285,77 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   )
 }
 
+.cv_regression_q2_rmsd <- function(Ytrue, Ypred, Ytrain = NULL) {
+  q2 <- .cv_metric_from_matrix(Ytrue, Ypred, Ytrain = Ytrain, metric = "q2")$metric_value
+  rmsd <- .cv_metric_from_matrix(Ytrue, Ypred, Ytrain = Ytrain, metric = "rmsd")$metric_value
+  list(Q2Y = q2, RMSD = rmsd)
+}
+
+.cv_training_r2_path <- function(Xdata,
+                                 Ydata,
+                                 ncomp,
+                                 scaling,
+                                 method,
+                                 backend,
+                                 svd.method,
+                                 rsvd_oversample,
+                                 rsvd_power,
+                                 svds_tol,
+                                 irlba_work,
+                                 irlba_maxit,
+                                 irlba_tol,
+                                 irlba_eps,
+                                 irlba_svtol,
+                                 seed,
+                                 north,
+                                 kernel,
+                                 gamma,
+                                 degree,
+                                 coef0,
+                                 gaussian_y,
+                                 gaussian_y_dim) {
+  if (is.factor(Ydata)) {
+    return(rep(NA_real_, length(ncomp)))
+  }
+  out <- tryCatch({
+    fit <- pls(
+      Xtrain = Xdata,
+      Ytrain = Ydata,
+      ncomp = ncomp,
+      scaling = scaling,
+      method = method,
+      svd.method = svd.method,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = svds_tol,
+      seed = seed,
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol,
+      gaussian_y = gaussian_y,
+      gaussian_y_dim = gaussian_y_dim,
+      fit = TRUE,
+      return_variance = FALSE,
+      proj = FALSE,
+      backend = backend,
+      north = north,
+      kernel = kernel,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0
+    )
+    as.numeric(fit$R2Y)
+  }, error = function(e) {
+    rep(NA_real_, length(ncomp))
+  })
+  if (length(out) != length(ncomp)) {
+    out <- rep_len(out, length(ncomp))
+  }
+  out
+}
+
 .cv_selection_metrics <- function(cv_res, Ydata, classification, selection_metric = "auto") {
   selection_metric <- .cv_normalize_selection_metric(selection_metric)
   if (classification) {
@@ -4937,6 +5008,18 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   } else {
     sqrt(metric_sse / pmax(metric_count, 1))
   }
+  q2_value <- if (!classification && is.finite(metric_tss) && metric_tss > 0) {
+    1 - metric_sse / metric_tss
+  } else if (classification) {
+    ifelse(metric_total > 0, metric_correct / metric_total, NA_real_)
+  } else {
+    rep(NA_real_, nslice)
+  }
+  rmsd_value <- if (!classification) {
+    sqrt(metric_sse / pmax(metric_count, 1))
+  } else {
+    rep(NA_real_, nslice)
+  }
   online_metrics <- data.frame(
     ncomp_index = seq_len(nslice),
     metric_name = metric_name,
@@ -4964,6 +5047,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }
   res$pred <- decoded$pred
   res$metrics <- if (is.null(decoded$metrics)) online_metrics else decoded$metrics
+  res$Q2Y <- as.numeric(q2_value)
+  res$RMSD <- as.numeric(rmsd_value)
   res
 }
 
@@ -6867,6 +6952,9 @@ pls =  function (Xtrain,
 	    lda_ridge
 	  )
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
+  if (!isTRUE(fit) && !is.null(model$R2Y)) {
+    model$R2Y <- rep(NA_real_, length(ncomp))
+  }
 
 
 #  model$R2Y[i] = 1 - sum(((Ytrain - model$Yfit[, , i]))^2)/sum(t(t(Ytrain) -  colMeans(Ytrain))^2)
@@ -6961,13 +7049,9 @@ pls =  function (Xtrain,
     if(classification){
 
       if(fit){
-        Yfitlab = as.data.frame(matrix(nrow = nrow(Xtrain), ncol = length(ncomp)))
-        colnames(Yfitlab)=paste("ncomp=",ncomp,sep="")
-        for (i in 1:length(ncomp)) {
-          t = apply(model$Yfit[, , i], 1, which.max)
-          Yfitlab[, i] = factor(lev[t], levels = lev)
-        }
-        model$Yfit=Yfitlab
+        train_model <- model
+        class(train_model) <- "fastPLS"
+        model$Yfit <- predict.fastPLS(train_model, Xtrain)$Ypred
       }
     }
 
@@ -7421,11 +7505,11 @@ pls =  function (Xtrain,
 #'   selection can also be controlled with `selection_metric = "auto"`,
 #'   `"accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`; the selection metric itself is
 #'   scalar.
-#' @return List with `best_ncomp`, decoded `pred`, `metrics`, legacy
-#'   `Q2Y`/`R2Y` metric vectors, `fold`, backend metadata, `best_parameters`,
-#'   and `Ypred` when score predictions are stored. When more than one
-#'   predictive configuration is tested, `tuning_summary` and `tuning_metrics`
-#'   report all grid results.
+#' @return List with `best_ncomp`, decoded `pred`, `metrics`, regression
+#'   `Q2Y`, `R2Y`, and `RMSD` vectors, `fold`, backend metadata,
+#'   `best_parameters`, and `Ypred` when score predictions are stored. When
+#'   more than one predictive configuration is tested, `tuning_summary` and
+#'   `tuning_metrics` report all grid results.
 #' @examples
 #' idx <- c(1:12, 51:62, 101:112)
 #' X <- as.matrix(iris[idx, 1:4])
@@ -7659,7 +7743,6 @@ single.pls.cv =  function (Xdata,
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol,
       seed = seed,
-      xprod = xprod,
       north = north,
       kernel = kernel,
       gamma = gamma,
@@ -7721,6 +7804,26 @@ single.pls.cv =  function (Xdata,
   )
   best_idx <- .cv_best_index(selection_metrics, selection_metric = selection_ctl$metric)
   values <- as.numeric(res$metrics$metric_value)
+  q2_values <- res$Q2Y
+  rmsd_values <- res$RMSD
+  if (!classification && (is.null(q2_values) || is.null(rmsd_values))) {
+    if (!is.null(res$Ypred)) {
+      dims <- dim(res$Ypred)
+      q2_values <- rmsd_values <- rep(NA_real_, dims[[3L]])
+      for (i in seq_len(dims[[3L]])) {
+        metric_pair <- .cv_regression_q2_rmsd(
+          Ytrue = Ydata,
+          Ypred = res$Ypred[, , i, drop = TRUE],
+          Ytrain = Ydata
+        )
+        q2_values[[i]] <- metric_pair$Q2Y
+        rmsd_values[[i]] <- metric_pair$RMSD
+      }
+    } else {
+      q2_values <- if (all(tolower(res$metrics$metric_name) == "q2")) values else rep(NA_real_, length(values))
+      rmsd_values <- if (all(tolower(res$metrics$metric_name) == "rmsd")) values else rep(NA_real_, length(values))
+    }
+  }
   selection_values <- as.numeric(selection_metrics$metric_value)
   res$best_ncomp <- as.integer(res$ncomp[[best_idx]])
   res$best_index <- best_idx
@@ -7729,8 +7832,37 @@ single.pls.cv =  function (Xdata,
   res$selection_values <- selection_values
   res$best_metric_name <- .cv_metric_name_at(selection_metrics, best_idx)
   res$best_metric_value <- selection_values[[best_idx]]
-  res$Q2Y <- values
-  res$R2Y <- values
+  res$Q2Y <- if (classification) values else as.numeric(q2_values)
+  res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
+  res$R2Y <- if (classification) {
+    values
+  } else {
+    .cv_training_r2_path(
+      Xdata = Xdata,
+      Ydata = Ydata,
+      ncomp = as.integer(res$ncomp),
+      scaling = scaling,
+      method = method,
+      backend = backend,
+      svd.method = svd.method,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      svds_tol = svds_tol,
+      irlba_work = irlba_work,
+      irlba_maxit = irlba_maxit,
+      irlba_tol = irlba_tol,
+      irlba_eps = irlba_eps,
+      irlba_svtol = irlba_svtol,
+      seed = seed,
+      north = north,
+      kernel = kernel,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0,
+      gaussian_y = gaussian_y,
+      gaussian_y_dim = gaussian_y_dim
+    )
+  }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- cfg
   res$best_parameters <- .cv_config_list(cfg)
@@ -7780,7 +7912,9 @@ single.pls.cv =  function (Xdata,
 #'   and `svtol`. Vector values are tuned in the inner loop. Inner selection can
 #'   also be controlled with `selection_metric = "auto"`, `"accuracy"`, `"r2"`,
 #'   `"q2"`, or `"rmsd"`; the selection metric itself is scalar.
-#' @return List of nested CV outputs and summaries.
+#' @return List of nested CV outputs and summaries. For regression, `Q2Y`
+#'   stores held-out Q2, `RMSD` stores held-out RMSD, and `R2Y` stores the mean
+#'   training-fit R2 of the selected outer-fold models.
 #' @examples
 #' idx <- c(1:10, 51:60, 101:110)
 #' X <- as.matrix(iris[idx, 1:4])
@@ -7932,6 +8066,7 @@ pls.double.cv = function(Xdata,
   res <- list(results = vector("list", as.integer(runn)))
   Q2Y <- rep(NA_real_, as.integer(runn))
   R2Y <- rep(NA_real_, as.integer(runn))
+  RMSD <- rep(NA_real_, as.integer(runn))
   metric_name <- rep(NA_character_, as.integer(runn))
   bb <- integer(0)
 
@@ -7957,6 +8092,7 @@ pls.double.cv = function(Xdata,
       run_pred_chr <- rep(NA_character_, nrow(Xdata))
     } else {
       run_pred <- matrix(NA_real_, nrow = nrow(Xdata), ncol = ncol(Ydata))
+      outer_train_r2 <- rep(NA_real_, nfold_outer)
     }
 
     for (f in seq_along(fold_values)) {
@@ -8060,7 +8196,7 @@ pls.double.cv = function(Xdata,
         irlba_svtol = fit_irlba_svtol,
         gaussian_y = fit_gaussian_y,
         gaussian_y_dim = fit_gaussian_y_dim,
-        fit = FALSE,
+        fit = !classification,
         proj = FALSE,
         backend = fit_backend,
         north = fit_north,
@@ -8082,6 +8218,9 @@ pls.double.cv = function(Xdata,
         pred <- if (is.data.frame(pred)) pred[[1L]] else pred
         run_pred_chr[test_idx] <- as.character(pred)
       } else {
+        if (!is.null(fit$R2Y) && length(fit$R2Y)) {
+          outer_train_r2[[f]] <- as.numeric(tail(fit$R2Y, 1L))
+        }
         pred <- fit$Ypred
         if (length(dim(pred)) == 3L) {
           pred <- pred[, , 1L, drop = TRUE]
@@ -8119,8 +8258,14 @@ pls.double.cv = function(Xdata,
       Ypred_tot <- Ypred_tot + run_pred
       run_selection_metric <- if (selection_ctl$metric %in% c("r2", "q2", "rmsd")) selection_ctl$metric else "auto"
       metric <- .cv_metric_from_matrix(Ydata, run_pred, Ytrain = Ydata, metric = run_selection_metric)
-      Q2Y[j] <- metric$metric_value
-      R2Y[j] <- metric$metric_value
+      metric_pair <- .cv_regression_q2_rmsd(Ydata, run_pred, Ytrain = Ydata)
+      Q2Y[j] <- metric_pair$Q2Y
+      RMSD[j] <- metric_pair$RMSD
+      R2Y[j] <- if (any(is.finite(outer_train_r2))) {
+        mean(outer_train_r2, na.rm = TRUE)
+      } else {
+        NA_real_
+      }
       metric_name[j] <- metric$metric_name
       res$results[[j]] <- list(
         Ypred = run_pred,
@@ -8162,11 +8307,14 @@ pls.double.cv = function(Xdata,
 
   res$Q2Y <- Q2Y
   res$R2Y <- R2Y
+  res$RMSD <- RMSD
   res$metric_name <- metric_name
   res$medianR2Y <- median(R2Y, na.rm = TRUE)
   res$CI95R2Y <- as.numeric(quantile(R2Y, c(0.025, 0.975), na.rm = TRUE))
   res$medianQ2Y <- median(Q2Y, na.rm = TRUE)
   res$CI95Q2Y <- as.numeric(quantile(Q2Y, c(0.025, 0.975), na.rm = TRUE))
+  res$medianRMSD <- median(RMSD, na.rm = TRUE)
+  res$CI95RMSD <- as.numeric(quantile(RMSD, c(0.025, 0.975), na.rm = TRUE))
   res$bcomp <- names(which.max(table(bb)))
   res$backend <- backend
   res$method <- method
@@ -8233,6 +8381,262 @@ pls.double.cv = function(Xdata,
 
 
 
+
+
+#' Evaluate prediction performance
+#'
+#' Computes common classification or regression performance metrics from
+#' observed and predicted values. The function accepts two vectors, two matrices,
+#' or classification score matrices. For NMR-style multivariate regression, it
+#' reports RMSE/RMSD, R2, Q2, MAE, median relative error percentage, RPD, and
+#' correlations. For classification, it reports accuracy, balanced accuracy,
+#' macro precision, macro recall, macro F1, Cohen's kappa, and the confusion
+#' matrix.
+#'
+#' @param observed Observed response values. Use a factor/character vector for
+#'   classification, a numeric vector/matrix for regression, or a one-hot
+#'   matrix for classification.
+#' @param predicted Predicted values. Use a factor/character vector for
+#'   predicted classes, a numeric vector/matrix for regression, or a class-score
+#'   matrix for classification.
+#' @param task One of `"auto"`, `"classification"`, or `"regression"`.
+#'   `"auto"` treats factor/character observed values as classification and
+#'   numeric values as regression, unless a one-hot observed matrix is detected.
+#' @param ytrain Optional training response for regression Q2. When supplied,
+#'   Q2 is computed relative to the training-set response mean. When omitted,
+#'   Q2 uses the observed response mean and is therefore identical to R2.
+#' @param top_k Integer vector of top-k classification accuracies to compute
+#'   when `predicted` is a class-score matrix.
+#' @param relative_epsilon Values with absolute observed response below this
+#'   threshold are ignored for relative-error metrics.
+#' @param na.rm Remove incomplete observations before computing metrics.
+#' @return A list with `task`, `metrics`, and optionally `per_response`,
+#'   `confusion`, `topk`, and `notes`.
+#' @examples
+#' evaluate(iris$Species, iris$Species)
+#'
+#' set.seed(1)
+#' y <- mtcars$mpg
+#' pred <- y + rnorm(length(y), sd = 2)
+#' evaluate(y, pred)$metrics
+#' @export
+evaluate <- function(observed,
+                     predicted,
+                     task = c("auto", "classification", "regression"),
+                     ytrain = NULL,
+                     top_k = c(1L, 5L),
+                     relative_epsilon = .Machine$double.eps,
+                     na.rm = TRUE) {
+  task <- match.arg(task)
+  notes <- character()
+
+  is_onehot <- function(x) {
+    is.matrix(x) &&
+      is.numeric(x) &&
+      ncol(x) > 1L &&
+      all(is.finite(x) | is.na(x)) &&
+      all(abs(rowSums(x, na.rm = TRUE) - 1) < 1e-8, na.rm = TRUE) &&
+      all(x[!is.na(x)] %in% c(0, 1))
+  }
+
+  if (identical(task, "auto")) {
+    task <- if (is.factor(observed) || is.character(observed) || is_onehot(observed)) {
+      "classification"
+    } else {
+      "regression"
+    }
+  }
+
+  if (identical(task, "classification")) {
+    class_from_input <- function(x, levels_ref = NULL) {
+      if (is.factor(x) || is.character(x)) {
+        return(as.character(x))
+      }
+      if (is.matrix(x) || is.data.frame(x)) {
+        x <- as.matrix(x)
+        if (!is.numeric(x)) {
+          return(as.character(x[, 1L]))
+        }
+        lev <- colnames(x)
+        if (is.null(lev)) {
+          lev <- if (is.null(levels_ref)) as.character(seq_len(ncol(x))) else levels_ref
+        }
+        return(lev[max.col(x, ties.method = "first")])
+      }
+      as.character(x)
+    }
+
+    obs_levels <- if (is.factor(observed)) levels(observed) else NULL
+    if (is.matrix(observed) && !is.null(colnames(observed))) {
+      obs_levels <- colnames(observed)
+    }
+    obs <- class_from_input(observed, obs_levels)
+    pred <- class_from_input(predicted, obs_levels)
+    lev <- unique(c(obs_levels, obs, pred))
+    lev <- lev[!is.na(lev)]
+    if (!length(lev)) {
+      stop("No valid class labels were found.", call. = FALSE)
+    }
+    obs <- factor(obs, levels = lev)
+    pred <- factor(pred, levels = lev)
+    keep <- rep(TRUE, length(obs))
+    if (na.rm) {
+      keep <- !is.na(obs) & !is.na(pred)
+      obs <- obs[keep]
+      pred <- pred[keep]
+    }
+    if (length(obs) != length(pred)) {
+      stop("observed and predicted must have the same number of samples.", call. = FALSE)
+    }
+
+    conf <- table(predicted = pred, observed = obs)
+    tp <- diag(conf)
+    support <- colSums(conf)
+    predicted_support <- rowSums(conf)
+    recall <- tp / support
+    precision <- tp / predicted_support
+    recall[!is.finite(recall)] <- NA_real_
+    precision[!is.finite(precision)] <- NA_real_
+    f1 <- 2 * precision * recall / (precision + recall)
+    f1[!is.finite(f1)] <- NA_real_
+    n <- sum(conf)
+    accuracy <- if (n > 0) sum(tp) / n else NA_real_
+    expected_accuracy <- if (n > 0) sum(rowSums(conf) * colSums(conf)) / n^2 else NA_real_
+    kappa <- if (is.finite(expected_accuracy) && expected_accuracy < 1) {
+      (accuracy - expected_accuracy) / (1 - expected_accuracy)
+    } else {
+      NA_real_
+    }
+
+    topk <- NULL
+    if ((is.matrix(predicted) || is.data.frame(predicted)) && is.numeric(as.matrix(predicted))) {
+      score <- as.matrix(predicted)
+      score_levels <- colnames(score)
+      if (is.null(score_levels)) {
+        score_levels <- if (!is.null(obs_levels)) obs_levels else as.character(seq_len(ncol(score)))
+      }
+      obs_chr <- as.character(class_from_input(observed, score_levels))
+      if (na.rm) {
+        obs_chr <- obs_chr[keep]
+        score <- score[keep, , drop = FALSE]
+      }
+      topk <- data.frame(
+        k = as.integer(top_k),
+        accuracy = vapply(as.integer(top_k), function(k) {
+          k <- min(max(1L, k), ncol(score))
+          top_idx <- t(matrix(
+            vapply(
+              seq_len(nrow(score)),
+              function(i) order(score[i, ], decreasing = TRUE)[seq_len(k)],
+              integer(k)
+            ),
+            nrow = k
+          ))
+          mean(vapply(seq_len(nrow(score)), function(i) obs_chr[[i]] %in% score_levels[top_idx[i, ]], logical(1L)), na.rm = TRUE)
+        }, numeric(1L))
+      )
+    }
+
+    return(list(
+      task = "classification",
+      metrics = data.frame(
+        n = as.integer(n),
+        accuracy = accuracy,
+        balanced_accuracy = mean(recall, na.rm = TRUE),
+        macro_precision = mean(precision, na.rm = TRUE),
+        macro_recall = mean(recall, na.rm = TRUE),
+        macro_f1 = mean(f1, na.rm = TRUE),
+        kappa = kappa,
+        stringsAsFactors = FALSE
+      ),
+      per_class = data.frame(
+        class = names(tp),
+        support = as.integer(support),
+        precision = as.numeric(precision),
+        recall = as.numeric(recall),
+        f1 = as.numeric(f1),
+        stringsAsFactors = FALSE
+      ),
+      confusion = conf,
+      topk = topk,
+      notes = notes
+    ))
+  }
+
+  obs <- as.matrix(observed)
+  pred <- as.matrix(predicted)
+  if (!is.numeric(obs) || !is.numeric(pred)) {
+    stop("Regression evaluation requires numeric observed and predicted values.", call. = FALSE)
+  }
+  if (!all(dim(obs) == dim(pred))) {
+    stop("observed and predicted must have the same dimensions.", call. = FALSE)
+  }
+  train <- if (!is.null(ytrain)) {
+    as.matrix(ytrain)
+  } else {
+    notes <- c(notes, "Q2 uses the observed response mean because ytrain was not supplied; Q2 equals R2 in this case.")
+    obs
+  }
+  if (ncol(train) != ncol(obs)) {
+    stop("ytrain must have the same number of response columns as observed.", call. = FALSE)
+  }
+
+  metric_one <- function(o, p, tr) {
+    keep <- is.finite(o) & is.finite(p)
+    if (na.rm) {
+      o <- o[keep]
+      p <- p[keep]
+    }
+    n <- length(o)
+    if (!n) {
+      return(rep(NA_real_, 12L))
+    }
+    err <- p - o
+    sse <- sum(err^2, na.rm = TRUE)
+    rmse <- sqrt(mean(err^2, na.rm = TRUE))
+    mae <- mean(abs(err), na.rm = TRUE)
+    bias <- mean(err, na.rm = TRUE)
+    tss_obs <- sum((o - mean(o, na.rm = TRUE))^2, na.rm = TRUE)
+    tr_center <- mean(tr, na.rm = TRUE)
+    tss_train <- sum((o - tr_center)^2, na.rm = TRUE)
+    rel_ok <- is.finite(o) & abs(o) > relative_epsilon
+    rel_err_pct <- abs(err[rel_ok] / o[rel_ok]) * 100
+    mre_pct <- if (length(rel_err_pct)) stats::median(rel_err_pct, na.rm = TRUE) else NA_real_
+    mape_pct <- if (length(rel_err_pct)) mean(rel_err_pct, na.rm = TRUE) else NA_real_
+    r <- suppressWarnings(stats::cor(o, p, method = "pearson", use = "complete.obs"))
+    rho <- suppressWarnings(stats::cor(o, p, method = "spearman", use = "complete.obs"))
+    sd_obs <- stats::sd(o, na.rm = TRUE)
+    c(
+      n = n,
+      R2 = if (is.finite(tss_obs) && tss_obs > 0) 1 - sse / tss_obs else NA_real_,
+      Q2 = if (is.finite(tss_train) && tss_train > 0) 1 - sse / tss_train else NA_real_,
+      RMSD = rmse,
+      RMSE = rmse,
+      MAE = mae,
+      bias = bias,
+      MRE_percent = mre_pct,
+      MAPE_percent = mape_pct,
+      RPD = if (is.finite(rmse) && rmse > 0) sd_obs / rmse else NA_real_,
+      Pearson_r = r,
+      Spearman_r = rho
+    )
+  }
+
+  per <- t(vapply(seq_len(ncol(obs)), function(j) {
+    metric_one(obs[, j], pred[, j], train[, j])
+  }, numeric(12L)))
+  per <- as.data.frame(per)
+  per$response <- colnames(obs) %||% paste0("Y", seq_len(ncol(obs)))
+  per <- per[, c("response", setdiff(names(per), "response")), drop = FALSE]
+  overall <- as.data.frame(as.list(metric_one(as.vector(obs), as.vector(pred), as.vector(train))))
+
+  list(
+    task = "regression",
+    metrics = overall,
+    per_response = per,
+    notes = notes
+  )
+}
 
 
 Vip <- function(object) {
