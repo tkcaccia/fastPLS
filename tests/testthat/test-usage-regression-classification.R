@@ -286,13 +286,27 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_equal(length(C2), 5L)
 
   model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
+  expect_identical(dim(model_uni$P), c(0L, 0L))
   vip_uni <- ViP(model_uni)
   expect_true(is.matrix(vip_uni))
 
   model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
+  expect_identical(dim(model_multi$P), c(0L, 0L))
   vip_multi <- ViP(model_multi)
   expect_true(is.list(vip_multi))
   expect_equal(length(vip_multi), 2L)
+
+  model_loadings <- pls(
+    A,
+    matrix(rnorm(nrow(A) * 2), ncol = 2),
+    ncomp = 1:3,
+    method = "simpls",
+    svd.method = "cpu_rsvd",
+    fit = TRUE,
+    return_loadings = TRUE
+  )
+  expect_equal(dim(model_loadings$P), c(ncol(A), 3L))
+  expect_true(all(is.finite(model_loadings$P)))
 })
 
 test_that("legacy KODAMA-specific helpers are not user-accessible", {

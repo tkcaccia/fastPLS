@@ -22,6 +22,7 @@ pls(
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = FALSE,
   return_variance = TRUE,
+  return_loadings = FALSE,
   proj = FALSE,
   perm.test = FALSE,
   times = 100,
@@ -92,6 +93,10 @@ chooses a memory-aware strategy from the data size.}
 explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
+\item{return_loadings}{Compute and store predictor loadings \code{P}. The default
+is \code{FALSE} because \code{P} is mainly used for interpretation/loading plots and
+is not needed for prediction, VIP, or the benchmark pipelines.}
+
 \item{proj}{Return projected \code{Ttest} when \code{TRUE}.}
 
 \item{perm.test}{Run permutation test.}
@@ -122,7 +127,7 @@ A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
 summaries were requested. Common fields are:
 \itemize{
-\item \code{P}: predictor loadings, with one column per latent component.
+\item \code{P}: predictor loadings, with one column per latent component. By default this is an empty \code{0 x 0} matrix; set \code{return_loadings = TRUE} to compute it for interpretation or loading plots.
 \item \code{Q}: response loadings or response-side latent coefficients.
 \item \code{R}: predictor weights/rotations used to project new samples into the PLS latent space.
 \item \code{Ttrain}: training latent scores. This is returned when the backend stores scores or when they are needed for fitted values, classifiers, variance summaries, or compact prediction.

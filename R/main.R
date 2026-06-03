@@ -286,6 +286,51 @@
   model
 }
 
+.maybe_attach_x_loadings <- function(model, Xtrain, return_loadings = FALSE) {
+  empty_p <- matrix(numeric(0), 0L, 0L)
+  if (is.null(model) || !is.list(model)) {
+    return(model)
+  }
+  if (!isTRUE(return_loadings)) {
+    model$P <- empty_p
+    if (!is.null(model$inner_model) && is.list(model$inner_model)) {
+      model$inner_model <- .maybe_attach_x_loadings(model$inner_model, Xtrain, FALSE)
+    }
+    return(model)
+  }
+  if (is.null(model$R) || length(model$R) == 0L || is.null(model$ncomp)) {
+    if (!is.null(model$inner_model) && is.list(model$inner_model)) {
+      model$inner_model <- .maybe_attach_x_loadings(model$inner_model, Xtrain, TRUE)
+    }
+    return(model)
+  }
+  R <- as.matrix(model$R)
+  Xtrain <- as.matrix(Xtrain)
+  if (nrow(R) != ncol(Xtrain)) {
+    return(model)
+  }
+  k <- min(max(as.integer(model$ncomp), na.rm = TRUE), ncol(R))
+  if (!is.finite(k) || is.na(k) || k < 1L) {
+    return(model)
+  }
+  Xscaled <- .fastpls_scaled_by_model(model, Xtrain)
+  scores <- .fastpls_score_matrix(model, "Ttrain")
+  if (is.null(scores) || ncol(scores) < k || nrow(scores) != nrow(Xscaled)) {
+    scores <- .fastpls_latent_scores(model, Xtrain, ncomp = k, backend = "cpu")
+  }
+  scores <- as.matrix(scores)[, seq_len(k), drop = FALSE]
+  denom <- colSums(scores * scores)
+  ok <- is.finite(denom) & denom > 0
+  P <- matrix(0, nrow = ncol(Xscaled), ncol = k)
+  if (any(ok)) {
+    P[, ok] <- sweep(crossprod(Xscaled, scores[, ok, drop = FALSE]), 2L, denom[ok], "/", check.margin = FALSE)
+  }
+  rownames(P) <- colnames(Xtrain)
+  colnames(P) <- paste0("LV", seq_len(k))
+  model$P <- P
+  model
+}
+
 .fastpls_named_components <- function(x, prefix) {
   names(x) <- paste0(prefix, seq_along(x))
   x
@@ -3521,6 +3566,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param return_variance Compute predictor-space latent-variable variance
 #'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
 #'   plotting variance metadata.
+#' @param return_loadings Compute and store predictor loadings `P`. The default
+#'   is `FALSE` because `P` is mainly used for interpretation/loading plots and
+#'   is not needed for prediction, VIP, or the benchmark pipelines.
 #' @param proj Return projected `Ttest` when `TRUE`.
 #' @param gpu_device_state Keep selected SIMPLS workspaces resident on the GPU when `TRUE`.
 #' @param gpu_qr Use GPU QR finalization when available.
@@ -6383,6 +6431,7 @@ pls =  function (Xtrain,
                          cknn_memory = c("auto", "standard", "blocked", "streaming"),
 	                 fit = FALSE,
                  return_variance = TRUE,
+                 return_loadings = FALSE,
                  proj = FALSE,
                  perm.test = FALSE,
                  times = 100,
@@ -6461,6 +6510,7 @@ pls =  function (Xtrain,
       return_variance = return_variance,
       proj = proj
     )
+    model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6486,6 +6536,7 @@ pls =  function (Xtrain,
       ))
     }
     model <- do.call(fit_fun, args)
+    model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6512,6 +6563,7 @@ pls =  function (Xtrain,
       ))
     }
     model <- do.call(fit_fun, args)
+    model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6530,10 +6582,11 @@ pls =  function (Xtrain,
         seed = seed,
         fit = fit,
         proj = proj,
-	        classifier = classifier,
-	        lda_ridge = lda_ridge,
+	      classifier = classifier,
+	      lda_ridge = lda_ridge,
             return_variance = return_variance
 	      )
+      model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
       return(.attach_backend_control(model, backend_control))
     }
     model <- .simpls_gpu(
@@ -6553,6 +6606,7 @@ pls =  function (Xtrain,
 	      lda_ridge = lda_ridge,
           return_variance = return_variance
 	    )
+    model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6701,8 +6755,9 @@ pls =  function (Xtrain,
 	    Ytrain_original,
 	    classifier,
 	    lda_ridge
-	  )
+		  )
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
+  model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
   if (!isTRUE(fit) && !is.null(model$R2Y)) {
     model$R2Y <- rep(NA_real_, length(ncomp))
   }
