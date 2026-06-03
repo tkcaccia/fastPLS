@@ -1,4 +1,4 @@
-test_that("pls records active backend-control settings", {
+test_that("pls does not expose backend-control metadata in fitted objects", {
   old_store_b <- Sys.getenv("FASTPLS_STORE_B", unset = NA_character_)
   old_deflcache <- Sys.getenv("FASTPLS_FAST_DEFLCACHE", unset = NA_character_)
   on.exit({
@@ -22,15 +22,8 @@ test_that("pls records active backend-control settings", {
   )
 
   expect_s3_class(fit, "fastPLS")
-  expect_s3_class(fit$backend_control, "fastPLSBackendControl")
-  expect_equal(fit$backend_control$overrides$backend, "cpu")
-  expect_equal(fit$backend_control$overrides$svd.method, "cpu_rsvd")
-
-  env <- fit$backend_control$env
-  store_b <- env[env$name == "FASTPLS_STORE_B", , drop = FALSE]
-  deflcache <- env[env$name == "FASTPLS_FAST_DEFLCACHE", , drop = FALSE]
-  expect_equal(store_b$value, "0")
-  expect_true(store_b$overridden)
-  expect_equal(deflcache$value, "0")
-  expect_true(deflcache$overridden)
+  expect_null(fit$backend_control)
+  expect_false("env" %in% names(fit))
+  expect_false("fastPLS_version" %in% names(fit))
+  expect_false("timestamp" %in% names(fit))
 })

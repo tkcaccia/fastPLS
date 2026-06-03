@@ -220,10 +220,6 @@
 }
 
 .attach_backend_control <- function(model, backend_control = NULL) {
-  if (is.null(model) || !is.list(model)) {
-    return(model)
-  }
-  model$backend_control <- backend_control %||% .backend_control_snapshot()
   model
 }
 
@@ -6375,32 +6371,7 @@ pls =  function (Xtrain,
 	  )
 	  on.exit(options(old_class_bias_options), add = TRUE)
 
-  backend_control <- .backend_control_snapshot(
-    context = "pls",
-    overrides = list(
-      method = requested_method,
-      backend = backend,
-      compiled_backend = backend_compiled,
-      svd.method = svd.method,
-      ncomp = as.integer(ncomp),
-      classifier = classifier,
-      return_variance = isTRUE(return_variance),
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      svds_tol = svds_tol,
-      irlba_work = irlba_work,
-      irlba_maxit = irlba_maxit,
-      irlba_tol = irlba_tol,
-      irlba_eps = irlba_eps,
-      irlba_svtol = irlba_svtol,
-      seed = seed,
-      k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m,
-      cknn_memory = cknn_memory
-    )
-  )
+  backend_control <- NULL
 
   if (identical(backend, "metal")) {
     model <- .pls_metal(
