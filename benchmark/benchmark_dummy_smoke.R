@@ -80,7 +80,7 @@ score_prediction <- function(pred, truth) {
 }
 
 run_one <- function(task, method, svd_method, backend,
-                    classifier = "argmax", gaussian_y = FALSE) {
+                    classifier = "argmax") {
   dat <- if (identical(task, "classification")) {
     make_classification()
   } else {
@@ -95,7 +95,6 @@ run_one <- function(task, method, svd_method, backend,
     svd.method = svd_method,
     backend = backend,
     classifier = classifier,
-    gaussian_y = gaussian_y,
     fit = FALSE,
     return_variance = FALSE,
     proj = FALSE,
@@ -111,7 +110,6 @@ run_one <- function(task, method, svd_method, backend,
     svd_method = svd_method,
     backend = backend,
     classifier = classifier,
-    gaussian_y = gaussian_y,
     runtime_ms = elapsed_ms,
     metric_name = metric$metric_name,
     metric_value = metric$metric_value,
@@ -132,7 +130,6 @@ safe_run_one <- function(...) {
         svd_method = dots[[3L]],
         backend = dots[[4L]],
         classifier = if (length(dots) >= 5L) dots[[5L]] else "argmax",
-        gaussian_y = if (length(dots) >= 6L) dots[[6L]] else FALSE,
         runtime_ms = NA_real_,
         metric_name = NA_character_,
         metric_value = NA_real_,

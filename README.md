@@ -40,34 +40,6 @@ For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient
 cube does not need to be stored.
 
-## Gaussian Response Compression
-
-All four model families can optionally fit a compressed Gaussian representation
-of the response by setting `gaussian_y = TRUE` in `pls()`. This is available
-through the compiled C++ and CUDA backends for `plssvd`, `simpls`, `opls`,
-and `kernelpls`. The option is disabled by default, so existing analyses are
-unchanged unless it is requested explicitly.
-
-When `gaussian_y_dim = NULL`, fastPLS uses `min(ncol(Xtrain), 100)` compressed
-response dimensions. A positive integer can be passed to `gaussian_y_dim` to
-test a smaller or larger sketch. The projection is reproducible through the
-model `seed`.
-
-For regression, the centered response matrix is multiplied by a Gaussian random
-projection before fitting. The fitted model stores a small ridge decoder that
-maps predictions from the compressed response space back to the original
-response columns, so `predict()` and in-fit predictions still return values on
-the original scale.
-
-For classification, Gaussian compression avoids fitting to a dense one-hot
-response when requested. Class labels are represented by reproducible Gaussian
-class codes, the PLS model is fit to those codes, and predictions are decoded by
-nearest-code scores back to the original factor levels.
-
-CUDA wrappers use the CUDA matrix-multiply helper for the regression projection
-and decoder construction when CUDA is available. The classification codebook is
-small and is built on the host before the GPU-native PLS fit.
-
 For PLS-DA with LDA classification, the recommended high-accuracy/high-speed
 configuration is `method = "plssvd", backend = "cuda", classifier = "lda"`.
 This uses the optimized standard CUDA path for latent projection, LDA training,
@@ -105,22 +77,6 @@ have been removed; tune only `candidate_knn_k`, `candidate_tau`, and
 `candidate_alpha`. The generic `pls()` API exposes the same decision rule through
 `classifier = "cknn"` and chooses the C++/CUDA/Metal implementation
 from `backend`.
-
-Example:
-
-```r
-fit <- pls(
-  Xtrain,
-  Ytrain,
-  Xtest,
-  Ytest,
-  method = "simpls",
-  svd.method = "rsvd",
-  ncomp = 50,
-  gaussian_y = TRUE,
-  gaussian_y_dim = 50
-)
-```
 
 ## Backends
 

@@ -103,8 +103,6 @@ classifier <- env("CLASSIFIER", "argmax")
 ncomp <- as.integer(env("NCOMP", "300"))
 scaling <- env("SCALING", "centering")
 seed <- as.integer(env("SEED", "123"))
-gaussian_y <- tolower(env("GAUSSIAN_Y", "false")) %in% c("1", "true", "yes", "y")
-gaussian_y_dim <- as.integer(env("GAUSSIAN_Y_DIM", "100"))
 predict_backend <- env("PREDICT_BACKEND", if (identical(backend, "cuda")) "cuda_flash" else "cpu")
 
 set.seed(seed)
@@ -121,8 +119,6 @@ base_row <- data.frame(
   classifier = classifier,
   ncomp = ncomp,
   scaling = scaling,
-  gaussian_y = gaussian_y,
-  gaussian_y_dim = if (isTRUE(gaussian_y)) gaussian_y_dim else NA_integer_,
   fit_time_sec = NA_real_,
   predict_time_sec = NA_real_,
   total_fit_predict_sec = NA_real_,
@@ -162,8 +158,6 @@ tryCatch({
       backend = backend,
       classifier = classifier,
       scaling = scaling,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = if (isTRUE(gaussian_y)) gaussian_y_dim else NULL,
       fit = FALSE,
       return_variance = FALSE
     )

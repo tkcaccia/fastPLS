@@ -81,8 +81,6 @@ make_response_code <- function(task, response_mode, code_dim = 50L, seed = 123L)
     col_pool <- setdiff(seq_len(ncol(H)), 1L)
     col_idx <- sample(col_pool, code_dim, replace = FALSE)
     codes <- H[row_idx, col_idx, drop = FALSE]
-  } else if (response_mode %in% c("gaussian50", "gaussian")) {
-    codes <- matrix(rnorm(length(classes) * code_dim), nrow = length(classes), ncol = code_dim)
   } else if (response_mode %in% c("orthogonal_random50", "orthogonal_random", "orthogonal50")) {
     z <- matrix(rnorm(length(classes) * code_dim), nrow = length(classes), ncol = code_dim)
     codes <- qr.Q(qr(z), complete = FALSE)
@@ -236,7 +234,7 @@ task_path <- find_dataset_rdata("singlecell")
 task <- as_task(task_path, dataset_id = "singlecell", split_seed = split_seed)
 variants <- strsplit(arg_value(args, "variants", default = "cpp_rsvd,cpp_irlba,cuda"), ",", fixed = TRUE)[[1L]]
 variants <- trimws(variants)
-response_modes <- strsplit(arg_value(args, "response_modes", default = "onehot,random_ecoc50,balanced_ecoc50,hadamard_ecoc50,gaussian50,orthogonal_random50,centroid_pca50"), ",", fixed = TRUE)[[1L]]
+response_modes <- strsplit(arg_value(args, "response_modes", default = "onehot,random_ecoc50,balanced_ecoc50,hadamard_ecoc50,orthogonal_random50,centroid_pca50"), ",", fixed = TRUE)[[1L]]
 response_modes <- trimws(response_modes)
 code_list <- setNames(vector("list", length(response_modes)), response_modes)
 for (mode in response_modes) {

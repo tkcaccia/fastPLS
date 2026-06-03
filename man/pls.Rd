@@ -13,8 +13,6 @@ pls(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   svd.method = c("irlba", "rsvd"),
-  gaussian_y = FALSE,
-  gaussian_y_dim = NULL,
   classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
   k = 10L,
@@ -56,12 +54,7 @@ pls(
 \code{rsvd}. Use CUDA or Metal backends for native GPU
 fits where available.}
 
-\item{gaussian_y}{Logical; when \code{TRUE}, fit PLS to a Gaussian random
-low-dimensional response sketch and decode predictions back to the original
-response scale or class labels. The default is \code{FALSE}.}
 
-\item{gaussian_y_dim}{Number of Gaussian response dimensions. When \code{NULL},
-the default is \code{min(ncol(Xtrain), 100)}.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on

@@ -2434,17 +2434,6 @@
   force(expr)
 }
 
-.gaussian_y_default_dim <- function(Xtrain, gaussian_y_dim = NULL) {
-  if (is.null(gaussian_y_dim) || length(gaussian_y_dim) == 0L || is.na(gaussian_y_dim[1L])) {
-    return(max(1L, min(as.integer(ncol(as.matrix(Xtrain))), 100L)))
-  }
-  dim <- as.integer(gaussian_y_dim[1L])
-  if (!is.finite(dim) || is.na(dim) || dim < 1L) {
-    stop("gaussian_y_dim must be a positive integer", call. = FALSE)
-  }
-  dim
-}
-
 .cuda_matmul_available <- function() {
   exists("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE) &&
     isTRUE(has_cuda())
@@ -2457,180 +2446,14 @@
   )
 }
 
-.gaussian_y_ridge_decoder <- function(Z, Yc, backend = c("cpu", "cuda")) {
-  backend <- match.arg(backend)
-  ztz <- crossprod(Z)
-  ridge <- 1e-8 * mean(diag(ztz))
-  if (!is.finite(ridge) || ridge <= 0) {
-    ridge <- 1e-8
-  }
-  rhs <- if (identical(backend, "cuda") && .cuda_matmul_available()) {
-    .cuda_matmul(t(Z), Yc)
-  } else {
-    crossprod(Z, Yc)
-  }
-  solve(ztz + diag(ridge, ncol(ztz)), rhs)
-}
-
-.gaussian_y_class_codes <- function(lev, dim, seed) {
-  codes <- .with_fastpls_seed(
-    seed,
-    matrix(rnorm(length(lev) * dim), nrow = length(lev), ncol = dim) / sqrt(dim)
-  )
-  codes <- sweep(codes, 2L, colMeans(codes), "-", check.margin = FALSE)
-  sds <- sqrt(colSums(codes * codes))
-  sds[!is.finite(sds) | sds == 0] <- 1
-  codes <- sweep(codes, 2L, sds, "/", check.margin = FALSE)
-  row_norm <- sqrt(rowSums(codes * codes))
-  row_norm[!is.finite(row_norm) | row_norm == 0] <- 1
-  codes <- sweep(codes, 1L, row_norm, "/", check.margin = FALSE)
-  rownames(codes) <- lev
-  colnames(codes) <- sprintf("gaussian_y_%03d", seq_len(ncol(codes)))
-  codes
-}
-
-.prepare_gaussian_y <- function(Ytrain,
-                                Xtrain,
-                                gaussian_y = FALSE,
-                                gaussian_y_dim = NULL,
-                                seed = 1L,
-                                backend = c("cpu", "cuda")) {
-  backend <- match.arg(backend)
+.prepare_response <- function(Ytrain) {
   classification <- is.factor(Ytrain)
   lev <- if (classification) levels(Ytrain) else NULL
-
-  if (!isTRUE(gaussian_y)) {
-    Ymat <- if (classification) transformy(Ytrain) else as.matrix(Ytrain)
-    return(list(
-      Ytrain = Ymat,
-      classification = classification,
-      lev = lev,
-      gaussian = NULL
-    ))
-  }
-
-  dim <- .gaussian_y_default_dim(Xtrain, gaussian_y_dim)
-  if (classification) {
-    codes <- .gaussian_y_class_codes(lev, dim, seed)
-    Ymat <- codes[as.integer(Ytrain), , drop = FALSE]
-    return(list(
-      Ytrain = Ymat,
-      classification = TRUE,
-      lev = lev,
-      gaussian = list(
-        enabled = TRUE,
-        task = "classification",
-        dim = ncol(Ymat),
-        original_dim = length(lev),
-        codes = codes,
-        backend = "cpu"
-      )
-    ))
-  }
-
-  Y <- as.matrix(Ytrain)
-  y_center <- colMeans(Y)
-  Yc <- sweep(Y, 2L, y_center, "-", check.margin = FALSE)
-  projection <- .with_fastpls_seed(
-    seed,
-    matrix(rnorm(ncol(Y) * dim), nrow = ncol(Y), ncol = dim) / sqrt(dim)
-  )
-  use_cuda <- identical(backend, "cuda") && .cuda_matmul_available()
-  Z <- if (use_cuda) .cuda_matmul(Yc, projection) else Yc %*% projection
-  decoder <- .gaussian_y_ridge_decoder(Z, Yc, backend = if (use_cuda) "cuda" else "cpu")
-  colnames(Z) <- sprintf("gaussian_y_%03d", seq_len(ncol(Z)))
   list(
-    Ytrain = Z,
-    classification = FALSE,
-    lev = NULL,
-    gaussian = list(
-      enabled = TRUE,
-      task = "regression",
-      dim = ncol(Z),
-      original_dim = ncol(Y),
-      y_center = matrix(y_center, nrow = 1L),
-      decoder = decoder,
-      backend = if (use_cuda) "cuda" else "cpu"
-    )
+    Ytrain = if (classification) transformy(Ytrain) else as.matrix(Ytrain),
+    classification = classification,
+    lev = lev
   )
-}
-
-.attach_gaussian_y <- function(model, spec) {
-  if (is.null(spec)) {
-    model$gaussian_y <- FALSE
-    return(model)
-  }
-  model$gaussian_y <- TRUE
-  model$gaussian_y_task <- spec$task
-  model$gaussian_y_dim <- spec$dim
-  model$gaussian_y_original_dim <- spec$original_dim
-  model$gaussian_y_backend <- spec$backend
-  if (identical(spec$task, "classification")) {
-    model$gaussian_y_codes <- spec$codes
-  } else {
-    model$gaussian_y_center <- spec$y_center
-    model$gaussian_y_decoder <- spec$decoder
-  }
-  model
-}
-
-.decode_gaussian_y_matrix <- function(object, Z) {
-  Z <- as.matrix(Z)
-  if (!isTRUE(object$gaussian_y)) {
-    return(Z)
-  }
-  if (identical(object$gaussian_y_task, "classification")) {
-    codes <- as.matrix(object$gaussian_y_codes)
-    scores <- 2 * (Z %*% t(codes))
-    scores <- sweep(scores, 2L, rowSums(codes * codes), "-", check.margin = FALSE)
-    colnames(scores) <- rownames(codes)
-    return(scores)
-  }
-  decoder <- as.matrix(object$gaussian_y_decoder)
-  Y <- if (identical(object$gaussian_y_backend, "cuda") && .cuda_matmul_available()) {
-    .cuda_matmul(Z, decoder)
-  } else {
-    Z %*% decoder
-  }
-  sweep(Y, 2L, as.numeric(object$gaussian_y_center[1L, ]), "+", check.margin = FALSE)
-}
-
-.decode_gaussian_y_cube <- function(object, Ycube) {
-  if (!isTRUE(object$gaussian_y) || is.null(Ycube)) {
-    return(Ycube)
-  }
-  dims <- dim(Ycube)
-  if (length(dims) == 2L) {
-    return(.decode_gaussian_y_matrix(object, Ycube))
-  }
-  if (length(dims) != 3L) {
-    stop("Gaussian response decoder expected a matrix or 3D prediction array", call. = FALSE)
-  }
-  first <- .decode_gaussian_y_matrix(object, Ycube[, , 1L, drop = TRUE])
-  out <- array(NA_real_, dim = c(nrow(first), ncol(first), dims[3L]))
-  out[, , 1L] <- first
-  if (dims[3L] >= 2L) {
-    for (i in seq.int(2L, dims[3L])) {
-      out[, , i] <- .decode_gaussian_y_matrix(object, Ycube[, , i, drop = TRUE])
-    }
-  }
-  dimnames(out) <- list(NULL, colnames(first), NULL)
-  out
-}
-
-.decode_gaussian_y_outputs <- function(model, original_Ytrain = NULL) {
-  if (!isTRUE(model$gaussian_y)) {
-    return(model)
-  }
-  if (!is.null(model$Yfit) && length(model$Yfit) > 0L && length(dim(model$Yfit)) >= 2L) {
-    model$Yfit <- .decode_gaussian_y_cube(model, model$Yfit)
-    if (!is.null(original_Ytrain) && !isTRUE(model$classification)) {
-      model$R2Y <- vapply(seq_len(dim(model$Yfit)[3L]), function(i) {
-        RQ(as.matrix(original_Ytrain), model$Yfit[, , i])
-      }, numeric(1))
-    }
-  }
-  model
 }
 
 .normalize_pls_method <- function(method) {
@@ -3140,7 +2963,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	  if (isTRUE(object$classification) &&
 	      is.null(Ytest) &&
 	      !isTRUE(raw_scores) &&
-	      !isTRUE(object$gaussian_y) &&
 	      !isTRUE(use_metal) &&
 	      (is.null(object$classification_rule) ||
 	         identical(object$classification_rule, "argmax"))) {
@@ -3184,9 +3006,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
     )
   } else {
     pls_predict(object, Xtest, proj)
-  }
-  if (isTRUE(object$gaussian_y)) {
-    res$Ypred <- .decode_gaussian_y_cube(object, res$Ypred)
   }
   res$Q2Y=NULL
 
@@ -3439,8 +3258,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            irlba_eps = 1e-9,
                            irlba_svtol = 1e-5,
                            seed = 1L,
-                           gaussian_y = FALSE,
-                           gaussian_y_dim = NULL,
 		                  classifier = c("argmax", "lda", "cknn"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
@@ -3448,9 +3265,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            proj = FALSE) {
   classifier <- .resolve_classifier_for_backend(classifier, "cpu")
   svd.method <- match.arg(.normalize_svd_method(svd.method), c("irlba", "cpu_rsvd"))
-  if (isTRUE(gaussian_y) && is.null(gaussian_y_dim)) {
-    gaussian_y_dim <- .gaussian_y_default_dim(Xtrain, NULL)
-  }
   .kernel_pls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), match.arg(kernel),
     gamma, degree, coef0, fit, proj, "cpp", pls,
@@ -3466,8 +3280,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol,
       seed = seed,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       classifier = classifier,
       lda_ridge = lda_ridge,
       return_variance = return_variance
@@ -3490,8 +3302,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                             rsvd_power = 1L,
                             svds_tol = 0,
                             seed = 1L,
-                            gaussian_y = FALSE,
-                            gaussian_y_dim = NULL,
 		                   classifier = c("argmax", "lda", "cknn"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
@@ -3500,9 +3310,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                             ...) {
   classifier <- .resolve_classifier_for_backend(classifier, "cuda")
   fit_fun <- .simpls_gpu
-  if (isTRUE(gaussian_y) && is.null(gaussian_y_dim)) {
-    gaussian_y_dim <- .gaussian_y_default_dim(Xtrain, NULL)
-  }
   .kernel_pls_fit(
     Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), match.arg(kernel),
     gamma, degree, coef0, fit, proj, "cuda", fit_fun,
@@ -3512,8 +3319,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
         rsvd_power = rsvd_power,
         svds_tol = svds_tol,
         seed = seed,
-        gaussian_y = gaussian_y,
-        gaussian_y_dim = gaussian_y_dim,
         classifier = classifier,
         lda_ridge = lda_ridge,
         return_variance = return_variance
@@ -3620,8 +3425,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                      irlba_eps = 1e-9,
                      irlba_svtol = 1e-5,
                      seed = 1L,
-                     gaussian_y = FALSE,
-                     gaussian_y_dim = NULL,
 			                  classifier = c("argmax", "lda", "cknn"),
                      lda_ridge = 1e-8,
                      fit = FALSE,
@@ -3644,8 +3447,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol,
       seed = seed,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       classifier = classifier,
       lda_ridge = lda_ridge,
       return_variance = return_variance
@@ -3665,8 +3466,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                       rsvd_power = 1L,
                       svds_tol = 0,
                       seed = 1L,
-                      gaussian_y = FALSE,
-                      gaussian_y_dim = NULL,
 			                      classifier = c("argmax", "lda", "cknn"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
@@ -3684,8 +3483,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
         rsvd_power = rsvd_power,
         svds_tol = svds_tol,
         seed = seed,
-        gaussian_y = gaussian_y,
-        gaussian_y_dim = gaussian_y_dim,
         classifier = classifier,
         lda_ridge = lda_ridge,
         return_variance = return_variance
@@ -3733,11 +3530,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param gpu_qr Use GPU QR finalization when available.
 #' @param gpu_eig Use GPU eigensolver finalization when available.
 #' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
-#' @param gaussian_y Logical; when `TRUE`, fit to a Gaussian random response
-#'   sketch and decode predictions back to the original response scale or class
-#'   labels. The default is `FALSE`.
-#' @param gaussian_y_dim Number of Gaussian response dimensions. When `NULL`,
-#'   the default is `min(ncol(Xtrain), 100)`.
 #' @return A `fastPLS` object.
 #' @noRd
 .simpls_gpu = function(Xtrain,
@@ -3756,8 +3548,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       gpu_qr = TRUE,
                       gpu_eig = TRUE,
                       gpu_finalize_threshold = 32L,
-                      gaussian_y = FALSE,
-                      gaussian_y_dim = NULL,
 			                      classifier = c("argmax", "lda", "cknn"),
 	                      lda_ridge = 1e-8,
                           return_variance = TRUE) {
@@ -3770,7 +3560,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 	  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
 	  Xtrain <- as.matrix(Xtrain)
 	  if (is.factor(Ytrain) &&
-	      !isTRUE(gaussian_y) &&
 	      !isTRUE(fit) &&
 	      classifier %in% c("argmax", "candidate_knn_cpp", "candidate_knn_cuda") &&
 	      .should_use_label_aware_plssvd(nrow(Xtrain), nlevels(Ytrain))) {
@@ -3793,7 +3582,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 	  }
 	  Ytrain_original <- Ytrain
   if (is.factor(Ytrain_original) &&
-      !isTRUE(gaussian_y) &&
       !isTRUE(fit) &&
       identical(classifier, "lda_cuda")) {
     lev <- levels(Ytrain_original)
@@ -3823,14 +3611,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     }
     return(model)
   }
-  yprep <- .prepare_gaussian_y(
-    Ytrain,
-    Xtrain,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
-    seed = seed,
-    backend = "cuda"
-  )
+  yprep <- .prepare_response(Ytrain)
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
@@ -3874,8 +3655,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     NULL
   }
   if (!is.null(fused_model)) {
-    fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
-    fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
     fused_model <- .maybe_attach_pls_variance_explained(fused_model, Xtrain, return_variance)
     fused_model <- .attach_backend_control(fused_model)
     return(fused_model)
@@ -3908,8 +3687,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   model$xprod_default <- use_xprod_default
   if (isTRUE(fit)) model <- .attach_train_scores(model, Xtrain)
   model <- .enable_flash_prediction(model, "cuda")
-	  model <- .attach_gaussian_y(model, yprep$gaussian)
-	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(
 	    model,
 	    Xtrain,
@@ -3961,11 +3738,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param gpu_qr Use GPU QR finalization when available.
 #' @param gpu_eig Use GPU eigensolver finalization when available.
 #' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
-#' @param gaussian_y Logical; when `TRUE`, fit to a Gaussian random response
-#'   sketch and decode predictions back to the original response scale or class
-#'   labels. The default is `FALSE`.
-#' @param gaussian_y_dim Number of Gaussian response dimensions. When `NULL`,
-#'   the default is `min(ncol(Xtrain), 100)`.
 #' @return A `fastPLS` object fitted with GPU PLSSVD.
 #' @noRd
 .plssvd_gpu = function(Xtrain,
@@ -3983,8 +3755,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       gpu_qr = TRUE,
                       gpu_eig = TRUE,
                       gpu_finalize_threshold = 32L,
-                      gaussian_y = FALSE,
-                      gaussian_y_dim = NULL,
 	                      classifier = c("argmax", "lda", "cknn"),
 	                      lda_ridge = 1e-8,
                           return_variance = TRUE) {
@@ -3997,14 +3767,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   Xtrain <- as.matrix(Xtrain)
   Ytrain_original <- Ytrain
-  yprep <- .prepare_gaussian_y(
-    Ytrain,
-    Xtrain,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
-    seed = seed,
-    backend = "cuda"
-  )
+  yprep <- .prepare_response(Ytrain)
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
@@ -4039,8 +3802,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     NULL
   }
   if (!is.null(fused_model)) {
-    fused_model <- .attach_gaussian_y(fused_model, yprep$gaussian)
-    fused_model <- .decode_gaussian_y_outputs(fused_model, Ytrain_original)
     fused_model <- .maybe_attach_pls_variance_explained(fused_model, Xtrain, return_variance)
     fused_model <- .attach_backend_control(fused_model)
     return(fused_model)
@@ -4071,8 +3832,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   model$xprod_default <- use_xprod_default
   if (isTRUE(fit)) model <- .attach_train_scores(model, Xtrain)
   model <- .enable_flash_prediction(model, "cuda")
-	  model <- .attach_gaussian_y(model, yprep$gaussian)
-	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(
 	    model,
 	    Xtrain,
@@ -4311,9 +4070,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                                  kernel,
                                  gamma,
                                  degree,
-                                 coef0,
-                                 gaussian_y,
-                                 gaussian_y_dim) {
+                                 coef0) {
   if (is.factor(Ydata)) {
     return(rep(NA_real_, length(ncomp)))
   }
@@ -4334,8 +4091,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       irlba_tol = irlba_tol,
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       fit = TRUE,
       return_variance = FALSE,
       proj = FALSE,
@@ -4796,8 +4551,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                             gamma = NULL,
                             degree = 3L,
                             coef0 = 1,
-                            gaussian_y = FALSE,
-                            gaussian_y_dim = NULL,
                             classifier = c("argmax", "lda", "cknn"),
                             lda_ridge = 1e-8,
                             k = 10L,
@@ -4940,8 +4693,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       irlba_tol = irlba_tol,
       irlba_eps = irlba_eps,
       irlba_svtol = irlba_svtol,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       fit = FALSE,
       proj = FALSE,
       return_variance = FALSE,
@@ -6336,10 +6087,8 @@ plot.fastPLS <- function(x,
   model$predict_latent_ok <- TRUE
   model <- .enable_flash_prediction(model, "cpu")
   model$predict_backend <- "metal"
-  model <- .attach_gaussian_y(model, yprep$gaussian)
   model$classification <- yprep$classification
   model$lev <- yprep$lev
-  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
   model <- .attach_lda_classifier(model, Xtrain, Ytrain_original, classifier, lda_ridge)
   model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
   class(model) <- "fastPLS"
@@ -6367,8 +6116,6 @@ plot.fastPLS <- function(x,
                        rsvd_oversample = 10L,
                        rsvd_power = 1L,
                        seed = 1L,
-                       gaussian_y = FALSE,
-                       gaussian_y_dim = NULL,
                        classifier = c("argmax", "lda", "cknn"),
                        lda_ridge = 1e-8,
                        fit = FALSE,
@@ -6384,14 +6131,7 @@ plot.fastPLS <- function(x,
 
   Xtrain <- as.matrix(Xtrain)
   Ytrain_original <- Ytrain
-  yprep <- .prepare_gaussian_y(
-    Ytrain,
-    Xtrain,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
-    seed = seed,
-    backend = "cpu"
-  )
+  yprep <- .prepare_response(Ytrain)
   Ymat <- yprep$Ytrain
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
 
@@ -6513,11 +6253,6 @@ plot.fastPLS <- function(x,
 #' @param svd.method SVD algorithm family for compiled CPU fits: \code{irlba} or
 #'   \code{rsvd}. Use CUDA or Metal backends for native GPU
 #'   fits where available.
-#' @param gaussian_y Logical; when `TRUE`, fit PLS to a Gaussian random
-#'   low-dimensional response sketch and decode predictions back to the original
-#'   response scale or class labels. The default is `FALSE`.
-#' @param gaussian_y_dim Number of Gaussian response dimensions. When `NULL`,
-#'   the default is `min(ncol(Xtrain), 100)`.
 #' @param classifier Classification decision rule. \code{argmax} keeps the
 #'   standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
 #'   the PLS latent scores. \code{cknn} is the compact name for the PLS-score
@@ -6578,8 +6313,6 @@ pls =  function (Xtrain,
                  scaling = c("centering", "autoscaling","none"),
                  method = c("simpls", "plssvd", "opls", "kernelpls"),
                  svd.method = c("irlba", "rsvd"),
-                 gaussian_y = FALSE,
-                 gaussian_y_dim = NULL,
 		                 classifier = c("argmax", "lda", "cknn"),
 		                 lda_ridge = 1e-8,
 			                 k = 10L,
@@ -6651,7 +6384,6 @@ pls =  function (Xtrain,
       svd.method = svd.method,
       ncomp = as.integer(ncomp),
       classifier = classifier,
-      gaussian_y = isTRUE(gaussian_y),
       return_variance = isTRUE(return_variance),
       rsvd_oversample = rsvd_oversample,
       rsvd_power = rsvd_power,
@@ -6687,8 +6419,6 @@ pls =  function (Xtrain,
       rsvd_oversample = rsvd_oversample,
       rsvd_power = rsvd_power,
       seed = seed,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       classifier = classifier,
       lda_ridge = lda_ridge,
       fit = fit,
@@ -6705,7 +6435,6 @@ pls =  function (Xtrain,
       ncomp = ncomp, north = north, scaling = scaling,
       rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
       svds_tol = svds_tol, seed = seed,
-      gaussian_y = gaussian_y, gaussian_y_dim = gaussian_y_dim,
       fit = fit, proj = proj
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
@@ -6732,7 +6461,6 @@ pls =  function (Xtrain,
       degree = degree, coef0 = coef0,
       rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
       svds_tol = svds_tol, seed = seed,
-      gaussian_y = gaussian_y, gaussian_y_dim = gaussian_y_dim,
       fit = fit, proj = proj
     )
     args <- c(args, list(classifier = classifier, lda_ridge = lda_ridge))
@@ -6766,8 +6494,6 @@ pls =  function (Xtrain,
         seed = seed,
         fit = fit,
         proj = proj,
-        gaussian_y = gaussian_y,
-        gaussian_y_dim = gaussian_y_dim,
 	        classifier = classifier,
 	        lda_ridge = lda_ridge,
             return_variance = return_variance
@@ -6787,8 +6513,6 @@ pls =  function (Xtrain,
       seed = seed,
       fit = fit,
       proj = proj,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
 	      classifier = classifier,
 	      lda_ridge = lda_ridge,
           return_variance = return_variance
@@ -6803,14 +6527,7 @@ pls =  function (Xtrain,
 
   Xtrain = as.matrix(Xtrain)
   Ytrain_original <- Ytrain
-  yprep <- .prepare_gaussian_y(
-    Ytrain,
-    Xtrain,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
-    seed = seed,
-    backend = "cpu"
-  )
+  yprep <- .prepare_response(Ytrain)
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
@@ -6940,10 +6657,8 @@ pls =  function (Xtrain,
   model$predict_latent_ok <- TRUE
   if (isTRUE(fit)) model <- .attach_train_scores(model, Xtrain)
   model <- .enable_flash_prediction(model, "cpu")
-  model <- .attach_gaussian_y(model, yprep$gaussian)
   model$classification=classification
   model$lev=lev
-	  model <- .decode_gaussian_y_outputs(model, Ytrain_original)
 	  model <- .attach_lda_classifier(
 	    model,
 	    Xtrain,
@@ -7031,7 +6746,6 @@ pls =  function (Xtrain,
             )
           }
 
-          model_perm <- .attach_gaussian_y(model_perm, yprep$gaussian)
           model_perm$classification <- classification
           model_perm$lev <- lev
           res_perm=predict(model_perm,Xtest,Ytest)
@@ -7254,9 +6968,6 @@ pls =  function (Xtrain,
   if (!identical(cfg$classifier, "lda")) {
     cfg$lda_ridge <- 1e-8
   }
-  if (!isTRUE(cfg$gaussian_y)) {
-    cfg["gaussian_y_dim"] <- list(NULL)
-  }
   cfg
 }
 
@@ -7274,8 +6985,6 @@ pls =  function (Xtrain,
                                      gamma,
                                      degree,
                                      coef0,
-                                     gaussian_y,
-                                     gaussian_y_dim,
                                      classifier, classifier_missing,
                                      lda_ridge,
                                      k,
@@ -7342,8 +7051,6 @@ pls =  function (Xtrain,
       gamma = .cv_grid_scalar_values(gamma, name = "gamma"),
       degree = .cv_grid_scalar_values(degree, name = "degree", cast = as.integer, allow_null = FALSE),
       coef0 = .cv_grid_scalar_values(coef0, name = "coef0", cast = as.numeric, allow_null = FALSE),
-      gaussian_y = .cv_grid_scalar_values(gaussian_y, name = "gaussian_y", cast = as.logical, allow_null = FALSE),
-      gaussian_y_dim = .cv_grid_scalar_values(gaussian_y_dim, name = "gaussian_y_dim"),
       classifier = .cv_grid_choice_values(
         classifier, classifier_missing,
         choices = .classifier_public_choices,
@@ -7487,8 +7194,6 @@ pls =  function (Xtrain,
 #' @param seed Random seed used for fold assignment and randomized SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
-#' @param gaussian_y_dim Number of Gaussian response dimensions. When `NULL`,
-#'   the default is `min(ncol(Xdata), 100)`.
 #' @param classifier Classification rule for factor responses: `"argmax"`,
 #'   `"lda"`, or `"cknn"`. Multiple values are treated as a tuning grid.
 #' @param lda_ridge Ridge added to the pooled LDA covariance diagonal. Multiple
@@ -7539,8 +7244,6 @@ single.pls.cv =  function (Xdata,
                           gamma = NULL,
                           degree = 3L,
                           coef0 = 1,
-                          gaussian_y = FALSE,
-                          gaussian_y_dim = NULL,
                           classifier = c("argmax", "lda", "cknn"),
                           lda_ridge = 1e-8,
                           k = 10L,
@@ -7571,8 +7274,6 @@ single.pls.cv =  function (Xdata,
     gamma = gamma,
     degree = degree,
     coef0 = coef0,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
     classifier = classifier,
     classifier_missing = missing(classifier),
     lda_ridge = lda_ridge,
@@ -7610,8 +7311,6 @@ single.pls.cv =  function (Xdata,
           gamma = cfg$gamma,
           degree = cfg$degree,
           coef0 = cfg$coef0,
-          gaussian_y = cfg$gaussian_y,
-          gaussian_y_dim = cfg$gaussian_y_dim,
           classifier = cfg$classifier,
           lda_ridge = cfg$lda_ridge,
           k = cfg$k,
@@ -7688,8 +7387,6 @@ single.pls.cv =  function (Xdata,
   gamma <- cfg$gamma
   degree <- cfg$degree
   coef0 <- cfg$coef0
-  gaussian_y <- cfg$gaussian_y
-  gaussian_y_dim <- cfg$gaussian_y_dim
   classifier <- cfg$classifier
   lda_ridge <- cfg$lda_ridge
   k <- cfg$k
@@ -7720,10 +7417,8 @@ single.pls.cv =  function (Xdata,
   if (is.null(constrain)) constrain <- seq_len(nrow(Xdata))
   classification <- is.factor(Ydata)
 
-  res <- if ((!identical(classifier, "argmax") && isTRUE(gaussian_y)) ||
-             (identical(classifier, "cknn") && !identical(cknn_memory, "standard")) ||
-             (!identical(kernel, "linear")) ||
-             (identical(backend, "metal") && isTRUE(gaussian_y))) {
+  res <- if ((identical(classifier, "cknn") && !identical(cknn_memory, "standard")) ||
+             !identical(kernel, "linear")) {
     .pls_cv_via_pls(
       Xdata = Xdata,
       Ydata = Ydata,
@@ -7748,8 +7443,6 @@ single.pls.cv =  function (Xdata,
       gamma = gamma,
       degree = degree,
       coef0 = coef0,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim,
       classifier = classifier,
       lda_ridge = lda_ridge,
       k = k,
@@ -7858,9 +7551,7 @@ single.pls.cv =  function (Xdata,
       kernel = kernel,
       gamma = gamma,
       degree = degree,
-      coef0 = coef0,
-      gaussian_y = gaussian_y,
-      gaussian_y_dim = gaussian_y_dim
+      coef0 = coef0
     )
   }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
@@ -7943,8 +7634,6 @@ pls.double.cv = function(Xdata,
                          gamma = NULL,
                          degree = 3L,
                          coef0 = 1,
-                         gaussian_y = FALSE,
-                         gaussian_y_dim = NULL,
                          classifier = c("argmax", "lda", "cknn"),
                          lda_ridge = 1e-8,
                          k = 10L,
@@ -7974,8 +7663,6 @@ pls.double.cv = function(Xdata,
     gamma = gamma,
     degree = degree,
     coef0 = coef0,
-    gaussian_y = gaussian_y,
-    gaussian_y_dim = gaussian_y_dim,
     classifier = classifier,
     classifier_missing = missing(classifier),
     lda_ridge = lda_ridge,
@@ -7999,8 +7686,6 @@ pls.double.cv = function(Xdata,
   gamma_grid <- .cv_grid_arg_values(tuning_grid, "gamma")
   degree_grid <- .cv_grid_arg_values(tuning_grid, "degree")
   coef0_grid <- .cv_grid_arg_values(tuning_grid, "coef0")
-  gaussian_y_grid <- .cv_grid_arg_values(tuning_grid, "gaussian_y")
-  gaussian_y_dim_grid <- .cv_grid_arg_values(tuning_grid, "gaussian_y_dim")
   classifier_grid <- .cv_grid_arg_values(tuning_grid, "classifier")
   lda_ridge_grid <- .cv_grid_arg_values(tuning_grid, "lda_ridge")
   k_grid <- .cv_grid_arg_values(tuning_grid, "k")
@@ -8021,8 +7706,6 @@ pls.double.cv = function(Xdata,
   gamma <- base_cfg$gamma
   degree <- base_cfg$degree
   coef0 <- base_cfg$coef0
-  gaussian_y <- base_cfg$gaussian_y
-  gaussian_y_dim <- base_cfg$gaussian_y_dim
   classifier_public <- base_cfg$classifier
   classifier <- .resolve_classifier_for_backend(classifier_public, backend)
   lda_ridge <- base_cfg$lda_ridge
@@ -8128,8 +7811,6 @@ pls.double.cv = function(Xdata,
           gamma = gamma_grid,
           degree = degree_grid,
           coef0 = coef0_grid,
-          gaussian_y = gaussian_y_grid,
-          gaussian_y_dim = gaussian_y_dim_grid,
           classifier = classifier_grid,
           lda_ridge = lda_ridge_grid,
           k = k_grid,
@@ -8157,8 +7838,6 @@ pls.double.cv = function(Xdata,
       fit_gamma <- .cv_value_or_default(selected, "gamma", gamma)
       fit_degree <- .cv_value_or_default(selected, "degree", degree)
       fit_coef0 <- .cv_value_or_default(selected, "coef0", coef0)
-      fit_gaussian_y <- .cv_value_or_default(selected, "gaussian_y", gaussian_y)
-      fit_gaussian_y_dim <- .cv_value_or_default(selected, "gaussian_y_dim", gaussian_y_dim)
       fit_classifier_public <- .cv_value_or_default(selected, "classifier", classifier_public)
       fit_classifier <- .resolve_classifier_for_backend(fit_classifier_public, fit_backend)
       fit_lda_ridge <- .cv_value_or_default(selected, "lda_ridge", lda_ridge)
@@ -8194,8 +7873,6 @@ pls.double.cv = function(Xdata,
         irlba_tol = fit_irlba_tol,
         irlba_eps = fit_irlba_eps,
         irlba_svtol = fit_irlba_svtol,
-        gaussian_y = fit_gaussian_y,
-        gaussian_y_dim = fit_gaussian_y_dim,
         fit = !classification,
         proj = FALSE,
         backend = fit_backend,
@@ -8351,8 +8028,6 @@ pls.double.cv = function(Xdata,
         gamma = gamma,
         degree = degree,
         coef0 = coef0,
-        gaussian_y = gaussian_y,
-        gaussian_y_dim = gaussian_y_dim,
         classifier = classifier,
         lda_ridge = lda_ridge,
         k = k,

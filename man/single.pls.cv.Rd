@@ -20,8 +20,6 @@ single.pls.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  gaussian_y = FALSE,
-  gaussian_y_dim = NULL,
   classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
   k = 10L,
@@ -77,12 +75,7 @@ are always held out together and are never split across training and test.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{gaussian_y}{Logical; when \code{TRUE}, fit PLS to a Gaussian random
-low-dimensional response sketch and decode predictions back to the original
-response scale or class labels. The default is \code{FALSE}.}
 
-\item{gaussian_y_dim}{Number of Gaussian response dimensions. When \code{NULL},
-the default is \code{min(ncol(Xdata), 100)}.}
 
 \item{classifier}{Classification rule for factor responses: \code{"argmax"},
 \code{"lda"}, or \code{"cknn"}. Multiple values are treated as a tuning grid.}

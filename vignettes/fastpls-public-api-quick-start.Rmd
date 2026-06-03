@@ -840,36 +840,6 @@ pc <- pca(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 105)
 plot(pc, groups = Ytrain_cls, ellipse = TRUE)
 ```
 
-## Gaussian Response Compression
-
-For high-dimensional responses, `gaussian_y = TRUE` compresses `Y` to a smaller
-random Gaussian response space before fitting and decodes predictions back to
-the original response scale or class labels. This option uses the random
-projection idea underlying the Johnson-Lindenstrauss lemma (Johnson and
-Lindenstrauss, 1984) as a practical response-side compression device. By
-default, the number of Gaussian dimensions is `min(ncol(Xtrain), 100)` unless
-`gaussian_y_dim` is supplied.
-
-```{r}
-Y_multi <- cbind(Ytrain_reg, Ytrain_reg^2, sin(Ytrain_reg))
-Y_multi_test <- cbind(Ytest_reg, Ytest_reg^2, sin(Ytest_reg))
-
-fit_gaussian <- pls(
-  Xtrain,
-  Y_multi,
-  Xtest,
-  Y_multi_test,
-  ncomp = 1:2,
-  method = "simpls",
-  svd.method = "rsvd",
-  gaussian_y = TRUE,
-  gaussian_y_dim = 3,
-  seed = 106
-)
-
-dim(fit_gaussian$Ypred)
-```
-
 ## CUDA Availability
 
 CUDA is optional. Use `has_cuda()` before selecting `backend = "cuda"`.

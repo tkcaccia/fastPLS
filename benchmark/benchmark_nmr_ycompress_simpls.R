@@ -105,24 +105,6 @@ make_y_transform <- function(Ytrain, mode, code_dim, seed = 123L, use_cuda_proje
       decoder <- function(pred_z) add_mean(as.matrix(pred_z) %*% t(loadings), y_center)
       effective_dim <- ncol(fit_y)
       decoder_name <- "pca_scores_times_loadings"
-    } else if (mode %in% c("gaussian50", "gaussian")) {
-      set.seed(as.integer(seed))
-      projection <- matrix(rnorm(q * d), nrow = q, ncol = d) / sqrt(d)
-      if (isTRUE(use_cuda_projection)) {
-        if (!cuda_matmul_available()) {
-          stop("CUDA Gaussian compression requested, but cuda_matrix_multiply/CUDA is unavailable")
-        }
-        fit_y <- cuda_matmul(Yc, projection)
-        decoder_mat <- ridge_decoder_backend(fit_y, Yc, use_cuda = TRUE)
-        decoder <- function(pred_z) add_mean(cuda_matmul(as.matrix(pred_z), decoder_mat), y_center)
-        projection_backend <- "cuda"
-      } else {
-        fit_y <- Yc %*% projection
-        decoder_mat <- ridge_decoder(fit_y, Yc)
-        decoder <- function(pred_z) add_mean(as.matrix(pred_z) %*% decoder_mat, y_center)
-      }
-      effective_dim <- ncol(fit_y)
-      decoder_name <- "ridge_least_squares"
     } else if (mode %in% c("orthogonal_random50", "orthogonal_random", "orthogonal50")) {
       set.seed(as.integer(seed))
       raw_projection <- matrix(rnorm(q * d), nrow = q, ncol = d)
@@ -194,7 +176,7 @@ transform <- make_y_transform(
   code_dim,
   seed = split_seed,
   use_cuda_projection = identical(variant, "cuda") &&
-    response_mode %in% c("gaussian50", "gaussian", "orthogonal_random50", "orthogonal_random", "orthogonal50")
+    response_mode %in% c("orthogonal_random50", "orthogonal_random", "orthogonal50")
 )
 
 row <- tryCatch({
