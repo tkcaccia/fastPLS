@@ -118,9 +118,43 @@ Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
 \code{svtol}, and \code{seed}.}
 }
 \value{
-A \code{fastPLS} object. Fitted objects include \code{variance_explained},
-\code{cumulative_variance_explained}, and matching \verb{x_*} aliases containing the
-fraction of training predictor variance explained by each latent variable.
+A \code{fastPLS} object. The object is a list whose fields depend on the
+selected method, backend, classifier, and whether test data or optional
+summaries were requested. Common fields are:
+\itemize{
+\item \code{P}: predictor loadings, with one column per latent component.
+\item \code{Q}: response loadings or response-side latent coefficients.
+\item \code{R}: predictor weights/rotations used to project new samples into the PLS latent space.
+\item \code{Ttrain}: training latent scores. This is returned when the backend stores scores or when they are needed for fitted values, classifiers, variance summaries, or compact prediction.
+\item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by PLSSVD-style compact prediction when a full coefficient array is avoided.
+\item \code{B}: regression coefficient matrix or coefficient array, when stored. For vector-valued \code{ncomp}, a three-dimensional array may contain the coefficient path for all requested component counts.
+\item \code{B_stored}: logical flag indicating whether the full \code{B} coefficients were stored.
+\item \code{compact_prediction}: logical flag indicating that prediction can use compact low-rank factors instead of a full \code{p x q} coefficient matrix.
+\item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one when no scaling is applied.
+\item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
+\item \code{p}, \code{m}: number of predictor and response columns used internally.
+\item \code{ncomp}: requested/effective component count vector. For PLSSVD this may be capped by the numerical rank of the response.
+\item \code{pls_method}: fitted PLS family, such as \code{"plssvd"} or \code{"simpls"}.
+\item \code{xprod_default}: logical flag indicating whether fastPLS selected the matrix-free cross-product route for the fit.
+\item \code{predict_latent_ok}: logical flag indicating whether latent-space prediction is available for \code{predict()}.
+\item \code{predict_backend}, \code{flash_svd}, \code{flash_svd_backend}, \code{flash_svd_mode}, \code{flash_block_size}: prediction/backend metadata for the compact streamed prediction path, when used.
+\item \code{classification}: logical flag indicating whether \code{Ytrain} was a factor and the model was fitted as PLS-DA.
+\item \code{lev}: factor levels used for classification.
+\item \code{classification_rule}: classification head used for factor responses: \code{"argmax"}, \code{"lda"}, or \code{"cknn"} internally resolved to the selected backend.
+\item \code{lda_backend}: backend used by the latent-space LDA classifier, when \code{classifier = "lda"}.
+\item \code{Yfit}: fitted training responses or fitted class labels, returned when \code{fit = TRUE}.
+\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE}; otherwise \code{NA} placeholders may be returned for compatibility.
+\item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied to \code{pls()}. For classification this contains predicted factor labels; for regression it contains numeric predictions.
+\item \code{Ypred_index}: integer class indices for classification predictions, when available.
+\item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
+\item \code{Q2Y}: test-set predictive performance for numeric \code{Ytest}, or classification accuracy for factor \code{Ytest}, returned when \code{Ytest} is supplied.
+\item \code{pval}: permutation-test p-values by component, returned when \code{perm.test = TRUE}.
+\item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained}, \code{variance_total}, \code{variance_basis}: predictor-space variance summaries returned when \code{return_variance = TRUE}.
+\item \code{x_variance}, \code{x_variance_explained}, \code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the predictor-space variance summaries.
+\item \code{inner_model}: fitted inner PLS model used by OPLS.
+\item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine}, \code{xprod_mode}, \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
+\item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific kernel settings and execution metadata.
+}
 }
 \description{
 Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or

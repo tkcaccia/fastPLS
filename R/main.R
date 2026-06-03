@@ -6291,9 +6291,74 @@ plot.fastPLS <- function(x,
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample`, `power`, `svds_tol`, `work`, `maxit`, `tol`, `eps`,
 #'   `svtol`, and `seed`.
-#' @return A `fastPLS` object. Fitted objects include `variance_explained`,
-#'   `cumulative_variance_explained`, and matching `x_*` aliases containing the
-#'   fraction of training predictor variance explained by each latent variable.
+#' @return A `fastPLS` object. The object is a list whose fields depend on the
+#'   selected method, backend, classifier, and whether test data or optional
+#'   summaries were requested. Common fields are:
+#'
+#'   * `P`: predictor loadings, with one column per latent component.
+#'   * `Q`: response loadings or response-side latent coefficients.
+#'   * `R`: predictor weights/rotations used to project new samples into the PLS
+#'     latent space.
+#'   * `Ttrain`: training latent scores. This is returned when the backend stores
+#'     scores or when they are needed for fitted values, classifiers, variance
+#'     summaries, or compact prediction.
+#'   * `C_latent`, `W_latent`: low-rank latent prediction factors used by
+#'     PLSSVD-style compact prediction when a full coefficient array is avoided.
+#'   * `B`: regression coefficient matrix or coefficient array, when stored.
+#'     For vector-valued `ncomp`, a three-dimensional array may contain the
+#'     coefficient path for all requested component counts.
+#'   * `B_stored`: logical flag indicating whether the full `B` coefficients
+#'     were stored.
+#'   * `compact_prediction`: logical flag indicating that prediction can use
+#'     compact low-rank factors instead of a full `p x q` coefficient matrix.
+#'   * `mX`, `vX`: training predictor centering and scaling values. `vX` is one
+#'     when no scaling is applied.
+#'   * `mY`: response centering values for regression or dummy-coded PLS-DA.
+#'   * `p`, `m`: number of predictor and response columns used internally.
+#'   * `ncomp`: requested/effective component count vector. For PLSSVD this may
+#'     be capped by the numerical rank of the response.
+#'   * `pls_method`: fitted PLS family, such as `"plssvd"` or `"simpls"`.
+#'   * `xprod_default`: logical flag indicating whether fastPLS selected the
+#'     matrix-free cross-product route for the fit.
+#'   * `predict_latent_ok`: logical flag indicating whether latent-space
+#'     prediction is available for `predict()`.
+#'   * `predict_backend`, `flash_svd`, `flash_svd_backend`,
+#'     `flash_svd_mode`, `flash_block_size`: prediction/backend metadata for the
+#'     compact streamed prediction path, when used.
+#'   * `classification`: logical flag indicating whether `Ytrain` was a factor
+#'     and the model was fitted as PLS-DA.
+#'   * `lev`: factor levels used for classification.
+#'   * `classification_rule`: classification head used for factor responses:
+#'     `"argmax"`, `"lda"`, or `"cknn"` internally resolved to the selected
+#'     backend.
+#'   * `lda_backend`: backend used by the latent-space LDA classifier, when
+#'     `classifier = "lda"`.
+#'   * `Yfit`: fitted training responses or fitted class labels, returned when
+#'     `fit = TRUE`.
+#'   * `R2Y`: training-set coefficient of determination path when `fit = TRUE`;
+#'     otherwise `NA` placeholders may be returned for compatibility.
+#'   * `Ypred`: predictions for `Xtest`, returned only when `Xtest` is supplied
+#'     to `pls()`. For classification this contains predicted factor labels; for
+#'     regression it contains numeric predictions.
+#'   * `Ypred_index`: integer class indices for classification predictions, when
+#'     available.
+#'   * `Ttest`: test-set latent scores, returned when `proj = TRUE`.
+#'   * `Q2Y`: test-set predictive performance for numeric `Ytest`, or
+#'     classification accuracy for factor `Ytest`, returned when `Ytest` is
+#'     supplied.
+#'   * `pval`: permutation-test p-values by component, returned when
+#'     `perm.test = TRUE`.
+#'   * `variance`, `variance_explained`, `cumulative_variance_explained`,
+#'     `variance_total`, `variance_basis`: predictor-space variance summaries
+#'     returned when `return_variance = TRUE`.
+#'   * `x_variance`, `x_variance_explained`,
+#'     `x_cumulative_variance_explained`, `x_variance_total`: aliases of the
+#'     predictor-space variance summaries.
+#'   * `inner_model`: fitted inner PLS model used by OPLS.
+#'   * `W_orth`, `P_orth`, `north`, `opls_engine`, `xprod_mode`,
+#'     `gpu_resident`: OPLS-specific orthogonal-component and backend metadata.
+#'   * `kernel`, `kernel_engine`, `kernel_linear_direct`: kernelPLS-specific
+#'     kernel settings and execution metadata.
 #' @examples
 #' X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 #' y <- mtcars$mpg
