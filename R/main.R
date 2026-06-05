@@ -7327,14 +7327,35 @@ pls =  function (Xtrain,
 #'   selection can also be controlled with `selection_metric = "auto"`,
 #'   `"accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`; the selection metric itself is
 #'   scalar.
-#' @return List with `best_ncomp`, decoded `pred`, `metrics`, regression
-#'   `Q2Y`, `R2Y`, and `RMSD` vectors, `fold`, backend metadata,
-#'   `best_parameters`, and `Ypred` when score predictions are stored.
-#'   `best_parameters` intentionally contains only `ncomp` plus the arguments
-#'   that were actually optimized, for example `classifier` when
-#'   `classifier = c("argmax", "lda")`. When more than one predictive
-#'   configuration is tested, `tuning_summary` and `tuning_metrics` report all
-#'   grid results, including fixed defaults.
+#' @return A list describing the cross-validation run and selected model:
+#'   \itemize{
+#'   \item `best_ncomp`: number of components selected by the chosen metric.
+#'   \item `best_index`: position of `best_ncomp` in the tested component grid.
+#'   \item `selection_metric`: metric used for optimization. With `"auto"`,
+#'   classification uses accuracy and regression uses the default prediction
+#'   error rule.
+#'   \item `best_metric_name` and `best_metric_value`: name and value of the
+#'   metric at the selected component count.
+#'   \item `Q2Y`: held-out cross-validated predictive performance. For
+#'   classification this is accuracy; for regression it is cross-validated Q2
+#'   when available.
+#'   \item `RMSD`: held-out root mean squared deviation for regression. It is
+#'   `NA` for classification.
+#'   \item `R2Y`: training-set explained-variance path for regression when
+#'   `return_r2 = TRUE`; otherwise `NA`. For classification it is retained as
+#'   cross-validated accuracy for backward compatibility.
+#'   \item `fold`: fold assignment used for each sample.
+#'   \item `pred`: decoded cross-validated predictions when predictions are
+#'   stored.
+#'   \item `Ypred`: raw prediction array when score predictions are stored.
+#'   \item `metrics`: per-component metric table returned by the CV backend.
+#'   \item `best_parameters`: compact list containing only `ncomp` plus the
+#'   arguments that were actually optimized, for example `classifier` when
+#'   `classifier = c("argmax", "lda")`.
+#'   \item `tuning_config`: complete configuration used for the selected run.
+#'   \item `tuning_summary` and `tuning_metrics`: tables for all tested
+#'   configurations when more than one predictive configuration is supplied.
+#'   }
 #' @examples
 #' idx <- c(1:12, 51:62, 101:112)
 #' X <- as.matrix(iris[idx, 1:4])

@@ -112,14 +112,33 @@ selection can also be controlled with \code{selection_metric = "auto"},
 scalar.}
 }
 \value{
-List with \code{best_ncomp}, decoded \code{pred}, \code{metrics}, regression
-\code{Q2Y}, \code{R2Y}, and \code{RMSD} vectors, \code{fold}, backend metadata,
-\code{best_parameters}, and \code{Ypred} when score predictions are stored.
-\code{best_parameters} intentionally contains only \code{ncomp} plus the arguments
-that were actually optimized, for example \code{classifier} when
-\code{classifier = c("argmax", "lda")}. When more than one predictive
-configuration is tested, \code{tuning_summary} and \code{tuning_metrics} report all
-grid results, including fixed defaults.
+A list describing the cross-validation run and selected model:
+\itemize{
+\item \code{best_ncomp}: number of components selected by the chosen metric.
+\item \code{best_index}: position of \code{best_ncomp} in the tested component grid.
+\item \code{selection_metric}: metric used for optimization. With \code{"auto"},
+classification uses accuracy and regression uses the default prediction error rule.
+\item \code{best_metric_name} and \code{best_metric_value}: name and value of the
+metric at the selected component count.
+\item \code{Q2Y}: held-out cross-validated predictive performance. For
+classification this is accuracy; for regression it is cross-validated Q2 when
+available.
+\item \code{RMSD}: held-out root mean squared deviation for regression. It is
+\code{NA} for classification.
+\item \code{R2Y}: training-set explained-variance path for regression when
+\code{return_r2 = TRUE}; otherwise \code{NA}. For classification it is retained as
+cross-validated accuracy for backward compatibility.
+\item \code{fold}: fold assignment used for each sample.
+\item \code{pred}: decoded cross-validated predictions when predictions are stored.
+\item \code{Ypred}: raw prediction array when score predictions are stored.
+\item \code{metrics}: per-component metric table returned by the CV backend.
+\item \code{best_parameters}: compact list containing only \code{ncomp} plus the
+arguments that were actually optimized, for example \code{classifier} when
+\code{classifier = c("argmax", "lda")}.
+\item \code{tuning_config}: complete configuration used for the selected run.
+\item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
+configurations when more than one predictive configuration is supplied.
+}
 }
 \description{
 Performs grouped k-fold or leave-one-out cross-validation over candidate
