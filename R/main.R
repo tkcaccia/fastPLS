@@ -7199,6 +7199,25 @@ pls =  function (Xtrain,
   as.list(rec[1L, , drop = FALSE])
 }
 
+.cv_varied_parameter_names <- function(configs) {
+  if (length(configs) <= 1L) {
+    return(character(0))
+  }
+  recs <- do.call(rbind, lapply(configs, .cv_config_record))
+  keep <- vapply(recs, function(x) {
+    x <- x[!is.na(x)]
+    length(unique(as.character(x))) > 1L
+  }, logical(1L))
+  names(recs)[keep]
+}
+
+.cv_selected_parameters <- function(cfg, configs, best_ncomp) {
+  full <- .cv_config_list(cfg)
+  varied <- .cv_varied_parameter_names(configs)
+  selected <- full[intersect(varied, names(full))]
+  c(list(ncomp = as.integer(best_ncomp[[1L]])), selected)
+}
+
 .cv_select_best_result_from_grid <- function(results,
                                              summaries,
                                              metrics,
@@ -7226,8 +7245,11 @@ pls =  function (Xtrain,
   best$tuning_summary <- summaries
   best$tuning_metrics <- metrics
   best$best_grid_id <- best_grid_id
-  best$best_parameters <- .cv_config_list(results[[best_grid_id]]$tuning_config)
-  best$best_parameters$ncomp <- best$best_ncomp
+  best$best_parameters <- .cv_selected_parameters(
+    results[[best_grid_id]]$tuning_config,
+    lapply(results, `[[`, "tuning_config"),
+    best$best_ncomp
+  )
   best
 }
 
@@ -7303,9 +7325,12 @@ pls =  function (Xtrain,
 #'   scalar.
 #' @return List with `best_ncomp`, decoded `pred`, `metrics`, regression
 #'   `Q2Y`, `R2Y`, and `RMSD` vectors, `fold`, backend metadata,
-#'   `best_parameters`, and `Ypred` when score predictions are stored. When
-#'   more than one predictive configuration is tested, `tuning_summary` and
-#'   `tuning_metrics` report all grid results.
+#'   `best_parameters`, and `Ypred` when score predictions are stored.
+#'   `best_parameters` intentionally contains only `ncomp` plus the arguments
+#'   that were actually optimized, for example `classifier` when
+#'   `classifier = c("argmax", "lda")`. When more than one predictive
+#'   configuration is tested, `tuning_summary` and `tuning_metrics` report all
+#'   grid results, including fixed defaults.
 #' @examples
 #' idx <- c(1:12, 51:62, 101:112)
 #' X <- as.matrix(iris[idx, 1:4])
@@ -7647,8 +7672,7 @@ single.pls.cv =  function (Xdata,
   }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- cfg
-  res$best_parameters <- .cv_config_list(cfg)
-  res$best_parameters$ncomp <- res$best_ncomp
+  res$best_parameters <- .cv_selected_parameters(cfg, tuning_grid, res$best_ncomp)
   res
 }
 

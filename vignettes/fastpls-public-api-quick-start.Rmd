@@ -679,8 +679,10 @@ data.frame(
 ```
 
 For example, `kernelpls` can select the best combination of component count and
-kernel setting. The selected values are returned in `best_parameters`, which can
-be passed to the final `pls()` call.
+kernel setting. The selected values are returned in `best_parameters`. This
+object contains only the quantities that were optimized, so fixed settings such
+as `method`, `backend`, and `svd.method` are supplied explicitly in the final
+`pls()` call.
 
 ```{r}
 cv_kernel <- single.pls.cv(
@@ -704,9 +706,9 @@ fit_kernel <- pls(
   Xtest,
   Ytest_cls,
   ncomp = bp$ncomp,
-  method = bp$method,
-  backend = bp$backend,
-  svd.method = bp$svd.method,
+  method = "kernelpls",
+  backend = "cpu",
+  svd.method = "rsvd",
   kernel = bp$kernel,
   gamma = if (is.na(bp$gamma)) NULL else bp$gamma,
   seed = 107

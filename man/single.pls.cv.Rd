@@ -106,11 +106,14 @@ selection can also be controlled with \code{selection_metric = "auto"},
 scalar.}
 }
 \value{
-List with \code{best_ncomp}, decoded \code{pred}, \code{metrics}, legacy
-\code{Q2Y}/\code{R2Y} metric vectors, \code{fold}, backend metadata, \code{best_parameters},
-and \code{Ypred} when score predictions are stored. When more than one
-predictive configuration is tested, \code{tuning_summary} and \code{tuning_metrics}
-report all grid results.
+List with \code{best_ncomp}, decoded \code{pred}, \code{metrics}, regression
+\code{Q2Y}, \code{R2Y}, and \code{RMSD} vectors, \code{fold}, backend metadata,
+\code{best_parameters}, and \code{Ypred} when score predictions are stored.
+\code{best_parameters} intentionally contains only \code{ncomp} plus the arguments
+that were actually optimized, for example \code{classifier} when
+\code{classifier = c("argmax", "lda")}. When more than one predictive
+configuration is tested, \code{tuning_summary} and \code{tuning_metrics} report all
+grid results, including fixed defaults.
 }
 \description{
 Performs grouped k-fold or leave-one-out cross-validation over candidate
