@@ -3553,7 +3553,13 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' matrices and deflated cross-covariance resident on device throughout the fit.
 #'
 #' @param Xtrain Numeric training predictor matrix.
+#'   Alternatively, a result returned by [single.pls.cv()]. In that case
+#'   `pls()` refits the selected model on the full cross-validation training
+#'   set and predicts `Xtest` using `best_ncomp` and the selected tuning
+#'   settings.
 #' @param Ytrain Training response (numeric or factor).
+#'   When `Xtrain` is a [single.pls.cv()] result, the second positional argument
+#'   may be used as `Xtest`.
 #' @param Xtest Optional test predictor matrix.
 #' @param Ytest Optional observed response used to compute `Q2Y`.
 #' @param ncomp Number of components (scalar or vector).
@@ -4153,6 +4159,88 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     out <- rep_len(out, length(ncomp))
   }
   out
+}
+
+.is_single_pls_cv_result <- function(x) {
+  inherits(x, "fastPLSCV") ||
+    (is.list(x) && !is.null(x$best_ncomp) && !is.null(x$tuning_config))
+}
+
+.cv_attach_fit_data <- function(res, Xdata, Ydata) {
+  attr(res, "fit_data") <- list(Xdata = Xdata, Ydata = Ydata)
+  class(res) <- unique(c("fastPLSCV", class(res)))
+  res
+}
+
+.cv_drop_fit_data <- function(res) {
+  attr(res, "fit_data") <- NULL
+  class(res) <- setdiff(class(res), "fastPLSCV")
+  res
+}
+
+.pls_from_single_cv_result <- function(cv,
+                                       Xtest = NULL,
+                                       Ytest = NULL,
+                                       fit = FALSE,
+                                       return_variance = TRUE,
+                                       return_loadings = FALSE,
+                                       proj = FALSE,
+                                       perm.test = FALSE,
+                                       times = 100) {
+  fit_data <- attr(cv, "fit_data", exact = TRUE)
+  if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
+    stop(
+      "This single.pls.cv() result does not contain the training data needed ",
+      "for automatic refitting. Please rerun single.pls.cv() with the current ",
+      "fastPLS version, or call pls(Xtrain, Ytrain, ...) manually using ",
+      "cv$best_parameters.",
+      call. = FALSE
+    )
+  }
+  cfg <- cv$tuning_config
+  if (is.null(cfg)) {
+    stop("The single.pls.cv() result does not contain tuning_config.", call. = FALSE)
+  }
+  params <- .cv_config_list(cfg)
+  svd_dots <- cfg$svd_dots %||% list()
+  args <- c(
+    list(
+      Xtrain = fit_data$Xdata,
+      Ytrain = fit_data$Ydata,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      ncomp = as.integer(cv$best_ncomp[[1L]]),
+      scaling = params$scaling %||% "centering",
+      method = params$method %||% "simpls",
+      svd.method = params$svd.method %||% "irlba",
+      classifier = params$classifier %||% "argmax",
+      lda_ridge = params$lda_ridge %||% 1e-8,
+      k = params$k %||% 10L,
+      tau = params$tau %||% 0.2,
+      alpha = params$alpha %||% 0.75,
+      top_m = params$top_m %||% 20L,
+      cknn_memory = params$cknn_memory %||% "auto",
+      fit = fit,
+      return_variance = return_variance,
+      return_loadings = return_loadings,
+      proj = proj,
+      perm.test = perm.test,
+      times = times,
+      backend = params$backend %||% "cpu",
+      north = params$north %||% 1L,
+      kernel = params$kernel %||% "linear",
+      gamma = params$gamma,
+      degree = params$degree %||% 3L,
+      coef0 = params$coef0 %||% 1
+    ),
+    svd_dots
+  )
+  args <- args[!vapply(args, is.null, logical(1L))]
+  model <- do.call(pls, args)
+  model$cv_best_parameters <- cv$best_parameters
+  model$cv_best_metric_name <- cv$best_metric_name
+  model$cv_best_metric_value <- cv$best_metric_value
+  model
 }
 
 .cv_selection_metrics <- function(cv_res, Ydata, classification, selection_metric = "auto") {
@@ -6413,6 +6501,12 @@ plot.fastPLS <- function(x,
 #' fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
 #'            svd.method = "rsvd", return_variance = FALSE)
 #' head(predict(fit, X)$Ypred)
+#'
+#' cv <- single.pls.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+#'                     backend = "cpu", svd.method = "rsvd", seed = 1)
+#' fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
+#' cv$best_ncomp
+#' head(fit_cv$Ypred)
 #' @export
 pls =  function (Xtrain,
                  Ytrain,
@@ -6443,6 +6537,27 @@ pls =  function (Xtrain,
                  coef0 = 1,
                  ...)
 {
+  if (.is_single_pls_cv_result(Xtrain)) {
+    cv_Xtest <- if (!missing(Ytrain) && missing(Xtest)) {
+      Ytrain
+    } else if (missing(Xtest)) {
+      NULL
+    } else {
+      Xtest
+    }
+    cv_Ytest <- if (missing(Ytest)) NULL else Ytest
+    return(.pls_from_single_cv_result(
+      cv = Xtrain,
+      Xtest = cv_Xtest,
+      Ytest = cv_Ytest,
+      fit = fit,
+      return_variance = return_variance,
+      return_loadings = return_loadings,
+      proj = proj,
+      perm.test = perm.test,
+      times = times
+    ))
+  }
 
   scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
   dots <- .svd_control_from_dots(list(...))
@@ -7355,6 +7470,8 @@ pls =  function (Xtrain,
 #'   \item `tuning_config`: complete configuration used for the selected run.
 #'   \item `tuning_summary` and `tuning_metrics`: tables for all tested
 #'   configurations when more than one predictive configuration is supplied.
+#'   \item The returned object can be passed as the first argument to [pls()] to
+#'   refit the selected model on the full training data and predict new samples.
 #'   }
 #' @examples
 #' idx <- c(1:12, 51:62, 101:112)
@@ -7477,6 +7594,7 @@ single.pls.cv =  function (Xdata,
         one$cv_status <- one$status
         one$status <- "ok"
       }
+      one <- .cv_drop_fit_data(one)
       one$tuning_config <- cfg
       grid_results[[grid_id]] <- one
       status <- if (identical(one$status, "ok")) "ok" else "error"
@@ -7512,12 +7630,13 @@ single.pls.cv =  function (Xdata,
     } else {
       data.frame()
     }
-    return(.cv_select_best_result_from_grid(
+    best <- .cv_select_best_result_from_grid(
       results = grid_results,
       summaries = summaries,
       metrics = metrics,
       selection_metric = selection_ctl$metric
-    ))
+    )
+    return(.cv_attach_fit_data(best, Xdata, Ydata))
   }
 
   cfg <- tuning_grid[[1L]]
@@ -7710,7 +7829,7 @@ single.pls.cv =  function (Xdata,
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- cfg
   res$best_parameters <- .cv_selected_parameters(cfg, tuning_grid, res$best_ncomp)
-  res
+  .cv_attach_fit_data(res, Xdata, Ydata)
 }
 
 

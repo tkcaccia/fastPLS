@@ -36,9 +36,14 @@ pls(
 )
 }
 \arguments{
-\item{Xtrain}{Numeric training predictor matrix.}
+\item{Xtrain}{Numeric training predictor matrix. Alternatively, a result
+returned by \code{single.pls.cv()}. In that case \code{pls()} refits the selected
+model on the full cross-validation training set and predicts \code{Xtest} using
+\code{best_ncomp} and the selected tuning settings.}
 
-\item{Ytrain}{Training response (numeric or factor).}
+\item{Ytrain}{Training response (numeric or factor). When \code{Xtrain} is a
+\code{single.pls.cv()} result, the second positional argument may be used as
+\code{Xtest}.}
 
 \item{Xtest}{Optional test predictor matrix.}
 
@@ -173,4 +178,10 @@ y <- mtcars$mpg
 fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
            svd.method = "rsvd", return_variance = FALSE)
 head(predict(fit, X)$Ypred)
+
+cv <- single.pls.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+                    backend = "cpu", svd.method = "rsvd", seed = 1)
+fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
+cv$best_ncomp
+head(fit_cv$Ypred)
 }

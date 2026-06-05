@@ -138,6 +138,8 @@ arguments that were actually optimized, for example \code{classifier} when
 \item \code{tuning_config}: complete configuration used for the selected run.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
+\item The returned object can be passed as the first argument to \code{pls()} to
+refit the selected model on the full training data and predict new samples.
 }
 }
 \description{
