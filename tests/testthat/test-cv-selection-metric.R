@@ -180,6 +180,42 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
   expect_false(isTRUE(all.equal(nested$R2Y, nested$RMSD)))
 })
 
+test_that("single.pls.cv can skip the extra full-data R2 fit", {
+  set.seed(21045)
+  X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
+  beta <- matrix(rnorm(7 * 2), nrow = 7, ncol = 2)
+  Y <- X %*% beta + matrix(rnorm(48 * 2, sd = 0.25), nrow = 48, ncol = 2)
+
+  with_r2 <- single.pls.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    kfold = 4,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21045,
+    return_r2 = TRUE
+  )
+  without_r2 <- single.pls.cv(
+    Xdata = X,
+    Ydata = Y,
+    ncomp = 1:3,
+    kfold = 4,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21045,
+    return_r2 = FALSE
+  )
+
+  expect_true(any(is.finite(with_r2$R2Y)))
+  expect_true(all(is.na(without_r2$R2Y)))
+  expect_true(any(is.finite(without_r2$Q2Y)))
+  expect_true(any(is.finite(without_r2$RMSD)))
+  expect_equal(without_r2$best_ncomp, with_r2$best_ncomp)
+})
+
 test_that("RMSD selection does not overwrite Q2Y", {
   set.seed(2105)
   X <- matrix(rnorm(72 * 9), nrow = 72, ncol = 9)

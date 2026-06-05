@@ -7314,6 +7314,10 @@ pls =  function (Xtrain,
 #' @param k,tau,alpha,top_m
 #'   Candidate-kNN controls used when `classifier = "cknn"`.
 #' @param return_scores Store score predictions for classification when `TRUE`.
+#' @param return_r2 For regression, fit one additional model on the full
+#'   dataset to estimate the training `R2Y` path. The default is `TRUE` for
+#'   backward compatibility. Set to `FALSE` to skip this extra fit; held-out
+#'   cross-validated `Q2Y` and `RMSD` are still calculated.
 #' @param xprod Use the matrix-free cross-product route where available.
 #'   `NULL` applies fastPLS defaults.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
@@ -7368,6 +7372,7 @@ single.pls.cv =  function (Xdata,
                           top_m = 20L,
                           cknn_memory = c("auto", "standard", "blocked", "streaming"),
                           return_scores = FALSE,
+                          return_r2 = TRUE,
                           xprod = NULL,
                           ...)
 {
@@ -7435,6 +7440,7 @@ single.pls.cv =  function (Xdata,
           top_m = cfg$top_m,
           cknn_memory = cfg$cknn_memory,
           return_scores = return_scores,
+          return_r2 = return_r2,
           xprod = cfg$xprod,
           selection_metric = selection_ctl$metric
         ),
@@ -7567,7 +7573,8 @@ single.pls.cv =  function (Xdata,
       top_m = top_m,
       cknn_memory = cknn_memory,
       return_scores = return_scores,
-      store_predictions = isTRUE(return_scores) ||
+      store_predictions = !classification ||
+        isTRUE(return_scores) ||
         (classification && !identical(classifier, "argmax")),
       selection_metric = selection_ctl$metric
     )
@@ -7600,7 +7607,8 @@ single.pls.cv =  function (Xdata,
     tau = tau,
     alpha = alpha,
     top_m = top_m,
-    store_predictions = isTRUE(return_scores) ||
+    store_predictions = !classification ||
+      isTRUE(return_scores) ||
       (classification && !identical(classifier, "argmax")),
     selection_metric = selection_ctl$metric
     )
@@ -7615,7 +7623,9 @@ single.pls.cv =  function (Xdata,
   values <- as.numeric(res$metrics$metric_value)
   q2_values <- res$Q2Y
   rmsd_values <- res$RMSD
-  if (!classification && (is.null(q2_values) || is.null(rmsd_values))) {
+  if (!classification &&
+      (is.null(q2_values) || is.null(rmsd_values) ||
+       all(!is.finite(q2_values)) || all(!is.finite(rmsd_values)))) {
     if (!is.null(res$Ypred)) {
       dims <- dim(res$Ypred)
       q2_values <- rmsd_values <- rep(NA_real_, dims[[3L]])
@@ -7645,6 +7655,8 @@ single.pls.cv =  function (Xdata,
   res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
   res$R2Y <- if (classification) {
     values
+  } else if (!isTRUE(return_r2)) {
+    rep(NA_real_, length(values))
   } else {
     .cv_training_r2_path(
       Xdata = Xdata,
@@ -7669,6 +7681,10 @@ single.pls.cv =  function (Xdata,
       degree = degree,
       coef0 = coef0
     )
+  }
+  if (!classification && !isTRUE(return_scores)) {
+    res$Ypred <- NULL
+    res$pred <- NULL
   }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- cfg

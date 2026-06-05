@@ -28,6 +28,7 @@ single.pls.cv(
   top_m = 20L,
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
   return_scores = FALSE,
+  return_r2 = TRUE,
   xprod = NULL,
   ...
 )
@@ -93,6 +94,11 @@ candidate-score cache in blocks for scalar component counts. \code{auto}
 chooses a memory-aware strategy from the data size.}
 
 \item{return_scores}{Store score predictions for classification when \code{TRUE}.}
+
+\item{return_r2}{For regression, fit one additional model on the full
+dataset to estimate the training \code{R2Y} path. The default is \code{TRUE} for
+backward compatibility. Set to \code{FALSE} to skip this extra fit; held-out
+cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}

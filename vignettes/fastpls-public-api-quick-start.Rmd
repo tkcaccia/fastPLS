@@ -624,16 +624,15 @@ cv_opt$best_ncomp
 ### Interpreting `R2Y`, `Q2Y`, and `RMSD`
 
 For regression models, `R2Y`, `Q2Y`, and `RMSD` answer different questions and
-should not usually be identical. `R2Y` is calculated from the model fitted on
-the training data and measures how much response variation is explained by the
-latent components. `Q2Y` is calculated from held-out cross-validation
-predictions and measures predictive performance on samples that were not used
-to fit the corresponding fold model. `RMSD` is the root mean squared deviation
-between held-out predictions and observed responses, so lower values are
-better. Consequently, `Q2Y` is usually lower than `R2Y`, and `RMSD` is on the
-response scale rather than on the explained-variance scale. For classification,
-`Q2Y` and `R2Y` report cross-validated accuracy for backward compatibility, and
-`RMSD` is not used.
+should not usually be identical. `Q2Y` is calculated by default from held-out
+cross-validation predictions and measures predictive performance on samples that
+were not used to fit the corresponding fold model. `RMSD` is also calculated
+from held-out predictions and is reported on the response scale, so lower values
+are better. `R2Y` is a training-set explained-variance estimate from one
+additional model fitted on the full dataset; set `return_r2 = FALSE` to skip
+this extra fit when only cross-validated performance is needed. For
+classification, `Q2Y` and `R2Y` report cross-validated accuracy for backward
+compatibility, and `RMSD` is not used.
 
 ```{r}
 data.frame(
