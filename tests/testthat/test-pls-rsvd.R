@@ -1,12 +1,12 @@
 library(fastPLS)
 
-test_that("default svd.method behavior remains unchanged", {
+test_that("pls defaults to randomized SVD", {
   set.seed(42)
   X <- matrix(rnorm(70 * 18), nrow = 70, ncol = 18)
   Y <- matrix(rnorm(70 * 4), nrow = 70, ncol = 4)
 
   m_default <- pls(X, Y, ncomp = 1:3, fit = TRUE)
-  m_explicit <- pls(X, Y, ncomp = 1:3, fit = TRUE, svd.method = "irlba")
+  m_explicit <- pls(X, Y, ncomp = 1:3, fit = TRUE, svd.method = "rsvd")
 
   align_signs <- function(ref, x) {
     out <- x

@@ -12,7 +12,7 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  svd.method = c("irlba", "rsvd"),
+  svd.method = c("rsvd", "irlba"),
   classifier = c("argmax", "lda", "cknn"),
   lda_ridge = 1e-08,
   k = 10L,

@@ -2273,7 +2273,7 @@
 
 .svd_control_defaults <- function() {
   list(
-    svd.method = "irlba",
+    svd.method = "rsvd",
     rsvd_oversample = 10L,
     rsvd_power = 1L,
     svds_tol = 0,
@@ -6586,7 +6586,7 @@ pls =  function (Xtrain,
                  ncomp=2,
                  scaling = c("centering", "autoscaling","none"),
                  method = c("simpls", "plssvd", "opls", "kernelpls"),
-                 svd.method = c("irlba", "rsvd"),
+                 svd.method = c("rsvd", "irlba"),
 		                 classifier = c("argmax", "lda", "cknn"),
 		                 lda_ridge = 1e-8,
 			                 k = 10L,
