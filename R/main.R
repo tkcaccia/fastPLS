@@ -5478,7 +5478,7 @@ pca <- function(x,
                 center = TRUE,
                 scale = FALSE,
                 backend = c("cpu", "cuda", "metal"),
-                method = c("irlba", "rsvd"),
+                method = c("rsvd", "irlba"),
                 ...) {
   x <- as.matrix(x)
   ncomp <- max(1L, min(as.integer(ncomp)[1L], nrow(x), ncol(x)))

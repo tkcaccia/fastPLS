@@ -66,8 +66,9 @@ test_that("pca uses public SVD backends and returns plottable scores", {
   Xtest <- matrix(rnorm(10 * 8), 10, 8)
   colnames(X) <- colnames(Xtest) <- paste0("v", seq_len(ncol(X)))
   fit <- pca(X, ncomp = 3, xtest = Xtest, center = TRUE, scale = TRUE,
-             backend = "cpu", method = "rsvd", seed = 12)
+             backend = "cpu", seed = 12)
   expect_s3_class(fit, "fastPLSPCA")
+  expect_identical(fit$svd.method, "cpu_rsvd")
   expect_equal(dim(fit$scores), c(60L, 3L))
   expect_equal(dim(fit$scores_test), c(10L, 3L))
   expect_equal(dim(fit$loadings), c(8L, 3L))

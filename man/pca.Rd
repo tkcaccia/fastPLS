@@ -9,7 +9,7 @@ pca(
   center = TRUE,
   scale = FALSE,
   backend = c("cpu", "cuda", "metal"),
-  method = c("irlba", "rsvd"),
+  method = c("rsvd", "irlba"),
   ...
 )
 }
