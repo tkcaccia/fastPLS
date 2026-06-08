@@ -5098,10 +5098,11 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 }
 
 .resolve_fastsvd_backend_method <- function(backend = c("cpu", "cuda", "metal"),
-                                            method = c("irlba", "rsvd")) {
+                                            method = c("rsvd", "irlba")) {
   backend <- match.arg(backend)
+  method <- match.arg(method)
   method <- .normalize_svd_method(method)
-  method <- match.arg(method, c("irlba", "rsvd"))
+  method <- match.arg(method, c("rsvd", "irlba"))
   if (identical(method, "irlba") && !identical(backend, "cpu")) {
     stop("fastsvd(method='irlba') is only available with backend='cpu'. Use method='rsvd' with backend='cuda' or backend='metal'.", call. = FALSE)
   }
@@ -5378,7 +5379,7 @@ fastsvd <- function(x,
                     nv = NULL,
                     ncomp = NULL,
                     backend = c("cpu", "cuda", "metal"),
-                    method = c("irlba", "rsvd"),
+                    method = c("rsvd", "irlba"),
                     oversample = 10L,
                     power = 1L,
                     svds_tol = 0,

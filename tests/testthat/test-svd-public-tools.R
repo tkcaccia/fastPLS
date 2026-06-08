@@ -1,7 +1,7 @@
 test_that("fastsvd returns decomposition outputs from public backends", {
   set.seed(1)
   A <- matrix(rnorm(120 * 20), 120, 20)
-  out <- fastsvd(A, ncomp = 5, backend = "cpu", method = "rsvd")
+  out <- fastsvd(A, ncomp = 5, backend = "cpu")
   expect_true(is.list(out))
   expect_true(all(c("u", "d", "v", "backend", "method", "svd.method", "elapsed") %in% names(out)))
   expect_identical(out$backend, "cpu")
