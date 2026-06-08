@@ -5690,7 +5690,7 @@ predict.fastPLSPCA <- function(object, newdata, ncomp = NULL, ...) {
     xy[, 2L],
     .fastpls_plot_args(xlab, ylab, main, dots)
   )
-  graphics::legend("topright", legend = levels(groups), pt.bg = pal, col = "black", pch = 21, bty = "n")
+  graphics::legend("topright", legend = levels(groups), pt.bg = pal, col = "black", pch = dots$pch, bty = "n")
   if (isTRUE(ellipse)) {
     for (lev in levels(groups)) {
       idx <- which(groups == lev)
@@ -5707,7 +5707,8 @@ predict.fastPLSPCA <- function(object, newdata, ncomp = NULL, ...) {
 #' Optional ellipses are computed either as a data confidence ellipse or a
 #' Hotelling T2 score ellipse.
 #' By default, grouped points use filled symbols with the group color in `bg`
-#' and a black contour in `col`.
+#' and a black contour in `col`; PCA plots use `pch = 22` unless another
+#' plotting character is supplied through `...`.
 #' Axis labels include the predictor-space variance explained by each plotted
 #' PCA component or PLS latent variable when available.
 #'
@@ -5748,6 +5749,7 @@ plot.fastPLSPCA <- function(x,
   dots$main <- NULL
   dots$xlab <- NULL
   dots$ylab <- NULL
+  if (is.null(dots$pch)) dots$pch <- 22
   do.call(
     .fastpls_plot_scores,
     c(

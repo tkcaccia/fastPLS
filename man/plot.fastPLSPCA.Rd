@@ -42,7 +42,8 @@ Draws a two-component PCA or PLS score plot. Ellipses can be drawn globally or
 per group, using either a standard data confidence ellipse or a Hotelling's T2
 score ellipse. Grouped points use filled plotting symbols by default, with the
 group color assigned to \code{bg} and a black point contour assigned to
-\code{col}. Axis labels include the predictor-space variance explained by each
+\code{col}. PCA plots use \code{pch = 22} unless another plotting character is
+supplied through \code{...}. Axis labels include the predictor-space variance explained by each
 plotted PCA component or PLS latent variable when available.
 }
 \examples{
