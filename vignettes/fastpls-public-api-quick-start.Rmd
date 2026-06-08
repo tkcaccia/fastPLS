@@ -834,6 +834,21 @@ head(pc$scores_test)
 head(predict(pc, Xtest, ncomp = 2))
 ```
 
+The same workflow can be used with the bundled breast cancer example. Here PCA
+is fitted only on the training matrix, the training scores are plotted first,
+and the independent test samples are projected with the stored training
+centering, scaling, and loadings before being overlaid on the same score map.
+
+```{r fig.width = 5, fig.height = 4}
+data(breast)
+
+pp <- pca(breast$X_train)
+plot(pp, bg = breast$y_train)
+
+qq <- predict(pp, breast$X_test)
+points(qq, bg = breast$y_test)
+```
+
 ## CUDA Availability
 
 CUDA is optional. Use `has_cuda()` before selecting `backend = "cuda"`.
