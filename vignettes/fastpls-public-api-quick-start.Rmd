@@ -813,7 +813,10 @@ Important elements returned by `pls.double.cv()` are:
 
 `fastsvd()` provides direct access to the same SVD backends used by PLS.
 `pca()` builds PCA scores and loadings from those backends, following the
-classical principal-component construction of Pearson (1901).
+classical principal-component construction of Pearson (1901). The fitted PCA
+object stores the training centering, scaling, and loading matrix, so the same
+projection can be applied to independent data either during fitting with
+`xtest` or later with `predict()`.
 
 ```{r}
 s <- fastsvd(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 104)
@@ -821,8 +824,14 @@ length(s$d)
 ```
 
 ```{r fig.width = 5, fig.height = 4}
-pc <- pca(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 105)
+pc <- pca(Xtrain, ncomp = 3, xtest = Xtest, backend = "cpu",
+          method = "rsvd", seed = 105)
 plot(pc, groups = Ytrain_cls, ellipse = TRUE)
+```
+
+```{r}
+head(pc$scores_test)
+head(predict(pc, Xtest, ncomp = 2))
 ```
 
 ## CUDA Availability

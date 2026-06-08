@@ -5450,6 +5450,9 @@ fastsvd <- function(x,
 #'
 #' @param x Numeric matrix with samples in rows and variables in columns.
 #' @param ncomp Number of principal components.
+#' @param xtest Optional independent matrix to project using the PCA loadings
+#'   learned from `x`. The same centering and scaling estimated from `x` are
+#'   applied to `xtest`.
 #' @param center Logical; center columns before SVD.
 #' @param scale Logical; scale columns before SVD.
 #' @param backend Compute backend. \code{cpu} runs on the host CPU. \code{cuda} and
@@ -5458,16 +5461,19 @@ fastsvd <- function(x,
 #' @param method SVD algorithm family. \code{irlba} is available only with
 #'   \code{backend = cpu}. \code{rsvd} uses randomized SVD on the selected backend.
 #' @param ... Additional arguments passed to [fastsvd()].
-#' @return A `fastPLSPCA` object with scores, loadings, and per-component
+#' @return A `fastPLSPCA` object with training `scores`, optional
+#'   `scores_test`, loadings, preprocessing values, and per-component
 #'   `variance_explained` plus cumulative variance explained.
 #' @examples
 #' pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
 #'           method = "rsvd", seed = 1)
 #' head(pc$scores)
 #' pc$variance_explained
+#' head(predict(pc, as.matrix(iris[1:5, 1:4])))
 #' @export
 pca <- function(x,
                 ncomp = 2L,
+                xtest = NULL,
                 center = TRUE,
                 scale = FALSE,
                 backend = c("cpu", "cuda", "metal"),
@@ -5527,7 +5533,69 @@ pca <- function(x,
     ncomp = ncomp
   )
   class(out) <- "fastPLSPCA"
+  if (!is.null(xtest)) {
+    out$scores_test <- predict(out, xtest)
+  }
   out
+}
+
+.predict_fastplspca_scores <- function(object, newdata, ncomp = NULL) {
+  if (!inherits(object, "fastPLSPCA")) {
+    stop("object must be a fastPLSPCA object.", call. = FALSE)
+  }
+  if (missing(newdata) || is.null(newdata)) {
+    stop("newdata must be supplied.", call. = FALSE)
+  }
+  newdata <- as.matrix(newdata)
+  loadings <- as.matrix(object$loadings)
+  if (ncol(newdata) != nrow(loadings)) {
+    stop(
+      "newdata must have the same number of columns used to fit the PCA object.",
+      call. = FALSE
+    )
+  }
+  if (!is.null(colnames(newdata)) && !is.null(rownames(loadings)) &&
+      !identical(colnames(newdata), rownames(loadings))) {
+    warning(
+      "newdata column names differ from the PCA loading names; projection uses column order.",
+      call. = FALSE
+    )
+  }
+  k <- if (is.null(ncomp)) {
+    ncol(loadings)
+  } else {
+    max(1L, min(as.integer(ncomp)[1L], ncol(loadings)))
+  }
+  center <- object$center %||% rep(0, nrow(loadings))
+  scale <- object$scale %||% rep(1, nrow(loadings))
+  scale[!is.finite(scale) | scale == 0] <- 1
+  projected <- sweep(newdata, 2L, center, "-")
+  projected <- sweep(projected, 2L, scale, "/")
+  scores <- projected %*% loadings[, seq_len(k), drop = FALSE]
+  colnames(scores) <- paste0("PC", seq_len(k))
+  rownames(scores) <- rownames(newdata)
+  scores
+}
+
+#' Project new data with a fitted fastPLS PCA model
+#'
+#' Applies the centering, scaling, and loading matrix stored in a
+#' `fastPLSPCA` object to an independent dataset.
+#'
+#' @param object A `fastPLSPCA` object returned by [pca()].
+#' @param newdata Numeric matrix with the same columns, in the same order, as
+#'   the matrix used to fit `object`.
+#' @param ncomp Optional number of principal components to return. By default
+#'   all components stored in `object` are returned.
+#' @param ... Ignored.
+#' @return Matrix of projected PCA scores for `newdata`.
+#' @examples
+#' pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
+#'           method = "rsvd", seed = 1)
+#' predict(pc, as.matrix(iris[1:3, 1:4]))
+#' @export
+predict.fastPLSPCA <- function(object, newdata, ncomp = NULL, ...) {
+  .predict_fastplspca_scores(object, newdata, ncomp = ncomp)
 }
 
 .fastpls_ellipse <- function(scores, conf = 0.95, type = c("confidence", "hotelling"), npoints = 100L) {

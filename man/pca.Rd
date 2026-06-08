@@ -5,6 +5,7 @@
 pca(
   x,
   ncomp = 2L,
+  xtest = NULL,
   center = TRUE,
   scale = FALSE,
   backend = c("cpu", "cuda", "metal"),
@@ -15,6 +16,9 @@ pca(
 \arguments{
 \item{x}{Numeric matrix with samples in rows and variables in columns.}
 \item{ncomp}{Number of principal components.}
+\item{xtest}{Optional independent matrix to project using the PCA loadings
+learned from \code{x}. The same centering and scaling estimated from \code{x}
+are applied to \code{xtest}.}
 \item{center}{Logical; center columns before SVD.}
 \item{scale}{Logical; scale columns before SVD.}
 \item{backend}{Compute backend. \code{cpu} runs on the host CPU.
@@ -26,9 +30,10 @@ backend.}
 \item{...}{Additional arguments passed to \code{\link{fastsvd}}.}
 }
 \value{
-A \code{fastPLSPCA} object containing scores, loadings, standard deviations,
-per-component \code{variance_explained}, cumulative variance explained,
-preprocessing values, and SVD metadata.
+A \code{fastPLSPCA} object containing training \code{scores}, optional
+\code{scores_test}, loadings, standard deviations, per-component
+\code{variance_explained}, cumulative variance explained, preprocessing values,
+and SVD metadata.
 }
 \description{
 Computes PCA from the selected fastPLS SVD backend and returns a compact object
@@ -39,4 +44,5 @@ pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
           method = "rsvd", seed = 1)
 head(pc$scores)
 pc$variance_explained
+head(predict(pc, as.matrix(iris[1:5, 1:4])))
 }
