@@ -216,6 +216,74 @@ test_that("single.pls.cv can skip the extra full-data R2 fit", {
   expect_equal(without_r2$best_ncomp, with_r2$best_ncomp)
 })
 
+test_that("classification CV keeps held-out accuracy separate from training R2", {
+  X <- as.matrix(iris[, 1:4])
+  y <- factor(iris[, 5])
+
+  with_r2 <- single.pls.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 2,
+    kfold = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21046,
+    return_r2 = TRUE
+  )
+  without_r2 <- single.pls.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 2,
+    kfold = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21046,
+    return_r2 = FALSE
+  )
+  full_fit <- pls(
+    Xtrain = X,
+    Ytrain = y,
+    ncomp = 2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = TRUE,
+    return_variance = FALSE,
+    seed = 21046
+  )
+
+  expect_true(is.finite(with_r2$Q2Y))
+  expect_true(is.finite(with_r2$R2Y))
+  expect_equal(with_r2$R2Y, as.numeric(full_fit$R2Y), tolerance = 1e-10)
+  expect_false(isTRUE(all.equal(with_r2$Q2Y, with_r2$R2Y)))
+  expect_true(all(is.na(without_r2$R2Y)))
+  expect_equal(without_r2$Q2Y, with_r2$Q2Y)
+})
+
+test_that("classification double CV does not reuse accuracy as R2", {
+  X <- as.matrix(iris[, 1:4])
+  y <- factor(iris[, 5])
+
+  nested <- pls.double.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    runn = 1,
+    kfold_inner = 2,
+    kfold_outer = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21047
+  )
+
+  expect_true(is.finite(nested$Q2Y))
+  expect_true(is.finite(nested$R2Y))
+  expect_false(isTRUE(all.equal(nested$Q2Y, nested$R2Y)))
+})
+
 test_that("RMSD selection does not overwrite Q2Y", {
   set.seed(2105)
   X <- matrix(rnorm(72 * 9), nrow = 72, ncol = 9)

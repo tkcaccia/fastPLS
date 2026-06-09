@@ -95,7 +95,7 @@ chooses a memory-aware strategy from the data size.}
 
 \item{return_scores}{Store score predictions for classification when \code{TRUE}.}
 
-\item{return_r2}{For regression, fit one additional model on the full
+\item{return_r2}{Fit one additional model on the full
 dataset to estimate the training \code{R2Y} path. The default is \code{TRUE} for
 backward compatibility. Set to \code{FALSE} to skip this extra fit; held-out
 cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
@@ -125,9 +125,10 @@ classification this is accuracy; for regression it is cross-validated Q2 when
 available.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
 \code{NA} for classification.
-\item \code{R2Y}: training-set explained-variance path for regression when
-\code{return_r2 = TRUE}; otherwise \code{NA}. For classification it is retained as
-cross-validated accuracy for backward compatibility.
+\item \code{R2Y}: training-set explained-variance path from a model fitted on
+the full dataset when \code{return_r2 = TRUE}; otherwise \code{NA}. For factor
+responses, this is calculated on the dummy-coded PLS-DA response scores, not on
+the decoded class labels.
 \item \code{fold}: fold assignment used for each sample.
 \item \code{pred}: decoded cross-validated predictions when predictions are stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.

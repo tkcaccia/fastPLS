@@ -631,8 +631,9 @@ from held-out predictions and is reported on the response scale, so lower values
 are better. `R2Y` is a training-set explained-variance estimate from one
 additional model fitted on the full dataset; set `return_r2 = FALSE` to skip
 this extra fit when only cross-validated performance is needed. For
-classification, `Q2Y` and `R2Y` report cross-validated accuracy for backward
-compatibility, and `RMSD` is not used.
+classification, `Q2Y` reports held-out CV accuracy, while `R2Y` is calculated
+from the full-data PLS-DA fit on the dummy-coded response scores. `RMSD` is not
+used for classification.
 
 ```{r}
 data.frame(
@@ -792,10 +793,11 @@ Important elements returned by `pls.double.cv()` are:
   column per class, showing how many repeated outer-CV runs voted for each
   class.
 - `Q2Y`, `RMSD`, and `R2Y`: one value per repeated outer CV run. For
-  classification, `Q2Y` and `R2Y` report cross-validated accuracy and `RMSD`
-  is not used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports
-  held-out RMSD, and `R2Y` reports the mean training-fit R2 of the selected
-  outer-fold models.
+  classification, `Q2Y` reports held-out accuracy, `R2Y` reports the mean
+  training-fit R2 of the selected outer-fold PLS-DA models, and `RMSD` is not
+  used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports held-out
+  RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold
+  models.
 - `metric_name`: the held-out metric used for inner/outer model selection.
 - `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, and `CI95R2Y`: summaries across repeated
   outer CV runs. With one run, the confidence interval simply reflects the

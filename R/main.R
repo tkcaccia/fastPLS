@@ -4121,9 +4121,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                                  gamma,
                                  degree,
                                  coef0) {
-  if (is.factor(Ydata)) {
-    return(rep(NA_real_, length(ncomp)))
-  }
   out <- tryCatch({
     fit <- pls(
       Xtrain = Xdata,
@@ -7500,7 +7497,7 @@ pls =  function (Xtrain,
 #' @param k,tau,alpha,top_m
 #'   Candidate-kNN controls used when `classifier = "cknn"`.
 #' @param return_scores Store score predictions for classification when `TRUE`.
-#' @param return_r2 For regression, fit one additional model on the full
+#' @param return_r2 Fit one additional model on the full
 #'   dataset to estimate the training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra fit; held-out
 #'   cross-validated `Q2Y` and `RMSD` are still calculated.
@@ -7527,9 +7524,10 @@ pls =  function (Xtrain,
 #'   when available.
 #'   \item `RMSD`: held-out root mean squared deviation for regression. It is
 #'   `NA` for classification.
-#'   \item `R2Y`: training-set explained-variance path for regression when
-#'   `return_r2 = TRUE`; otherwise `NA`. For classification it is retained as
-#'   cross-validated accuracy for backward compatibility.
+#'   \item `R2Y`: training-set explained-variance path from a model fitted on
+#'   the full dataset when `return_r2 = TRUE`; otherwise `NA`. For factor
+#'   responses, this is calculated on the dummy-coded PLS-DA response scores,
+#'   not on the decoded class labels.
 #'   \item `fold`: fold assignment used for each sample.
 #'   \item `pred`: decoded cross-validated predictions when predictions are
 #'   stored.
@@ -7864,9 +7862,7 @@ single.pls.cv =  function (Xdata,
   res$best_metric_value <- selection_values[[best_idx]]
   res$Q2Y <- if (classification) values else as.numeric(q2_values)
   res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
-  res$R2Y <- if (classification) {
-    values
-  } else if (!isTRUE(return_r2)) {
+  res$R2Y <- if (!isTRUE(return_r2)) {
     rep(NA_real_, length(values))
   } else {
     .cv_training_r2_path(
@@ -7945,9 +7941,10 @@ single.pls.cv =  function (Xdata,
 #'   and `svtol`. Vector values are tuned in the inner loop. Inner selection can
 #'   also be controlled with `selection_metric = "auto"`, `"accuracy"`, `"r2"`,
 #'   `"q2"`, or `"rmsd"`; the selection metric itself is scalar.
-#' @return List of nested CV outputs and summaries. For regression, `Q2Y`
-#'   stores held-out Q2, `RMSD` stores held-out RMSD, and `R2Y` stores the mean
-#'   training-fit R2 of the selected outer-fold models.
+#' @return List of nested CV outputs and summaries. `Q2Y` stores held-out
+#'   predictive performance (accuracy for factor responses and Q2 for numeric
+#'   responses), `RMSD` stores held-out RMSD for numeric responses, and `R2Y`
+#'   stores the mean training-fit R2 of the selected outer-fold models.
 #' @examples
 #' idx <- c(1:10, 51:60, 101:110)
 #' X <- as.matrix(iris[idx, 1:4])
@@ -8113,11 +8110,11 @@ pls.double.cv = function(Xdata,
     best_comp <- integer(nfold_outer)
     inner_results <- vector("list", nfold_outer)
     best_parameters <- vector("list", nfold_outer)
+    outer_train_r2 <- rep(NA_real_, nfold_outer)
     if (classification) {
       run_pred_chr <- rep(NA_character_, nrow(Xdata))
     } else {
       run_pred <- matrix(NA_real_, nrow = nrow(Xdata), ncol = ncol(Ydata))
-      outer_train_r2 <- rep(NA_real_, nfold_outer)
     }
 
     for (f in seq_along(fold_values)) {
@@ -8215,7 +8212,7 @@ pls.double.cv = function(Xdata,
         irlba_tol = fit_irlba_tol,
         irlba_eps = fit_irlba_eps,
         irlba_svtol = fit_irlba_svtol,
-        fit = !classification,
+        fit = TRUE,
         proj = FALSE,
         backend = fit_backend,
         north = fit_north,
@@ -8233,6 +8230,9 @@ pls.double.cv = function(Xdata,
       )
 
       if (classification) {
+        if (!is.null(fit$R2Y) && length(fit$R2Y)) {
+          outer_train_r2[[f]] <- as.numeric(tail(fit$R2Y, 1L))
+        }
         pred <- fit$Ypred
         pred <- if (is.data.frame(pred)) pred[[1L]] else pred
         run_pred_chr[test_idx] <- as.character(pred)
@@ -8258,7 +8258,11 @@ pls.double.cv = function(Xdata,
         vote_tot[cbind(which(ok), idx[ok])] <- vote_tot[cbind(which(ok), idx[ok])] + 1
       }
       Q2Y[j] <- mean(as.character(pred_factor) == as.character(Ydata_original), na.rm = TRUE)
-      R2Y[j] <- Q2Y[j]
+      R2Y[j] <- if (any(is.finite(outer_train_r2))) {
+        mean(outer_train_r2, na.rm = TRUE)
+      } else {
+        NA_real_
+      }
       metric_name[j] <- "accuracy"
       res$results[[j]] <- list(
         Ypred = pred_factor,
