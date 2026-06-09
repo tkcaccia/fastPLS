@@ -6675,8 +6675,13 @@ plot.permutation <- function(x,
 #'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
 #'   plotting variance metadata.
 #' @param proj Return projected `Ttest` when `TRUE`.
-#' @param perm.test Run permutation test.
-#' @param times Number of permutations.
+#' @param perm.test Run a single-split permutation test when `Xtest` and
+#'   `Ytest` are supplied. The rows of `Xtrain` are randomly permuted, the
+#'   model is refitted, and the permuted test-set `Q2Y` path is compared with
+#'   the observed `Q2Y` path.
+#' @param times Number of permutations. For `pls()`, the empirical p-value for
+#'   each component is `mean(Q2Y_permuted > Q2Y_observed)` and is returned in
+#'   `pval`. No +1 correction is applied.
 #' @param backend Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
 #'   for CUDA-native fitting, or experimental \code{metal} for Apple Metal
 #'   randomized-SVD/GEMM acceleration.
@@ -6745,8 +6750,12 @@ plot.permutation <- function(x,
 #'     factor `Ytest`, returned when response scores are available.
 #'   * `accuracy`: decoded-label accuracy for factor `Ytest`, returned when
 #'     classification predictions are available.
-#'   * `pval`: permutation-test p-values by component, returned when
-#'     `perm.test = TRUE`.
+#'   * `pval`: single-split permutation-test p-values by component, returned
+#'     when `perm.test = TRUE`. Each p-value is the fraction of permuted
+#'     `Q2Y` values larger than the observed `Q2Y`.
+#'   * `permutation`: long-format permutation table, returned when
+#'     `perm.test = TRUE`, with observed and permuted `R2`/`Q2` values and the
+#'     permutation correlation used by `plot.permutation()`.
 #'   * `variance`, `variance_explained`, `cumulative_variance_explained`,
 #'     `variance_total`, `variance_basis`: predictor-space variance summaries
 #'     returned when `return_variance = TRUE`.
@@ -8182,6 +8191,15 @@ pls.single.cv =  function (Xdata,
 #'   \code{method = "kernelpls"}, multiple values are tuned in the inner loop.
 #' @param xprod Use the matrix-free cross-product route where available for
 #'   inner component optimization. `NULL` applies fastPLS defaults.
+#' @param perm.test Run a nested-CV permutation test. For each permutation, the
+#'   rows of `Xdata` are shuffled, the complete double cross-validation is
+#'   repeated, and the median permuted `Q2Y` is compared with the observed
+#'   median `Q2Y`.
+#' @param times Number of permutations. For predictive metrics where larger is
+#'   better, such as `Q2Y`, the empirical p-value is
+#'   `mean(Q2Y_permuted >= Q2Y_observed)`. For loss metrics where smaller is
+#'   better, such as RMSD, it is `mean(loss_permuted <= loss_observed)`. No +1
+#'   correction is applied.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample`, `power`, `svds_tol`, `work`, `maxit`, `tol`, `eps`,

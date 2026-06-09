@@ -104,9 +104,14 @@ is not needed for prediction, VIP, or the benchmark pipelines.}
 
 \item{proj}{Return projected \code{Ttest} when \code{TRUE}.}
 
-\item{perm.test}{Run permutation test.}
+\item{perm.test}{Run a single-split permutation test when \code{Xtest} and
+\code{Ytest} are supplied. The rows of \code{Xtrain} are randomly permuted, the
+model is refitted, and the permuted test-set \code{Q2Y} path is compared with
+the observed \code{Q2Y} path.}
 
-\item{times}{Number of permutations.}
+\item{times}{Number of permutations. For \code{pls()}, the empirical p-value
+for each component is \code{mean(Q2Y_permuted > Q2Y_observed)} and is returned
+in \code{pval}. No +1 correction is applied.}
 
 \item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
 for CUDA-native fitting, or experimental \code{metal} for Apple Metal
@@ -159,7 +164,8 @@ summaries were requested. Common fields are:
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
 \item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for factor \code{Ytest}, returned when response scores are available.
 \item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when classification predictions are available.
-\item \code{pval}: permutation-test p-values by component, returned when \code{perm.test = TRUE}.
+\item \code{pval}: single-split permutation-test p-values by component, returned when \code{perm.test = TRUE}. Each p-value is the fraction of permuted \code{Q2Y} values larger than the observed \code{Q2Y}.
+\item \code{permutation}: long-format permutation table, returned when \code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the permutation correlation used by \code{plot.permutation()}.
 \item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained}, \code{variance_total}, \code{variance_basis}: predictor-space variance summaries returned when \code{return_variance = TRUE}.
 \item \code{x_variance}, \code{x_variance_explained}, \code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the predictor-space variance summaries.
 \item \code{inner_model}: fitted inner PLS model used by OPLS.

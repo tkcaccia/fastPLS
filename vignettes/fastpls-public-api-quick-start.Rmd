@@ -645,6 +645,68 @@ data.frame(
 )
 ```
 
+### Permutation-test p-values
+
+`fastPLS` provides two permutation-test procedures. In `pls()`, the permutation
+test is a single train/test procedure: the rows of `Xtrain` are randomly
+permuted, the model is refitted, and the permuted test-set `Q2Y` values are
+compared with the observed `Q2Y` values component by component. The returned
+`pval` is the empirical fraction `mean(Q2Y_permuted > Q2Y_observed)`, without a
+`+1` correction. The full permutation table is stored in `permutation` and can
+be visualized with `plot.permutation()`, where the x-axis is the correlation
+between the original and permuted response structure and the y-axis shows R2
+and Q2.
+
+```{r}
+perm_fit <- pls(
+  Xtrain = Xtrain,
+  Ytrain = Ytrain_reg,
+  Xtest = Xtest,
+  Ytest = Ytest_reg,
+  ncomp = 2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  fit = TRUE,
+  perm.test = TRUE,
+  times = 5,
+  return_variance = FALSE,
+  seed = 108
+)
+
+perm_fit$pval
+plot.permutation(perm_fit, ncomp = 2)
+```
+
+In `pls.double.cv()`, the permutation test repeats the complete nested
+cross-validation workflow after shuffling the rows of `Xdata`. The observed
+statistic is the median outer-CV `Q2Y`, and `Q2Ysampled` stores the permuted
+median values. For metrics where larger is better, the p-value is
+`mean(Q2Y_permuted >= Q2Y_observed)`; for loss metrics where smaller is better,
+it is `mean(loss_permuted <= loss_observed)`.
+
+```{r}
+dcv_perm <- pls.double.cv(
+  Xdata = Xtrain[1:30, ],
+  Ydata = Ytrain_reg[1:30],
+  ncomp = 1:2,
+  runn = 1,
+  kfold_inner = 2,
+  kfold_outer = 2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  perm.test = TRUE,
+  times = 3,
+  seed = 109
+)
+
+data.frame(
+  observed_median_Q2Y = median(dcv_perm$Q2Y, na.rm = TRUE),
+  p_value = dcv_perm$p.value
+)
+```
+
 The selected CV object can then be passed directly to `pls()`. The final model
 is refitted on the full training set using the selected component count and
 selected tuning settings, then applied to the independent test set.

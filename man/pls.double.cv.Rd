@@ -63,9 +63,16 @@ fits where available.}
 \item{seed}{Random seed used for outer/inner fold assignment and randomized
 SVD steps.}
 
-\item{perm.test}{Run permutation test.}
+\item{perm.test}{Run a nested-CV permutation test. For each permutation, the
+rows of \code{Xdata} are shuffled, the complete double cross-validation is
+repeated, and the median permuted \code{Q2Y} is compared with the observed
+median \code{Q2Y}.}
 
-\item{times}{Number of permutations.}
+\item{times}{Number of permutations. For predictive metrics where larger is
+better, such as \code{Q2Y}, the empirical p-value is
+\code{mean(Q2Y_permuted >= Q2Y_observed)}. For loss metrics where smaller is
+better, such as RMSD, it is \code{mean(loss_permuted <= loss_observed)}. No +1
+correction is applied.}
 
 \item{runn}{Number of repeated runs.}
 
