@@ -107,7 +107,7 @@ run_one <- function(dataset, method, backend, svd_method, classifier) {
   fit <- NULL
   tm <- system.time({
     fit <- tryCatch(
-      fastPLS::single.pls.cv(
+      fastPLS::pls.single.cv(
         Xdata = as.matrix(task$Xtrain),
         Ydata = if (identical(task_type, "classification")) factor(task$Ytrain) else as.matrix(task$Ytrain),
         ncomp = grid,

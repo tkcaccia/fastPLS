@@ -392,7 +392,7 @@ run_cv10 <- function(task, spec, effective_ncomp) {
     "rmsd"
   }
   t0 <- proc.time()[["elapsed"]]
-  cv <- fastPLS::single.pls.cv(
+  cv <- fastPLS::pls.single.cv(
     Xdata = dat$X,
     Ydata = dat$Y,
     constrain = seq_len(nrow(dat$X)),

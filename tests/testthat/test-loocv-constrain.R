@@ -4,7 +4,7 @@ test_that("LOOCV leaves out one constraint group at a time", {
   y <- factor(iris[idx, 5])
   constrain <- rep(seq_len(nrow(X) / 2L), each = 2L)
 
-  cv <- single.pls.cv(
+  cv <- pls.single.cv(
     X,
     y,
     constrain = constrain,
@@ -29,7 +29,7 @@ test_that("numeric kfold at group count also means constrained LOOCV", {
   y <- factor(rep(letters[1:3], each = 8))
   constrain <- rep(seq_len(12), each = 2L)
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     X,
     y,
     constrain = constrain,
@@ -54,7 +54,7 @@ test_that("LOOCV grouped splitting also works for regression responses", {
   Y <- cbind(rnorm(20), rnorm(20))
   constrain <- rep(seq_len(10), each = 2L)
 
-  cv <- single.pls.cv(
+  cv <- pls.single.cv(
     X,
     Y,
     constrain = constrain,

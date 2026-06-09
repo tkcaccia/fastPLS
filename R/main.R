@@ -3561,12 +3561,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' matrices and deflated cross-covariance resident on device throughout the fit.
 #'
 #' @param Xtrain Numeric training predictor matrix.
-#'   Alternatively, a result returned by [single.pls.cv()]. In that case
+#'   Alternatively, a result returned by [pls.single.cv()]. In that case
 #'   `pls()` refits the selected model on the full cross-validation training
 #'   set and predicts `Xtest` using `best_ncomp` and the selected tuning
 #'   settings.
 #' @param Ytrain Training response (numeric or factor).
-#'   When `Xtrain` is a [single.pls.cv()] result, the second positional argument
+#'   When `Xtrain` is a [pls.single.cv()] result, the second positional argument
 #'   may be used as `Xtest`.
 #' @param Xtest Optional test predictor matrix.
 #' @param Ytest Optional observed response used to compute `Q2Y`.
@@ -4215,8 +4215,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   fit_data <- attr(cv, "fit_data", exact = TRUE)
   if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     stop(
-      "This single.pls.cv() result does not contain the training data needed ",
-      "for automatic refitting. Please rerun single.pls.cv() with the current ",
+      "This pls.single.cv() result does not contain the training data needed ",
+      "for automatic refitting. Please rerun pls.single.cv() with the current ",
       "fastPLS version, or call pls(Xtrain, Ytrain, ...) manually using ",
       "cv$best_parameters.",
       call. = FALSE
@@ -4224,7 +4224,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }
   cfg <- cv$tuning_config
   if (is.null(cfg)) {
-    stop("The single.pls.cv() result does not contain tuning_config.", call. = FALSE)
+    stop("The pls.single.cv() result does not contain tuning_config.", call. = FALSE)
   }
   params <- .cv_config_list(cfg)
   svd_dots <- cfg$svd_dots %||% list()
@@ -6645,7 +6645,7 @@ plot.fastPLS <- function(x,
 #'            svd.method = "rsvd", return_variance = FALSE)
 #' head(predict(fit, X)$Ypred)
 #'
-#' cv <- single.pls.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+#' cv <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
 #'                     backend = "cpu", svd.method = "rsvd", seed = 1)
 #' fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 #' cv$best_ncomp
@@ -7621,17 +7621,17 @@ pls =  function (Xtrain,
 #' idx <- c(1:12, 51:62, 101:112)
 #' X <- as.matrix(iris[idx, 1:4])
 #' y <- factor(iris[idx, 5])
-#' opt <- single.pls.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+#' opt <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
 #'                      backend = "cpu", svd.method = "rsvd", seed = 1)
 #' opt$best_ncomp
-#' opt_kernel <- single.pls.cv(X, y, ncomp = 1:2, kfold = 3,
+#' opt_kernel <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3,
 #'                             method = "kernelpls", backend = "cpu",
 #'                             svd.method = "rsvd",
 #'                             kernel = c("linear", "rbf"),
 #'                             gamma = c(0.1, 1), seed = 1)
 #' opt_kernel$best_parameters
 #' @export
-single.pls.cv =  function (Xdata,
+pls.single.cv =  function (Xdata,
                           Ydata,
                           ncomp=2,
                           constrain=NULL,
@@ -7688,7 +7688,7 @@ single.pls.cv =  function (Xdata,
     cknn_memory_missing = missing(cknn_memory),
     xprod = xprod,
     dots = selection_ctl$dots,
-    context = "single.pls.cv()"
+    context = "pls.single.cv()"
   )
   if (length(tuning_grid) > 1L) {
     grid_results <- vector("list", length(tuning_grid))
@@ -7729,7 +7729,7 @@ single.pls.cv =  function (Xdata,
         cfg$svd_dots
       )
       one <- tryCatch(
-        do.call(single.pls.cv, run_args),
+        do.call(pls.single.cv, run_args),
         error = function(e) {
           list(status = "error", error = conditionMessage(e), tuning_config = cfg)
         }
@@ -7807,7 +7807,7 @@ single.pls.cv =  function (Xdata,
   svd_ctl <- .resolve_svd_control(
     svd.method = svd.method,
     dots = c(dots$dots, list(seed = seed)),
-    context = "single.pls.cv()"
+    context = "pls.single.cv()"
   )
   svd.method <- match.arg(.normalize_svd_method(svd_ctl$svd.method), c("irlba", "cpu_rsvd"))
   rsvd_oversample <- svd_ctl$rsvd_oversample
@@ -8265,7 +8265,7 @@ pls.double.cv = function(Xdata,
         ),
         svd_dot_args
       )
-      inner <- do.call(single.pls.cv, inner_args)
+      inner <- do.call(pls.single.cv, inner_args)
       best_comp[f] <- as.integer(inner$best_ncomp[[1L]])
       inner_results[[f]] <- inner
       selected <- inner$best_parameters

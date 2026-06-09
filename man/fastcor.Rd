@@ -24,7 +24,7 @@ does not rank-transform the inputs and therefore does not compute Spearman
 correlation.
 }
 \author{Stefano Cacciatore, Leonardo Tenori, Dupe Ojo, Alessia Vignoli}
-\seealso{\code{\link{single.pls.cv}}, \code{\link{pls.double.cv}}}
+\seealso{\code{\link{pls.single.cv}}, \code{\link{pls.double.cv}}}
 \examples{
 data(iris)
 x <- as.matrix(iris[, -5])

@@ -22,7 +22,7 @@ selected through the user-facing functions below.
 | `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
 | `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
 | `plot()` | Plot PLS or PCA score maps, with optional confidence or Hotelling T2 ellipses. |
-| `single.pls.cv()` | Run grouped cross-validation and choose the best component count. |
+| `pls.single.cv()` | Run grouped cross-validation and choose the best component count. |
 | `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
 | `pca()` | Compute PCA using the same SVD backend selector. |
@@ -506,7 +506,7 @@ par(old_par)
 
 ## Cross-Validation
 
-`fastPLS` provides two cross-validation helpers. Use `single.pls.cv()` for
+`fastPLS` provides two cross-validation helpers. Use `pls.single.cv()` for
 grouped k-fold or leave-one-group-out validation; pass a scalar `ncomp` for a
 fixed-component CV or a vector of candidates when the number of components
 should be selected from a grid. Use `pls.double.cv()` for nested validation,
@@ -515,7 +515,7 @@ predictive performance. Both helpers support regression and classification and d
 compiled CPU/CUDA core when available.
 
 The cKNN memory strategy can also be used during cross-validation. For example,
-`single.pls.cv(..., classifier = "cknn", cknn_memory = "blocked")` evaluates
+`pls.single.cv(..., classifier = "cknn", cknn_memory = "blocked")` evaluates
 the same candidate-kNN classifier while reducing fold-level prediction memory.
 For very large scalar-component cKNN validations, `cknn_memory = "streaming"`
 can further reduce peak RAM by constructing the training score cache in blocks
@@ -527,7 +527,7 @@ In ordinary k-fold CV, samples are split directly into `kfold` folds. The
 example below validates a fixed two-component SIMPLS classifier with five folds.
 
 ```{r}
-cv_kfold <- single.pls.cv(
+cv_kfold <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   ncomp = 2,
@@ -556,7 +556,7 @@ never one in each.
 ```{r}
 patient_id <- rep(seq_len(nrow(Xtrain) / 2), each = 2)
 
-cv_grouped <- single.pls.cv(
+cv_grouped <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   constrain = patient_id,
@@ -582,7 +582,7 @@ values greater than or equal to the number of constraint groups are also treated
 as leave-one-group-out CV.
 
 ```{r}
-cv_loocv <- single.pls.cv(
+cv_loocv <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   constrain = patient_id,
@@ -600,7 +600,7 @@ c(n_loocv_folds = length(unique(cv_loocv$fold)),
 
 ### Component and hyperparameter optimization CV
 
-`single.pls.cv()` repeats the same CV splitting strategy over several candidate
+`pls.single.cv()` repeats the same CV splitting strategy over several candidate
 component counts and returns the best value according to the predictive metric:
 accuracy for classification, Q2 for univariate regression, and RMSD-style
 prediction error for multivariate regression outputs. Predictive arguments can
@@ -608,7 +608,7 @@ also be supplied as vectors to tune a compact grid. Fold-control arguments such
 as `kfold` remain single settings for the whole CV run.
 
 ```{r}
-cv_opt <- single.pls.cv(
+cv_opt <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_reg,
   ncomp = 1:3,
@@ -650,7 +650,7 @@ is refitted on the full training set using the selected component count and
 selected tuning settings, then applied to the independent test set.
 
 ```{r}
-cv_select <- single.pls.cv(
+cv_select <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   ncomp = 1:3,
@@ -679,7 +679,7 @@ kernel setting. The selected values are returned in `best_parameters`, and the
 same CV object can be passed to `pls()` for the final refit.
 
 ```{r}
-cv_kernel <- single.pls.cv(
+cv_kernel <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
   ncomp = 1:3,
@@ -718,7 +718,7 @@ optimize model complexity, such as the number of latent variables, whereas the
 outer CV loop (`CV2`) holds out samples that are not used during optimization and
 therefore provides the performance estimate of the complete modelling strategy.
 In `fastPLS`, `pls.double.cv()` follows this idea: the inner loop calls
-`single.pls.cv()` to select the best number of components and any vector-valued
+`pls.single.cv()` to select the best number of components and any vector-valued
 predictive hyperparameters, while the outer loop refits the selected model on
 the corresponding outer training set and predicts the outer test fold. Both
 `kfold_inner` and `kfold_outer` can be ordinary fold counts or `"loocv"`, and

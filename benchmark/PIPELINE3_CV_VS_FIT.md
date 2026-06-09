@@ -13,7 +13,7 @@ bash benchmark/run_pipeline3_cv_vs_fit.sh
 ## Benchmark modes
 
 - `fit_predict`: single model fit followed by test-set prediction.
-- `cv10`: 10-fold cross-validation using `single.pls.cv`.
+- `cv10`: 10-fold cross-validation using `pls.single.cv`.
 
 The default launch script runs both modes.  Use
 `FASTPLS_PIPELINE3_BENCHMARK_MODES=cv10` to run only cross-validation.

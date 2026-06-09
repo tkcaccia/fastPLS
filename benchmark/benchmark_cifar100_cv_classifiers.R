@@ -179,7 +179,7 @@ run_one <- function(X, y, method, classifier, backend, svd_method, profile_name,
     setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
   }, add = TRUE)
   tryCatch({
-    out <- single.pls.cv(
+    out <- pls.single.cv(
       X,
       y,
       ncomp = ncomp,

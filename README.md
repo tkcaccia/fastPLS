@@ -3,7 +3,7 @@
 `fastPLS` provides compiled C++ and CUDA implementations of partial least squares
 models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
-through `pls()`, `single.pls.cv()`, `pls.double.cv()`,
+through `pls()`, `pls.single.cv()`, `pls.double.cv()`,
 `fastsvd()`, and `pca()` instead of through low-level implementation wrappers.
 The current standard pipeline compares four model families:
 
@@ -141,7 +141,7 @@ Prediction and utilities:
 
 Cross-validation:
 
-- `single.pls.cv()`
+- `pls.single.cv()`
 - `pls.double.cv()`
 
 All lower-level C++, CUDA, OPLS, kernel PLS, SVD-dispatch, and KODAMA-oriented

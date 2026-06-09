@@ -1,11 +1,11 @@
 library(fastPLS)
 
-test_that("single.pls.cv tunes prediction hyperparameters", {
+test_that("pls.single.cv tunes prediction hyperparameters", {
   idx <- c(1:12, 51:62, 101:112)
   X <- as.matrix(iris[idx, 1:4])
   y <- factor(iris[idx, 5])
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     X,
     y,
     ncomp = 1:2,
@@ -53,12 +53,12 @@ test_that("pls.double.cv uses inner selected hyperparameters", {
   }, logical(1L))))
 })
 
-test_that("single.pls.cv reports only optimized best parameters", {
+test_that("pls.single.cv reports only optimized best parameters", {
   idx <- c(1:12, 51:62, 101:112)
   X <- as.matrix(iris[idx, 1:4])
   y <- factor(iris[idx, 5])
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     X,
     y,
     ncomp = 2:4,
@@ -72,7 +72,7 @@ test_that("single.pls.cv reports only optimized best parameters", {
   expect_true(opt$best_parameters$classifier %in% c("argmax", "lda"))
 })
 
-test_that("pls refits and predicts from a single.pls.cv result", {
+test_that("pls refits and predicts from a pls.single.cv result", {
   set.seed(2106)
   test_idx <- sample(seq_len(nrow(iris)), 30)
   Xtrain <- as.matrix(iris[-test_idx, 1:4])
@@ -80,7 +80,7 @@ test_that("pls refits and predicts from a single.pls.cv result", {
   Xtest <- as.matrix(iris[test_idx, 1:4])
   Ytest <- factor(iris[test_idx, 5], levels = levels(Ytrain))
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     Xtrain,
     Ytrain,
     ncomp = 1:3,
@@ -106,13 +106,13 @@ test_that("pls refits and predicts from a single.pls.cv result", {
   expect_equal(fit_named$Ypred, fit_positional$Ypred)
 })
 
-test_that("pls refits regression models selected by single.pls.cv", {
+test_that("pls refits regression models selected by pls.single.cv", {
   set.seed(2107)
   X <- matrix(rnorm(60 * 6), nrow = 60, ncol = 6)
   y <- X[, 1] - 0.5 * X[, 2] + rnorm(60, sd = 0.2)
   test_idx <- seq(1, 60, by = 3)
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     X[-test_idx, , drop = FALSE],
     y[-test_idx],
     ncomp = 1:3,

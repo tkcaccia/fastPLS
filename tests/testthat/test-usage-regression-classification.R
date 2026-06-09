@@ -98,13 +98,13 @@ test_that("classification Yfit uses the same decoding as predict", {
   expect_true("setosa" %in% as.character(fit$Yfit[[1]]))
 })
 
-test_that("single.pls.cv and pls.double.cv run in both contexts", {
+test_that("pls.single.cv and pls.double.cv run in both contexts", {
   set.seed(1004)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
   Yreg <- matrix(rnorm(60), ncol = 1)
   ycls <- factor(sample(c("L", "M", "H"), 60, replace = TRUE))
 
-  cv_reg <- single.pls.cv(
+  cv_reg <- pls.single.cv(
     Xdata = X,
     Ydata = Yreg,
     ncomp = 1:2,
@@ -115,7 +115,7 @@ test_that("single.pls.cv and pls.double.cv run in both contexts", {
   expect_true(is.list(cv_reg))
   expect_true("Q2Y" %in% names(cv_reg))
 
-  cv_cls <- single.pls.cv(
+  cv_cls <- pls.single.cv(
     Xdata = X,
     Ydata = ycls,
     ncomp = 1:2,
@@ -162,7 +162,7 @@ test_that("compiled CV reports the prediction backend", {
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   y <- factor(sample(c("A", "B", "C"), 48, replace = TRUE))
 
-  cpu_cv <- single.pls.cv(
+  cpu_cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -175,7 +175,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cpu_cv$backend, "cpu")
   expect_identical(cpu_cv$prediction_backend, "cpu")
 
-  cpu_opt <- single.pls.cv(
+  cpu_opt <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -204,7 +204,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_true(is.factor(cpu_double$Ypred))
 
   skip_if_not(has_cuda(), "CUDA backend unavailable")
-  cuda_cv <- single.pls.cv(
+  cuda_cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -216,7 +216,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cuda_cv$backend, "cuda")
   expect_identical(cuda_cv$prediction_backend, "cuda_flash")
 
-  cuda_opt <- single.pls.cv(
+  cuda_opt <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,

@@ -38,7 +38,7 @@ test_that("pls supports all declared method/backend combinations (smoke)", {
   }
 })
 
-test_that("single.pls.cv and pls.double.cv support accelerated simpls", {
+test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
   set.seed(20260318)
   X <- matrix(rnorm(54 * 8), nrow = 54, ncol = 8)
   y_reg <- matrix(rnorm(54 * 2), ncol = 2)
@@ -48,7 +48,7 @@ test_that("single.pls.cv and pls.double.cv support accelerated simpls", {
 
   for (s in back) {
     for (m in c("plssvd", "simpls")) {
-      cv_reg <- single.pls.cv(
+      cv_reg <- pls.single.cv(
         Xdata = X,
         Ydata = y_reg,
         ncomp = 1:2,
@@ -59,7 +59,7 @@ test_that("single.pls.cv and pls.double.cv support accelerated simpls", {
       expect_true(is.list(cv_reg))
       expect_true("Q2Y" %in% names(cv_reg))
 
-      cv_cls <- single.pls.cv(
+      cv_cls <- pls.single.cv(
         Xdata = X,
         Ydata = y_cls,
         ncomp = 1:2,

@@ -283,7 +283,7 @@ for (dataset_id in datasets) {
       msg <- "Metal backend not available"
     } else if (identical(spec$backend, "metal") && !identical(spec$classifier, "argmax")) {
       status <- "skipped_not_native_metal_cv"
-      msg <- "Metal single.pls.cv currently has native compiled CV for argmax only"
+      msg <- "Metal pls.single.cv currently has native compiled CV for argmax only"
     }
 
     if (identical(status, "ok")) {
@@ -294,7 +294,7 @@ for (dataset_id in datasets) {
       res <- tryCatch({
         setTimeLimit(elapsed = timeout_sec, transient = TRUE)
         t0 <- proc.time()[["elapsed"]]
-        cv <- fastPLS::single.pls.cv(
+        cv <- fastPLS::pls.single.cv(
           Xdata = X,
           Ydata = Y,
           ncomp = effective_ncomp,

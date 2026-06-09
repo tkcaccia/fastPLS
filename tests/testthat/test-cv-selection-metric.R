@@ -1,9 +1,9 @@
-test_that("single.pls.cv can optimize explicit regression metrics", {
+test_that("pls.single.cv can optimize explicit regression metrics", {
   set.seed(2101)
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   y <- matrix(0.6 * X[, 1] - 0.3 * X[, 2] + rnorm(48, sd = 0.2), ncol = 1)
 
-  opt_r2 <- single.pls.cv(
+  opt_r2 <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -18,7 +18,7 @@ test_that("single.pls.cv can optimize explicit regression metrics", {
   expect_identical(opt_r2$best_metric_name, "r2")
   expect_true(opt_r2$best_ncomp %in% 1:2)
 
-  opt_rmsd <- single.pls.cv(
+  opt_rmsd <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -42,7 +42,7 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
   y <- factor(rep(c("A", "B", "C"), each = 18))
   X[, 1] <- X[, 1] + as.numeric(y)
 
-  opt <- single.pls.cv(
+  opt <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:2,
@@ -83,7 +83,7 @@ test_that("SIMPLS metric-only CV matches stored prediction CV", {
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
   y <- matrix(0.7 * X[, 1] - 0.5 * X[, 3] + rnorm(60, sd = 0.25), ncol = 1)
 
-  metric_only <- single.pls.cv(
+  metric_only <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:3,
@@ -94,7 +94,7 @@ test_that("SIMPLS metric-only CV matches stored prediction CV", {
     seed = 21,
     selection_metric = "rmsd"
   )
-  stored <- single.pls.cv(
+  stored <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:3,
@@ -147,7 +147,7 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
   )
   expect_equal(scalar_fit$R2Y[[1]], path_fit$R2Y[[3]], tolerance = 1e-10)
 
-  single <- single.pls.cv(
+  single <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,
@@ -180,13 +180,13 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
   expect_false(isTRUE(all.equal(nested$R2Y, nested$RMSD)))
 })
 
-test_that("single.pls.cv can skip the extra full-data R2 fit", {
+test_that("pls.single.cv can skip the extra full-data R2 fit", {
   set.seed(21045)
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   beta <- matrix(rnorm(7 * 2), nrow = 7, ncol = 2)
   Y <- X %*% beta + matrix(rnorm(48 * 2, sd = 0.25), nrow = 48, ncol = 2)
 
-  with_r2 <- single.pls.cv(
+  with_r2 <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,
@@ -197,7 +197,7 @@ test_that("single.pls.cv can skip the extra full-data R2 fit", {
     seed = 21045,
     return_r2 = TRUE
   )
-  without_r2 <- single.pls.cv(
+  without_r2 <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,
@@ -220,7 +220,7 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
   X <- as.matrix(iris[, 1:4])
   y <- factor(iris[, 5])
 
-  with_r2 <- single.pls.cv(
+  with_r2 <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -231,7 +231,7 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     seed = 21046,
     return_r2 = TRUE
   )
-  without_r2 <- single.pls.cv(
+  without_r2 <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -295,7 +295,7 @@ test_that("RMSD selection does not overwrite Q2Y", {
   beta <- matrix(rnorm(9 * 3), nrow = 9, ncol = 3)
   Y <- X %*% beta + matrix(rnorm(72 * 3, sd = 1.5), nrow = 72, ncol = 3)
 
-  single <- single.pls.cv(
+  single <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,

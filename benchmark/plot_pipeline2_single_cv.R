@@ -37,7 +37,7 @@ p_time <- ggplot(d, aes(x = variant, y = elapsed_sec, fill = backend)) +
   facet_grid(dataset ~ method, scales = "free_y") +
   scale_y_log10() +
   coord_flip() +
-  labs(x = NULL, y = "CV elapsed time (s, log scale)", title = "Pipeline 2: single.pls.cv speed") +
+  labs(x = NULL, y = "CV elapsed time (s, log scale)", title = "Pipeline 2: pls.single.cv speed") +
   theme_bw(base_size = 11) +
   theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
 
@@ -45,7 +45,7 @@ p_metric <- ggplot(d, aes(x = variant, y = metric_value, fill = backend)) +
   geom_col(width = 0.75) +
   facet_grid(dataset ~ method, scales = "free_y") +
   coord_flip() +
-  labs(x = NULL, y = "CV predictive metric", title = "Pipeline 2: single.pls.cv predictive performance") +
+  labs(x = NULL, y = "CV predictive metric", title = "Pipeline 2: pls.single.cv predictive performance") +
   theme_bw(base_size = 11) +
   theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
 
