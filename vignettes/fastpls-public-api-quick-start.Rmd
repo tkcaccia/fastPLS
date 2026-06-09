@@ -320,6 +320,24 @@ fit_cls <- pls(
 head(fit_cls$Ypred)
 ```
 
+### Confusion matrix
+
+For classification models, the predicted labels can be cross-tabulated against
+the observed labels. The same information is also returned by `evaluate()`.
+
+```{r}
+confusion_cls <- table(
+  predicted = fit_cls$Ypred[[length(fit_cls$ncomp)]],
+  observed = Ytest_cls
+)
+confusion_cls
+
+evaluate(
+  observed = Ytest_cls,
+  predicted = fit_cls$Ypred[[length(fit_cls$ncomp)]]
+)$confusion
+```
+
 For PLS-DA with an LDA prediction head, use the `classifier` argument. The
 recommended GPU route is PLSSVD followed by native CUDA LDA:
 
