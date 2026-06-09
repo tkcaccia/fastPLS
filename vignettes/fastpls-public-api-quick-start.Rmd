@@ -338,8 +338,9 @@ evaluate(
 )$confusion
 ```
 
-For PLS-DA with an LDA prediction head, use the `classifier` argument. The
-recommended GPU route is PLSSVD followed by native CUDA LDA:
+For PLS-DA with an LDA prediction head, use the `classifier` argument. On
+systems with GPU support, the backend is selected through `backend = "cuda"` or
+`backend = "metal"` where available:
 
 ```{r eval = FALSE}
 fit_cls_lda_gpu <- pls(
@@ -354,7 +355,7 @@ fit_cls_lda_gpu <- pls(
 )
 ```
 
-When CUDA is unavailable, the compiled CPU fallback is:
+When a GPU backend is unavailable, the compiled CPU fallback is:
 
 ```{r}
 fit_cls_lda_cpu <- pls(
@@ -936,12 +937,14 @@ qq <- predict(pp, breast$X_test)
 points(qq, bg = breast$y_test)
 ```
 
-## CUDA Availability
+## CUDA and Metal Availability
 
-CUDA is optional. Use `has_cuda()` before selecting `backend = "cuda"`.
+CUDA and Apple Metal are optional. Use `has_cuda()` before selecting
+`backend = "cuda"` and `has_metal()` before selecting `backend = "metal"`.
 
 ```{r}
 has_cuda()
+has_metal()
 ```
 
 ```{r eval = FALSE}
@@ -969,13 +972,34 @@ if (has_cuda()) {
 }
 ```
 
+```{r eval = FALSE}
+if (has_metal()) {
+  fit_metal <- pls(
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "metal"
+  )
+
+  pca_metal <- pca(
+    Xtrain,
+    ncomp = 2,
+    backend = "metal",
+    method = "rsvd"
+  )
+}
+```
+
 ## Helper Functions
 
 `fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
 importance in projection trajectories for fitted PLS models, following the
 standard VIP interpretation used for PLS variable ranking (Wold, Sjostrom, and
 Eriksson, 2001; Chong and Jun, 2005). These functions are ordinary R-level
-helpers and are independent of CUDA availability.
+helpers and are independent of CUDA or Metal availability.
 
 ```{r}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
