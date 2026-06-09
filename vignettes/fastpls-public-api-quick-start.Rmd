@@ -671,7 +671,7 @@ perm_fit <- pls(
   svd.method = "rsvd",
   fit = TRUE,
   perm.test = TRUE,
-  times = 5,
+  times = 100,
   return_variance = FALSE,
   seed = 108
 )
@@ -699,7 +699,7 @@ dcv_perm <- pls.double.cv(
   backend = "cpu",
   svd.method = "rsvd",
   perm.test = TRUE,
-  times = 3,
+  times = 100,
   seed = 109
 )
 
