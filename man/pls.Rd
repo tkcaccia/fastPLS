@@ -157,7 +157,8 @@ summaries were requested. Common fields are:
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied to \code{pls()}. For classification this contains predicted factor labels; for regression it contains numeric predictions.
 \item \code{Ypred_index}: integer class indices for classification predictions, when available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: test-set predictive performance for numeric \code{Ytest}, or classification accuracy for factor \code{Ytest}, returned when \code{Ytest} is supplied.
+\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for factor \code{Ytest}, returned when response scores are available.
+\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when classification predictions are available.
 \item \code{pval}: permutation-test p-values by component, returned when \code{perm.test = TRUE}.
 \item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained}, \code{variance_total}, \code{variance_basis}: predictor-space variance summaries returned when \code{return_variance = TRUE}.
 \item \code{x_variance}, \code{x_variance_explained}, \code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the predictor-space variance summaries.

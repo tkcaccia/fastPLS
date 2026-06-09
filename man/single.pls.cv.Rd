@@ -120,9 +120,9 @@ A list describing the cross-validation run and selected model:
 classification uses accuracy and regression uses the default prediction error rule.
 \item \code{best_metric_name} and \code{best_metric_value}: name and value of the
 metric at the selected component count.
-\item \code{Q2Y}: held-out cross-validated predictive performance. For
-classification this is accuracy; for regression it is cross-validated Q2 when
-available.
+\item \code{Q2Y}: held-out cross-validated Q2. For factor responses, Q2 is
+calculated on the dummy-coded PLS-DA response scores.
+\item \code{accuracy}: held-out decoded-label accuracy for factor responses.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
 \code{NA} for classification.
 \item \code{R2Y}: training-set explained-variance path from a model fitted on

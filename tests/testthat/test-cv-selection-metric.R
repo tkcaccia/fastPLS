@@ -256,13 +256,16 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
 
   expect_true(is.finite(with_r2$Q2Y))
   expect_true(is.finite(with_r2$R2Y))
+  expect_true(is.finite(with_r2$accuracy))
   expect_equal(with_r2$R2Y, as.numeric(full_fit$R2Y), tolerance = 1e-10)
   expect_false(isTRUE(all.equal(with_r2$Q2Y, with_r2$R2Y)))
+  expect_false(isTRUE(all.equal(with_r2$Q2Y, with_r2$accuracy)))
   expect_true(all(is.na(without_r2$R2Y)))
   expect_equal(without_r2$Q2Y, with_r2$Q2Y)
+  expect_equal(without_r2$accuracy, with_r2$accuracy)
 })
 
-test_that("classification double CV does not reuse accuracy as R2", {
+test_that("classification double CV reports Q2, R2, and accuracy separately", {
   X <- as.matrix(iris[, 1:4])
   y <- factor(iris[, 5])
 
@@ -281,7 +284,9 @@ test_that("classification double CV does not reuse accuracy as R2", {
 
   expect_true(is.finite(nested$Q2Y))
   expect_true(is.finite(nested$R2Y))
+  expect_true(is.finite(nested$accuracy))
   expect_false(isTRUE(all.equal(nested$Q2Y, nested$R2Y)))
+  expect_false(isTRUE(all.equal(nested$Q2Y, nested$accuracy)))
 })
 
 test_that("RMSD selection does not overwrite Q2Y", {

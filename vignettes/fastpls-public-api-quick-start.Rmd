@@ -631,9 +631,10 @@ from held-out predictions and is reported on the response scale, so lower values
 are better. `R2Y` is a training-set explained-variance estimate from one
 additional model fitted on the full dataset; set `return_r2 = FALSE` to skip
 this extra fit when only cross-validated performance is needed. For
-classification, `Q2Y` reports held-out CV accuracy, while `R2Y` is calculated
-from the full-data PLS-DA fit on the dummy-coded response scores. `RMSD` is not
-used for classification.
+classification, `Q2Y` is calculated from held-out dummy-coded PLS-DA response
+scores, `accuracy` reports decoded-label accuracy, and `R2Y` is calculated from
+the full-data PLS-DA fit on the dummy-coded response scores. `RMSD` is not used
+for classification.
 
 ```{r}
 data.frame(
@@ -743,10 +744,11 @@ cv_double <- pls.double.cv(
 data.frame(
   selected_ncomp_mode = cv_double$bcomp,
   outer_metric = cv_double$metric_name,
-  outer_accuracy = cv_double$Q2Y,
-  median_accuracy = cv_double$medianQ2Y,
-  ci95_low = cv_double$CI95Q2Y[1],
-  ci95_high = cv_double$CI95Q2Y[2]
+  outer_accuracy = cv_double$accuracy,
+  outer_Q2Y = cv_double$Q2Y,
+  median_Q2Y = cv_double$medianQ2Y,
+  ci95_Q2Y_low = cv_double$CI95Q2Y[1],
+  ci95_Q2Y_high = cv_double$CI95Q2Y[2]
 )
 ```
 
@@ -792,8 +794,9 @@ Important elements returned by `pls.double.cv()` are:
 - `vote_counts`: classification-only matrix with one row per sample and one
   column per class, showing how many repeated outer-CV runs voted for each
   class.
-- `Q2Y`, `RMSD`, and `R2Y`: one value per repeated outer CV run. For
-  classification, `Q2Y` reports held-out accuracy, `R2Y` reports the mean
+- `accuracy`, `Q2Y`, `RMSD`, and `R2Y`: one value per repeated outer CV run.
+  For classification, `accuracy` reports decoded-label accuracy, `Q2Y` reports
+  held-out Q2 on dummy-coded PLS-DA response scores, `R2Y` reports the mean
   training-fit R2 of the selected outer-fold PLS-DA models, and `RMSD` is not
   used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports held-out
   RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold

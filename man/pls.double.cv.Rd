@@ -130,10 +130,11 @@ also be controlled with \code{selection_metric = "auto"}, \code{"accuracy"}, \co
 \code{"q2"}, or \code{"rmsd"}; the selection metric itself is scalar.}
 }
 \value{
-List of nested CV outputs and summaries. \code{Q2Y} stores held-out predictive
-performance (accuracy for factor responses and Q2 for numeric responses),
-\code{RMSD} stores held-out RMSD for numeric responses, and \code{R2Y} stores
-the mean training-fit R2 of the selected outer-fold models.
+List of nested CV outputs and summaries. \code{Q2Y} stores held-out Q2
+(on dummy-coded PLS-DA response scores for factor responses), \code{accuracy}
+stores held-out decoded-label accuracy for factor responses, \code{RMSD} stores
+held-out RMSD for numeric responses, and \code{R2Y} stores the mean
+training-fit R2 of the selected outer-fold models.
 }
 \description{
 Performs nested grouped cross-validation with an outer loop for unbiased

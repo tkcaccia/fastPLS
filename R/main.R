@@ -1844,13 +1844,11 @@
   out
 }
 
-.fastpls_q2_from_class_labels <- function(object, Ytest, Ypredlab) {
-  Ytest_transf <- .fastpls_one_hot_labels(Ytest, object$lev)
-  vapply(seq_along(object$ncomp), function(i) {
-    RQ(
-      Ytest_transf,
-      .fastpls_one_hot_labels(Ypredlab[[i]], object$lev)
-    )
+.fastpls_accuracy_from_class_labels <- function(lev, Ytest, Ypredlab) {
+  vapply(seq_along(Ypredlab), function(i) {
+    pred <- factor(as.character(Ypredlab[[i]]), levels = lev)
+    obs <- factor(as.character(Ytest), levels = lev)
+    mean(pred == obs, na.rm = TRUE)
   }, numeric(1))
 }
 
@@ -1950,7 +1948,8 @@
     }
     model$Ypred <- Ypredlab
     if (!is.null(Ytest)) {
-      model$Q2Y <- .fastpls_q2_from_class_labels(model, Ytest, Ypredlab)
+      model$accuracy <- .fastpls_accuracy_from_class_labels(lev, Ytest, Ypredlab)
+      model$Q2Y <- rep(NA_real_, length(model$ncomp))
     }
   }
   class(model) <- "fastPLS"
@@ -2982,7 +2981,8 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       res$Ttest <- lda_res$Ttest
     }
     if (!is.null(Ytest)) {
-      res$Q2Y <- .fastpls_q2_from_class_labels(object, Ytest, res$Ypred)
+      res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
+      res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
 		    return(res)
 		  }
@@ -2997,7 +2997,8 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	    )
 	    cand_res$Q2Y <- NULL
 	    if (!is.null(Ytest)) {
-	      cand_res$Q2Y <- .fastpls_q2_from_class_labels(object, Ytest, cand_res$Ypred)
+	      cand_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, cand_res$Ypred)
+	      cand_res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
 	    return(cand_res)
 	  }
@@ -3021,6 +3022,10 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       backend = pred_backend
     )
     bias_res$Q2Y <- NULL
+    if (!is.null(Ytest)) {
+      bias_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, bias_res$Ypred)
+      bias_res$Q2Y <- rep(NA_real_, length(object$ncomp))
+    }
     return(bias_res)
   }
 	  res <- if (isTRUE(use_metal)) {
@@ -3107,6 +3112,9 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
         res$Ypred_top <- top_res$Ypred_top
         res$Ypred_top_score <- top_res$Ypred_top_score
       }
+    }
+    if (!is.null(Ytest)) {
+      res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
     }
   }
   res
@@ -4100,6 +4108,26 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   list(Q2Y = q2, RMSD = rmsd)
 }
 
+.cv_classification_q2_path <- function(Ytrue, Ypred, lev) {
+  dims <- dim(Ypred)
+  if (length(dims) != 3L) {
+    return(NA_real_)
+  }
+  Ymat <- .fastpls_one_hot_labels(Ytrue, lev)
+  vapply(seq_len(dims[[3L]]), function(i) {
+    pred_i <- matrix(Ypred[, , i], nrow = dims[[1L]], ncol = dims[[2L]])
+    if (!any(is.finite(pred_i))) {
+      return(NA_real_)
+    }
+    .cv_metric_from_matrix(
+      Ytrue = Ymat,
+      Ypred = pred_i,
+      Ytrain = Ymat,
+      metric = "q2"
+    )$metric_value
+  }, numeric(1))
+}
+
 .cv_training_r2_path <- function(Xdata,
                                  Ydata,
                                  ncomp,
@@ -4246,13 +4274,28 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     if (identical(selection_metric, "auto")) {
       selection_metric <- "accuracy"
     }
-    if (!identical(selection_metric, "accuracy")) {
+    if (identical(selection_metric, "accuracy")) {
+      return(cv_res$metrics)
+    }
+    if (identical(selection_metric, "q2")) {
+      if (is.null(cv_res$Ypred)) {
+        stop("Stored classification score predictions are required to optimize selection_metric = 'q2'.", call. = FALSE)
+      }
+      q2 <- .cv_classification_q2_path(Ydata, cv_res$Ypred, cv_res$levels)
+      return(data.frame(
+        ncomp_index = seq_along(q2),
+        metric_name = rep("q2", length(q2)),
+        metric_value = q2,
+        stringsAsFactors = FALSE
+      ))
+    }
+    if (!identical(selection_metric, "r2")) {
       stop(
-        "Classification CV can only optimize selection_metric = 'accuracy'.",
+        "Classification CV can optimize selection_metric = 'accuracy' or 'q2'.",
         call. = FALSE
       )
     }
-    return(cv_res$metrics)
+    stop("Classification selection_metric = 'r2' is based on the full-data training fit and cannot be optimized by held-out folds.", call. = FALSE)
   }
   if (identical(selection_metric, "auto")) {
     selection_metric <- "rmsd"
@@ -4544,6 +4587,16 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   } else {
     list(pred = NULL, metrics = res$metrics)
   }
+  if (classification && !is.null(res$Ypred)) {
+    res$Yscore <- res$Ypred
+    res$Q2Y <- .cv_classification_q2_path(Yoriginal, res$Ypred, lev)
+    if (!isTRUE(return_scores)) {
+      res$Ypred <- NULL
+    }
+  }
+  if (classification && !is.null(decoded$metrics)) {
+    res$accuracy <- as.numeric(decoded$metrics$metric_value)
+  }
   res$pred <- decoded$pred
   res$metrics <- decoded$metrics
   res$classification <- classification
@@ -4761,8 +4814,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   } else {
     NULL
   }
-  score_pred <- if (classification && isTRUE(return_scores)) {
-    if (isTRUE(store_predictions)) array(NA_real_, dim = c(nrow(Xdata), q_response, nslice)) else NULL
+  score_pred <- if (classification) {
+    array(NA_real_, dim = c(nrow(Xdata), q_response, nslice))
   } else if (!classification) {
     if (isTRUE(store_predictions)) array(NA_real_, dim = c(nrow(Xdata), q_response, nslice)) else NULL
   } else {
@@ -4841,6 +4894,26 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     )
 
     if (classification) {
+      raw_scores <- tryCatch(
+        predict(fit, Xdata[test_idx, , drop = FALSE], raw_scores = TRUE),
+        error = function(e) NULL
+      )
+      score_cube <- if (!is.null(raw_scores$Yscore)) {
+        raw_scores$Yscore
+      } else if (length(dim(raw_scores$Ypred)) == 3L) {
+        raw_scores$Ypred
+      } else {
+        NULL
+      }
+      if (!is.null(score_cube) && length(dim(score_cube)) == 3L) {
+        for (j in seq_len(nslice)) {
+          score_pred[test_idx, , j] <- matrix(
+            score_cube[, , j],
+            nrow = length(test_idx),
+            ncol = q_response
+          )
+        }
+      }
       for (j in seq_len(nslice)) {
         pred_chr <- .cv_class_predictions_from_fit(fit, j, length(test_idx))
         if (!is.null(class_pred)) {
@@ -4891,7 +4964,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   q2_value <- if (!classification && is.finite(metric_tss) && metric_tss > 0) {
     1 - metric_sse / metric_tss
   } else if (classification) {
-    ifelse(metric_total > 0, metric_correct / metric_total, NA_real_)
+    .cv_classification_q2_path(Ydata, score_pred, lev)
   } else {
     rep(NA_real_, nslice)
   }
@@ -4908,7 +4981,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   )
 
   res <- list(
-    Ypred = score_pred,
+    Ypred = if (classification && !isTRUE(return_scores)) NULL else score_pred,
+    Yscore = if (classification) score_pred else NULL,
     class_pred = class_pred,
     fold = fold,
     ncomp = ncomp,
@@ -6547,9 +6621,10 @@ plot.fastPLS <- function(x,
 #'   * `Ypred_index`: integer class indices for classification predictions, when
 #'     available.
 #'   * `Ttest`: test-set latent scores, returned when `proj = TRUE`.
-#'   * `Q2Y`: test-set predictive performance for numeric `Ytest`, or
-#'     classification accuracy for factor `Ytest`, returned when `Ytest` is
-#'     supplied.
+#'   * `Q2Y`: test-set Q2 for numeric `Ytest`, or dummy-response PLS-DA Q2 for
+#'     factor `Ytest`, returned when response scores are available.
+#'   * `accuracy`: decoded-label accuracy for factor `Ytest`, returned when
+#'     classification predictions are available.
 #'   * `pval`: permutation-test p-values by component, returned when
 #'     `perm.test = TRUE`.
 #'   * `variance`, `variance_explained`, `cumulative_variance_explained`,
@@ -7519,9 +7594,9 @@ pls =  function (Xtrain,
 #'   error rule.
 #'   \item `best_metric_name` and `best_metric_value`: name and value of the
 #'   metric at the selected component count.
-#'   \item `Q2Y`: held-out cross-validated predictive performance. For
-#'   classification this is accuracy; for regression it is cross-validated Q2
-#'   when available.
+#'   \item `Q2Y`: held-out cross-validated Q2. For factor responses, Q2 is
+#'   calculated on the dummy-coded PLS-DA response scores.
+#'   \item `accuracy`: held-out decoded-label accuracy for factor responses.
 #'   \item `RMSD`: held-out root mean squared deviation for regression. It is
 #'   `NA` for classification.
 #'   \item `R2Y`: training-set explained-variance path from a model fitted on
@@ -7781,8 +7856,9 @@ single.pls.cv =  function (Xdata,
       alpha = alpha,
       top_m = top_m,
       cknn_memory = cknn_memory,
-      return_scores = return_scores,
+      return_scores = isTRUE(return_scores) || classification,
       store_predictions = !classification ||
+        classification ||
         isTRUE(return_scores) ||
         (classification && !identical(classifier, "argmax")),
       selection_metric = selection_ctl$metric
@@ -7809,7 +7885,7 @@ single.pls.cv =  function (Xdata,
     seed = seed,
     xprod = xprod,
     north = north,
-    return_scores = return_scores,
+    return_scores = isTRUE(return_scores) || classification,
     classifier = classifier,
     lda_ridge = lda_ridge,
     k = k,
@@ -7817,6 +7893,7 @@ single.pls.cv =  function (Xdata,
     alpha = alpha,
     top_m = top_m,
     store_predictions = !classification ||
+      classification ||
       isTRUE(return_scores) ||
       (classification && !identical(classifier, "argmax")),
     selection_metric = selection_ctl$metric
@@ -7832,6 +7909,20 @@ single.pls.cv =  function (Xdata,
   values <- as.numeric(res$metrics$metric_value)
   q2_values <- res$Q2Y
   rmsd_values <- res$RMSD
+  accuracy_values <- if (classification) {
+    if (!is.null(res$accuracy)) as.numeric(res$accuracy) else values
+  } else {
+    NULL
+  }
+  if (classification &&
+      (is.null(q2_values) || length(q2_values) != length(values) || all(!is.finite(q2_values)))) {
+    score_cube <- res$Yscore %||% res$Ypred
+    if (!is.null(score_cube)) {
+      q2_values <- .cv_classification_q2_path(Ydata, score_cube, res$levels)
+    } else {
+      q2_values <- rep(NA_real_, length(values))
+    }
+  }
   if (!classification &&
       (is.null(q2_values) || is.null(rmsd_values) ||
        all(!is.finite(q2_values)) || all(!is.finite(rmsd_values)))) {
@@ -7860,7 +7951,10 @@ single.pls.cv =  function (Xdata,
   res$selection_values <- selection_values
   res$best_metric_name <- .cv_metric_name_at(selection_metrics, best_idx)
   res$best_metric_value <- selection_values[[best_idx]]
-  res$Q2Y <- if (classification) values else as.numeric(q2_values)
+  if (classification) {
+    res$accuracy <- accuracy_values
+  }
+  res$Q2Y <- as.numeric(q2_values)
   res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
   res$R2Y <- if (!isTRUE(return_r2)) {
     rep(NA_real_, length(values))
@@ -7889,7 +7983,12 @@ single.pls.cv =  function (Xdata,
       coef0 = coef0
     )
   }
-  if (!classification && !isTRUE(return_scores)) {
+  if (classification && !isTRUE(return_scores)) {
+    res$Ypred <- NULL
+    res$Yscore <- NULL
+    res$class_pred <- NULL
+    res$pred <- NULL
+  } else if (!classification && !isTRUE(return_scores)) {
     res$Ypred <- NULL
     res$pred <- NULL
   }
@@ -7941,10 +8040,11 @@ single.pls.cv =  function (Xdata,
 #'   and `svtol`. Vector values are tuned in the inner loop. Inner selection can
 #'   also be controlled with `selection_metric = "auto"`, `"accuracy"`, `"r2"`,
 #'   `"q2"`, or `"rmsd"`; the selection metric itself is scalar.
-#' @return List of nested CV outputs and summaries. `Q2Y` stores held-out
-#'   predictive performance (accuracy for factor responses and Q2 for numeric
-#'   responses), `RMSD` stores held-out RMSD for numeric responses, and `R2Y`
-#'   stores the mean training-fit R2 of the selected outer-fold models.
+#' @return List of nested CV outputs and summaries. `Q2Y` stores held-out Q2
+#'   (on dummy-coded PLS-DA response scores for factor responses), `accuracy`
+#'   stores held-out decoded-label accuracy for factor responses, `RMSD` stores
+#'   held-out RMSD for numeric responses, and `R2Y` stores the mean training-fit
+#'   R2 of the selected outer-fold models.
 #' @examples
 #' idx <- c(1:10, 51:60, 101:110)
 #' X <- as.matrix(iris[idx, 1:4])
@@ -8111,6 +8211,8 @@ pls.double.cv = function(Xdata,
     inner_results <- vector("list", nfold_outer)
     best_parameters <- vector("list", nfold_outer)
     outer_train_r2 <- rep(NA_real_, nfold_outer)
+    outer_q2 <- rep(NA_real_, nfold_outer)
+    outer_accuracy <- rep(NA_real_, nfold_outer)
     if (classification) {
       run_pred_chr <- rep(NA_character_, nrow(Xdata))
     } else {
@@ -8233,6 +8335,12 @@ pls.double.cv = function(Xdata,
         if (!is.null(fit$R2Y) && length(fit$R2Y)) {
           outer_train_r2[[f]] <- as.numeric(tail(fit$R2Y, 1L))
         }
+        if (!is.null(fit$Q2Y) && length(fit$Q2Y)) {
+          outer_q2[[f]] <- as.numeric(tail(fit$Q2Y, 1L))
+        }
+        if (!is.null(fit$accuracy) && length(fit$accuracy)) {
+          outer_accuracy[[f]] <- as.numeric(tail(fit$accuracy, 1L))
+        }
         pred <- fit$Ypred
         pred <- if (is.data.frame(pred)) pred[[1L]] else pred
         run_pred_chr[test_idx] <- as.character(pred)
@@ -8257,7 +8365,15 @@ pls.double.cv = function(Xdata,
       if (any(ok)) {
         vote_tot[cbind(which(ok), idx[ok])] <- vote_tot[cbind(which(ok), idx[ok])] + 1
       }
-      Q2Y[j] <- mean(as.character(pred_factor) == as.character(Ydata_original), na.rm = TRUE)
+      accuracy_j <- mean(as.character(pred_factor) == as.character(Ydata_original), na.rm = TRUE)
+      if (!any(is.finite(outer_accuracy))) {
+        outer_accuracy[] <- accuracy_j
+      }
+      Q2Y[j] <- if (any(is.finite(outer_q2))) {
+        mean(outer_q2, na.rm = TRUE)
+      } else {
+        NA_real_
+      }
       R2Y[j] <- if (any(is.finite(outer_train_r2))) {
         mean(outer_train_r2, na.rm = TRUE)
       } else {
@@ -8272,7 +8388,8 @@ pls.double.cv = function(Xdata,
         best_parameters = best_parameters,
         inner = inner_results,
         metric_name = "accuracy",
-        metric_value = Q2Y[j],
+        metric_value = accuracy_j,
+        accuracy = accuracy_j,
         backend = backend,
         method = method
       )
@@ -8324,6 +8441,10 @@ pls.double.cv = function(Xdata,
     )
     res$conf <- conf_txt
     res$vote_counts <- vote_tot
+    res$accuracy <- vapply(res$results, function(x) {
+      val <- x$accuracy
+      if (is.null(val) || !length(val)) NA_real_ else as.numeric(val[[1L]])
+    }, numeric(1))
   } else {
     res$Ypred <- Ypred_tot / as.integer(runn)
   }
