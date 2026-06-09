@@ -829,9 +829,7 @@ data.frame(
   outer_metric = cv_double$metric_name,
   outer_accuracy = cv_double$accuracy,
   outer_Q2Y = cv_double$Q2Y,
-  median_Q2Y = cv_double$medianQ2Y,
-  ci95_Q2Y_low = cv_double$CI95Q2Y[1],
-  ci95_Q2Y_high = cv_double$CI95Q2Y[2]
+  outer_R2Y = cv_double$R2Y
 )
 ```
 
@@ -885,9 +883,9 @@ Important elements returned by `pls.double.cv()` are:
   RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold
   models.
 - `metric_name`: the held-out metric used for inner/outer model selection.
-- `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, and `CI95R2Y`: summaries across repeated
-  outer CV runs. With one run, the confidence interval simply reflects the
-  single available value.
+- `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, `CI95R2Y`, `medianRMSD`, and
+  `CI95RMSD`: summaries across repeated outer CV runs, returned only when
+  `runn > 1`. They are omitted for the default `runn = 1` output.
 - `bcomp`: the most frequently selected number of components across all outer
   folds and repeated runs.
 - `backend` and `method`: the default backend and PLS method used by the call.

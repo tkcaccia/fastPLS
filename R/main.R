@@ -8231,7 +8231,7 @@ pls.double.cv = function(Xdata,
                          seed = 1L,
                          perm.test=FALSE,
                          times=100,
-                         runn=10,
+                         runn=1,
                          kfold_inner=10,
                          kfold_outer=10,
                          north = 1L,
@@ -8619,12 +8619,14 @@ pls.double.cv = function(Xdata,
   res$R2Y <- R2Y
   res$RMSD <- RMSD
   res$metric_name <- metric_name
-  res$medianR2Y <- median(R2Y, na.rm = TRUE)
-  res$CI95R2Y <- as.numeric(quantile(R2Y, c(0.025, 0.975), na.rm = TRUE))
-  res$medianQ2Y <- median(Q2Y, na.rm = TRUE)
-  res$CI95Q2Y <- as.numeric(quantile(Q2Y, c(0.025, 0.975), na.rm = TRUE))
-  res$medianRMSD <- median(RMSD, na.rm = TRUE)
-  res$CI95RMSD <- as.numeric(quantile(RMSD, c(0.025, 0.975), na.rm = TRUE))
+  if (as.integer(runn) > 1L) {
+    res$medianR2Y <- median(R2Y, na.rm = TRUE)
+    res$CI95R2Y <- as.numeric(quantile(R2Y, c(0.025, 0.975), na.rm = TRUE))
+    res$medianQ2Y <- median(Q2Y, na.rm = TRUE)
+    res$CI95Q2Y <- as.numeric(quantile(Q2Y, c(0.025, 0.975), na.rm = TRUE))
+    res$medianRMSD <- median(RMSD, na.rm = TRUE)
+    res$CI95RMSD <- as.numeric(quantile(RMSD, c(0.025, 0.975), na.rm = TRUE))
+  }
   res$bcomp <- names(which.max(table(bb)))
   res$backend <- backend
   res$method <- method

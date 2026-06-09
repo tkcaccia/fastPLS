@@ -16,7 +16,7 @@ pls.double.cv(
   seed = 1L,
   perm.test = FALSE,
   times = 100,
-  runn = 10,
+  runn = 1,
   kfold_inner = 10,
   kfold_outer = 10,
   north = 1L,
@@ -74,7 +74,8 @@ better, such as \code{Q2Y}, the empirical p-value is
 better, such as RMSD, it is \code{mean(loss_permuted <= loss_observed)}. No +1
 correction is applied.}
 
-\item{runn}{Number of repeated runs.}
+\item{runn}{Number of repeated runs. When \code{runn = 1}, repeated-run
+summary fields such as \code{medianQ2Y} and \code{CI95Q2Y} are not returned.}
 
 \item{kfold_inner}{Inner-fold count, or \code{"loocv"} to leave out one
 constraint group at a time inside each outer training set.}

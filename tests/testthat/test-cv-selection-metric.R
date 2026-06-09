@@ -289,6 +289,41 @@ test_that("classification double CV reports Q2, R2, and accuracy separately", {
   expect_false(isTRUE(all.equal(nested$Q2Y, nested$accuracy)))
 })
 
+test_that("double CV omits repeated-run summaries for a single run", {
+  set.seed(21048)
+  X <- matrix(rnorm(36 * 5), nrow = 36, ncol = 5)
+  y <- drop(X[, 1] - 0.5 * X[, 2] + rnorm(36, sd = 0.2))
+
+  single_run <- pls.double.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    runn = 1,
+    kfold_inner = 2,
+    kfold_outer = 2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21048
+  )
+  repeated <- pls.double.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    runn = 2,
+    kfold_inner = 2,
+    kfold_outer = 2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 21048
+  )
+
+  summary_names <- c("medianR2Y", "CI95R2Y", "medianQ2Y", "CI95Q2Y", "medianRMSD", "CI95RMSD")
+  expect_false(any(summary_names %in% names(single_run)))
+  expect_true(all(summary_names %in% names(repeated)))
+})
+
 test_that("RMSD selection does not overwrite Q2Y", {
   set.seed(2105)
   X <- matrix(rnorm(72 * 9), nrow = 72, ncol = 9)

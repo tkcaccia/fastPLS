@@ -103,5 +103,6 @@ test_that("Metal backend is available through public CV helpers", {
     seed = 103
   )
   expect_identical(nested$backend, "metal")
-  expect_true(is.finite(nested$medianQ2Y))
+  expect_true(is.finite(nested$Q2Y))
+  expect_null(nested$medianQ2Y)
 })
