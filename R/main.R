@@ -1852,6 +1852,20 @@
   }, numeric(1))
 }
 
+.fastpls_permutation_cor <- function(Y, idx) {
+  Y <- as.matrix(Y)
+  if (nrow(Y) != length(idx)) {
+    return(NA_real_)
+  }
+  y0 <- as.numeric(Y)
+  yp <- as.numeric(Y[idx, , drop = FALSE])
+  ok <- is.finite(y0) & is.finite(yp)
+  if (sum(ok) < 2L || stats::sd(y0[ok]) == 0 || stats::sd(yp[ok]) == 0) {
+    return(NA_real_)
+  }
+  as.numeric(stats::cor(y0[ok], yp[ok]))
+}
+
 .try_cuda_native_lda_fit_predict <- function(method_id,
                                             method_name,
                                             Xtrain,
@@ -5944,6 +5958,112 @@ plot.fastPLS <- function(x,
   )
 }
 
+#' Plot PLS permutation-test R2 and Q2 values
+#'
+#' Draws the permutation-test diagnostic plot produced by `pls(...,
+#' perm.test = TRUE)`. The x-axis is the correlation between the original and
+#' permuted response structure; the y-axis is the observed or permuted R2/Q2
+#' value. R2 is shown in blue and Q2 in red.
+#'
+#' @param x A `fastPLS` model fitted with `perm.test = TRUE`, or a permutation
+#'   data frame stored in `model$permutation`.
+#' @param ncomp Component count to plot. Defaults to the largest component
+#'   stored in the permutation table.
+#' @param main,xlab,ylab Plot title and axis labels.
+#' @param col,pch Colors and point symbols for R2 and Q2.
+#' @param legend_position Legend position passed to [legend()].
+#' @param ... Additional graphical parameters passed to [plot()].
+#' @return Invisibly returns the plotted permutation data.
+#' @examples
+#' set.seed(1)
+#' X <- as.matrix(iris[, 1:4])
+#' y <- iris$Sepal.Length
+#' idx <- sample(seq_len(nrow(X)), 30)
+#' fit <- pls(X[idx, ], y[idx], X[idx, ], y[idx],
+#'            ncomp = 2, perm.test = TRUE, times = 5)
+#' plot.permutation(fit)
+#' @export
+plot.permutation <- function(x,
+                             ncomp = NULL,
+                             main = NULL,
+                             xlab = "Cor",
+                             ylab = "Value",
+                             col = c(R2 = "#3155B7", Q2 = "#E5332A"),
+                             pch = c(R2 = 16, Q2 = 15),
+                             legend_position = "bottomright",
+                             ...) {
+  perm <- if (is.data.frame(x)) {
+    x
+  } else {
+    x$permutation
+  }
+  if (is.null(perm) || !is.data.frame(perm) || !nrow(perm)) {
+    stop("No permutation table found. Refit pls() with perm.test = TRUE.", call. = FALSE)
+  }
+  required <- c("type", "ncomp", "metric", "cor", "value")
+  missing_cols <- setdiff(required, names(perm))
+  if (length(missing_cols)) {
+    stop("Permutation table is missing required columns: ",
+         paste(missing_cols, collapse = ", "), call. = FALSE)
+  }
+  if (is.null(ncomp)) {
+    ncomp <- max(perm$ncomp, na.rm = TRUE)
+  }
+  ncomp <- as.integer(ncomp)[1L]
+  dat <- perm[perm$ncomp == ncomp & perm$metric %in% c("R2", "Q2"), , drop = FALSE]
+  dat <- dat[is.finite(dat$cor) & is.finite(dat$value), , drop = FALSE]
+  if (!nrow(dat)) {
+    stop("No finite permutation values available for ncomp = ", ncomp, ".", call. = FALSE)
+  }
+  if (is.null(main)) {
+    main <- paste("Permutation test, ncomp =", ncomp)
+  }
+  xlim <- range(c(0, 1, dat$cor), finite = TRUE)
+  ylim <- range(dat$value, finite = TRUE)
+  pad <- diff(ylim) * 0.08
+  if (!is.finite(pad) || pad == 0) pad <- 0.1
+  ylim <- ylim + c(-pad, pad)
+  graphics::plot(
+    dat$cor,
+    dat$value,
+    type = "n",
+    xlim = xlim,
+    ylim = ylim,
+    xlab = xlab,
+    ylab = ylab,
+    main = main,
+    ...
+  )
+  for (metric in c("R2", "Q2")) {
+    d <- dat[dat$metric == metric & dat$type == "permutation", , drop = FALSE]
+    if (nrow(d)) {
+      graphics::points(d$cor, d$value, col = col[[metric]], pch = pch[[metric]])
+    }
+    obs <- dat[dat$metric == metric & dat$type == "observed", , drop = FALSE]
+    if (nrow(obs)) {
+      graphics::points(obs$cor, obs$value, col = col[[metric]], pch = pch[[metric]], cex = 1.3)
+      if (nrow(d)) {
+        graphics::segments(
+          x0 = mean(d$cor, na.rm = TRUE),
+          y0 = mean(d$value, na.rm = TRUE),
+          x1 = obs$cor[[1L]],
+          y1 = obs$value[[1L]],
+          col = col[[metric]],
+          lty = 2
+        )
+      }
+    }
+  }
+  graphics::legend(
+    legend_position,
+    legend = c("R2", "Q2"),
+    col = col[c("R2", "Q2")],
+    pch = pch[c("R2", "Q2")],
+    bty = "o"
+  )
+  invisible(dat)
+}
+
 .metal_mm <- function(A, B) {
   if (!isTRUE(has_metal())) {
     stop("backend='metal' requires Apple Metal support.", call. = FALSE)
@@ -7036,15 +7156,19 @@ pls =  function (Xtrain,
       #    o$scoreXtest=as.matrix(Xtest) %*% o$R[,1:ncomp]
       if (perm.test) {
         v = matrix(NA,nrow=times,ncol=length(ncomp))
+        r2_perm = matrix(NA_real_, nrow = times, ncol = length(ncomp))
+        cor_perm = rep(NA_real_, times)
         for (i in 1:times) {
           ss = sample(1:nrow(Xtrain))
           Xtrain_permuted = Xtrain[ss, ]
+          cor_perm[[i]] <- .fastpls_permutation_cor(Ytrain, ss)
 
           if(meth==1){
             model_perm=pls.model1(
               Xtrain_permuted,
               Ytrain,
               ncomp=ncomp,
+              fit=TRUE,
               scaling=scal,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
@@ -7063,6 +7187,7 @@ pls =  function (Xtrain,
               Xtrain_permuted,
               Ytrain,
               ncomp=ncomp,
+              fit=TRUE,
               scaling=scal,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
@@ -7081,6 +7206,7 @@ pls =  function (Xtrain,
               Xtrain_permuted,
               Ytrain,
               ncomp=ncomp,
+              fit=TRUE,
               scaling=scal,
               svd.method=svdmeth,
               rsvd_oversample=rsvd_oversample,
@@ -7097,6 +7223,9 @@ pls =  function (Xtrain,
 
           model_perm$classification <- classification
           model_perm$lev <- lev
+          if (!is.null(model_perm$R2Y)) {
+            r2_perm[i, ] <- as.numeric(model_perm$R2Y)
+          }
           res_perm=predict(model_perm,Xtest,Ytest)
 
           v[i,]=res_perm$Q2Y
@@ -7105,6 +7234,25 @@ pls =  function (Xtrain,
         for(j in 1:length(ncomp)){
           model$pval[j] = sum(v[,j] > model$Q2Y)/times
         }
+        perm_df <- data.frame(
+          type = rep("permutation", times * length(ncomp) * 2L),
+          permutation = rep(seq_len(times), times = length(ncomp) * 2L),
+          ncomp = rep(rep(as.integer(ncomp), each = times), times = 2L),
+          metric = rep(c("R2", "Q2"), each = times * length(ncomp)),
+          cor = rep(rep(cor_perm, times = length(ncomp)), times = 2L),
+          value = c(as.numeric(r2_perm), as.numeric(v)),
+          stringsAsFactors = FALSE
+        )
+        obs_df <- data.frame(
+          type = "observed",
+          permutation = NA_integer_,
+          ncomp = rep(as.integer(ncomp), times = 2L),
+          metric = rep(c("R2", "Q2"), each = length(ncomp)),
+          cor = 1,
+          value = c(as.numeric(model$R2Y), as.numeric(model$Q2Y)),
+          stringsAsFactors = FALSE
+        )
+        model$permutation <- rbind(perm_df, obs_df)
 
 
       }
