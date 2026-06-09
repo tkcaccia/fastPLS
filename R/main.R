@@ -8206,11 +8206,42 @@ pls.single.cv =  function (Xdata,
 #'   and `svtol`. Vector values are tuned in the inner loop. Inner selection can
 #'   also be controlled with `selection_metric = "auto"`, `"accuracy"`, `"r2"`,
 #'   `"q2"`, or `"rmsd"`; the selection metric itself is scalar.
-#' @return List of nested CV outputs and summaries. `Q2Y` stores held-out Q2
-#'   (on dummy-coded PLS-DA response scores for factor responses), `accuracy`
-#'   stores held-out decoded-label accuracy for factor responses, `RMSD` stores
-#'   held-out RMSD for numeric responses, and `R2Y` stores the mean training-fit
-#'   R2 of the selected outer-fold models.
+#' @return A list with the following elements:
+#'
+#'   * `results`: list with one element per repeated run. Each run stores
+#'     `Ypred`/`pred`, the outer `fold` assignment, `best_ncomp` selected in
+#'     each outer fold, fold-level `best_parameters`, the complete inner-CV
+#'     objects in `inner`, run-level `metric_name` and `metric_value`, and the
+#'     default `backend` and `method`.
+#'   * `Ypred`: final cross-validated predictions. For classification, repeated
+#'     runs are combined by voting; for regression, numeric predictions are
+#'     averaged across runs.
+#'   * `Q2Y`: one held-out Q2 value per repeated run. For factor responses this
+#'     is calculated on dummy-coded PLS-DA response scores.
+#'   * `R2Y`: one training-fit R2 value per repeated run, averaged across the
+#'     selected outer-fold models.
+#'   * `RMSD`: one held-out RMSD value per repeated run for numeric responses;
+#'     `NA` for classification.
+#'   * `metric_name`: held-out metric used for each repeated run.
+#'   * `bcomp`: most frequently selected component count across outer folds and
+#'     repeated runs.
+#'   * `backend`, `method`: default backend and PLS method supplied to the call.
+#'     If vector-valued methods or backends are tuned, selected fold-level values
+#'     are stored in `results[[run]]$best_parameters`.
+#'   * `selection_metric`: criterion used by the inner CV loop.
+#'   * `acc_tot`: classification-only text summary of correctly classified
+#'     samples and percentage accuracy.
+#'   * `conf`: classification-only confusion matrix printed as counts and
+#'     column percentages.
+#'   * `vote_counts`: classification-only vote-count matrix with one row per
+#'     sample and one column per class.
+#'   * `accuracy`: classification-only decoded-label accuracy, one value per
+#'     repeated run.
+#'   * `medianR2Y`, `CI95R2Y`, `medianQ2Y`, `CI95Q2Y`, `medianRMSD`,
+#'     `CI95RMSD`: repeated-run summaries returned only when `runn > 1`.
+#'   * `Q2Ysampled`: permutation median-Q2 values returned when
+#'     `perm.test = TRUE`.
+#'   * `p.value`: permutation-test p-value returned when `perm.test = TRUE`.
 #' @examples
 #' idx <- c(1:10, 51:60, 101:110)
 #' X <- as.matrix(iris[idx, 1:4])
