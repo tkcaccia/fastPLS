@@ -22,8 +22,10 @@ selected through the user-facing functions below.
 | `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
 | `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
 | `plot()` | Plot PLS or PCA score maps, with optional confidence or Hotelling T2 ellipses. |
+| `plot.permutation()` | Plot R2/Q2 permutation-test diagnostics from `pls(..., perm.test = TRUE)`. |
 | `pls.single.cv()` | Run grouped cross-validation and choose the best component count. |
 | `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
+| `evaluate()` | Compute classification and regression performance metrics from predictions. |
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
 | `pca()` | Compute PCA using the same SVD backend selector. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
