@@ -162,159 +162,23 @@ The same call can fit the four model families by changing `method`:
 - `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
 - `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial kernels.
 
-## Implementation of the Main Methods
+A practical starting point is:
 
-### Singular-vector backends
+| Goal | Suggested call |
+|---|---|
+| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Direct cross-covariance PLS-SVD | `method = "plssvd"` |
+| Remove response-unrelated structured variation | `method = "opls"` |
+| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
+| Small or moderate data | `backend = "cpu"` |
+| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
+| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 
-The PLS algorithms in `fastPLS` are separated from the inner singular-vector
-backend. The compiled CPU implementation supports two truncated SVD routes:
-`irlba` and randomized SVD. The `irlba` backend follows the implicitly
-restarted Lanczos bidiagonalization strategy of Baglama and Reichel (2005). It
-estimates only the leading singular triplets needed by the requested PLS
-components, rather than computing a full dense SVD. The randomized SVD backend
-follows the randomized range-finder framework described by Halko, Martinsson,
-and Tropp (2011): it draws a Gaussian test matrix, forms a low-dimensional
-sketch of the target matrix, optionally applies power iterations,
-orthonormalizes the sketch, and solves the final SVD in the small projected
-space. In `pls()` and the cross-validation helpers, these controls are supplied
-directly through `...`; in stand-alone SVD calls they are supplied directly to
-`fastsvd()`.
+## Classification Examples
 
-On Apple Silicon builds where `has_metal()` returns `TRUE`,
-`fastsvd(backend = "metal", method = "rsvd")` and
-`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This
-backend keeps the same randomized SVD mathematics as the CPU backend, but sends
-the large sketching matrix
-multiplications to Apple Metal Performance Shaders. The QR decomposition and
-final small SVD remain on the CPU. Because matrices are copied between R and
-Metal buffers, this backend is most useful for larger matrices where the GPU
-multiplication work is large enough to dominate transfer overhead.
-
-The experimental PLS Metal backend, `pls(..., backend = "metal")`, extends the
-same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
-score projections, deflation matrix products, and prediction matrix products
-are dispatched through Metal. Small decompositions, scalar reductions, and some
-kernel-centering operations remain CPU-side until dedicated Metal kernels are
-added.
-
-For CUDA builds, GPU execution is selected with `backend = "cuda"`, so the main
-matrix operations are performed by GPU-native PLS routines. When the
-cross-covariance \(S = X^T Y\) would be large, selected backends can use the
-matrix-free `xprod` route. In that route, the code avoids explicitly storing
-`S` and evaluates the products required by the SVD through identities such as
-\(Sv = X^T(Yv)\) and \(S^Tu = Y^T(Xu)\). For classification problems with many
-classes, label-aware products can avoid materializing a dense one-hot response
-matrix. The low-rank streamed prediction path is inspired by the FlashSVD
-streaming low-rank inference design of Shao et al. (2025), but is adapted here
-to the PLS prediction factors exposed by `fastPLS`.
-In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
-route automatically only when the cross-product is large enough to justify it.
-
-### PLSSVD
-
-`method = "plssvd"` implements the direct cross-covariance SVD formulation of
-PLS, within the same broad PLS regression and PLS-DA framework described by
-Wold, Sjostrom, and Eriksson (2001), Barker and Rayens (2003), and Boulesteix
-and Strimmer (2007). After preprocessing, the algorithm computes the dominant
-singular subspace of \(X^T Y\) and reuses that subspace to generate the
-requested component path.
-The maximum meaningful number of PLSSVD components is capped by
-`min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
-uses the valid internal rank and records the capped component count.
-
-The main innovation relative to a simple textbook PLSSVD implementation is the
-execution strategy. fastPLS can use truncated IRLBA or randomized SVD, compact
-low-rank prediction factors, CUDA-native fitting, and the matrix-free `xprod`
-route. For large classification tasks, the label-aware PLSSVD path computes
-class-wise cross-products from the factor labels and avoids dense one-hot `Y`
-unless the legacy dense route is explicitly needed.
-
-### SIMPLS
-
-`method = "simpls"` is the optimized fastPLS SIMPLS core. Statistically, it
-keeps the de Jong (1993) SIMPLS idea: one supervised latent direction is
-appended at a time, the score and loading vectors are computed, an orthogonal
-loading direction is constructed, and the cross-covariance is deflated before
-the next component.
-
-The implementation differs from a naive classical SIMPLS loop in how it obtains
-new singular directions. Instead of always calling the SVD backend for one fresh
-vector after every deflation, fastPLS can refresh a small block of candidate
-directions from the current deflated cross-covariance. The block is consumed
-sequentially: each candidate direction is normalized, converted into a SIMPLS
-component, orthogonalized, and followed by the usual SIMPLS deflation before the
-next component is accepted. The cached-deflation update explicitly computes
-\(v^T S\) and applies the rank-one update \(S <- S - v(v^T S)\), reducing
-temporary allocations and repeated projection work. The incremental refresh
-uses the previous latent direction as a warm start for the next randomized
-refresh, which can reduce the number of iterations needed to recover the next
-dominant direction.
-
-These block-refresh, warm-start, and cached-deflation optimizations are
-SIMPLS-specific because SIMPLS is a sequential deflation method. PLSSVD uses a
-different one-shot cross-covariance SVD strategy. OPLS and kernel PLS reuse the
-same optimized compiled building blocks where their internal fitting step is
-linear PLS-like.
-
-### OPLS
-
-`method = "opls"` follows the orthogonal PLS idea introduced by Trygg and Wold
-(2002). It first removes response-orthogonal variation from `X` and then fits
-the optimized PLS core to the filtered matrix. The number of orthogonal
-components is controlled by `north`. The filtering step estimates orthogonal
-scores and loadings, subtracts the corresponding variation from `X`, and stores
-the orthogonal filter so the same transformation is applied at prediction time.
-Users select OPLS with `method = "opls"`; the lower-level implementation details
-are handled internally.
-
-### Kernel PLS
-
-`method = "kernelpls"` follows the kernel PLS formulation of Rosipal and Trejo
-(2001). It constructs a kernel representation before applying the selected
-inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
-For nonlinear kernels, the training kernel matrix is centered and the PLS model
-is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
-kernel materialization and uses the ordinary linear PLS path.
-
-### Classification heads
-
-For classification, factor responses are treated as PLS-DA targets. The default
-classifier, `classifier = "argmax"`, predicts the class with the largest
-predicted dummy-response score. This is the classical PLS-DA decision rule
-described in chemometric discrimination work such as Barker and Rayens (2003)
-and reviewed by Boulesteix and Strimmer (2007).
-
-The LDA head, `classifier = "lda"`, fits a
-regularized linear discriminant model on the PLS latent scores, following the
-linear discriminant principle of Fisher (1936). For each class, fastPLS
-estimates a score-space mean, an empirical prior, and a common pooled
-within-class covariance matrix. A small ridge term scaled by the average
-covariance diagonal is added for numerical stability. Prediction uses the
-standard LDA discriminant score and returns the largest-scoring class. The CUDA
-and Metal routes are selected automatically from `backend` when available.
-
-The cKNN head, `classifier = "cknn"`, is the short public name for the
-candidate-kNN classifier used in large multiclass PLS-DA.
-It first scores classes by centroids in supervised PLS score space, keeps the
-top candidate classes, and then reranks those candidates by same-class nearest
-neighbours in the PLS score space, using the nearest-neighbour classification
-principle of Cover and Hart (1967) after a supervised PLS compression step. The
-default tuning parameters are
-`k = 10`, `tau = 0.2`, `alpha = 0.75`, and
-`top_m = 20`. `predict()` can also return ranked predictions by using
-`top` or `top5 = TRUE`.
-
-For large multiclass data, cKNN can be memory-intensive because it uses PLS
-scores for both training and test samples. The `cknn_memory` argument controls
-how these score matrices are materialized. `cknn_memory = "standard"` uses the
-historical one-pass path. `cknn_memory = "blocked"` keeps the same classifier
-but predicts test samples in blocks, avoiding a full test-score matrix in
-memory. `cknn_memory = "streaming"` additionally builds the training
-candidate-score cache in row blocks for scalar `ncomp`, which is useful for
-ImageNet-scale feature matrices. The default, `cknn_memory = "auto"`, selects a
-memory-aware strategy from the size of the latent-score cache. These modes do
-not change the cKNN scoring rule; they only change when intermediate matrices
-are created.
+The examples below show the three classification heads available through
+`classifier`: the default argmax PLS-DA rule, latent-space LDA, and
+candidate-kNN.
 
 ```{r}
 fit_cls <- pls(
@@ -410,6 +274,7 @@ fit_cls_cknn <- pls(
 
 table(fit_cls_cknn$Ypred[[length(fit_cls_cknn$ncomp)]], Ytest_cls)
 ```
+
 
 ## OPLS and Kernel PLS
 
@@ -1061,6 +926,161 @@ dim(C)
 vip <- ViP(fit_reg)
 dim(vip)
 ```
+
+## Implementation of the Main Methods
+
+### Singular-vector backends
+
+The PLS algorithms in `fastPLS` are separated from the inner singular-vector
+backend. The compiled CPU implementation supports two truncated SVD routes:
+`irlba` and randomized SVD. The `irlba` backend follows the implicitly
+restarted Lanczos bidiagonalization strategy of Baglama and Reichel (2005). It
+estimates only the leading singular triplets needed by the requested PLS
+components, rather than computing a full dense SVD. The randomized SVD backend
+follows the randomized range-finder framework described by Halko, Martinsson,
+and Tropp (2011): it draws a Gaussian test matrix, forms a low-dimensional
+sketch of the target matrix, optionally applies power iterations,
+orthonormalizes the sketch, and solves the final SVD in the small projected
+space. In `pls()` and the cross-validation helpers, these controls are supplied
+directly through `...`; in stand-alone SVD calls they are supplied directly to
+`fastsvd()`.
+
+On Apple Silicon builds where `has_metal()` returns `TRUE`,
+`fastsvd(backend = "metal", method = "rsvd")` and
+`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This
+backend keeps the same randomized SVD mathematics as the CPU backend, but sends
+the large sketching matrix
+multiplications to Apple Metal Performance Shaders. The QR decomposition and
+final small SVD remain on the CPU. Because matrices are copied between R and
+Metal buffers, this backend is most useful for larger matrices where the GPU
+multiplication work is large enough to dominate transfer overhead.
+
+The experimental PLS Metal backend, `pls(..., backend = "metal")`, extends the
+same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
+score projections, deflation matrix products, and prediction matrix products
+are dispatched through Metal. Small decompositions, scalar reductions, and some
+kernel-centering operations remain CPU-side until dedicated Metal kernels are
+added.
+
+For CUDA builds, GPU execution is selected with `backend = "cuda"`, so the main
+matrix operations are performed by GPU-native PLS routines. When the
+cross-covariance \(S = X^T Y\) would be large, selected backends can use the
+matrix-free `xprod` route. In that route, the code avoids explicitly storing
+`S` and evaluates the products required by the SVD through identities such as
+\(Sv = X^T(Yv)\) and \(S^Tu = Y^T(Xu)\). For classification problems with many
+classes, label-aware products can avoid materializing a dense one-hot response
+matrix. The low-rank streamed prediction path is inspired by the FlashSVD
+streaming low-rank inference design of Shao et al. (2025), but is adapted here
+to the PLS prediction factors exposed by `fastPLS`.
+In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
+route automatically only when the cross-product is large enough to justify it.
+
+### PLSSVD
+
+`method = "plssvd"` implements the direct cross-covariance SVD formulation of
+PLS, within the same broad PLS regression and PLS-DA framework described by
+Wold, Sjostrom, and Eriksson (2001), Barker and Rayens (2003), and Boulesteix
+and Strimmer (2007). After preprocessing, the algorithm computes the dominant
+singular subspace of \(X^T Y\) and reuses that subspace to generate the
+requested component path.
+The maximum meaningful number of PLSSVD components is capped by
+`min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
+uses the valid internal rank and records the capped component count.
+
+The main innovation relative to a simple textbook PLSSVD implementation is the
+execution strategy. fastPLS can use truncated IRLBA or randomized SVD, compact
+low-rank prediction factors, CUDA-native fitting, and the matrix-free `xprod`
+route. For large classification tasks, the label-aware PLSSVD path computes
+class-wise cross-products from the factor labels and avoids dense one-hot `Y`
+unless the legacy dense route is explicitly needed.
+
+### SIMPLS
+
+`method = "simpls"` is the optimized fastPLS SIMPLS core. Statistically, it
+keeps the de Jong (1993) SIMPLS idea: one supervised latent direction is
+appended at a time, the score and loading vectors are computed, an orthogonal
+loading direction is constructed, and the cross-covariance is deflated before
+the next component.
+
+The implementation differs from a naive classical SIMPLS loop in how it obtains
+new singular directions. Instead of always calling the SVD backend for one fresh
+vector after every deflation, fastPLS can refresh a small block of candidate
+directions from the current deflated cross-covariance. The block is consumed
+sequentially: each candidate direction is normalized, converted into a SIMPLS
+component, orthogonalized, and followed by the usual SIMPLS deflation before the
+next component is accepted. The cached-deflation update explicitly computes
+\(v^T S\) and applies the rank-one update \(S <- S - v(v^T S)\), reducing
+temporary allocations and repeated projection work. The incremental refresh
+uses the previous latent direction as a warm start for the next randomized
+refresh, which can reduce the number of iterations needed to recover the next
+dominant direction.
+
+These block-refresh, warm-start, and cached-deflation optimizations are
+SIMPLS-specific because SIMPLS is a sequential deflation method. PLSSVD uses a
+different one-shot cross-covariance SVD strategy. OPLS and kernel PLS reuse the
+same optimized compiled building blocks where their internal fitting step is
+linear PLS-like.
+
+### OPLS
+
+`method = "opls"` follows the orthogonal PLS idea introduced by Trygg and Wold
+(2002). It first removes response-orthogonal variation from `X` and then fits
+the optimized PLS core to the filtered matrix. The number of orthogonal
+components is controlled by `north`. The filtering step estimates orthogonal
+scores and loadings, subtracts the corresponding variation from `X`, and stores
+the orthogonal filter so the same transformation is applied at prediction time.
+Users select OPLS with `method = "opls"`; the lower-level implementation details
+are handled internally.
+
+### Kernel PLS
+
+`method = "kernelpls"` follows the kernel PLS formulation of Rosipal and Trejo
+(2001). It constructs a kernel representation before applying the selected
+inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
+For nonlinear kernels, the training kernel matrix is centered and the PLS model
+is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
+kernel materialization and uses the ordinary linear PLS path.
+
+### Classification heads
+
+For classification, factor responses are treated as PLS-DA targets. The default
+classifier, `classifier = "argmax"`, predicts the class with the largest
+predicted dummy-response score. This is the classical PLS-DA decision rule
+described in chemometric discrimination work such as Barker and Rayens (2003)
+and reviewed by Boulesteix and Strimmer (2007).
+
+The LDA head, `classifier = "lda"`, fits a
+regularized linear discriminant model on the PLS latent scores, following the
+linear discriminant principle of Fisher (1936). For each class, fastPLS
+estimates a score-space mean, an empirical prior, and a common pooled
+within-class covariance matrix. A small ridge term scaled by the average
+covariance diagonal is added for numerical stability. Prediction uses the
+standard LDA discriminant score and returns the largest-scoring class. The CUDA
+and Metal routes are selected automatically from `backend` when available.
+
+The cKNN head, `classifier = "cknn"`, is the short public name for the
+candidate-kNN classifier used in large multiclass PLS-DA.
+It first scores classes by centroids in supervised PLS score space, keeps the
+top candidate classes, and then reranks those candidates by same-class nearest
+neighbours in the PLS score space, using the nearest-neighbour classification
+principle of Cover and Hart (1967) after a supervised PLS compression step. The
+default tuning parameters are
+`k = 10`, `tau = 0.2`, `alpha = 0.75`, and
+`top_m = 20`. `predict()` can also return ranked predictions by using
+`top` or `top5 = TRUE`.
+
+For large multiclass data, cKNN can be memory-intensive because it uses PLS
+scores for both training and test samples. The `cknn_memory` argument controls
+how these score matrices are materialized. `cknn_memory = "standard"` uses the
+historical one-pass path. `cknn_memory = "blocked"` keeps the same classifier
+but predicts test samples in blocks, avoiding a full test-score matrix in
+memory. `cknn_memory = "streaming"` additionally builds the training
+candidate-score cache in row blocks for scalar `ncomp`, which is useful for
+ImageNet-scale feature matrices. The default, `cknn_memory = "auto"`, selects a
+memory-aware strategy from the size of the latent-score cache. These modes do
+not change the cKNN scoring rule; they only change when intermediate matrices
+are created.
+
 
 ## Method References
 
