@@ -35,26 +35,33 @@ selected through the user-facing functions below.
 
 ## Example Data
 
-The examples below use datasets available from base R or bundled with
-`fastPLS`. Regression responses are supplied as numeric vectors or matrices.
-Classification responses are supplied as factors; internally, `fastPLS` handles
-the response encoding and returns predicted class labels.
+The examples below use datasets available from base R and datasets bundled with
+`fastPLS`. The `mtcars` data are used for regression, `iris` for introductory
+classification examples, and the bundled `colon` and `breast` omics datasets
+for score plots and multi-class examples. Regression responses are supplied as
+numeric vectors or matrices. Classification responses are supplied as factors;
+internally, `fastPLS` handles the response encoding and returns predicted class
+labels.
 
 ```{r}
 library(fastPLS)
 
 set.seed(100)
-X <- as.matrix(iris[, c("Sepal.Width", "Petal.Length", "Petal.Width")])
-Y_reg <- matrix(iris$Sepal.Length, ncol = 1)
-Y_cls <- iris$Species
+Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
+Y_reg <- matrix(mtcars$mpg, ncol = 1)
+reg_test_id <- sample(seq_len(nrow(Xreg)), 8)
+Xreg_train <- Xreg[-reg_test_id, , drop = FALSE]
+Xreg_test <- Xreg[reg_test_id, , drop = FALSE]
+Ytrain_reg <- Y_reg[-reg_test_id, , drop = FALSE]
+Ytest_reg <- Y_reg[reg_test_id, , drop = FALSE]
 
-test_id <- sample(seq_len(nrow(X)), 30)
-Xtrain <- X[-test_id, , drop = FALSE]
-Xtest <- X[test_id, , drop = FALSE]
-Ytrain_reg <- Y_reg[-test_id, , drop = FALSE]
-Ytest_reg <- Y_reg[test_id, , drop = FALSE]
-Ytrain_cls <- Y_cls[-test_id]
-Ytest_cls <- Y_cls[test_id]
+X <- as.matrix(iris[, c("Sepal.Width", "Petal.Length", "Petal.Width")])
+Y_cls <- iris$Species
+cls_test_id <- sample(seq_len(nrow(X)), 30)
+Xtrain <- X[-cls_test_id, , drop = FALSE]
+Xtest <- X[cls_test_id, , drop = FALSE]
+Ytrain_cls <- Y_cls[-cls_test_id]
+Ytest_cls <- Y_cls[cls_test_id]
 ```
 
 ## Fit PLS Models
@@ -71,9 +78,9 @@ compact names as `fastsvd()`, for example `oversample`, `power`, `maxit`,
 
 ```{r}
 fit_reg <- pls(
-  Xtrain,
+  Xreg_train,
   Ytrain_reg,
-  Xtest,
+  Xreg_test,
   Ytest_reg,
   ncomp = 1:3,
   method = "simpls",
@@ -138,7 +145,7 @@ supplied, Q2 is calculated relative to the training-set response mean; this is
 the preferred setting for independent test-set evaluation.
 
 ```{r}
-pred_reg <- predict(fit_reg, Xtest)$Ypred[, , length(fit_reg$ncomp)]
+pred_reg <- predict(fit_reg, Xreg_test)$Ypred[, , length(fit_reg$ncomp)]
 evaluate(Ytest_reg, pred_reg, ytrain = Ytrain_reg)$metrics
 ```
 
@@ -378,9 +385,9 @@ OPLS and kernel PLS are accessed through the same `pls()` function. Use
 
 ```{r}
 fit_opls <- pls(
-  Xtrain,
+  Xreg_train,
   Ytrain_reg,
-  Xtest,
+  Xreg_test,
   Ytest_reg,
   ncomp = 1:2,
   method = "opls",
@@ -430,7 +437,7 @@ FlashSVD-style CPU path, CUDA prediction on CUDA-enabled builds, or Metal
 prediction on Apple Metal-enabled builds.
 
 ```{r}
-pred_reg <- predict(fit_reg, Xtest, Ytest = Ytest_reg, proj = TRUE)
+pred_reg <- predict(fit_reg, Xreg_test, Ytest = Ytest_reg, proj = TRUE)
 names(pred_reg)
 dim(pred_reg$Ypred)
 ```
@@ -449,7 +456,7 @@ ellipses or Hotelling T2 ellipses, following the multivariate confidence
 region idea introduced by Hotelling (1931).
 
 ```{r fig.width = 5, fig.height = 4}
-plot(fit_reg, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
+plot(fit_cls, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
 The next example uses the bundled two-class colon gene-expression data. The
@@ -626,7 +633,7 @@ as `kfold` remain single settings for the whole CV run.
 
 ```{r}
 cv_opt <- pls.single.cv(
-  Xdata = Xtrain,
+  Xdata = Xreg_train,
   Ydata = Ytrain_reg,
   ncomp = 1:3,
   kfold = 5,
@@ -676,9 +683,9 @@ and Q2.
 
 ```{r}
 perm_fit <- pls(
-  Xtrain = Xtrain,
+  Xtrain = Xreg_train,
   Ytrain = Ytrain_reg,
-  Xtest = Xtest,
+  Xtest = Xreg_test,
   Ytest = Ytest_reg,
   ncomp = 2,
   method = "simpls",
@@ -704,8 +711,8 @@ it is `mean(loss_permuted <= loss_observed)`.
 
 ```{r}
 dcv_perm <- pls.double.cv(
-  Xdata = Xtrain[1:30, ],
-  Ydata = Ytrain_reg[1:30],
+  Xdata = Xreg_train[1:20, ],
+  Ydata = Ytrain_reg[1:20],
   ncomp = 1:2,
   runn = 1,
   kfold_inner = 2,
