@@ -163,13 +163,13 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
   expect_false(isTRUE(all.equal(nested$R2Y, nested$RMSD)))
 })
 
-test_that("pls.single.cv can skip the extra full-data R2 fit", {
+test_that("pls.single.cv can skip the extra full-data fit", {
   set.seed(21045)
   X <- matrix(rnorm(48 * 7), nrow = 48, ncol = 7)
   beta <- matrix(rnorm(7 * 2), nrow = 7, ncol = 2)
   Y <- X %*% beta + matrix(rnorm(48 * 2, sd = 0.25), nrow = 48, ncol = 2)
 
-  with_r2 <- pls.single.cv(
+  with_fit <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,
@@ -178,9 +178,9 @@ test_that("pls.single.cv can skip the extra full-data R2 fit", {
     backend = "cpu",
     svd.method = "rsvd",
     seed = 21045,
-    return_r2 = TRUE
+    fit = TRUE
   )
-  without_r2 <- pls.single.cv(
+  without_fit <- pls.single.cv(
     Xdata = X,
     Ydata = Y,
     ncomp = 1:3,
@@ -189,21 +189,23 @@ test_that("pls.single.cv can skip the extra full-data R2 fit", {
     backend = "cpu",
     svd.method = "rsvd",
     seed = 21045,
-    return_r2 = FALSE
+    fit = FALSE
   )
 
-  expect_true(any(is.finite(with_r2$R2Y)))
-  expect_true(all(is.na(without_r2$R2Y)))
-  expect_true(any(is.finite(without_r2$Q2Y)))
-  expect_true(any(is.finite(without_r2$RMSD)))
-  expect_equal(without_r2$best_ncomp, with_r2$best_ncomp)
+  expect_true(any(is.finite(with_fit$R2Y)))
+  expect_false(is.null(with_fit$Yfit))
+  expect_true(all(is.na(without_fit$R2Y)))
+  expect_null(without_fit$Yfit)
+  expect_true(any(is.finite(without_fit$Q2Y)))
+  expect_true(any(is.finite(without_fit$RMSD)))
+  expect_equal(without_fit$best_ncomp, with_fit$best_ncomp)
 })
 
 test_that("classification CV keeps held-out accuracy separate from training R2", {
   X <- as.matrix(iris[, 1:4])
   y <- factor(iris[, 5])
 
-  with_r2 <- pls.single.cv(
+  with_fit <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -212,9 +214,9 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     backend = "cpu",
     svd.method = "rsvd",
     seed = 21046,
-    return_r2 = TRUE
+    fit = TRUE
   )
-  without_r2 <- pls.single.cv(
+  without_fit <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 2,
@@ -223,7 +225,7 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     backend = "cpu",
     svd.method = "rsvd",
     seed = 21046,
-    return_r2 = FALSE
+    fit = FALSE
   )
   full_fit <- pls(
     Xtrain = X,
@@ -237,15 +239,17 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     seed = 21046
   )
 
-  expect_true(is.finite(with_r2$Q2Y))
-  expect_true(is.finite(with_r2$R2Y))
-  expect_true(is.finite(with_r2$accuracy))
-  expect_equal(with_r2$R2Y, as.numeric(full_fit$R2Y), tolerance = 1e-10)
-  expect_false(isTRUE(all.equal(with_r2$Q2Y, with_r2$R2Y)))
-  expect_false(isTRUE(all.equal(with_r2$Q2Y, with_r2$accuracy)))
-  expect_true(all(is.na(without_r2$R2Y)))
-  expect_equal(without_r2$Q2Y, with_r2$Q2Y)
-  expect_equal(without_r2$accuracy, with_r2$accuracy)
+  expect_true(is.finite(with_fit$Q2Y))
+  expect_true(is.finite(with_fit$R2Y))
+  expect_true(is.finite(with_fit$accuracy))
+  expect_false(is.null(with_fit$Yfit))
+  expect_equal(with_fit$R2Y, as.numeric(full_fit$R2Y), tolerance = 1e-10)
+  expect_false(isTRUE(all.equal(with_fit$Q2Y, with_fit$R2Y)))
+  expect_false(isTRUE(all.equal(with_fit$Q2Y, with_fit$accuracy)))
+  expect_true(all(is.na(without_fit$R2Y)))
+  expect_null(without_fit$Yfit)
+  expect_equal(without_fit$Q2Y, with_fit$Q2Y)
+  expect_equal(without_fit$accuracy, with_fit$accuracy)
 })
 
 test_that("classification double CV reports Q2, R2, and accuracy separately", {

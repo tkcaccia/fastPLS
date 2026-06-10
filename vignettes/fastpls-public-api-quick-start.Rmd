@@ -650,7 +650,7 @@ cross-validation predictions and measures predictive performance on samples that
 were not used to fit the corresponding fold model. `RMSD` is also calculated
 from held-out predictions and is reported on the response scale, so lower values
 are better. `R2Y` is a training-set explained-variance estimate from one
-additional model fitted on the full dataset; set `return_r2 = FALSE` to skip
+additional model fitted on the full dataset; set `fit = FALSE` to skip
 this extra fit when only cross-validated performance is needed. For
 classification, `Q2Y` is calculated from held-out dummy-coded PLS-DA response
 scores, `accuracy` reports decoded-label accuracy, and `R2Y` is calculated from

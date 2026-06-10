@@ -160,7 +160,7 @@ test_that("pls refits regression models selected by pls.single.cv", {
     backend = "cpu",
     svd.method = "rsvd",
     seed = 2107,
-    return_r2 = FALSE
+    fit = FALSE
   )
   fit <- pls(
     opt,

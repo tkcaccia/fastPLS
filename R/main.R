@@ -4142,27 +4142,27 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }, numeric(1))
 }
 
-.cv_training_r2_path <- function(Xdata,
-                                 Ydata,
-                                 ncomp,
-                                 scaling,
-                                 method,
-                                 backend,
-                                 svd.method,
-                                 rsvd_oversample,
-                                 rsvd_power,
-                                 svds_tol,
-                                 irlba_work,
-                                 irlba_maxit,
-                                 irlba_tol,
-                                 irlba_eps,
-                                 irlba_svtol,
-                                 seed,
-                                 north,
-                                 kernel,
-                                 gamma,
-                                 degree,
-                                 coef0) {
+.cv_training_fit_summary <- function(Xdata,
+                                     Ydata,
+                                     ncomp,
+                                     scaling,
+                                     method,
+                                     backend,
+                                     svd.method,
+                                     rsvd_oversample,
+                                     rsvd_power,
+                                     svds_tol,
+                                     irlba_work,
+                                     irlba_maxit,
+                                     irlba_tol,
+                                     irlba_eps,
+                                     irlba_svtol,
+                                     seed,
+                                     north,
+                                     kernel,
+                                     gamma,
+                                     degree,
+                                     coef0) {
   out <- tryCatch({
     fit <- pls(
       Xtrain = Xdata,
@@ -4190,12 +4190,18 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       degree = degree,
       coef0 = coef0
     )
-    as.numeric(fit$R2Y)
+    list(
+      R2Y = as.numeric(fit$R2Y),
+      Yfit = fit$Yfit
+    )
   }, error = function(e) {
-    rep(NA_real_, length(ncomp))
+    list(
+      R2Y = rep(NA_real_, length(ncomp)),
+      Yfit = NULL
+    )
   })
-  if (length(out) != length(ncomp)) {
-    out <- rep_len(out, length(ncomp))
+  if (length(out$R2Y) != length(ncomp)) {
+    out$R2Y <- rep_len(out$R2Y, length(ncomp))
   }
   out
 }
@@ -7763,10 +7769,10 @@ pls =  function (Xtrain,
 #'   values are used only when `classifier = "lda"`.
 #' @param k,tau,alpha,top_m
 #'   Candidate-kNN controls used when `classifier = "cknn"`.
-#' @param return_r2 Fit one additional model on the full
-#'   dataset to estimate the training `R2Y` path. The default is `TRUE` for
-#'   backward compatibility. Set to `FALSE` to skip this extra fit; held-out
-#'   cross-validated `Q2Y` and `RMSD` are still calculated.
+#' @param fit Fit one additional model on the full dataset and return its
+#'   fitted values (`Yfit`) and training `R2Y` path. The default is `TRUE` for
+#'   backward compatibility. Set to `FALSE` to skip this extra full-data fit;
+#'   held-out cross-validated `Q2Y` and `RMSD` are still calculated.
 #' @param xprod Use the matrix-free cross-product route where available.
 #'   `NULL` applies fastPLS defaults.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
@@ -7790,8 +7796,9 @@ pls =  function (Xtrain,
 #'   \item `accuracy`: held-out decoded-label accuracy for factor responses.
 #'   \item `RMSD`: held-out root mean squared deviation for regression. It is
 #'   `NA` for classification.
+#'   \item `Yfit`: fitted values from the full-data model when `fit = TRUE`.
 #'   \item `R2Y`: training-set explained-variance path from a model fitted on
-#'   the full dataset when `return_r2 = TRUE`; otherwise `NA`. For factor
+#'   the full dataset when `fit = TRUE`; otherwise `NA`. For factor
 #'   responses, this is calculated on the dummy-coded PLS-DA response scores,
 #'   not on the decoded class labels.
 #'   \item `fold`: fold assignment used for each sample.
@@ -7846,7 +7853,7 @@ pls.single.cv =  function (Xdata,
                           alpha = 0.75,
                           top_m = 20L,
                           cknn_memory = c("auto", "standard", "blocked", "streaming"),
-                          return_r2 = TRUE,
+                          fit = TRUE,
                           xprod = NULL,
                           ...)
 {
@@ -7913,7 +7920,7 @@ pls.single.cv =  function (Xdata,
           alpha = cfg$alpha,
           top_m = cfg$top_m,
           cknn_memory = cfg$cknn_memory,
-          return_r2 = return_r2,
+          fit = fit,
           xprod = cfg$xprod,
           selection_metric = selection_ctl$metric
         ),
@@ -8146,10 +8153,10 @@ pls.single.cv =  function (Xdata,
   }
   res$Q2Y <- as.numeric(q2_values)
   res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
-  res$R2Y <- if (!isTRUE(return_r2)) {
-    rep(NA_real_, length(values))
+  training_fit <- if (!isTRUE(fit)) {
+    list(R2Y = rep(NA_real_, length(values)), Yfit = NULL)
   } else {
-    .cv_training_r2_path(
+    .cv_training_fit_summary(
       Xdata = Xdata,
       Ydata = Ydata,
       ncomp = as.integer(res$ncomp),
@@ -8173,6 +8180,8 @@ pls.single.cv =  function (Xdata,
       coef0 = coef0
     )
   }
+  res$R2Y <- training_fit$R2Y
+  res$Yfit <- training_fit$Yfit
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- .cv_prune_config_for_output(cfg)
   res$best_parameters <- .cv_selected_parameters(cfg, tuning_grid, res$best_ncomp)

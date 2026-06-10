@@ -27,7 +27,7 @@ pls.single.cv(
   alpha = 0.75,
   top_m = 20L,
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
-  return_r2 = TRUE,
+  fit = TRUE,
   xprod = NULL,
   ...
 )
@@ -92,10 +92,11 @@ latent-score memory. \code{streaming} additionally builds the training
 candidate-score cache in blocks for scalar component counts. \code{auto}
 chooses a memory-aware strategy from the data size.}
 
-\item{return_r2}{Fit one additional model on the full
-dataset to estimate the training \code{R2Y} path. The default is \code{TRUE} for
-backward compatibility. Set to \code{FALSE} to skip this extra fit; held-out
-cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
+\item{fit}{Fit one additional model on the full dataset and return its
+fitted values (\code{Yfit}) and training \code{R2Y} path. The default is
+\code{TRUE} for backward compatibility. Set to \code{FALSE} to skip this extra
+full-data fit; held-out cross-validated \code{Q2Y} and \code{RMSD} are still
+calculated.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}
@@ -122,8 +123,9 @@ calculated on the dummy-coded PLS-DA response scores.
 \item \code{accuracy}: held-out decoded-label accuracy for factor responses.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
 \code{NA} for classification.
+\item \code{Yfit}: fitted values from the full-data model when \code{fit = TRUE}.
 \item \code{R2Y}: training-set explained-variance path from a model fitted on
-the full dataset when \code{return_r2 = TRUE}; otherwise \code{NA}. For factor
+the full dataset when \code{fit = TRUE}; otherwise \code{NA}. For factor
 responses, this is calculated on the dummy-coded PLS-DA response scores, not on
 the decoded class labels.
 \item \code{fold}: fold assignment used for each sample.
