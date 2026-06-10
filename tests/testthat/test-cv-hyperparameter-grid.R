@@ -72,6 +72,45 @@ test_that("pls.single.cv reports only optimized best parameters", {
   expect_true(opt$best_parameters$classifier %in% c("argmax", "lda"))
 })
 
+test_that("pls.single.cv tuning_config omits irrelevant classifier controls", {
+  idx <- c(1:12, 51:62, 101:112)
+  X <- as.matrix(iris[idx, 1:4])
+  y <- factor(iris[idx, 5])
+
+  argmax <- pls.single.cv(
+    X,
+    y,
+    ncomp = 2,
+    kfold = 3,
+    classifier = "argmax",
+    seed = 2
+  )
+  expect_true("classifier" %in% names(argmax$tuning_config))
+  expect_false(any(c("lda_ridge", "k", "tau", "alpha", "top_m", "cknn_memory") %in% names(argmax$tuning_config)))
+
+  lda <- pls.single.cv(
+    X,
+    y,
+    ncomp = 2,
+    kfold = 3,
+    classifier = "lda",
+    seed = 2
+  )
+  expect_true("lda_ridge" %in% names(lda$tuning_config))
+  expect_false(any(c("k", "tau", "alpha", "top_m", "cknn_memory") %in% names(lda$tuning_config)))
+
+  cknn <- pls.single.cv(
+    X,
+    y,
+    ncomp = 2,
+    kfold = 3,
+    classifier = "cknn",
+    seed = 2
+  )
+  expect_true(all(c("k", "tau", "alpha", "top_m", "cknn_memory") %in% names(cknn$tuning_config)))
+  expect_false("lda_ridge" %in% names(cknn$tuning_config))
+})
+
 test_that("pls refits and predicts from a pls.single.cv result", {
   set.seed(2106)
   test_idx <- sample(seq_len(nrow(iris)), 30)

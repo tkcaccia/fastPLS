@@ -7614,6 +7614,32 @@ pls =  function (Xtrain,
   as.list(rec[1L, , drop = FALSE])
 }
 
+.cv_prune_config_for_output <- function(cfg) {
+  keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
+  if (identical(cfg$method, "opls")) {
+    keep <- c(keep, "north")
+  }
+  if (identical(cfg$method, "kernelpls")) {
+    keep <- c(keep, "kernel")
+    if (identical(cfg$kernel, "rbf")) {
+      keep <- c(keep, "gamma")
+    } else if (identical(cfg$kernel, "poly")) {
+      keep <- c(keep, "gamma", "degree", "coef0")
+    }
+  }
+  if (identical(cfg$classifier, "lda")) {
+    keep <- c(keep, "lda_ridge")
+  } else if (identical(cfg$classifier, "cknn")) {
+    keep <- c(keep, "k", "tau", "alpha", "top_m", "cknn_memory")
+  }
+  keep <- intersect(unique(keep), names(cfg))
+  out <- cfg[keep]
+  if (!is.null(cfg$svd_dots) && length(cfg$svd_dots)) {
+    out$svd_dots <- cfg$svd_dots
+  }
+  out
+}
+
 .cv_varied_parameter_names <- function(configs) {
   if (length(configs) <= 1L) {
     return(character(0))
@@ -7660,11 +7686,20 @@ pls =  function (Xtrain,
   best$tuning_summary <- summaries
   best$tuning_metrics <- metrics
   best$best_grid_id <- best_grid_id
+  full_configs <- lapply(results, function(x) x$tuning_config_full %||% x$tuning_config)
+  best_full_config <- results[[best_grid_id]]$tuning_config_full %||% results[[best_grid_id]]$tuning_config
   best$best_parameters <- .cv_selected_parameters(
-    results[[best_grid_id]]$tuning_config,
-    lapply(results, `[[`, "tuning_config"),
+    best_full_config,
+    full_configs,
     best$best_ncomp
   )
+  best$tuning_config_full <- NULL
+  if (length(best$tuning_results)) {
+    best$tuning_results <- lapply(best$tuning_results, function(x) {
+      x$tuning_config_full <- NULL
+      x
+    })
+  }
   best
 }
 
@@ -7768,7 +7803,9 @@ pls =  function (Xtrain,
 #'   \item `best_parameters`: compact list containing only `ncomp` plus the
 #'   arguments that were actually optimized, for example `classifier` when
 #'   `classifier = c("argmax", "lda")`.
-#'   \item `tuning_config`: complete configuration used for the selected run.
+#'   \item `tuning_config`: relevant selected configuration used for the run.
+#'   Irrelevant classifier- or method-specific defaults are omitted; for
+#'   example, cKNN controls are not shown when `classifier = "argmax"`.
 #'   \item `tuning_summary` and `tuning_metrics`: tables for all tested
 #'   configurations when more than one predictive configuration is supplied.
 #'   \item The returned object can be passed as the first argument to [pls()] to
@@ -7896,7 +7933,8 @@ pls.single.cv =  function (Xdata,
         one$status <- "ok"
       }
       one <- .cv_drop_fit_data(one)
-      one$tuning_config <- cfg
+      one$tuning_config_full <- cfg
+      one$tuning_config <- .cv_prune_config_for_output(cfg)
       grid_results[[grid_id]] <- one
       status <- if (identical(one$status, "ok")) "ok" else "error"
       err_msg <- if (identical(status, "ok")) NA_character_ else (one$error %||% "configuration failed")
@@ -8150,7 +8188,7 @@ pls.single.cv =  function (Xdata,
     res$pred <- NULL
   }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
-  res$tuning_config <- cfg
+  res$tuning_config <- .cv_prune_config_for_output(cfg)
   res$best_parameters <- .cv_selected_parameters(cfg, tuning_grid, res$best_ncomp)
   .cv_attach_fit_data(res, Xdata, Ydata)
 }

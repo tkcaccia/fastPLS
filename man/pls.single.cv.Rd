@@ -136,7 +136,9 @@ the decoded class labels.
 \item \code{best_parameters}: compact list containing only \code{ncomp} plus the
 arguments that were actually optimized, for example \code{classifier} when
 \code{classifier = c("argmax", "lda")}.
-\item \code{tuning_config}: complete configuration used for the selected run.
+\item \code{tuning_config}: relevant selected configuration used for the run.
+Irrelevant classifier- or method-specific defaults are omitted; for example,
+cKNN controls are not shown when \code{classifier = "argmax"}.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
 \item The returned object can be passed as the first argument to \code{pls()} to
