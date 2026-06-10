@@ -75,6 +75,10 @@ The `svd.method` argument selects the CPU singular-vector backend for CPU
 models. Backend-specific controls are supplied through `...` using the same
 compact names as `fastsvd()`, for example `oversample`, `power`, `maxit`,
 `tol`, `svtol`, and `seed`.
+Use `svd.method = "irlba"` or `"rsvd"` with `backend = "cpu"`. CUDA and Metal
+fits use their native randomized-SVD-style backends, so users normally select
+the device with `backend = "cuda"` or `backend = "metal"` and leave
+`svd.method` at its default.
 
 ```{r}
 fit_reg <- pls(
@@ -91,6 +95,17 @@ fit_reg <- pls(
 
 fit_reg$Q2Y
 ```
+
+The fitted object is a list. The fields most users inspect first are:
+
+- `Ypred`: predictions for `Xtest`, when test data were supplied.
+- `Q2Y`: test-set predictive Q2 when `Ytest` was supplied.
+- `Yfit`: fitted values on the training set, returned when `fit = TRUE`.
+- `R2Y`: training-set explained response variance, returned when `fit = TRUE`.
+- `Ttrain` and `Ttest`: latent scores for training and test samples, when
+  stored or requested with `proj = TRUE`.
+- `ncomp`, `pls_method`, `classification`, and `classification_rule`: model
+  settings recorded in the fitted object.
 
 ## Evaluate Predictions
 
@@ -115,26 +130,17 @@ evaluate(Ytest_cls, fit_eval_cls$Ypred[[length(fit_eval_cls$ncomp)]])$metrics
 ```
 
 When predictions are class scores rather than final class labels, `top_k`
-reports whether the true class appears among the best `k` scored classes. This
-is useful for multiclass problems such as CIFAR-100 or ImageNet, where top-1
-and top-5 accuracy are often reported.
+reports whether the true class appears among the best `k` scored classes. The
+same idea is used for multiclass problems such as CIFAR-100 or ImageNet, where
+top-1 and top-5 accuracy are often reported.
 
 ```{r}
-iris_score <- matrix(
-  c(
-    0.70, 0.20, 0.10,
-    0.35, 0.40, 0.25,
-    0.20, 0.30, 0.50
-  ),
-  nrow = 3,
-  byrow = TRUE,
-  dimnames = list(NULL, levels(iris$Species))
-)
+pred_top <- predict(fit_eval_cls, Xtest, top = 2, raw_scores = TRUE)
+score_last <- pred_top$Yscore[, , length(fit_eval_cls$ncomp)]
 
 evaluate(
-  observed = factor(c("setosa", "versicolor", "versicolor"),
-                    levels = levels(iris$Species)),
-  predicted = iris_score,
+  observed = Ytest_cls,
+  predicted = score_last,
   top_k = c(1, 2)
 )$topk
 ```
@@ -176,8 +182,9 @@ directly through `...`; in stand-alone SVD calls they are supplied directly to
 
 On Apple Silicon builds where `has_metal()` returns `TRUE`,
 `fastsvd(backend = "metal", method = "rsvd")` and
-`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This backend keeps the same
-randomized SVD mathematics as the CPU backend, but sends the large sketching matrix
+`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This
+backend keeps the same randomized SVD mathematics as the CPU backend, but sends
+the large sketching matrix
 multiplications to Apple Metal Performance Shaders. The QR decomposition and
 final small SVD remain on the CPU. Because matrices are copied between R and
 Metal buffers, this backend is most useful for larger matrices where the GPU
@@ -200,6 +207,8 @@ classes, label-aware products can avoid materializing a dense one-hot response
 matrix. The low-rank streamed prediction path is inspired by the FlashSVD
 streaming low-rank inference design of Shao et al. (2025), but is adapted here
 to the PLS prediction factors exposed by `fastPLS`.
+In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
+route automatically only when the cross-product is large enough to justify it.
 
 ### PLSSVD
 
@@ -351,7 +360,7 @@ fit_cls_lda_gpu <- pls(
   Ytrain_cls,
   Xtest,
   Ytest_cls,
-  ncomp = 50,
+  ncomp = 1:2,
   method = "plssvd",
   backend = "cuda",
   classifier = "lda"
@@ -375,6 +384,31 @@ fit_cls_lda_cpu <- pls(
 )
 
 head(fit_cls_lda_cpu$Ypred)
+```
+
+The candidate-kNN head is selected with `classifier = "cknn"`. It is most
+useful for larger multiclass data, but the same syntax works on smaller
+examples:
+
+```{r}
+fit_cls_cknn <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "cknn",
+  k = 5,
+  tau = 0.2,
+  alpha = 0.75,
+  top_m = 3,
+  seed = 100
+)
+
+table(fit_cls_cknn$Ypred[[length(fit_cls_cknn$ncomp)]], Ytest_cls)
 ```
 
 ## OPLS and Kernel PLS
@@ -423,7 +457,7 @@ kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
 names(kernel_fits) <- c("linear", "rbf", "poly")
 
 kernel_accuracy <- vapply(kernel_fits, function(fit) {
-  mean(fit$Ypred[, ncol(fit$Ypred)] == Ytest_cls)
+  mean(fit$Ypred[[length(fit$ncomp)]] == Ytest_cls)
 }, numeric(1))
 kernel_accuracy
 ```
@@ -535,8 +569,8 @@ grouped k-fold or leave-one-group-out validation; pass a scalar `ncomp` for a
 fixed-component CV or a vector of candidates when the number of components
 should be selected from a grid. Use `pls.double.cv()` for nested validation,
 where an inner CV chooses the number of components and an outer CV estimates
-predictive performance. Both helpers support regression and classification and dispatch to the same
-compiled CPU/CUDA core when available.
+predictive performance. Both helpers support regression and classification and
+dispatch to the same compiled CPU/CUDA core when available.
 
 The cKNN memory strategy can also be used during cross-validation. For example,
 `pls.single.cv(..., classifier = "cknn", cknn_memory = "blocked")` evaluates
@@ -578,7 +612,7 @@ that both spectra are placed either in the training set or in the test set,
 never one in each.
 
 ```{r}
-patient_id <- rep(seq_len(nrow(Xtrain) / 2), each = 2)
+patient_id <- rep(seq_len(ceiling(nrow(Xtrain) / 2)), each = 2)[seq_len(nrow(Xtrain))]
 
 cv_grouped <- pls.single.cv(
   Xdata = Xtrain,
@@ -861,6 +895,16 @@ cv_double_kernel <- pls.double.cv(
 cv_double_kernel$results[[1]]$best_parameters
 ```
 
+Most users first inspect:
+
+| Field | Meaning |
+|---|---|
+| `bcomp` | Most frequently selected number of components. |
+| `accuracy`, `Q2Y`, `RMSD` | Outer-CV predictive performance, depending on task type. |
+| `Ypred` | Final cross-validated prediction for each sample. |
+| `conf` | Classification confusion matrix. |
+| `results` | Detailed per-run and per-fold information. |
+
 Important elements returned by `pls.double.cv()` are:
 
 - `results`: one entry per repeated outer CV run. Each entry stores `Ypred` and
@@ -900,16 +944,19 @@ Important elements returned by `pls.double.cv()` are:
 
 ## PCA and SVD Utilities
 
-`fastsvd()` provides direct access to the same SVD backends used by PLS.
-`pca()` builds PCA scores and loadings from those backends, following the
-classical principal-component construction of Pearson (1901). The fitted PCA
-object stores the training centering, scaling, and loading matrix, so the same
-projection can be applied to independent data either during fitting with
+`fastsvd()` provides direct access to the same SVD backends used by PLS. It
+returns the left singular vectors (`u`), singular values (`d`), and right
+singular vectors (`v`) for users who want a truncated decomposition outside a
+PLS model. `pca()` builds PCA scores and loadings from those backends, following
+the classical principal-component construction of Pearson (1901). The fitted
+PCA object stores the training centering, scaling, and loading matrix, so the
+same projection can be applied to independent data either during fitting with
 `xtest` or later with `predict()`.
 
 ```{r}
 s <- fastsvd(Xtrain, ncomp = 3, backend = "cpu", method = "rsvd", seed = 104)
-length(s$d)
+names(s)
+s$d
 ```
 
 ```{r fig.width = 5, fig.height = 4}
@@ -999,8 +1046,11 @@ if (has_metal()) {
 `fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
 importance in projection trajectories for fitted PLS models, following the
 standard VIP interpretation used for PLS variable ranking (Wold, Sjostrom, and
-Eriksson, 2001; Chong and Jun, 2005). These functions are ordinary R-level
-helpers and are independent of CUDA or Metal availability.
+Eriksson, 2001; Chong and Jun, 2005). VIP is most useful when the columns of
+`X` are interpretable predictors, such as genes, metabolites, spectral bins, or
+clinical variables; larger values indicate stronger contribution to the fitted
+latent predictive model. These functions are ordinary R-level helpers and are
+independent of CUDA or Metal availability.
 
 ```{r}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
