@@ -32,8 +32,8 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
   expect_identical(opt_rmsd$selection_metric, "rmsd")
   expect_identical(opt_rmsd$best_metric_name, "rmsd")
   expect_true(opt_rmsd$best_ncomp %in% 1:2)
-  expect_null(opt_rmsd$Ypred)
-  expect_null(opt_rmsd$Ypred_optim)
+  expect_false(is.null(opt_rmsd$Ypred))
+  expect_false(is.null(opt_rmsd$Ypred_optim))
 })
 
 test_that("classification CV selects by accuracy and nested CV forwards the rule", {
@@ -56,8 +56,8 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
   expect_identical(opt$selection_metric, "accuracy")
   expect_identical(opt$best_metric_name, "accuracy")
   expect_true(opt$best_ncomp %in% 1:2)
-  expect_null(opt$class_pred)
-  expect_null(opt$Ypred_optim)
+  expect_false(is.null(opt$class_pred))
+  expect_false(is.null(opt$Ypred_optim))
 
   nested <- pls.double.cv(
     Xdata = X,
@@ -78,12 +78,12 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
   }, logical(1))))
 })
 
-test_that("SIMPLS metric-only CV matches stored prediction CV", {
+test_that("SIMPLS CV always stores prediction scores", {
   set.seed(2103)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
   y <- matrix(0.7 * X[, 1] - 0.5 * X[, 3] + rnorm(60, sd = 0.25), ncol = 1)
 
-  metric_only <- pls.single.cv(
+  cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,
     ncomp = 1:3,
@@ -92,29 +92,12 @@ test_that("SIMPLS metric-only CV matches stored prediction CV", {
     backend = "cpu",
     svd.method = "rsvd",
     seed = 21,
-    selection_metric = "rmsd"
-  )
-  stored <- pls.single.cv(
-    Xdata = X,
-    Ydata = y,
-    ncomp = 1:3,
-    kfold = 3,
-    method = "simpls",
-    backend = "cpu",
-    svd.method = "rsvd",
-    seed = 21,
-    return_scores = TRUE,
     selection_metric = "rmsd"
   )
 
-  expect_null(metric_only$Ypred)
-  expect_false(is.null(stored$Ypred))
-  expect_equal(
-    metric_only$selection_metrics$metric_value,
-    stored$selection_metrics$metric_value,
-    tolerance = 1e-8
-  )
-  expect_identical(metric_only$best_ncomp, stored$best_ncomp)
+  expect_false(is.null(cv$Ypred))
+  expect_equal(dim(cv$Ypred), c(nrow(X), ncol(y), 3L))
+  expect_equal(cv$best_ncomp, cv$ncomp[[cv$best_index]])
 })
 
 test_that("regression CV reports distinct training R2 and held-out Q2", {

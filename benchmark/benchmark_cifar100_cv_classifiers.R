@@ -195,8 +195,7 @@ run_one <- function(X, y, method, classifier, backend, svd_method, profile_name,
       k = k,
       tau = tau,
       alpha = alpha,
-      top_m = top_m,
-      return_scores = FALSE
+      top_m = top_m
     )
     accuracy <- extract_accuracy(out)
   }, error = function(e) {

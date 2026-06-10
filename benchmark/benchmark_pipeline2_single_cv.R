@@ -309,7 +309,6 @@ for (dataset_id in datasets) {
           top_m = top_m_cknn,
           scaling = "centering",
           seed = 123L,
-          return_scores = FALSE,
           xprod = NULL
         )
         elapsed <- proc.time()[["elapsed"]] - t0

@@ -27,7 +27,6 @@ pls.single.cv(
   alpha = 0.75,
   top_m = 20L,
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
-  return_scores = FALSE,
   return_r2 = TRUE,
   xprod = NULL,
   ...
@@ -92,8 +91,6 @@ values are used only when \code{classifier = "lda"}.}
 latent-score memory. \code{streaming} additionally builds the training
 candidate-score cache in blocks for scalar component counts. \code{auto}
 chooses a memory-aware strategy from the data size.}
-
-\item{return_scores}{Store score predictions for classification when \code{TRUE}.}
 
 \item{return_r2}{Fit one additional model on the full
 dataset to estimate the training \code{R2Y} path. The default is \code{TRUE} for

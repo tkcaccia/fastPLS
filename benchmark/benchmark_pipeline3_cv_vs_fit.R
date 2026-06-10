@@ -408,7 +408,6 @@ run_cv10 <- function(task, spec, effective_ncomp) {
     alpha = cknn_alpha,
     top_m = cknn_top_m,
     north = if (identical(spec$method, "opls")) 1L else 1L,
-    return_scores = FALSE,
     seed = 123L + replicate_id,
     selection_metric = selection_metric
   )

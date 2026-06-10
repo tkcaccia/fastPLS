@@ -4754,7 +4754,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                             alpha = 0.75,
                             top_m = 20L,
                             cknn_memory = c("auto", "standard", "blocked", "streaming"),
-                            return_scores = FALSE,
+                            return_scores = TRUE,
                             store_predictions = TRUE,
                             selection_metric = "auto",
                             ...) {
@@ -4995,7 +4995,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   )
 
   res <- list(
-    Ypred = if (classification && !isTRUE(return_scores)) NULL else score_pred,
+    Ypred = score_pred,
     Yscore = if (classification) score_pred else NULL,
     class_pred = class_pred,
     fold = fold,
@@ -7763,7 +7763,6 @@ pls =  function (Xtrain,
 #'   values are used only when `classifier = "lda"`.
 #' @param k,tau,alpha,top_m
 #'   Candidate-kNN controls used when `classifier = "cknn"`.
-#' @param return_scores Store score predictions for classification when `TRUE`.
 #' @param return_r2 Fit one additional model on the full
 #'   dataset to estimate the training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra fit; held-out
@@ -7847,7 +7846,6 @@ pls.single.cv =  function (Xdata,
                           alpha = 0.75,
                           top_m = 20L,
                           cknn_memory = c("auto", "standard", "blocked", "streaming"),
-                          return_scores = FALSE,
                           return_r2 = TRUE,
                           xprod = NULL,
                           ...)
@@ -7915,7 +7913,6 @@ pls.single.cv =  function (Xdata,
           alpha = cfg$alpha,
           top_m = cfg$top_m,
           cknn_memory = cfg$cknn_memory,
-          return_scores = return_scores,
           return_r2 = return_r2,
           xprod = cfg$xprod,
           selection_metric = selection_ctl$metric
@@ -8051,10 +8048,9 @@ pls.single.cv =  function (Xdata,
       alpha = alpha,
       top_m = top_m,
       cknn_memory = cknn_memory,
-      return_scores = isTRUE(return_scores) || classification,
+      return_scores = TRUE,
       store_predictions = !classification ||
         classification ||
-        isTRUE(return_scores) ||
         (classification && !identical(classifier, "argmax")),
       selection_metric = selection_ctl$metric
     )
@@ -8080,7 +8076,7 @@ pls.single.cv =  function (Xdata,
     seed = seed,
     xprod = xprod,
     north = north,
-    return_scores = isTRUE(return_scores) || classification,
+    return_scores = TRUE,
     classifier = classifier,
     lda_ridge = lda_ridge,
     k = k,
@@ -8089,7 +8085,6 @@ pls.single.cv =  function (Xdata,
     top_m = top_m,
     store_predictions = !classification ||
       classification ||
-      isTRUE(return_scores) ||
       (classification && !identical(classifier, "argmax")),
     selection_metric = selection_ctl$metric
     )
@@ -8177,15 +8172,6 @@ pls.single.cv =  function (Xdata,
       degree = degree,
       coef0 = coef0
     )
-  }
-  if (classification && !isTRUE(return_scores)) {
-    res$Ypred <- NULL
-    res$Yscore <- NULL
-    res$class_pred <- NULL
-    res$pred <- NULL
-  } else if (!classification && !isTRUE(return_scores)) {
-    res$Ypred <- NULL
-    res$pred <- NULL
   }
   res$Ypred_optim <- .cv_extract_prediction_at(res, best_idx)
   res$tuning_config <- .cv_prune_config_for_output(cfg)
@@ -8494,7 +8480,6 @@ pls.double.cv = function(Xdata,
           alpha = alpha_grid,
           top_m = top_m_grid,
           cknn_memory = cknn_memory_grid,
-          return_scores = FALSE,
           xprod = xprod_grid,
           selection_metric = selection_ctl$metric
         ),
