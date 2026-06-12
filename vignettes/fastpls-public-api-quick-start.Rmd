@@ -760,7 +760,7 @@ cv_double_kernel <- pls.double.cv(
 cv_double_kernel$results[[1]]$best_parameters
 ```
 
-Most users first inspect:
+The most commonly used `pls.double.cv()` output fields are:
 
 | Field | Meaning |
 |---|---|
