@@ -4,7 +4,7 @@ set -eu
 use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
 openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
-cuda_root="${CUDA_ROOT:-/usr/local/cuda}"
+cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
 use_metal="${FASTPLS_USE_METAL:-auto}"
 
 pkg_cxxflags=""
@@ -19,17 +19,46 @@ if [ "${use_openblas}" = "1" ]; then
   pkg_libs="-L${openblas_root}/lib -lopenblas"
 fi
 
+find_cuda_root() {
+  if [ -n "${cuda_root}" ]; then
+    printf "%s" "${cuda_root}"
+    return
+  fi
+
+  for d in /usr/local/cuda /opt/cuda /usr/local/cuda-*; do
+    if [ -d "$d" ]; then
+      printf "%s" "$d"
+      return
+    fi
+  done
+}
+
+cuda_root="$(find_cuda_root || true)"
 cuda_header="${cuda_root}/include/cuda_runtime.h"
-cuda_lib_dir="${cuda_root}/lib64"
+cuda_lib_dir=""
+if [ -n "${cuda_root}" ]; then
+  if [ -d "${cuda_root}/lib64" ]; then
+    cuda_lib_dir="${cuda_root}/lib64"
+  elif [ -d "${cuda_root}/lib" ]; then
+    cuda_lib_dir="${cuda_root}/lib"
+  fi
+fi
 have_cuda=0
 
-if [ "${use_cuda}" = "1" ]; then
-  have_cuda=1
-elif [ "${use_cuda}" = "auto" ] && [ -f "${cuda_header}" ] && [ -d "${cuda_lib_dir}" ]; then
+if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" != "FALSE" ] &&
+   [ -n "${cuda_root}" ] && [ -f "${cuda_header}" ] && [ -n "${cuda_lib_dir}" ]; then
   have_cuda=1
 fi
 
+if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "ERROR: FASTPLS_USE_CUDA=1 but the CUDA Toolkit was not found or is incomplete." >&2
+  echo "Set CUDA_ROOT to the CUDA Toolkit directory, for example:" >&2
+  echo "  /usr/local/cuda" >&2
+  exit 1
+fi
+
 if [ "${have_cuda}" = "1" ]; then
+  echo "fastPLS configure: CUDA Toolkit found at ${cuda_root}"
   cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_root}/include"
   cuda_nvcc="${cuda_root}/bin/nvcc"
   if [ -x "${cuda_nvcc}" ]; then
@@ -43,6 +72,8 @@ if [ "${have_cuda}" = "1" ]; then
   fi
   pkg_cxxflags="${cuda_flags}"
   pkg_libs="-L${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
+else
+  echo "fastPLS configure: CUDA Toolkit not found; building CPU-only package"
 fi
 
 have_metal=0

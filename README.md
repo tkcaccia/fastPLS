@@ -94,10 +94,29 @@ CUDA backend:
 - use `pls(..., backend = "cuda")` with `method = "plssvd"`, `"simpls"`,
   `"opls"`, or `"kernelpls"`.
 
-On Windows, the package installs CPU-only by default when CUDA is not available,
-so machines without NVIDIA hardware still build normally. On a Windows NVIDIA
-workstation, install the NVIDIA CUDA Toolkit and build with CUDA enabled, for
-example:
+On Linux and Windows, CUDA support is optional. If the CUDA Toolkit is not
+available, the package builds CPU-only and CUDA requests give a clear runtime
+error. To force a CPU-only build on any machine:
+
+```r
+Sys.setenv(FASTPLS_USE_CUDA = "0")
+remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
+```
+
+On an NVIDIA workstation, install the NVIDIA CUDA Toolkit and build with CUDA
+enabled by setting `FASTPLS_USE_CUDA = "1"` and `CUDA_ROOT`.
+
+Linux example:
+
+```r
+Sys.setenv(
+  FASTPLS_USE_CUDA = "1",
+  CUDA_ROOT = "/usr/local/cuda"
+)
+remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
+```
+
+Windows example:
 
 ```r
 Sys.setenv(
