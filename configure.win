@@ -56,6 +56,10 @@ pkg_libs=""
 cuda_objects=""
 cuda_rule=""
 
+# A macOS configure run may generate the Objective-C++ Metal source.  Windows
+# builds must always use the C++ stub and must never try to compile/link Metal.
+rm -f src/svd_metal_backend.mm
+
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure.win: CUDA Toolkit found at ${cuda_root}"
   pkg_cppflags="-DFASTPLS_HAS_CUDA -I\"${cuda_root}/include\""

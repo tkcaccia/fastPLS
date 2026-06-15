@@ -1,14 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-rm -f src/Makevars src/svd_metal_backend.mm
-
-if [ -f src/Makevars.win.in ]; then
-  sed \
-    -e 's|@FASTPLS_WIN_PKG_CPPFLAGS@||g' \
-    -e 's|@FASTPLS_WIN_PKG_CXXFLAGS@||g' \
-    -e 's|@FASTPLS_WIN_PKG_LIBS@||g' \
-    -e 's|@FASTPLS_WIN_CUDA_OBJECTS@||g' \
-    -e 's|@FASTPLS_WIN_CUDA_RULE@||g' \
-    src/Makevars.win.in > src/Makevars.win
-fi
+rm -f src/Makevars src/Makevars.win src/svd_metal_backend.mm

@@ -19,6 +19,8 @@
 ^src/.*\.(o|so)$
 ^src/symbols[.]rds$
 ^src/Makevars$
+^src/Makevars[.]win$
+^src/svd_metal_backend[.]mm$
 ^\.bench-lib.*$
 ^PACKAGES$
 ^PACKAGES[.]gz$
