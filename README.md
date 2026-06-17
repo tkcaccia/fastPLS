@@ -96,7 +96,9 @@ CUDA backend:
 
 On Linux and Windows, CUDA support is optional. If the CUDA Toolkit is not
 available, the package builds CPU-only and CUDA requests give a clear runtime
-error. To force a CPU-only build on any machine:
+error. This CPU-only fallback is also used if an old environment has
+`FASTPLS_USE_CUDA = "1"` but the toolkit is missing. To force a CPU-only build
+on any machine:
 
 ```r
 Sys.setenv(FASTPLS_USE_CUDA = "0")
@@ -128,6 +130,10 @@ remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
 
 After installation, `has_cuda()` reports whether the package was compiled with
 CUDA support and can see a CUDA device at runtime.
+
+For automated CUDA build tests, set `FASTPLS_REQUIRE_CUDA = "1"` in addition to
+`FASTPLS_USE_CUDA = "1"` if installation should fail when the CUDA Toolkit is
+not found.
 
 FlashSVD-style low-rank prediction is integrated into the standard prediction
 path. When compact latent factors are available, `predict.fastPLS()` can apply

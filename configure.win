@@ -2,6 +2,7 @@
 set -eu
 
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
+require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
 cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
 
 normalize_path() {
@@ -43,11 +44,16 @@ if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" !
   fi
 fi
 
-if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
-  echo "ERROR: FASTPLS_USE_CUDA=1 but the CUDA Toolkit was not found." >&2
+if [ "${require_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "ERROR: FASTPLS_REQUIRE_CUDA=1 but the CUDA Toolkit was not found." >&2
   echo "Set CUDA_ROOT to the CUDA Toolkit directory, for example:" >&2
   echo "  C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6" >&2
   exit 1
+fi
+
+if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "fastPLS configure.win: FASTPLS_USE_CUDA=1 was set but the CUDA Toolkit was not found; building CPU-only Windows package"
+  echo "fastPLS configure.win: set FASTPLS_REQUIRE_CUDA=1 to make missing CUDA a configuration error"
 fi
 
 pkg_cppflags=""

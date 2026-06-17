@@ -4,6 +4,7 @@ set -eu
 use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
 openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
+require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
 cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
 use_metal="${FASTPLS_USE_METAL:-auto}"
 
@@ -50,11 +51,16 @@ if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" !
   have_cuda=1
 fi
 
-if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
-  echo "ERROR: FASTPLS_USE_CUDA=1 but the CUDA Toolkit was not found or is incomplete." >&2
+if [ "${require_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "ERROR: FASTPLS_REQUIRE_CUDA=1 but the CUDA Toolkit was not found or is incomplete." >&2
   echo "Set CUDA_ROOT to the CUDA Toolkit directory, for example:" >&2
   echo "  /usr/local/cuda" >&2
   exit 1
+fi
+
+if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
+  echo "fastPLS configure: FASTPLS_USE_CUDA=1 was set but the CUDA Toolkit was not found or is incomplete; building CPU-only package"
+  echo "fastPLS configure: set FASTPLS_REQUIRE_CUDA=1 to make missing CUDA a configuration error"
 fi
 
 if [ "${have_cuda}" = "1" ]; then
