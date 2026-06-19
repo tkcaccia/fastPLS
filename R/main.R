@@ -4222,18 +4222,19 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       coef0 = coef0
     )
     list(
-      R2Y = as.numeric(fit$R2Y),
+      R2Y = .fastpls_name_metric_path(fit$R2Y, ncomp),
       Yfit = fit$Yfit
     )
   }, error = function(e) {
     list(
-      R2Y = rep(NA_real_, length(ncomp)),
+      R2Y = .fastpls_name_metric_path(rep(NA_real_, length(ncomp)), ncomp),
       Yfit = NULL
     )
   })
   if (length(out$R2Y) != length(ncomp)) {
     out$R2Y <- rep_len(out$R2Y, length(ncomp))
   }
+  out$R2Y <- .fastpls_name_metric_path(out$R2Y, ncomp)
   out
 }
 

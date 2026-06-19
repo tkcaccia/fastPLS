@@ -243,7 +243,7 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
   expect_true(is.finite(with_fit$R2Y))
   expect_true(is.finite(with_fit$accuracy))
   expect_false(is.null(with_fit$Yfit))
-  expect_equal(with_fit$R2Y, as.numeric(full_fit$R2Y), tolerance = 1e-10)
+  expect_equal(as.numeric(with_fit$R2Y), as.numeric(full_fit$R2Y), tolerance = 1e-10)
   expect_false(isTRUE(all.equal(with_fit$Q2Y, with_fit$R2Y)))
   expect_false(isTRUE(all.equal(with_fit$Q2Y, with_fit$accuracy)))
   expect_true(all(is.na(without_fit$R2Y)))
