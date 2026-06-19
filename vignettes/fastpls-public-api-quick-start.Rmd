@@ -250,50 +250,73 @@ A practical starting point is:
 
 ## Evaluate Predictions
 
-Use `evaluate()` when you want a compact summary of prediction quality from
-observed and predicted values. For classification, it returns accuracy,
-balanced accuracy, macro-F1, Cohen's kappa, per-class summaries, and the
-confusion matrix.
+Use `evaluate()` after fitting or prediction when you want a compact summary of
+model performance from observed and predicted values. The function accepts
+predicted class labels, numeric regression predictions, or class-score matrices.
+The examples below reuse the fitted objects created in the previous section.
 
 ```{r}
-fit_eval_cls <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "simpls",
-  backend = "cpu",
-  svd.method = "rsvd",
-  seed = 101
-)
-evaluate(Ytest_cls, fit_eval_cls$Ypred[[length(fit_eval_cls$ncomp)]])$metrics
-```
-
-When predictions are class scores rather than final class labels, `top_k`
-reports whether the true class appears among the best `k` scored classes. The
-same idea is used for multiclass problems such as CIFAR-100 or ImageNet, where
-top-1 and top-5 accuracy are often reported.
-
-```{r}
-pred_top <- predict(fit_eval_cls, Xtest, top = 2, raw_scores = TRUE)
-score_last <- pred_top$Yscore[, , length(fit_eval_cls$ncomp)]
-
-evaluate(
+eval_cls <- evaluate(
   observed = Ytest_cls,
-  predicted = score_last,
-  top_k = c(1, 2)
-)$topk
+  predicted = fit_cls$Ypred[["ncomp=2"]]
+)
+
+eval_cls$metrics
 ```
 
-For numeric regression, `evaluate()` returns R2, Q2, RMSD/RMSE, MAE, bias,
-median relative error percentage, RPD, and correlations. If `ytrain` is
-supplied, Q2 is calculated relative to the training-set response mean; this is
-the preferred setting for independent test-set evaluation.
+For classification, `evaluate()` also returns a confusion matrix. Rows are the
+predicted classes and columns are the observed classes. A compact bubble plot is
+often easier to inspect than the printed table, especially when there are many
+classes.
+
+```{r fig.width=4.8, fig.height=4}
+confusion_df <- as.data.frame(eval_cls$confusion)
+names(confusion_df) <- c("Predicted", "Observed", "Count")
+
+plot(
+  as.integer(confusion_df$Observed),
+  as.integer(confusion_df$Predicted),
+  cex = sqrt(confusion_df$Count + 0.5),
+  pch = 21,
+  bg = "#4E79A7",
+  col = "black",
+  xaxt = "n",
+  yaxt = "n",
+  xlab = "Observed class",
+  ylab = "Predicted class",
+  main = "Confusion matrix"
+)
+axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+abline(0, 1, col = "#D55E00", lwd = 2)
+```
+
+When class-score matrices are available, `evaluate()` can also report top-k
+accuracy. This is useful for large multiclass tasks where top-1 and top-5
+accuracy are both informative. Here the ranked labels returned by
+`predict(..., top = 2)` are already stored in `pred_cls_later`.
 
 ```{r}
-pred_reg <- predict(fit_reg, Xreg_test)$Ypred[, , length(fit_reg$ncomp)]
-evaluate(Ytest_reg, pred_reg, ytrain = Ytrain_reg)$metrics
+top2_hit <- vapply(seq_len(nrow(pred_cls_later$Ypred_top[["ncomp=2"]])), function(i) {
+  as.character(Ytest_cls)[i] %in% pred_cls_later$Ypred_top[["ncomp=2"]][i, ]
+}, logical(1))
+
+mean(top2_hit)
+```
+
+For numeric regression, `evaluate()` reports R2, Q2, RMSD/RMSE, MAE, bias,
+median relative error percentage, RPD, and correlations. If `ytrain` is supplied,
+Q2 is calculated relative to the training-set response mean, which is the
+preferred setting for independent test-set evaluation.
+
+```{r}
+eval_reg <- evaluate(
+  observed = Ytest_reg,
+  predicted = pred_mpg,
+  ytrain = Ytrain_reg
+)
+
+eval_reg$metrics
 ```
 
 ## Classification Examples
