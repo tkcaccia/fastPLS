@@ -199,12 +199,13 @@ test_that("CPU FlashSVD prediction is the default for compiled PLS", {
     )
     pred_ref <- predict(ref, X[idx, , drop = FALSE], backend = "cpu")
     pred_flash <- predict(flash, X[idx, , drop = FALSE])
+    flash_internal <- attr(flash, "fastPLS_internal")
 
     expect_s3_class(flash, "fastPLS")
-    expect_true(isTRUE(flash$flash_svd))
-    expect_identical(flash$flash_svd_backend, "cpu")
-    expect_identical(flash$predict_backend, "cpu_flash")
-    expect_identical(flash$flash_svd_mode, "streamed_low_rank_prediction")
+    expect_true(isTRUE(flash_internal$flash_svd))
+    expect_identical(flash_internal$flash_svd_backend, "cpu")
+    expect_identical(flash_internal$predict_backend, "cpu_flash")
+    expect_identical(flash_internal$flash_svd_mode, "streamed_low_rank_prediction")
     expect_equal(flash$B, ref$B)
     expect_equal(pred_flash$Ypred, pred_ref$Ypred, tolerance = 1e-10)
   }

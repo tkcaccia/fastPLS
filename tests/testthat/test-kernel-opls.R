@@ -40,7 +40,7 @@ test_that("kernelpls high-level wrapper dispatches to simpls", {
   )
 
   expect_s3_class(fit_fast, "fastPLSKernel")
-  expect_identical(fit_fast$inner_model$pls_method, "simpls")
+  expect_identical(attr(fit_fast$inner_model, "fastPLS_internal")$pls_method, "simpls")
 })
 
 test_that("OPLS C++ wrapper predicts regression matrices", {
@@ -85,6 +85,6 @@ test_that("opls high-level wrapper dispatches to simpls", {
   )
 
   expect_s3_class(fit, "fastPLSOpls")
-  expect_identical(fit$inner_model$pls_method, "simpls")
+  expect_identical(attr(fit$inner_model, "fastPLS_internal")$pls_method, "simpls")
   expect_equal(dim(fit$Ypred), c(length(idx), ncol(Y), 2L))
 })

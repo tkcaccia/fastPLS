@@ -26,7 +26,7 @@ test_that("Metal PLS backend fits core method families when available", {
     )
     expect_true(inherits(fit, "fastPLS"))
     if (identical(method, "plssvd")) {
-      expect_identical(fit$predict_backend, "metal")
+      expect_identical(attr(fit, "fastPLS_internal")$predict_backend, "metal")
       expect_identical(fit$backend, "metal")
     } else {
       expect_true(

@@ -1883,6 +1883,52 @@
   x
 }
 
+.fastpls_hidden_output_fields <- c(
+  "B_stored",
+  "compact_prediction",
+  "pls_method",
+  "predict_latent_ok",
+  "xprod_default",
+  "predict_backend",
+  "flash_svd",
+  "flash_svd_backend",
+  "flash_svd_mode",
+  "flash_block_size",
+  "classification"
+)
+
+.fastpls_hide_internal_output_fields <- function(x) {
+  present <- intersect(.fastpls_hidden_output_fields, names(x))
+  if (!length(present)) {
+    return(x)
+  }
+  internal <- attr(x, "fastPLS_internal", exact = TRUE)
+  if (is.null(internal)) {
+    internal <- list()
+  }
+  internal[present] <- x[present]
+  x[present] <- NULL
+  attr(x, "fastPLS_internal") <- internal
+  x
+}
+
+.fastpls_restore_internal_output_fields <- function(x) {
+  internal <- attr(x, "fastPLS_internal", exact = TRUE)
+  if (is.null(internal) || !length(internal)) {
+    return(x)
+  }
+  missing <- setdiff(names(internal), names(x))
+  if (length(missing)) {
+    x[missing] <- internal[missing]
+  }
+  x
+}
+
+.fastpls_public_pls_output <- function(x, ncomp = NULL) {
+  x <- .fastpls_name_pls_metric_paths(x, ncomp)
+  .fastpls_hide_internal_output_fields(x)
+}
+
 .fastpls_permutation_cor <- function(Y, idx) {
   Y <- as.matrix(Y)
   if (nrow(Y) != length(idx)) {
@@ -2980,6 +3026,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
   if (!is(object, "fastPLS")) {
     stop("object is not a fastPLS object")
   }
+  object <- .fastpls_restore_internal_output_fields(object)
   backend <- match.arg(backend)
   top <- .resolve_top_k(top, top5)
   Xtest=as.matrix(newdata)
@@ -6748,26 +6795,12 @@ plot.permutation <- function(x,
 #'   * `B`: regression coefficient matrix or coefficient array, when stored.
 #'     For vector-valued `ncomp`, a three-dimensional array may contain the
 #'     coefficient path for all requested component counts.
-#'   * `B_stored`: logical flag indicating whether the full `B` coefficients
-#'     were stored.
-#'   * `compact_prediction`: logical flag indicating that prediction can use
-#'     compact low-rank factors instead of a full `p x q` coefficient matrix.
 #'   * `mX`, `vX`: training predictor centering and scaling values. `vX` is one
 #'     when no scaling is applied.
 #'   * `mY`: response centering values for regression or dummy-coded PLS-DA.
 #'   * `p`, `m`: number of predictor and response columns used internally.
 #'   * `ncomp`: requested/effective component count vector. For PLSSVD this may
 #'     be capped by the numerical rank of the response.
-#'   * `pls_method`: fitted PLS family, such as `"plssvd"` or `"simpls"`.
-#'   * `xprod_default`: logical flag indicating whether fastPLS selected the
-#'     matrix-free cross-product route for the fit.
-#'   * `predict_latent_ok`: logical flag indicating whether latent-space
-#'     prediction is available for `predict()`.
-#'   * `predict_backend`, `flash_svd`, `flash_svd_backend`,
-#'     `flash_svd_mode`, `flash_block_size`: prediction/backend metadata for the
-#'     compact streamed prediction path, when used.
-#'   * `classification`: logical flag indicating whether `Ytrain` was a factor
-#'     and the model was fitted as PLS-DA.
 #'   * `lev`: factor levels used for classification.
 #'   * `classification_rule`: classification head used for factor responses:
 #'     `"argmax"`, `"lda"`, or `"cknn"` internally resolved to the selected
@@ -6939,8 +6972,8 @@ pls =  function (Xtrain,
       proj = proj
     )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
-    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
-    return(.attach_backend_control(model, backend_control))
+    model <- .attach_backend_control(model, backend_control)
+    return(.fastpls_public_pls_output(model, model$ncomp))
   }
 
   if (identical(requested_method, "opls")) {
@@ -6966,8 +6999,8 @@ pls =  function (Xtrain,
     }
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
-    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
-    return(.attach_backend_control(model, backend_control))
+    model <- .attach_backend_control(model, backend_control)
+    return(.fastpls_public_pls_output(model, model$ncomp))
   }
 
   if (identical(requested_method, "kernelpls")) {
@@ -6994,8 +7027,8 @@ pls =  function (Xtrain,
     }
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
-    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
-    return(.attach_backend_control(model, backend_control))
+    model <- .attach_backend_control(model, backend_control)
+    return(.fastpls_public_pls_output(model, model$ncomp))
   }
 
   if (identical(backend, "cuda")) {
@@ -7018,8 +7051,8 @@ pls =  function (Xtrain,
             return_variance = return_variance
 	      )
       model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
-      model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
-      return(.attach_backend_control(model, backend_control))
+      model <- .attach_backend_control(model, backend_control)
+      return(.fastpls_public_pls_output(model, model$ncomp))
     }
     model <- .simpls_gpu(
       Xtrain = Xtrain,
@@ -7039,8 +7072,8 @@ pls =  function (Xtrain,
           return_variance = return_variance
 	    )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
-    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
-    return(.attach_backend_control(model, backend_control))
+    model <- .attach_backend_control(model, backend_control)
+    return(.fastpls_public_pls_output(model, model$ncomp))
   }
 
   meth = .normalize_pls_method(requested_method)
@@ -7324,9 +7357,8 @@ pls =  function (Xtrain,
 
 
   class(model)="fastPLS"
-  model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
   model <- .attach_backend_control(model, backend_control)
-  model
+  .fastpls_public_pls_output(model, model$ncomp)
 }
 
 .cv_best_index <- function(metrics, selection_metric = "auto") {

@@ -104,8 +104,8 @@ The fitted object is a list. The fields most users inspect first are:
 - `R2Y`: training-set explained response variance, returned when `fit = TRUE`.
 - `Ttrain` and `Ttest`: latent scores for training and test samples, when
   stored or requested with `proj = TRUE`.
-- `ncomp`, `pls_method`, `classification`, and `classification_rule`: model
-  settings recorded in the fitted object.
+- `ncomp` and `classification_rule`: model settings recorded in the fitted
+  object when relevant.
 
 ## Evaluate Predictions
 

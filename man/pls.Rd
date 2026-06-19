@@ -143,17 +143,10 @@ summaries were requested. Common fields are:
 \item \code{Ttrain}: training latent scores. This is returned when the backend stores scores or when they are needed for fitted values, classifiers, variance summaries, or compact prediction.
 \item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by PLSSVD-style compact prediction when a full coefficient array is avoided.
 \item \code{B}: regression coefficient matrix or coefficient array, when stored. For vector-valued \code{ncomp}, a three-dimensional array may contain the coefficient path for all requested component counts.
-\item \code{B_stored}: logical flag indicating whether the full \code{B} coefficients were stored.
-\item \code{compact_prediction}: logical flag indicating that prediction can use compact low-rank factors instead of a full \code{p x q} coefficient matrix.
 \item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one when no scaling is applied.
 \item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
 \item \code{p}, \code{m}: number of predictor and response columns used internally.
 \item \code{ncomp}: requested/effective component count vector. For PLSSVD this may be capped by the numerical rank of the response.
-\item \code{pls_method}: fitted PLS family, such as \code{"plssvd"} or \code{"simpls"}.
-\item \code{xprod_default}: logical flag indicating whether fastPLS selected the matrix-free cross-product route for the fit.
-\item \code{predict_latent_ok}: logical flag indicating whether latent-space prediction is available for \code{predict()}.
-\item \code{predict_backend}, \code{flash_svd}, \code{flash_svd_backend}, \code{flash_svd_mode}, \code{flash_block_size}: prediction/backend metadata for the compact streamed prediction path, when used.
-\item \code{classification}: logical flag indicating whether \code{Ytrain} was a factor and the model was fitted as PLS-DA.
 \item \code{lev}: factor levels used for classification.
 \item \code{classification_rule}: classification head used for factor responses: \code{"argmax"}, \code{"lda"}, or \code{"cknn"} internally resolved to the selected backend.
 \item \code{lda_backend}: backend used by the latent-space LDA classifier, when \code{classifier = "lda"}.

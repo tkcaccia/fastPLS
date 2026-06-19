@@ -66,3 +66,35 @@ test_that("single-CV training R2 path is a named vector", {
   expect_null(dim(cv$R2Y))
   expect_identical(names(cv$R2Y), paste0("ncomp=", cv$ncomp))
 })
+
+test_that("pls hides internal implementation fields from public output", {
+  X <- as.matrix(iris[, 1:4])
+  fit <- pls(
+    X,
+    iris$Species,
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    return_variance = FALSE
+  )
+  hidden <- c(
+    "B_stored",
+    "compact_prediction",
+    "pls_method",
+    "predict_latent_ok",
+    "xprod_default",
+    "predict_backend",
+    "flash_svd",
+    "flash_svd_backend",
+    "flash_svd_mode",
+    "flash_block_size",
+    "classification"
+  )
+  expect_false(any(hidden %in% names(fit)))
+  expect_true(is.list(attr(fit, "fastPLS_internal")))
+
+  pred <- predict(fit, X[1:5, , drop = FALSE])
+  expect_s3_class(pred$Ypred[[1]], "factor")
+})

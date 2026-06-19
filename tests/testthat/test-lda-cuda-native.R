@@ -219,5 +219,5 @@ test_that("standard CUDA LDA remains the default implementation", {
   )
 
   expect_equal(fit_default$lda$train_backend, "cuda_project")
-  expect_equal(fit_default$predict_backend, "cuda_flash")
+  expect_equal(attr(fit_default, "fastPLS_internal")$predict_backend, "cuda_flash")
 })
