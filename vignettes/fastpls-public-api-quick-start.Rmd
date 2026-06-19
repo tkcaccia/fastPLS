@@ -80,6 +80,10 @@ fits use their native randomized-SVD-style backends, so users normally select
 the device with `backend = "cuda"` or `backend = "metal"` and leave
 `svd.method` at its default.
 
+The simplest workflow is to provide both the training data and an independent
+test set directly to `pls()`. In this case the fitted object already contains
+test-set predictions and, if `Ytest` is supplied, predictive metrics.
+
 ```{r}
 fit_reg <- pls(
   Xreg_train,
@@ -90,22 +94,159 @@ fit_reg <- pls(
   method = "simpls",
   backend = "cpu",
   svd.method = "irlba",
-  fit = TRUE
+  fit = TRUE,
+  return_variance = FALSE
 )
 
 fit_reg$Q2Y
 ```
 
-The fitted object is a list. The fields most users inspect first are:
+For regression, `Ypred` is a numeric prediction array with one slice for each
+requested number of components. The metric vectors are named by component
+count, so the prediction corresponding to `ncomp = 3` can be extracted as
+follows.
 
-- `Ypred`: predictions for `Xtest`, when test data were supplied.
-- `Q2Y`: test-set predictive Q2 when `Ytest` was supplied.
-- `Yfit`: fitted values on the training set, returned when `fit = TRUE`.
-- `R2Y`: training-set explained response variance, returned when `fit = TRUE`.
-- `Ttrain` and `Ttest`: latent scores for training and test samples, when
-  stored or requested with `proj = TRUE`.
-- `ncomp` and `classification_rule`: model settings recorded in the fitted
-  object when relevant.
+```{r fig.width=4.8, fig.height=4}
+reg_component <- which(fit_reg$ncomp == 3L)
+pred_mpg <- fit_reg$Ypred[, , reg_component]
+plot(
+  Ytest_reg,
+  pred_mpg,
+  pch = 21,
+  bg = "#4E79A7",
+  col = "black",
+  xlab = "Observed mpg",
+  ylab = "Predicted mpg",
+  main = "Regression: observed vs predicted"
+)
+abline(0, 1, col = "#D55E00", lwd = 2)
+```
+
+The alternative workflow is to fit the model once without a test set, then call
+`predict()` later. This is useful when the same model must be applied to several
+independent datasets. `predict()` automatically applies the centering/scaling
+stored in the fitted object.
+
+```{r}
+fit_reg_train_only <- pls(
+  Xreg_train,
+  Ytrain_reg,
+  ncomp = 1:3,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  fit = TRUE,
+  return_variance = FALSE
+)
+
+pred_reg_later <- predict(
+  fit_reg_train_only,
+  Xreg_test,
+  Ytest = Ytest_reg,
+  proj = TRUE
+)
+
+pred_reg_later$Q2Y
+head(pred_reg_later$Ttest)
+```
+
+For classification, the response is supplied as a factor and `pls()` returns
+predicted class labels. The default classifier is `classifier = "argmax"`, which
+implements standard PLS-DA decoding. The same interface can also use
+`classifier = "lda"` or `classifier = "cknn"`.
+
+```{r}
+fit_cls <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "argmax",
+  fit = TRUE,
+  return_variance = FALSE,
+  seed = 101
+)
+
+fit_cls$accuracy
+```
+
+The predicted labels can be visualized against the observed labels. Correct
+classification appears on the diagonal.
+
+```{r fig.width=4.8, fig.height=4}
+pred_cls <- fit_cls$Ypred[["ncomp=2"]]
+plot(
+  as.integer(Ytest_cls),
+  as.integer(pred_cls),
+  xaxt = "n",
+  yaxt = "n",
+  pch = 21,
+  bg = "#59A14F",
+  col = "black",
+  xlab = "Observed class",
+  ylab = "Predicted class",
+  main = "Classification: observed vs predicted"
+)
+axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+abline(0, 1, col = "#D55E00", lwd = 2)
+```
+
+As for regression, classification models can also be fitted first and predicted
+later. `predict()` can optionally return ranked classes by setting `top` or
+`top5 = TRUE`.
+
+```{r}
+fit_cls_train_only <- pls(
+  Xtrain,
+  Ytrain_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "lda",
+  fit = TRUE,
+  return_variance = FALSE,
+  seed = 101
+)
+
+pred_cls_later <- predict(
+  fit_cls_train_only,
+  Xtest,
+  Ytest = Ytest_cls,
+  top = 2
+)
+
+pred_cls_later$accuracy
+head(pred_cls_later$Ypred_top[["ncomp=2"]])
+```
+
+The same `pls()` call can fit the four model families by changing `method`:
+
+- `method = "plssvd"`: direct cross-covariance SVD PLS.
+- `method = "simpls"`: accelerated compiled SIMPLS implementation.
+- `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
+- `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial
+  kernels.
+
+A practical starting point is:
+
+| Goal | Suggested call |
+|---|---|
+| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Direct cross-covariance PLS-SVD | `method = "plssvd"` |
+| Remove response-unrelated structured variation | `method = "opls"` |
+| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
+| Argmax PLS-DA decoding | `classifier = "argmax"` |
+| Latent-space discriminant analysis | `classifier = "lda"` |
+| Candidate-neighbour classification | `classifier = "cknn"` |
+| Small or moderate data | `backend = "cpu"` |
+| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
+| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 
 ## Evaluate Predictions
 
@@ -154,25 +295,6 @@ the preferred setting for independent test-set evaluation.
 pred_reg <- predict(fit_reg, Xreg_test)$Ypred[, , length(fit_reg$ncomp)]
 evaluate(Ytest_reg, pred_reg, ytrain = Ytrain_reg)$metrics
 ```
-
-The same call can fit the four model families by changing `method`:
-
-- `method = "plssvd"`: direct cross-covariance SVD PLS.
-- `method = "simpls"`: accelerated compiled SIMPLS implementation.
-- `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
-- `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial kernels.
-
-A practical starting point is:
-
-| Goal | Suggested call |
-|---|---|
-| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
-| Direct cross-covariance PLS-SVD | `method = "plssvd"` |
-| Remove response-unrelated structured variation | `method = "opls"` |
-| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
-| Small or moderate data | `backend = "cpu"` |
-| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
-| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 
 ## Classification Examples
 
