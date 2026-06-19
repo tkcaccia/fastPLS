@@ -1852,6 +1852,37 @@
   }, numeric(1))
 }
 
+.fastpls_ncomp_names <- function(ncomp) {
+  paste0("ncomp=", as.integer(ncomp))
+}
+
+.fastpls_name_metric_path <- function(x, ncomp) {
+  if (is.null(x)) {
+    return(x)
+  }
+  if (length(x) != length(ncomp)) {
+    return(x)
+  }
+  out <- as.numeric(x)
+  names(out) <- .fastpls_ncomp_names(ncomp)
+  out
+}
+
+.fastpls_name_pls_metric_paths <- function(x, ncomp = NULL) {
+  if (is.null(ncomp)) {
+    ncomp <- x$ncomp
+  }
+  if (is.null(ncomp)) {
+    return(x)
+  }
+  for (field in c("accuracy", "Q2Y", "R2Y")) {
+    if (!is.null(x[[field]])) {
+      x[[field]] <- .fastpls_name_metric_path(x[[field]], ncomp)
+    }
+  }
+  x
+}
+
 .fastpls_permutation_cor <- function(Y, idx) {
   Y <- as.matrix(Y)
   if (nrow(Y) != length(idx)) {
@@ -2998,7 +3029,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
       res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
-		    return(res)
+		    return(.fastpls_name_pls_metric_paths(res, object$ncomp))
 		  }
 	  if (isTRUE(object$classification) &&
 	      !is.null(object$classification_rule) &&
@@ -3014,7 +3045,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	      cand_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, cand_res$Ypred)
 	      cand_res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
-	    return(cand_res)
+	    return(.fastpls_name_pls_metric_paths(cand_res, object$ncomp))
 	  }
 	  if (isTRUE(object$classification) &&
 	      is.null(Ytest) &&
@@ -3040,7 +3071,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       bias_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, bias_res$Ypred)
       bias_res$Q2Y <- rep(NA_real_, length(object$ncomp))
     }
-    return(bias_res)
+    return(.fastpls_name_pls_metric_paths(bias_res, object$ncomp))
   }
 	  res <- if (isTRUE(use_metal)) {
     .pls_predict_metal(object, Xtest, proj)
@@ -3131,7 +3162,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
     }
   }
-  res
+  .fastpls_name_pls_metric_paths(res, object$ncomp)
 }
 
 .fastpls_preprocess_train <- function(X, scaling) {
@@ -6745,7 +6776,8 @@ plot.permutation <- function(x,
 #'   * `Yfit`: fitted training responses or fitted class labels, returned when
 #'     `fit = TRUE`.
 #'   * `R2Y`: training-set coefficient of determination path when `fit = TRUE`;
-#'     otherwise `NA` placeholders may be returned for compatibility.
+#'     otherwise `NA` placeholders may be returned for compatibility. Elements
+#'     are named by component count, for example `"ncomp=2"`.
 #'   * `Ypred`: predictions for `Xtest`, returned only when `Xtest` is supplied
 #'     to `pls()`. For classification this contains predicted factor labels; for
 #'     regression it contains numeric predictions.
@@ -6753,9 +6785,11 @@ plot.permutation <- function(x,
 #'     available.
 #'   * `Ttest`: test-set latent scores, returned when `proj = TRUE`.
 #'   * `Q2Y`: test-set Q2 for numeric `Ytest`, or dummy-response PLS-DA Q2 for
-#'     factor `Ytest`, returned when response scores are available.
+#'     factor `Ytest`, returned when response scores are available. Elements are
+#'     named by component count.
 #'   * `accuracy`: decoded-label accuracy for factor `Ytest`, returned when
-#'     classification predictions are available.
+#'     classification predictions are available. Elements are named by component
+#'     count.
 #'   * `pval`: single-split permutation-test p-values by component, returned
 #'     when `perm.test = TRUE`. Each p-value is the fraction of permuted
 #'     `Q2Y` values larger than the observed `Q2Y`.
@@ -6904,6 +6938,7 @@ pls =  function (Xtrain,
       proj = proj
     )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
+    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6930,6 +6965,7 @@ pls =  function (Xtrain,
     }
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
+    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6957,6 +6993,7 @@ pls =  function (Xtrain,
     }
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
+    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -6980,6 +7017,7 @@ pls =  function (Xtrain,
             return_variance = return_variance
 	      )
       model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
+      model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
       return(.attach_backend_control(model, backend_control))
     }
     model <- .simpls_gpu(
@@ -7000,6 +7038,7 @@ pls =  function (Xtrain,
           return_variance = return_variance
 	    )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
+    model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
     return(.attach_backend_control(model, backend_control))
   }
 
@@ -7284,6 +7323,7 @@ pls =  function (Xtrain,
 
 
   class(model)="fastPLS"
+  model <- .fastpls_name_pls_metric_paths(model, model$ncomp)
   model <- .attach_backend_control(model, backend_control)
   model
 }

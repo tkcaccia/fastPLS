@@ -158,12 +158,12 @@ summaries were requested. Common fields are:
 \item \code{classification_rule}: classification head used for factor responses: \code{"argmax"}, \code{"lda"}, or \code{"cknn"} internally resolved to the selected backend.
 \item \code{lda_backend}: backend used by the latent-space LDA classifier, when \code{classifier = "lda"}.
 \item \code{Yfit}: fitted training responses or fitted class labels, returned when \code{fit = TRUE}.
-\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE}; otherwise \code{NA} placeholders may be returned for compatibility.
+\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE}; otherwise \code{NA} placeholders may be returned for compatibility. Elements are named by component count, for example \code{"ncomp=2"}.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied to \code{pls()}. For classification this contains predicted factor labels; for regression it contains numeric predictions.
 \item \code{Ypred_index}: integer class indices for classification predictions, when available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for factor \code{Ytest}, returned when response scores are available.
-\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when classification predictions are available.
+\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for factor \code{Ytest}, returned when response scores are available. Elements are named by component count.
+\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when classification predictions are available. Elements are named by component count.
 \item \code{pval}: single-split permutation-test p-values by component, returned when \code{perm.test = TRUE}. Each p-value is the fraction of permuted \code{Q2Y} values larger than the observed \code{Q2Y}.
 \item \code{permutation}: long-format permutation table, returned when \code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the permutation correlation used by \code{plot.permutation()}.
 \item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained}, \code{variance_total}, \code{variance_basis}: predictor-space variance summaries returned when \code{return_variance = TRUE}.
