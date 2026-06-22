@@ -105,6 +105,12 @@ Sys.setenv(FASTPLS_USE_CUDA = "0")
 remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
 ```
 
+On Windows, if installation prints `package 'fastPLS' is in use and will not be
+installed`, restart R before reinstalling. Windows keeps the loaded package DLL
+locked, so `force = TRUE` cannot replace it while `library(fastPLS)` is active.
+For a Windows machine without the CUDA Toolkit, use the CPU-only command above
+and do not set `CUDA_ROOT`.
+
 On an NVIDIA workstation, install the NVIDIA CUDA Toolkit and build with CUDA
 enabled by setting `FASTPLS_USE_CUDA = "1"` and `CUDA_ROOT`.
 
