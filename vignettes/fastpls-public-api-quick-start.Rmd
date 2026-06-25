@@ -117,9 +117,9 @@ fit_reg$Q2Y
 ```
 
 For regression, `Ypred` is a numeric prediction array with one slice for each
-requested number of components. The metric vectors are named by component
-count, so the prediction corresponding to `ncomp = 3` can be extracted as
-follows.
+requested number of components. Here the last slice corresponds to the largest
+requested component count (`ncomp = 3`). The metric vectors are named by
+component count, for example `fit_reg$Q2Y["ncomp=3"]`.
 
 ```{r fig.width=4.8, fig.height=4}
 reg_component <- dim(fit_reg$Ypred)[3L]
@@ -335,7 +335,7 @@ The examples below show the three classification heads available through
 candidate-kNN.
 
 ```{r}
-fit_cls <- pls(
+fit_cls_plssvd <- pls(
   Xtrain,
   Ytrain_cls,
   Xtest,
@@ -347,7 +347,7 @@ fit_cls <- pls(
   seed = 100
 )
 
-head(fit_cls$Ypred)
+head(fit_cls_plssvd$Ypred)
 ```
 
 ### Confusion matrix
@@ -358,7 +358,7 @@ Rows are predicted labels and columns are observed labels.
 ```{r}
 evaluate(
   observed = Ytest_cls,
-  predicted = fit_cls$Ypred[["ncomp=2"]]
+  predicted = fit_cls_plssvd$Ypred[["ncomp=2"]]
 )$confusion
 ```
 
@@ -429,9 +429,10 @@ evaluate(
 
 ## OPLS and Kernel PLS
 
-OPLS and kernel PLS are accessed through the same `pls()` function. Use
-`method = "opls"` for orthogonal filtering before PLS, and
-`method = "kernelpls"` for the kernel representation.
+OPLS and kernel PLS are accessed through the same `pls()` function. The OPLS
+example below uses the regression data, because OPLS is often used to separate
+predictive and response-orthogonal variation. The kernel PLS example then uses
+the iris classification data to show nonlinear PLS-DA syntax.
 
 ```{r}
 fit_opls <- pls(
@@ -486,17 +487,23 @@ supplied, predictive metrics are returned when available. The optional
 FlashSVD-style CPU path, CUDA prediction on CUDA-enabled builds, or Metal
 prediction on Apple Metal-enabled builds.
 
+For regression models, `predict()` returns a numeric prediction array and, when
+`Ytest` is supplied, test-set metrics.
+
 ```{r}
 pred_reg <- predict(fit_reg, Xreg_test, Ytest = Ytest_reg, proj = TRUE)
 names(pred_reg)
 dim(pred_reg$Ypred)
 ```
 
+For classification models, `predict()` returns predicted class labels for each
+requested component count.
+
 ```{r}
 pred_cls <- predict(fit_cls, Xtest, Ytest = Ytest_cls)
 evaluate(
   observed = Ytest_cls,
-  predicted = pred_cls$Ypred[[2]]
+  predicted = pred_cls$Ypred[["ncomp=2"]]
 )$confusion
 ```
 
