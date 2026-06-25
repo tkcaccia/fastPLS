@@ -266,9 +266,14 @@ eval_cls
 ```
 
 For classification, `evaluate()` also returns a confusion matrix. Rows are the
-predicted classes and columns are the observed classes. A compact bubble plot is
-often easier to inspect than the printed table, especially when there are many
-classes.
+predicted classes and columns are the observed classes.
+
+```{r}
+eval_cls$confusion
+```
+
+A compact bubble plot is often easier to inspect than the printed table,
+especially when there are many classes.
 
 ```{r fig.width=4.8, fig.height=4}
 confusion_df <- as.data.frame(eval_cls$confusion)
