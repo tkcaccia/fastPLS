@@ -1924,6 +1924,14 @@
   x
 }
 
+print.fastPLS <- function(x, ...) {
+  out <- .fastpls_hide_internal_output_fields(x)
+  attr(out, "fastPLS_internal") <- NULL
+  class(out) <- setdiff(class(out), "fastPLS")
+  print(out, ...)
+  invisible(x)
+}
+
 .fastpls_public_pls_output <- function(x, ncomp = NULL) {
   x <- .fastpls_name_pls_metric_paths(x, ncomp)
   .fastpls_hide_internal_output_fields(x)

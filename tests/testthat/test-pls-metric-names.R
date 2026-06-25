@@ -94,6 +94,9 @@ test_that("pls hides internal implementation fields from public output", {
   )
   expect_false(any(hidden %in% names(fit)))
   expect_true(is.list(attr(fit, "fastPLS_internal")))
+  printed <- capture.output(print(fit))
+  hidden_labels <- paste0("$", hidden)
+  expect_false(any(printed %in% hidden_labels))
 
   pred <- predict(fit, X[1:5, , drop = FALSE])
   expect_s3_class(pred$Ypred[[1]], "factor")
