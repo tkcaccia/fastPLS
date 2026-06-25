@@ -218,7 +218,8 @@ pred_cls_later <- predict(
   fit_cls_train_only,
   Xtest,
   Ytest = Ytest_cls,
-  top = 2
+  top = 2,
+  raw_scores = TRUE
 )
 
 pred_cls_later$accuracy
@@ -261,7 +262,7 @@ eval_cls <- evaluate(
   predicted = fit_cls$Ypred[["ncomp=2"]]
 )
 
-eval_cls$metrics
+eval_cls
 ```
 
 For classification, `evaluate()` also returns a confusion matrix. Rows are the
@@ -293,15 +294,18 @@ abline(0, 1, col = "#D55E00", lwd = 2)
 
 When class-score matrices are available, `evaluate()` can also report top-k
 accuracy. This is useful for large multiclass tasks where top-1 and top-5
-accuracy are both informative. Here the ranked labels returned by
-`predict(..., top = 2)` are already stored in `pred_cls_later`.
+accuracy are both informative. Here the class-score matrix returned by
+`predict(..., top = 2, raw_scores = TRUE)` is already stored in
+`pred_cls_later`.
 
 ```{r}
-top2_hit <- vapply(seq_len(nrow(pred_cls_later$Ypred_top[["ncomp=2"]])), function(i) {
-  as.character(Ytest_cls)[i] %in% pred_cls_later$Ypred_top[["ncomp=2"]][i, ]
-}, logical(1))
+score_last <- pred_cls_later$LDA_scores[, , length(fit_cls_train_only$ncomp)]
 
-mean(top2_hit)
+evaluate(
+  observed = Ytest_cls,
+  predicted = score_last,
+  top_k = c(1, 2)
+)
 ```
 
 For numeric regression, `evaluate()` reports R2, Q2, RMSD/RMSE, MAE, bias,
@@ -316,7 +320,7 @@ eval_reg <- evaluate(
   ytrain = Ytrain_reg
 )
 
-eval_reg$metrics
+eval_reg
 ```
 
 ## Classification Examples
