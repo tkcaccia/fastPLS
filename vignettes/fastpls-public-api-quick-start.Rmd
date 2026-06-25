@@ -48,28 +48,17 @@ A practical starting point is:
 | Large dense matrices or many classes/responses | `backend = "cuda"` when available |
 | Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 
-## Example Data
+## Classification Tasks
 
-The examples below use datasets available from base R and datasets bundled with
-`fastPLS`. The `mtcars` data are used for regression, `iris` for introductory
-classification examples, and the bundled `colon` and `breast` omics datasets
-for score plots and multi-class examples. Regression responses are supplied as
-numeric vectors or matrices. Classification responses are supplied as factors;
-internally, `fastPLS` handles the response encoding and returns predicted class
-labels.
+For classification, responses are supplied as factors. `fastPLS` handles the
+PLS-DA response encoding internally and returns predicted class labels. The
+examples in this section use the `iris` data for compact classification examples
+and the bundled `colon` and `breast` omics datasets for score plots.
 
 ```{r}
 library(fastPLS)
 
 set.seed(100)
-Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
-Y_reg <- matrix(mtcars$mpg, ncol = 1)
-reg_test_id <- sample(seq_len(nrow(Xreg)), 8)
-Xreg_train <- Xreg[-reg_test_id, , drop = FALSE]
-Xreg_test <- Xreg[reg_test_id, , drop = FALSE]
-Ytrain_reg <- Y_reg[-reg_test_id, , drop = FALSE]
-Ytest_reg <- Y_reg[reg_test_id, , drop = FALSE]
-
 X <- as.matrix(iris[, c("Sepal.Width", "Petal.Length", "Petal.Width")])
 Y_cls <- iris$Species
 cls_test_id <- sample(seq_len(nrow(X)), 30)
@@ -79,21 +68,366 @@ Ytrain_cls <- Y_cls[-cls_test_id]
 Ytest_cls <- Y_cls[cls_test_id]
 ```
 
-## Fit PLS Models
+### Fit And Predict A Classifier
 
-The `method` argument selects the outer PLS algorithm. The `backend` argument
-selects the implementation: `"cpu"` for the compiled CPU implementation,
-`"cuda"` for GPU-native execution when available, and experimental `"metal"`
-for Apple Metal acceleration on Apple Silicon.
+The `method` argument selects the PLS algorithm, `backend` selects the
+implementation, and `classifier` selects the classification head. The default
+classification head is `classifier = "argmax"`, which predicts the class with
+the largest PLS-DA response score.
 
-The `svd.method` argument selects the CPU singular-vector backend for CPU
-models. Backend-specific controls are supplied through `...` using the same
-compact names as `fastsvd()`, for example `oversample`, `power`, `maxit`,
-`tol`, `svtol`, and `seed`.
-Use `svd.method = "irlba"` or `"rsvd"` with `backend = "cpu"`. CUDA and Metal
-fits use their native randomized-SVD-style backends, so users normally select
-the device with `backend = "cuda"` or `backend = "metal"` and leave
-`svd.method` at its default.
+```{r}
+fit_cls <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "argmax",
+  fit = TRUE,
+  return_variance = FALSE,
+  seed = 101
+)
+
+fit_cls$accuracy
+```
+
+The predicted labels can be visualized against the observed labels. Correct
+classification appears on the diagonal.
+
+```{r fig.width=4.8, fig.height=4}
+pred_cls <- fit_cls$Ypred[["ncomp=2"]]
+plot(
+  as.integer(Ytest_cls),
+  as.integer(pred_cls),
+  xaxt = "n",
+  yaxt = "n",
+  pch = 21,
+  bg = "#59A14F",
+  col = "black",
+  xlab = "Observed class",
+  ylab = "Predicted class",
+  main = "Classification: observed vs predicted"
+)
+axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+abline(0, 1, col = "#D55E00", lwd = 2)
+```
+
+Classification models can also be fitted once and predicted later. `predict()`
+can optionally return ranked classes by setting `top` or `top5 = TRUE`. The
+ordinary prediction in `Ypred` is always the rank-1 class. When `top > 1`,
+`Ypred_top` contains the ordered candidate labels for each sample: `rank1` is
+the predicted class, `rank2` is the next most likely class, and so on. If
+available, `Ypred_top_score` contains the corresponding class scores used to
+create that ranking.
+
+```{r}
+fit_cls_train_only <- pls(
+  Xtrain,
+  Ytrain_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "lda",
+  fit = TRUE,
+  return_variance = FALSE,
+  seed = 101
+)
+
+pred_cls_later <- predict(
+  fit_cls_train_only,
+  Xtest,
+  Ytest = Ytest_cls,
+  top = 2,
+  raw_scores = TRUE
+)
+
+pred_cls_later$accuracy
+head(pred_cls_later$Ypred_top[["ncomp=2"]])
+```
+
+### Evaluate Classification Predictions
+
+Use `evaluate()` to summarize predicted class labels or class-score matrices.
+For classification, the complete output includes global metrics, per-class
+metrics, and the confusion matrix.
+
+```{r}
+eval_cls <- evaluate(
+  observed = Ytest_cls,
+  predicted = fit_cls$Ypred[["ncomp=2"]]
+)
+
+eval_cls
+```
+
+Rows of the confusion matrix are predicted labels and columns are observed
+labels.
+
+```{r}
+eval_cls$confusion
+```
+
+A compact bubble plot is often easier to inspect than the printed table,
+especially when there are many classes.
+
+```{r fig.width=4.8, fig.height=4}
+confusion_df <- as.data.frame(eval_cls$confusion)
+names(confusion_df) <- c("Predicted", "Observed", "Count")
+
+plot(
+  as.integer(confusion_df$Observed),
+  as.integer(confusion_df$Predicted),
+  cex = sqrt(confusion_df$Count + 0.5),
+  pch = 21,
+  bg = "#4E79A7",
+  col = "black",
+  xaxt = "n",
+  yaxt = "n",
+  xlab = "Observed class",
+  ylab = "Predicted class",
+  main = "Confusion matrix"
+)
+axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
+abline(0, 1, col = "#D55E00", lwd = 2)
+```
+
+When class-score matrices are available, `evaluate()` can also report top-k
+accuracy. Top-k accuracy asks whether the true class appears anywhere among the
+first `k` ranked labels. Thus top-1 accuracy is ordinary classification accuracy,
+while top-5 accuracy gives credit when the correct class appears among the five
+highest-scoring alternatives.
+
+```{r}
+score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
+
+evaluate(
+  observed = Ytest_cls,
+  predicted = score_last,
+  top_k = c(1, 2)
+)
+```
+
+### Classification Heads
+
+The same `pls()` interface exposes argmax PLS-DA, latent-space LDA, and
+candidate-kNN.
+
+```{r}
+fit_cls_plssvd <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "plssvd",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 100
+)
+
+head(fit_cls_plssvd$Ypred)
+
+evaluate(
+  observed = Ytest_cls,
+  predicted = fit_cls_plssvd$Ypred[["ncomp=2"]]
+)$confusion
+```
+
+For PLS-DA with an LDA prediction head, use `classifier = "lda"`. On systems
+with GPU support, the backend is selected through `backend = "cuda"` or
+`backend = "metal"` where available:
+
+```{r eval = FALSE}
+fit_cls_lda_gpu <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "plssvd",
+  backend = "cuda",
+  classifier = "lda"
+)
+```
+
+When a GPU backend is unavailable, the compiled CPU fallback is:
+
+```{r}
+fit_cls_lda_cpu <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "plssvd",
+  backend = "cpu",
+  svd.method = "rsvd",
+  seed = 100,
+  classifier = "lda"
+)
+
+head(fit_cls_lda_cpu$Ypred)
+```
+
+The candidate-kNN head is selected with `classifier = "cknn"`. It is most useful
+for larger multiclass data, but the same syntax works on smaller examples:
+
+```{r}
+fit_cls_cknn <- pls(
+  Xtrain,
+  Ytrain_cls,
+  Xtest,
+  Ytest_cls,
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  classifier = "cknn",
+  k = 5,
+  tau = 0.2,
+  alpha = 0.75,
+  top_m = 3,
+  seed = 100
+)
+
+evaluate(
+  observed = Ytest_cls,
+  predicted = fit_cls_cknn$Ypred[["ncomp=2"]]
+)$confusion
+```
+
+### Kernel PLS For Classification
+
+Kernel PLS changes the representation of the samples before the inner PLS fit.
+The `linear` kernel is equivalent to an ordinary inner-product representation and
+is useful as a fast baseline. The `rbf` kernel uses a radial-basis similarity;
+the `poly` kernel uses polynomial interactions among features.
+
+```{r}
+kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
+  pls(
+    Xtrain, Ytrain_cls, Xtest, Ytest_cls,
+    ncomp = 1:2,
+    method = "kernelpls",
+    kernel = k,
+    gamma = 1 / ncol(Xtrain),
+    degree = 2,
+    coef0 = 1,
+    svd.method = "rsvd",
+    seed = 102
+  )
+})
+names(kernel_fits) <- c("linear", "rbf", "poly")
+
+kernel_accuracy <- vapply(kernel_fits, function(fit) {
+  mean(fit$Ypred[["ncomp=2"]] == Ytest_cls)
+}, numeric(1))
+kernel_accuracy
+```
+
+### Classification Score Plots
+
+`plot()` can visualize stored PLS score maps. Refit with `fit = TRUE` to store
+training scores, or predict with `proj = TRUE` to store test scores. Ellipses can
+be ordinary confidence ellipses or Hotelling T2 ellipses.
+
+```{r fig.width = 5, fig.height = 4}
+plot(fit_cls, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
+```
+
+The next example uses the bundled two-class colon gene-expression data. The same
+`plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
+`"kernelpls"`; here we keep the code short and show one fitted model.
+
+```{r colon-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
+data("colon", package = "fastPLS")
+set.seed(200)
+X_two <- as.matrix(colon$X)
+y_two <- colon$y
+train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
+  sample(i, floor(0.7 * length(i)))
+}))
+
+fit_two <- pls(
+  X_two[train_two, , drop = FALSE], y_two[train_two],
+  X_two[-train_two, , drop = FALSE], y_two[-train_two],
+  ncomp = 1:2, method = "simpls", backend = "cpu",
+  svd.method = "rsvd", fit = TRUE, proj = TRUE, seed = 200
+)
+
+plot(fit_two, score.set = "train", groups = y_two[train_two],
+     ellipse = TRUE, main = "Colon, two classes")
+```
+
+The second score-plot example uses a bundled three-subtype breast-cancer
+expression example and fits OPLS with two orthogonal components (`north = 2`).
+The example uses predefined training and test sets.
+
+```{r breast-tcga-three-class-opls, fig.width = 7.5, fig.height = 4}
+data("breast", package = "fastPLS")
+X_three <- as.matrix(breast$X_train)
+y_three <- breast$y_train
+X_three_test <- as.matrix(breast$X_test)
+y_three_test <- breast$y_test
+
+opls_three <- pls(
+  X_three,
+  y_three,
+  X_three_test,
+  y_three_test,
+  ncomp = 1:2,
+  method = "opls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  fit = TRUE,
+  proj = TRUE,
+  north = 2L,
+  seed = 201
+)
+
+old_par <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2.2, 0.8))
+plot(
+  opls_three,
+  score.set = "train",
+  groups = y_three,
+  ellipse = TRUE,
+  ellipse.type = "hotelling",
+  main = "OPLS training, north = 2"
+)
+plot(
+  opls_three,
+  score.set = "test",
+  groups = opls_three$Ypred[["ncomp=2"]],
+  xlim = c(-0.16, 0.42),
+  main = "OPLS test prediction"
+)
+par(old_par)
+```
+
+## Regression Tasks
+
+For regression, responses are supplied as numeric vectors or matrices. The
+examples in this section use `mtcars` to demonstrate univariate regression and
+OPLS.
+
+```{r}
+set.seed(100)
+Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
+Y_reg <- matrix(mtcars$mpg, ncol = 1)
+reg_test_id <- sample(seq_len(nrow(Xreg)), 8)
+Xreg_train <- Xreg[-reg_test_id, , drop = FALSE]
+Xreg_test <- Xreg[reg_test_id, , drop = FALSE]
+Ytrain_reg <- Y_reg[-reg_test_id, , drop = FALSE]
+Ytest_reg <- Y_reg[reg_test_id, , drop = FALSE]
+```
+
+### Fit And Predict A Regression Model
 
 The simplest workflow is to provide both the training data and an independent
 test set directly to `pls()`. In this case the fitted object already contains
@@ -165,160 +499,7 @@ pred_reg_later$Q2Y
 head(pred_reg_later$Ttest)
 ```
 
-For classification, the response is supplied as a factor and `pls()` returns
-predicted class labels. The default classifier is `classifier = "argmax"`, which
-implements standard PLS-DA decoding. The same interface can also use
-`classifier = "lda"` or `classifier = "cknn"`.
-
-```{r}
-fit_cls <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "simpls",
-  backend = "cpu",
-  svd.method = "rsvd",
-  classifier = "argmax",
-  fit = TRUE,
-  return_variance = FALSE,
-  seed = 101
-)
-
-fit_cls$accuracy
-```
-
-The predicted labels can be visualized against the observed labels. Correct
-classification appears on the diagonal.
-
-```{r fig.width=4.8, fig.height=4}
-pred_cls <- fit_cls$Ypred[["ncomp=2"]]
-plot(
-  as.integer(Ytest_cls),
-  as.integer(pred_cls),
-  xaxt = "n",
-  yaxt = "n",
-  pch = 21,
-  bg = "#59A14F",
-  col = "black",
-  xlab = "Observed class",
-  ylab = "Predicted class",
-  main = "Classification: observed vs predicted"
-)
-axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-abline(0, 1, col = "#D55E00", lwd = 2)
-```
-
-As for regression, classification models can also be fitted first and predicted
-later. `predict()` can optionally return ranked classes by setting `top` or
-`top5 = TRUE`. The ordinary prediction in `Ypred` is always the rank-1 class.
-When `top > 1`, `Ypred_top` contains the ordered candidate labels for each
-sample: `rank1` is the predicted class, `rank2` is the next most likely class,
-and so on. If available, `Ypred_top_score` contains the corresponding class
-scores used to create that ranking.
-
-```{r}
-fit_cls_train_only <- pls(
-  Xtrain,
-  Ytrain_cls,
-  ncomp = 1:2,
-  method = "simpls",
-  backend = "cpu",
-  svd.method = "rsvd",
-  classifier = "lda",
-  fit = TRUE,
-  return_variance = FALSE,
-  seed = 101
-)
-
-pred_cls_later <- predict(
-  fit_cls_train_only,
-  Xtest,
-  Ytest = Ytest_cls,
-  top = 2,
-  raw_scores = TRUE
-)
-
-pred_cls_later$accuracy
-head(pred_cls_later$Ypred_top[["ncomp=2"]])
-```
-
-The same `pls()` call can fit the four model families by changing `method`:
-
-- `method = "plssvd"`: direct cross-covariance SVD PLS.
-- `method = "simpls"`: accelerated compiled SIMPLS implementation.
-- `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
-- `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial
-  kernels.
-
-## Evaluate Predictions
-
-Use `evaluate()` after fitting or prediction when you want a compact summary of
-model performance from observed and predicted values. The function accepts
-predicted class labels, numeric regression predictions, or class-score matrices.
-The examples below reuse the fitted objects created in the previous section.
-
-```{r}
-eval_cls <- evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls$Ypred[["ncomp=2"]]
-)
-
-eval_cls
-```
-
-For classification, `evaluate()` also returns a confusion matrix. Rows are the
-predicted classes and columns are the observed classes.
-
-```{r}
-eval_cls$confusion
-```
-
-A compact bubble plot is often easier to inspect than the printed table,
-especially when there are many classes.
-
-```{r fig.width=4.8, fig.height=4}
-confusion_df <- as.data.frame(eval_cls$confusion)
-names(confusion_df) <- c("Predicted", "Observed", "Count")
-
-plot(
-  as.integer(confusion_df$Observed),
-  as.integer(confusion_df$Predicted),
-  cex = sqrt(confusion_df$Count + 0.5),
-  pch = 21,
-  bg = "#4E79A7",
-  col = "black",
-  xaxt = "n",
-  yaxt = "n",
-  xlab = "Observed class",
-  ylab = "Predicted class",
-  main = "Confusion matrix"
-)
-axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-abline(0, 1, col = "#D55E00", lwd = 2)
-```
-
-When class-score matrices are available, `evaluate()` can also report top-k
-accuracy. This is useful for large multiclass tasks where top-1 and top-5
-accuracy are both informative. Top-k accuracy asks whether the true class appears
-anywhere among the first `k` ranked labels. Thus top-1 accuracy is ordinary
-classification accuracy, while top-5 accuracy gives credit when the correct
-class appears among the five highest-scoring alternatives. Here the class-score
-matrix returned by `predict(..., top = 2, raw_scores = TRUE)` is already stored
-in `pred_cls_later`.
-
-```{r}
-score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
-
-evaluate(
-  observed = Ytest_cls,
-  predicted = score_last,
-  top_k = c(1, 2)
-)
-```
+### Evaluate Regression Predictions
 
 For numeric regression, `evaluate()` reports R2, Q2, RMSD/RMSE, MAE, bias,
 median relative error percentage, RPD, and correlations. If `ytrain` is supplied,
@@ -335,111 +516,10 @@ eval_reg <- evaluate(
 eval_reg
 ```
 
-## Classification Examples
+### OPLS For Regression
 
-The examples below show the three classification heads available through
-`classifier`: the default argmax PLS-DA rule, latent-space LDA, and
-candidate-kNN.
-
-```{r}
-fit_cls_plssvd <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  backend = "cpu",
-  svd.method = "rsvd",
-  seed = 100
-)
-
-head(fit_cls_plssvd$Ypred)
-```
-
-### Confusion matrix
-
-For classification models, `evaluate()` returns the confusion matrix directly.
-Rows are predicted labels and columns are observed labels.
-
-```{r}
-evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls_plssvd$Ypred[["ncomp=2"]]
-)$confusion
-```
-
-For PLS-DA with an LDA prediction head, use the `classifier` argument. On
-systems with GPU support, the backend is selected through `backend = "cuda"` or
-`backend = "metal"` where available:
-
-```{r eval = FALSE}
-fit_cls_lda_gpu <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  backend = "cuda",
-  classifier = "lda"
-)
-```
-
-When a GPU backend is unavailable, the compiled CPU fallback is:
-
-```{r}
-fit_cls_lda_cpu <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  backend = "cpu",
-  svd.method = "rsvd",
-  seed = 100,
-  classifier = "lda"
-)
-
-head(fit_cls_lda_cpu$Ypred)
-```
-
-The candidate-kNN head is selected with `classifier = "cknn"`. It is most
-useful for larger multiclass data, but the same syntax works on smaller
-examples:
-
-```{r}
-fit_cls_cknn <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "simpls",
-  backend = "cpu",
-  svd.method = "rsvd",
-  classifier = "cknn",
-  k = 5,
-  tau = 0.2,
-  alpha = 0.75,
-  top_m = 3,
-  seed = 100
-)
-
-evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls_cknn$Ypred[["ncomp=2"]]
-)$confusion
-```
-
-
-## OPLS and Kernel PLS
-
-OPLS and kernel PLS are accessed through the same `pls()` function. The OPLS
-example below uses the regression data, because OPLS is often used to separate
-predictive and response-orthogonal variation. The kernel PLS example then uses
-the iris classification data to show nonlinear PLS-DA syntax.
+OPLS is accessed through the same `pls()` function with `method = "opls"`. It is
+often used to separate predictive variation from response-orthogonal variation.
 
 ```{r}
 fit_opls <- pls(
@@ -455,144 +535,7 @@ fit_opls <- pls(
 )
 
 class(fit_opls)
-```
-
-Kernel PLS changes the representation of the samples before the inner PLS fit.
-The `linear` kernel is equivalent to an ordinary inner-product representation
-and is useful as a fast baseline. The `rbf` kernel uses a radial-basis
-similarity and can capture smooth nonlinear class boundaries; its scale is
-controlled by `gamma`. The `poly` kernel uses polynomial interactions among
-features and is controlled by `degree`, `gamma`, and `coef0`.
-
-```{r}
-kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
-  pls(
-    Xtrain, Ytrain_cls, Xtest, Ytest_cls,
-    ncomp = 1:2,
-    method = "kernelpls",
-    kernel = k,
-    gamma = 1 / ncol(Xtrain),
-    degree = 2,
-    coef0 = 1,
-    svd.method = "rsvd",
-    seed = 102
-  )
-})
-names(kernel_fits) <- c("linear", "rbf", "poly")
-
-kernel_accuracy <- vapply(kernel_fits, function(fit) {
-  mean(fit$Ypred[["ncomp=2"]] == Ytest_cls)
-}, numeric(1))
-kernel_accuracy
-```
-
-## Prediction
-
-`predict()` applies the preprocessing stored in the fitted object. If `Ytest` is
-supplied, predictive metrics are returned when available. The optional
-`backend` argument can select the ordinary CPU path, the compact
-FlashSVD-style CPU path, CUDA prediction on CUDA-enabled builds, or Metal
-prediction on Apple Metal-enabled builds.
-
-For regression models, `predict()` returns a numeric prediction array and, when
-`Ytest` is supplied, test-set metrics.
-
-```{r}
-pred_reg <- predict(fit_reg, Xreg_test, Ytest = Ytest_reg, proj = TRUE)
-names(pred_reg)
-dim(pred_reg$Ypred)
-```
-
-For classification models, `predict()` returns predicted class labels for each
-requested component count.
-
-```{r}
-pred_cls <- predict(fit_cls, Xtest, Ytest = Ytest_cls)
-evaluate(
-  observed = Ytest_cls,
-  predicted = pred_cls$Ypred[["ncomp=2"]]
-)$confusion
-```
-
-## Score Plots
-
-`plot()` is an S3 method for both fitted PLS models and PCA objects. For PLS
-models, refit with `fit = TRUE` to store training scores, or predict with
-`proj = TRUE` to store test scores. Ellipses can be ordinary confidence
-ellipses or Hotelling T2 ellipses, following the multivariate confidence
-region idea introduced by Hotelling (1931).
-
-```{r fig.width = 5, fig.height = 4}
-plot(fit_cls, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
-```
-
-The next example uses the bundled two-class colon gene-expression data. The
-same `plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
-`"kernelpls"`; here we keep the code short and show one fitted model.
-
-```{r colon-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
-data("colon", package = "fastPLS")
-set.seed(200)
-X_two <- as.matrix(colon$X)
-y_two <- colon$y
-train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
-  sample(i, floor(0.7 * length(i)))
-}))
-
-fit_two <- pls(
-  X_two[train_two, , drop = FALSE], y_two[train_two],
-  X_two[-train_two, , drop = FALSE], y_two[-train_two],
-  ncomp = 1:2, method = "simpls", backend = "cpu",
-  svd.method = "rsvd", fit = TRUE, proj = TRUE, seed = 200
-)
-
-plot(fit_two, score.set = "train", groups = y_two[train_two],
-     ellipse = TRUE, main = "Colon, two classes")
-```
-
-The second example uses a bundled three-subtype breast-cancer expression
-example and fits OPLS with two orthogonal components (`north = 2`). The example
-uses predefined training and test sets.
-
-```{r breast-tcga-three-class-opls, fig.width = 7.5, fig.height = 4}
-data("breast", package = "fastPLS")
-X_three <- as.matrix(breast$X_train)
-y_three <- breast$y_train
-X_three_test <- as.matrix(breast$X_test)
-y_three_test <- breast$y_test
-
-opls_three <- pls(
-  X_three,
-  y_three,
-  X_three_test,
-  y_three_test,
-  ncomp = 1:2,
-  method = "opls",
-  backend = "cpu",
-  svd.method = "rsvd",
-  fit = TRUE,
-  proj = TRUE,
-  north = 2L,
-  seed = 201
-)
-
-old_par <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2.2, 0.8))
-plot(
-  opls_three,
-  score.set = "train",
-  groups = y_three,
-  ellipse = TRUE,
-  ellipse.type = "hotelling",
-  main = "OPLS training, north = 2"
-)
-plot(
-  opls_three,
-  score.set = "test",
-  groups = opls_three$Ypred[["ncomp=2"]],
-  xlim = c(-0.16, 0.42),
-  main = "OPLS test prediction"
-)
-par(old_par)
+fit_opls$Q2Y
 ```
 
 ## Cross-Validation
