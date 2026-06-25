@@ -41,9 +41,9 @@ A practical starting point is:
 | Direct cross-covariance PLS-SVD | `method = "plssvd"` |
 | Remove response-unrelated structured variation | `method = "opls"` |
 | Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
-| Argmax PLS-DA decoding | `classifier = "argmax"` |
-| Latent-space discriminant analysis | `classifier = "lda"` |
-| Candidate-neighbour classification | `classifier = "cknn"` |
+| Classification: argmax PLS-DA decoding | `classifier = "argmax"` |
+| Classification: latent-space discriminant analysis | `classifier = "lda"` |
+| Classification: candidate-neighbour classification | `classifier = "cknn"` |
 | Small or moderate data | `backend = "cpu"` |
 | Large dense matrices or many classes/responses | `backend = "cuda"` when available |
 | Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
@@ -51,9 +51,12 @@ A practical starting point is:
 ## Classification Tasks
 
 For classification, responses are supplied as factors. `fastPLS` handles the
-PLS-DA response encoding internally and returns predicted class labels. The
-examples in this section use the `iris` data for compact classification examples
-and the bundled `colon` and `breast` omics datasets for score plots.
+PLS-DA response encoding internally and returns predicted class labels.
+The `classifier` argument is used only for this type of task and selects the
+classification head: `argmax`, `lda`, or `cknn`. These options are not
+regression models and are not used for numeric responses. The examples in this
+section use the `iris` data for compact classification examples and the bundled
+`colon` and `breast` omics datasets for score plots.
 
 ```{r}
 library(fastPLS)
@@ -215,8 +218,11 @@ evaluate(
 
 ### Classification Heads
 
-The same `pls()` interface exposes argmax PLS-DA, latent-space LDA, and
-candidate-kNN.
+The same `pls()` interface exposes three classification-specific heads for
+factor responses: argmax PLS-DA, latent-space LDA, and candidate-kNN. They are
+decoders applied after the PLS model has produced class-response scores or
+latent scores. For regression, leave `classifier` at its default; numeric
+responses are predicted directly as continuous values.
 
 ```{r}
 fit_cls_plssvd <- pls(
@@ -423,7 +429,10 @@ par(old_par)
 
 For regression, responses are supplied as numeric vectors or matrices. The
 examples in this section use `mtcars` to demonstrate univariate regression and
-OPLS.
+OPLS. Regression does not use `classifier = "argmax"`, `classifier = "lda"`, or
+`classifier = "cknn"`: those are classification heads for factor responses.
+For numeric responses, `pls()` returns continuous predictions and regression
+metrics such as `R2Y`, `Q2Y`, and `RMSD`.
 
 ```{r}
 set.seed(100)
@@ -1163,7 +1172,9 @@ kernel materialization and uses the ordinary linear PLS path.
 
 ### Classification heads
 
-For classification, factor responses are treated as PLS-DA targets. The default
+For classification, factor responses are treated as PLS-DA targets. The
+following heads are classification-specific decoders and are not used for
+numeric regression responses. The default
 classifier, `classifier = "argmax"`, predicts the class with the largest
 predicted dummy-response score. This is the classical PLS-DA decision rule
 described in chemometric discrimination work such as Barker and Rayens (2003)
