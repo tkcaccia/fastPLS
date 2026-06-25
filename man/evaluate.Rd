@@ -40,7 +40,8 @@ threshold are ignored for relative-error metrics.}
 }
 \value{
 A list with \code{task}, \code{metrics}, and optionally \code{per_response},
-\code{per_class}, \code{confusion}, \code{topk}, and \code{notes}.
+\code{per_class}, \code{confusion}, and \code{topk}. A \code{notes} element is
+included only when the evaluation has an explanatory note to report.
 }
 \description{
 Computes common classification or regression performance metrics from observed

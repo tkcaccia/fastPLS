@@ -8865,7 +8865,8 @@ pls.double.cv = function(Xdata,
 #'   threshold are ignored for relative-error metrics.
 #' @param na.rm Remove incomplete observations before computing metrics.
 #' @return A list with `task`, `metrics`, and optionally `per_response`,
-#'   `confusion`, `topk`, and `notes`.
+#'   `per_class`, `confusion`, and `topk`. A `notes` element is included only
+#'   when the evaluation has an explanatory note to report.
 #' @examples
 #' evaluate(iris$Species, iris$Species)
 #'
@@ -8991,7 +8992,7 @@ evaluate <- function(observed,
       )
     }
 
-    return(list(
+    out <- list(
       task = "classification",
       metrics = data.frame(
         n = as.integer(n),
@@ -9012,9 +9013,12 @@ evaluate <- function(observed,
         stringsAsFactors = FALSE
       ),
       confusion = conf,
-      topk = topk,
-      notes = notes
-    ))
+      topk = topk
+    )
+    if (length(notes)) {
+      out$notes <- notes
+    }
+    return(out)
   }
 
   obs <- as.matrix(observed)
@@ -9084,12 +9088,15 @@ evaluate <- function(observed,
   per <- per[, c("response", setdiff(names(per), "response")), drop = FALSE]
   overall <- as.data.frame(as.list(metric_one(as.vector(obs), as.vector(pred), as.vector(train))))
 
-  list(
+  out <- list(
     task = "regression",
     metrics = overall,
-    per_response = per,
-    notes = notes
+    per_response = per
   )
+  if (length(notes)) {
+    out$notes <- notes
+  }
+  out
 }
 
 

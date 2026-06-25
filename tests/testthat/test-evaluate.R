@@ -8,6 +8,7 @@ test_that("evaluate computes classification metrics", {
   expect_equal(res$metrics$accuracy, 4 / 5)
   expect_true("macro_f1" %in% names(res$metrics))
   expect_equal(sum(res$confusion), 5)
+  expect_false("notes" %in% names(res))
 })
 
 test_that("evaluate computes top-k accuracy from score matrices", {
@@ -40,4 +41,15 @@ test_that("evaluate computes regression and spectral metrics", {
   expect_true(all(c("R2", "Q2", "RMSD", "MRE_percent", "RPD") %in% names(res$metrics)))
   expect_equal(nrow(res$per_response), 2)
   expect_false(isTRUE(all.equal(res$metrics$R2, res$metrics$Q2)))
+  expect_false("notes" %in% names(res))
+})
+
+test_that("evaluate only reports notes when they are informative", {
+  observed <- c(1, 2, 3)
+  predicted <- observed + 0.1
+
+  res <- evaluate(observed, predicted)
+
+  expect_true("notes" %in% names(res))
+  expect_match(res$notes[[1]], "Q2 uses the observed response mean")
 })
