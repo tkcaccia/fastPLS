@@ -33,6 +33,21 @@ selected through the user-facing functions below.
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check whether Apple Metal-native fastPLS support is available. |
 
+A practical starting point is:
+
+| Goal | Suggested call |
+|---|---|
+| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Direct cross-covariance PLS-SVD | `method = "plssvd"` |
+| Remove response-unrelated structured variation | `method = "opls"` |
+| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
+| Argmax PLS-DA decoding | `classifier = "argmax"` |
+| Latent-space discriminant analysis | `classifier = "lda"` |
+| Candidate-neighbour classification | `classifier = "cknn"` |
+| Small or moderate data | `backend = "cpu"` |
+| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
+| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
+
 ## Example Data
 
 The examples below use datasets available from base R and datasets bundled with
@@ -233,21 +248,6 @@ The same `pls()` call can fit the four model families by changing `method`:
 - `method = "opls"`: OPLS filtering followed by the selected inner PLS core.
 - `method = "kernelpls"`: kernel PLS with linear, radial-basis, or polynomial
   kernels.
-
-A practical starting point is:
-
-| Goal | Suggested call |
-|---|---|
-| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
-| Direct cross-covariance PLS-SVD | `method = "plssvd"` |
-| Remove response-unrelated structured variation | `method = "opls"` |
-| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
-| Argmax PLS-DA decoding | `classifier = "argmax"` |
-| Latent-space discriminant analysis | `classifier = "lda"` |
-| Candidate-neighbour classification | `classifier = "cknn"` |
-| Small or moderate data | `backend = "cpu"` |
-| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
-| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 
 ## Evaluate Predictions
 
