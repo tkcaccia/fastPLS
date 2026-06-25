@@ -1884,6 +1884,9 @@
 }
 
 .fastpls_hidden_output_fields <- c(
+  "p",
+  "m",
+  "ncomp",
   "B_stored",
   "compact_prediction",
   "pls_method",
@@ -1894,7 +1897,12 @@
   "flash_svd_backend",
   "flash_svd_mode",
   "flash_block_size",
-  "classification"
+  "classification",
+  "classification_rule",
+  "lda_backend",
+  "candidate_knn",
+  "R_predict",
+  "R_offset"
 )
 
 .fastpls_hide_internal_output_fields <- function(x) {
@@ -6013,6 +6021,7 @@ plot.fastPLS <- function(x,
                          ellipse.type = c("confidence", "hotelling"),
                          conf = 0.95,
                          ...) {
+  x <- .fastpls_restore_internal_output_fields(x)
   score.set <- match.arg(score.set)
   scores <- .fastpls_model_scores(x, score.set = score.set)
   if (is.null(scores)) {
@@ -6806,15 +6815,7 @@ plot.permutation <- function(x,
 #'   * `mX`, `vX`: training predictor centering and scaling values. `vX` is one
 #'     when no scaling is applied.
 #'   * `mY`: response centering values for regression or dummy-coded PLS-DA.
-#'   * `p`, `m`: number of predictor and response columns used internally.
-#'   * `ncomp`: requested/effective component count vector. For PLSSVD this may
-#'     be capped by the numerical rank of the response.
 #'   * `lev`: factor levels used for classification.
-#'   * `classification_rule`: classification head used for factor responses:
-#'     `"argmax"`, `"lda"`, or `"cknn"` internally resolved to the selected
-#'     backend.
-#'   * `lda_backend`: backend used by the latent-space LDA classifier, when
-#'     `classifier = "lda"`.
 #'   * `Yfit`: fitted training responses or fitted class labels, returned when
 #'     `fit = TRUE`.
 #'   * `R2Y`: training-set coefficient of determination path when `fit = TRUE`;
@@ -6849,6 +6850,10 @@ plot.permutation <- function(x,
 #'     `gpu_resident`: OPLS-specific orthogonal-component and backend metadata.
 #'   * `kernel`, `kernel_engine`, `kernel_linear_direct`: kernelPLS-specific
 #'     kernel settings and execution metadata.
+#'
+#'   Function settings and backend bookkeeping, such as the component grid and
+#'   resolved classifier backend, are retained internally for prediction and
+#'   plotting but are not shown as public output fields.
 #' @examples
 #' X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 #' y <- mtcars$mpg

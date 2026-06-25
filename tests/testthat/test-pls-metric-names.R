@@ -80,6 +80,9 @@ test_that("pls hides internal implementation fields from public output", {
     return_variance = FALSE
   )
   hidden <- c(
+    "p",
+    "m",
+    "ncomp",
     "B_stored",
     "compact_prediction",
     "pls_method",
@@ -90,7 +93,12 @@ test_that("pls hides internal implementation fields from public output", {
     "flash_svd_backend",
     "flash_svd_mode",
     "flash_block_size",
-    "classification"
+    "classification",
+    "classification_rule",
+    "lda_backend",
+    "candidate_knn",
+    "R_predict",
+    "R_offset"
   )
   expect_false(any(hidden %in% names(fit)))
   expect_true(is.list(attr(fit, "fastPLS_internal")))

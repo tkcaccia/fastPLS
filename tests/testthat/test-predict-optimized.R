@@ -1,4 +1,6 @@
 legacy_predict_core <- function(model, Xtest, proj = FALSE) {
+  restore_internal <- get(".fastpls_restore_internal_output_fields", envir = asNamespace("fastPLS"))
+  model <- restore_internal(model)
   m <- model$m
   w <- nrow(Xtest)
   length_ncomp <- length(model$ncomp)
@@ -46,7 +48,11 @@ test_that("optimized prediction core preserves regression outputs", {
 
   model <- unclass(fit)
   Xtest <- X[idx, , drop = FALSE]
-  optimized <- fastPLS:::pls_predict(model, Xtest, TRUE)
+  optimized <- fastPLS:::pls_predict(
+    get(".fastpls_restore_internal_output_fields", envir = asNamespace("fastPLS"))(model),
+    Xtest,
+    TRUE
+  )
   legacy <- legacy_predict_core(model, Xtest, TRUE)
 
   expect_equal(dim(optimized$Ypred), dim(legacy$Ypred))

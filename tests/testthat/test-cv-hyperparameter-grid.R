@@ -138,7 +138,7 @@ test_that("pls refits and predicts from a pls.single.cv result", {
   fit_positional <- pls(opt, Xtest, Ytest = Ytest, return_variance = FALSE)
 
   expect_s3_class(fit_named, "fastPLS")
-  expect_equal(as.integer(fit_named$ncomp), as.integer(opt$best_ncomp))
+  expect_equal(as.integer(attr(fit_named, "fastPLS_internal")$ncomp), as.integer(opt$best_ncomp))
   expect_equal(fit_named$cv_best_parameters, opt$best_parameters)
   expect_true(is.data.frame(fit_named$Ypred))
   expect_equal(nrow(fit_named$Ypred), nrow(Xtest))
@@ -170,7 +170,7 @@ test_that("pls refits regression models selected by pls.single.cv", {
   )
 
   expect_s3_class(fit, "fastPLS")
-  expect_equal(as.integer(fit$ncomp), as.integer(opt$best_ncomp))
+  expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), as.integer(opt$best_ncomp))
   expect_true(is.array(fit$Ypred))
   expect_equal(dim(fit$Ypred)[1], length(test_idx))
   expect_true(any(is.finite(fit$Ypred)))

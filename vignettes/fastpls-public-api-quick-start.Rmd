@@ -122,7 +122,7 @@ count, so the prediction corresponding to `ncomp = 3` can be extracted as
 follows.
 
 ```{r fig.width=4.8, fig.height=4}
-reg_component <- which(fit_reg$ncomp == 3L)
+reg_component <- dim(fit_reg$Ypred)[3L]
 pred_mpg <- fit_reg$Ypred[, , reg_component]
 plot(
   Ytest_reg,
@@ -304,7 +304,7 @@ accuracy are both informative. Here the class-score matrix returned by
 `pred_cls_later`.
 
 ```{r}
-score_last <- pred_cls_later$LDA_scores[, , length(fit_cls_train_only$ncomp)]
+score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
 
 evaluate(
   observed = Ytest_cls,
@@ -358,7 +358,7 @@ Rows are predicted labels and columns are observed labels.
 ```{r}
 evaluate(
   observed = Ytest_cls,
-  predicted = fit_cls$Ypred[[length(fit_cls$ncomp)]]
+  predicted = fit_cls$Ypred[["ncomp=2"]]
 )$confusion
 ```
 
@@ -422,7 +422,7 @@ fit_cls_cknn <- pls(
 
 evaluate(
   observed = Ytest_cls,
-  predicted = fit_cls_cknn$Ypred[[length(fit_cls_cknn$ncomp)]]
+  predicted = fit_cls_cknn$Ypred[["ncomp=2"]]
 )$confusion
 ```
 
@@ -473,7 +473,7 @@ kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
 names(kernel_fits) <- c("linear", "rbf", "poly")
 
 kernel_accuracy <- vapply(kernel_fits, function(fit) {
-  mean(fit$Ypred[[length(fit$ncomp)]] == Ytest_cls)
+  mean(fit$Ypred[["ncomp=2"]] == Ytest_cls)
 }, numeric(1))
 kernel_accuracy
 ```
@@ -574,7 +574,7 @@ plot(
 plot(
   opls_three,
   score.set = "test",
-  groups = opls_three$Ypred[[length(opls_three$ncomp)]],
+  groups = opls_three$Ypred[["ncomp=2"]],
   xlim = c(-0.16, 0.42),
   main = "OPLS test prediction"
 )

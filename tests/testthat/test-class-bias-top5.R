@@ -42,12 +42,13 @@ test_that("candidate-kNN classifier is fitted and can be used for top-k predicti
     seed = 123L
   )
 
-  expect_equal(fit$classification_rule, "candidate_knn_cpp")
-  expect_true(is.list(fit$candidate_knn))
-  expect_equal(fit$candidate_knn$parameters$knn_k, 10L)
-  expect_equal(fit$candidate_knn$parameters$tau, 0.2)
-  expect_equal(fit$candidate_knn$parameters$alpha, 0.75)
-  expect_null(fit$candidate_knn$parameters$bias_method)
+  internal <- attr(fit, "fastPLS_internal")
+  expect_equal(internal$classification_rule, "candidate_knn_cpp")
+  expect_true(is.list(internal$candidate_knn))
+  expect_equal(internal$candidate_knn$parameters$knn_k, 10L)
+  expect_equal(internal$candidate_knn$parameters$tau, 0.2)
+  expect_equal(internal$candidate_knn$parameters$alpha, 0.75)
+  expect_null(internal$candidate_knn$parameters$bias_method)
 
   pred <- predict(fit, X[idx, , drop = FALSE], top = 3L)
   expect_true(is.data.frame(pred$Ypred))
@@ -72,7 +73,8 @@ test_that("candidate-kNN stores no class-bias offsets", {
 
   expect_true(is.null(fit$class_bias))
   expect_true(is.null(fit$class_bias_parameters))
-  expect_true(all(vapply(fit$candidate_knn$models, function(x) is.null(x$bias), logical(1))))
+  internal <- attr(fit, "fastPLS_internal")
+  expect_true(all(vapply(internal$candidate_knn$models, function(x) is.null(x$bias), logical(1))))
   pred <- predict(fit, X, top5 = TRUE)
   expect_equal(dim(pred$Ypred_top[[1]]), c(nrow(X), 4L))
 })

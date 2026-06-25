@@ -145,11 +145,7 @@ summaries were requested. Common fields are:
 \item \code{B}: regression coefficient matrix or coefficient array, when stored. For vector-valued \code{ncomp}, a three-dimensional array may contain the coefficient path for all requested component counts.
 \item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one when no scaling is applied.
 \item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
-\item \code{p}, \code{m}: number of predictor and response columns used internally.
-\item \code{ncomp}: requested/effective component count vector. For PLSSVD this may be capped by the numerical rank of the response.
 \item \code{lev}: factor levels used for classification.
-\item \code{classification_rule}: classification head used for factor responses: \code{"argmax"}, \code{"lda"}, or \code{"cknn"} internally resolved to the selected backend.
-\item \code{lda_backend}: backend used by the latent-space LDA classifier, when \code{classifier = "lda"}.
 \item \code{Yfit}: fitted training responses or fitted class labels, returned when \code{fit = TRUE}.
 \item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE}; otherwise \code{NA} placeholders may be returned for compatibility. Elements are named by component count, for example \code{"ncomp=2"}.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied to \code{pls()}. For classification this contains predicted factor labels; for regression it contains numeric predictions.
@@ -165,6 +161,10 @@ summaries were requested. Common fields are:
 \item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine}, \code{xprod_mode}, \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
 \item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific kernel settings and execution metadata.
 }
+
+Function settings and backend bookkeeping, such as the component grid and
+resolved classifier backend, are retained internally for prediction and plotting
+but are not shown as public output fields.
 }
 \description{
 Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or

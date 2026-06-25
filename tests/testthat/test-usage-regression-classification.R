@@ -273,7 +273,7 @@ test_that("SVD utilities and helper functions are usable in practice", {
   png_file <- tempfile(fileext = ".png")
   grDevices::png(png_file)
   expect_silent(plot(plot_model, score.set = "train", groups = y[1:60]))
-  expect_silent(plot(plot_model, score.set = "test", groups = plot_model$Ypred[[length(plot_model$ncomp)]]))
+  expect_silent(plot(plot_model, score.set = "test", groups = plot_model$Ypred[[length(plot_model$Ypred)]]))
   grDevices::dev.off()
   unlink(png_file)
 
