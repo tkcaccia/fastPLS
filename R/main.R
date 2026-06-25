@@ -6761,11 +6761,16 @@ plot.permutation <- function(x,
 #'   `backend`: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
 #'   where available.
 #' @param k Number of same-class PLS-score neighbours used by
-#'   the candidate-kNN classifier.
-#' @param tau Positive temperature used to smooth the neighbour
-#'   similarities in candidate-kNN scoring.
-#' @param alpha Weight of the centroid/prototype candidate score
-#'   added to the local kNN score.
+#'   the candidate-kNN classifier. Larger values use more neighbours per
+#'   candidate class and therefore give a smoother, less local decision.
+#' @param tau Positive temperature for pooling the top neighbour similarities in
+#'   candidate-kNN scoring. Smaller values make the score close to the best
+#'   neighbour; larger values average the top neighbours more smoothly.
+#' @param alpha Weight of the centroid/prototype candidate score added to the
+#'   local kNN score. The final candidate score is the smoothed same-class kNN
+#'   evidence plus \code{alpha} times the centroid score. Higher values keep the
+#'   decision closer to the global PLS class-centroid ranking; lower values make
+#'   the reranking depend more strongly on local neighbours.
 #' @param top_m Number of centroid-ranked candidate classes passed to
 #'   the kNN reranker.
 #' @param cknn_memory Memory strategy for \code{classifier = "cknn"}.
@@ -7856,8 +7861,17 @@ pls =  function (Xtrain,
 #'   `"lda"`, or `"cknn"`. Multiple values are treated as a tuning grid.
 #' @param lda_ridge Ridge added to the pooled LDA covariance diagonal. Multiple
 #'   values are used only when `classifier = "lda"`.
-#' @param k,tau,alpha,top_m
-#'   Candidate-kNN controls used when `classifier = "cknn"`.
+#' @param k Number of same-class PLS-score neighbours used by
+#'   candidate-kNN when `classifier = "cknn"`.
+#' @param tau Positive temperature for smoothing the top neighbour
+#'   similarities. Smaller values emphasize the nearest neighbour; larger values
+#'   produce a smoother local class score.
+#' @param alpha Weight of the centroid/prototype candidate score in
+#'   candidate-kNN. The final candidate score is local kNN evidence plus
+#'   \code{alpha} times the centroid score, so larger values keep more of the
+#'   global centroid ranking.
+#' @param top_m Number of centroid-ranked candidate classes passed to the
+#'   kNN reranker.
 #' @param fit Fit one additional model on the full dataset and return its
 #'   fitted values (`Yfit`) and training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra full-data fit;

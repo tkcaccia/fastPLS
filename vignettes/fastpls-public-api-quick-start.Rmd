@@ -277,6 +277,15 @@ head(fit_cls_lda_cpu$Ypred)
 
 The candidate-kNN head is selected with `classifier = "cknn"`. It is most useful
 for larger multiclass data, but the same syntax works on smaller examples:
+The main tuning parameters control how strongly the local neighbourhood can
+modify the global PLS class ranking. `k` is the number of same-class neighbours
+used for each candidate class. `tau` is a positive temperature: small values make
+the local score behave almost like the single best neighbour, whereas larger
+values smooth the evidence over the top neighbours. `alpha` weights the
+centroid/prototype score that is added to the local kNN score. Larger `alpha`
+keeps predictions closer to the global class-centroid ranking; smaller `alpha`
+lets local neighbours dominate the reranking. `top_m` controls how many
+centroid-ranked classes are passed to this reranker.
 
 ```{r}
 fit_cls_cknn <- pls(
@@ -1175,7 +1184,13 @@ It first scores classes by centroids in supervised PLS score space, keeps the
 top `top_m` candidate classes, and then reranks only those candidates by
 same-class nearest neighbours in the PLS score space, using the nearest-neighbour
 classification principle of Cover and Hart (1967) after a supervised PLS
-compression step. The `top_m` parameter is therefore internal to the cKNN
+compression step. For each candidate class, the neighbour similarities are
+combined with a temperature-smoothed top-`k` score. The `tau` parameter controls
+this smoothing: lower values emphasize the strongest neighbour, while higher
+values make the local evidence closer to an average of the top neighbours. The
+final candidate score is the smoothed local kNN evidence plus `alpha` times the
+centroid score, so `alpha` controls the balance between local correction and the
+global PLS class-centroid ranking. The `top_m` parameter is internal to the cKNN
 decision rule: it controls how many centroid-ranked classes are passed to the
 kNN reranker. This is different from the prediction argument `top`, which only
 controls how many ranked output labels are returned to the user. The default

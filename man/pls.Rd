@@ -74,13 +74,18 @@ where available.}
 \item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
 
 \item{k}{Number of same-class PLS-score neighbours used by
-the candidate-kNN classifier.}
+the candidate-kNN classifier. Larger values use more neighbours per
+candidate class and therefore give a smoother, less local decision.}
 
-\item{tau}{Positive temperature used to smooth the neighbour
-similarities in candidate-kNN scoring.}
+\item{tau}{Positive temperature for pooling the top neighbour similarities in
+candidate-kNN scoring. Smaller values make the score close to the best
+neighbour; larger values average the top neighbours more smoothly.}
 
-\item{alpha}{Weight of the centroid/prototype candidate score
-added to the local kNN score.}
+\item{alpha}{Weight of the centroid/prototype candidate score added to the
+local kNN score. The final candidate score is the smoothed same-class kNN
+evidence plus \code{alpha} times the centroid score. Higher values keep the
+decision closer to the global PLS class-centroid ranking; lower values make
+the reranking depend more strongly on local neighbours.}
 
 \item{top_m}{Number of centroid-ranked candidate classes passed to
 the kNN reranker.}

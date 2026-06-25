@@ -83,7 +83,20 @@ are always held out together and are never split across training and test.}
 \item{lda_ridge}{Ridge added to the pooled LDA covariance diagonal. Multiple
 values are used only when \code{classifier = "lda"}.}
 
-\item{k, tau, alpha, top_m}{Candidate-kNN controls used when \code{classifier = "cknn"}.}
+\item{k}{Number of same-class PLS-score neighbours used by
+candidate-kNN when \code{classifier = "cknn"}.}
+
+\item{tau}{Positive temperature for smoothing the top neighbour
+similarities. Smaller values emphasize the nearest neighbour; larger values
+produce a smoother local class score.}
+
+\item{alpha}{Weight of the centroid/prototype candidate score in
+candidate-kNN. The final candidate score is local kNN evidence plus
+\code{alpha} times the centroid score, so larger values keep more of the
+global centroid ranking.}
+
+\item{top_m}{Number of centroid-ranked candidate classes passed to the
+kNN reranker.}
 
 \item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
 \code{standard} uses the historical one-pass candidate-kNN path.
