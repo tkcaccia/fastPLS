@@ -3020,8 +3020,11 @@ pls.model2.fast.gpu =
 #'   low-rank prediction when compact factors are available and the low-rank
 #'   application is expected to be beneficial.
 #' @param flash.block_size Row block size for \code{cpu_flash} prediction.
-#' @param top Number of ranked classes to return for classification.
-#' @param top5 Convenience flag equivalent to `top = max(top, 5)`.
+#' @param top Number of ranked classes to return for classification. Rank 1 is
+#'   the ordinary predicted class stored in `Ypred`; ranks 2, 3, and so on are
+#'   lower-scoring alternatives returned in `Ypred_top` when `top > 1`.
+#' @param top5 Convenience flag equivalent to `top = max(top, 5)`, useful for
+#'   reporting ImageNet-style top-5 candidate labels.
 #' @param raw_scores If `TRUE`, keep raw classification score cubes as
 #'   `Yscore` when available.
 #' @param ... Unused.

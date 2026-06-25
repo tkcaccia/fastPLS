@@ -38,9 +38,12 @@ application is expected to be beneficial.}
 
 \item{flash.block_size}{Row block size for \code{cpu_flash} prediction.}
 
-\item{top}{Number of ranked classes to return for classification.}
+\item{top}{Number of ranked classes to return for classification. Rank 1 is
+the ordinary predicted class stored in \code{Ypred}; ranks 2, 3, and so on are
+lower-scoring alternatives returned in \code{Ypred_top} when \code{top > 1}.}
 
-\item{top5}{Convenience flag equivalent to \code{top = max(top, 5)}.}
+\item{top5}{Convenience flag equivalent to \code{top = max(top, 5)}, useful for
+reporting ImageNet-style top-5 candidate labels.}
 
 \item{raw_scores}{If \code{TRUE}, keep raw classification score cubes as
 \code{Yscore} when available.}

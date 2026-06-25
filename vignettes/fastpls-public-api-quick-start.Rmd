@@ -213,7 +213,11 @@ abline(0, 1, col = "#D55E00", lwd = 2)
 
 As for regression, classification models can also be fitted first and predicted
 later. `predict()` can optionally return ranked classes by setting `top` or
-`top5 = TRUE`.
+`top5 = TRUE`. The ordinary prediction in `Ypred` is always the rank-1 class.
+When `top > 1`, `Ypred_top` contains the ordered candidate labels for each
+sample: `rank1` is the predicted class, `rank2` is the next most likely class,
+and so on. If available, `Ypred_top_score` contains the corresponding class
+scores used to create that ranking.
 
 ```{r}
 fit_cls_train_only <- pls(
@@ -299,9 +303,12 @@ abline(0, 1, col = "#D55E00", lwd = 2)
 
 When class-score matrices are available, `evaluate()` can also report top-k
 accuracy. This is useful for large multiclass tasks where top-1 and top-5
-accuracy are both informative. Here the class-score matrix returned by
-`predict(..., top = 2, raw_scores = TRUE)` is already stored in
-`pred_cls_later`.
+accuracy are both informative. Top-k accuracy asks whether the true class appears
+anywhere among the first `k` ranked labels. Thus top-1 accuracy is ordinary
+classification accuracy, while top-5 accuracy gives credit when the correct
+class appears among the five highest-scoring alternatives. Here the class-score
+matrix returned by `predict(..., top = 2, raw_scores = TRUE)` is already stored
+in `pred_cls_later`.
 
 ```{r}
 score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
@@ -1222,10 +1229,14 @@ and Metal routes are selected automatically from `backend` when available.
 The cKNN head, `classifier = "cknn"`, is the short public name for the
 candidate-kNN classifier used in large multiclass PLS-DA.
 It first scores classes by centroids in supervised PLS score space, keeps the
-top candidate classes, and then reranks those candidates by same-class nearest
-neighbours in the PLS score space, using the nearest-neighbour classification
-principle of Cover and Hart (1967) after a supervised PLS compression step. The
-default tuning parameters are
+top `top_m` candidate classes, and then reranks only those candidates by
+same-class nearest neighbours in the PLS score space, using the nearest-neighbour
+classification principle of Cover and Hart (1967) after a supervised PLS
+compression step. The `top_m` parameter is therefore internal to the cKNN
+decision rule: it controls how many centroid-ranked classes are passed to the
+kNN reranker. This is different from the prediction argument `top`, which only
+controls how many ranked output labels are returned to the user. The default
+tuning parameters are
 `k = 10`, `tau = 0.2`, `alpha = 0.75`, and
 `top_m = 20`. `predict()` can also return ranked predictions by using
 `top` or `top5 = TRUE`.
