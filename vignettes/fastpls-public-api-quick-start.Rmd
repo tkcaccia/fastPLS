@@ -352,16 +352,10 @@ head(fit_cls$Ypred)
 
 ### Confusion matrix
 
-For classification models, the predicted labels can be cross-tabulated against
-the observed labels. The same information is also returned by `evaluate()`.
+For classification models, `evaluate()` returns the confusion matrix directly.
+Rows are predicted labels and columns are observed labels.
 
 ```{r}
-confusion_cls <- table(
-  predicted = fit_cls$Ypred[[length(fit_cls$ncomp)]],
-  observed = Ytest_cls
-)
-confusion_cls
-
 evaluate(
   observed = Ytest_cls,
   predicted = fit_cls$Ypred[[length(fit_cls$ncomp)]]
@@ -426,7 +420,10 @@ fit_cls_cknn <- pls(
   seed = 100
 )
 
-table(fit_cls_cknn$Ypred[[length(fit_cls_cknn$ncomp)]], Ytest_cls)
+evaluate(
+  observed = Ytest_cls,
+  predicted = fit_cls_cknn$Ypred[[length(fit_cls_cknn$ncomp)]]
+)$confusion
 ```
 
 
@@ -497,7 +494,10 @@ dim(pred_reg$Ypred)
 
 ```{r}
 pred_cls <- predict(fit_cls, Xtest, Ytest = Ytest_cls)
-table(pred_cls$Ypred[[2]], Ytest_cls)
+evaluate(
+  observed = Ytest_cls,
+  predicted = pred_cls$Ypred[[2]]
+)$confusion
 ```
 
 ## Score Plots
