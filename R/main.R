@@ -1902,7 +1902,8 @@
   "lda_backend",
   "candidate_knn",
   "R_predict",
-  "R_offset"
+  "R_offset",
+  "precision"
 )
 
 .fastpls_hide_internal_output_fields <- function(x) {
@@ -1943,6 +1944,87 @@ print.fastPLS <- function(x, ...) {
 .fastpls_public_pls_output <- function(x, ncomp = NULL) {
   x <- .fastpls_name_pls_metric_paths(x, ncomp)
   .fastpls_hide_internal_output_fields(x)
+}
+
+.predict_fastpls_float32 <- function(object, newdata, Ytest = NULL, proj = FALSE,
+                                     top = 1L, top5 = FALSE, raw_scores = FALSE) {
+  .require_float_package()
+  top <- .resolve_top_k(top, top5)
+  Xtest <- .as_float32_matrix(newdata, "newdata")
+  Xtest <- .float32_sweep_cols(Xtest, object$mX, "-")
+  Xtest <- .float32_sweep_cols(Xtest, object$vX, "/")
+  ncomp <- as.integer(object$ncomp)
+
+  if (isTRUE(object$classification)) {
+    Ypred <- as.data.frame(matrix(nrow = nrow(Xtest), ncol = length(ncomp)))
+    colnames(Ypred) <- .fastpls_ncomp_names(ncomp)
+    score_cube <- if (isTRUE(raw_scores) || top > 1L) {
+      array(NA_real_, dim = c(nrow(Xtest), length(object$lev), length(ncomp)),
+            dimnames = list(NULL, object$lev, NULL))
+    } else {
+      NULL
+    }
+    for (i in seq_along(ncomp)) {
+      k <- ncomp[[i]]
+      Ttest <- Xtest %*% object$R[, seq_len(k), drop = FALSE]
+      Yhat <- if (identical(object$pls_method, "plssvd")) {
+        Ttest %*% object$W_latent[[.fastpls_ncomp_names(k)]]
+      } else {
+        Ttest %*% t(object$Q[, seq_len(k), drop = FALSE])
+      }
+      Yhat <- .float32_sweep_cols(Yhat, object$mY, "+")
+      scores <- .float32_to_numeric_matrix(Yhat)
+      idx <- max.col(scores, ties.method = "first")
+      Ypred[[i]] <- factor(object$lev[idx], levels = object$lev)
+      if (!is.null(score_cube)) {
+        score_cube[, , i] <- scores
+      }
+    }
+    res <- list(Ypred = Ypred, Q2Y = NULL)
+    if (!is.null(score_cube) && isTRUE(raw_scores)) {
+      res$Yscore <- score_cube
+    }
+    if (!is.null(score_cube) && top > 1L) {
+      top_res <- .class_topk_from_score_cube(score_cube, object$lev, ncomp, top = top)
+      res$Ypred <- top_res$Ypred
+      res$Ypred_index <- top_res$Ypred_index
+      res$Ypred_top <- top_res$Ypred_top
+      res$Ypred_top_score <- top_res$Ypred_top_score
+    }
+    if (!is.null(Ytest)) {
+      res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
+      res$Q2Y <- rep(NA_real_, length(ncomp))
+    }
+    return(.fastpls_name_pls_metric_paths(res, ncomp))
+  }
+
+  Ypred_list <- vector("list", length(ncomp))
+  Q2Y <- rep(NA_real_, length(ncomp))
+  Ttest_out <- vector("list", length(ncomp))
+  for (i in seq_along(ncomp)) {
+    k <- ncomp[[i]]
+    Ttest <- Xtest %*% object$R[, seq_len(k), drop = FALSE]
+    Yhat <- if (identical(object$pls_method, "plssvd")) {
+      Ttest %*% object$W_latent[[.fastpls_ncomp_names(k)]]
+    } else {
+      Ttest %*% t(object$Q[, seq_len(k), drop = FALSE])
+    }
+    Yhat <- .float32_sweep_cols(Yhat, object$mY, "+")
+    Ypred_list[[i]] <- Yhat
+    if (isTRUE(proj)) {
+      Ttest_out[[i]] <- Ttest
+    }
+    if (!is.null(Ytest)) {
+      Q2Y[[i]] <- .float32_rq(.as_float32_matrix(Ytest, "Ytest"), Yhat)
+    }
+  }
+  names(Ypred_list) <- .fastpls_ncomp_names(ncomp)
+  res <- list(Ypred = Ypred_list, Q2Y = if (is.null(Ytest)) NULL else Q2Y)
+  if (isTRUE(proj)) {
+    names(Ttest_out) <- .fastpls_ncomp_names(ncomp)
+    res$Ttest <- Ttest_out
+  }
+  .fastpls_name_pls_metric_paths(res, ncomp)
 }
 
 .fastpls_permutation_cor <- function(Y, idx) {
@@ -2603,6 +2685,312 @@ print.fastPLS <- function(x, ...) {
   )
 }
 
+.is_float32 <- function(x) {
+  inherits(x, "float32")
+}
+
+.has_float32_input <- function(...) {
+  any(vapply(list(...), .is_float32, logical(1)))
+}
+
+.require_float_package <- function() {
+  if (!requireNamespace("float", quietly = TRUE)) {
+    stop("float32 input requires the 'float' package.", call. = FALSE)
+  }
+}
+
+.as_float32_matrix <- function(x, name = "x") {
+  .require_float_package()
+  if (.is_float32(x)) {
+    if (is.null(dim(x))) {
+      return(float::fl(matrix(as.numeric(x), ncol = 1L)))
+    }
+    return(x)
+  }
+  if (is.factor(x)) {
+    stop(sprintf("%s must be numeric before conversion to float32.", name), call. = FALSE)
+  }
+  float::fl(as.matrix(x))
+}
+
+.float32_zeros <- function(n, p) {
+  float::fl(matrix(0, nrow = n, ncol = p))
+}
+
+.float32_row_expand <- function(row, n) {
+  float::fl(matrix(rep(as.numeric(row), each = n), nrow = n))
+}
+
+.float32_sweep_cols <- function(X, row, op = c("-", "/", "+")) {
+  op <- match.arg(op)
+  R <- .float32_row_expand(row, nrow(X))
+  switch(
+    op,
+    "-" = X - R,
+    "/" = X / R,
+    "+" = X + R
+  )
+}
+
+.float32_to_numeric_matrix <- function(x) {
+  if (.is_float32(x)) {
+    out <- float::dbl(x)
+    if (is.null(dim(out))) {
+      out <- matrix(out, ncol = 1L)
+    }
+    return(out)
+  }
+  out <- as.matrix(x)
+  if (is.null(dim(out))) {
+    out <- matrix(out, ncol = 1L)
+  }
+  out
+}
+
+.float32_col_sd <- function(X) {
+  n <- nrow(X)
+  if (n < 2L) {
+    return(float::fl(matrix(1, nrow = 1L, ncol = ncol(X))))
+  }
+  mu <- colMeans(X)
+  Xc <- .float32_sweep_cols(X, float::fl(matrix(as.numeric(mu), nrow = 1L)), "-")
+  out <- sqrt(colSums(Xc * Xc) / (n - 1L))
+  out <- float::fl(matrix(as.numeric(out), nrow = 1L))
+  out[out == 0] <- 1
+  out
+}
+
+.float32_center_scale <- function(X, scaling) {
+  mX <- float::fl(matrix(0, nrow = 1L, ncol = ncol(X)))
+  if (scaling < 3L) {
+    mX <- float::fl(matrix(as.numeric(colMeans(X)), nrow = 1L))
+    X <- .float32_sweep_cols(X, mX, "-")
+  }
+  vX <- float::fl(matrix(1, nrow = 1L, ncol = ncol(X)))
+  if (scaling == 2L) {
+    vX <- .float32_col_sd(X)
+    X <- .float32_sweep_cols(X, vX, "/")
+  }
+  list(X = X, mX = mX, vX = vX)
+}
+
+.float32_rq <- function(y, yhat) {
+  yd <- .float32_to_numeric_matrix(y)
+  pd <- .float32_to_numeric_matrix(yhat)
+  denom <- sum((sweep(yd, 2L, colMeans(yd), "-"))^2)
+  if (!is.finite(denom) || denom <= 0) {
+    return(NA_real_)
+  }
+  1 - sum((yd - pd)^2) / denom
+}
+
+.float32_rsvd <- function(A, k, oversample = 10L, power = 1L, seed = 1L) {
+  .require_float_package()
+  k <- min(max(1L, as.integer(k)[1L]), min(nrow(A), ncol(A)))
+  l <- min(ncol(A), k + max(0L, as.integer(oversample)[1L]))
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  } else {
+    NULL
+  }
+  on.exit({
+    if (is.null(old_seed)) {
+      if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    } else {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+  set.seed(as.integer(seed)[1L])
+  omega <- float::fl(matrix(stats::rnorm(ncol(A) * l), nrow = ncol(A), ncol = l))
+  Y <- A %*% omega
+  if (power > 0L) {
+    for (i in seq_len(as.integer(power))) {
+      Z <- crossprod(A, Y)
+      Y <- A %*% Z
+    }
+  }
+  Q <- qr.Q(qr(Y))
+  B <- crossprod(Q, A)
+  sv <- float::svd(B)
+  U <- Q %*% sv$u[, seq_len(k), drop = FALSE]
+  list(
+    u = U,
+    d = sv$d[seq_len(k), , drop = FALSE],
+    v = sv$v[, seq_len(k), drop = FALSE]
+  )
+}
+
+.float32_prepare_response <- function(Ytrain) {
+  classification <- is.factor(Ytrain)
+  lev <- if (classification) levels(Ytrain) else NULL
+  Y <- if (classification) {
+    float::fl(transformy(Ytrain))
+  } else {
+    .as_float32_matrix(Ytrain, "Ytrain")
+  }
+  list(Ytrain = Y, classification = classification, lev = lev)
+}
+
+.float32_fit_plssvd <- function(Xtrain, Ytrain, ncomp, scaling, fit,
+                                rsvd_oversample, rsvd_power, seed) {
+  Xtrain <- .as_float32_matrix(Xtrain, "Xtrain")
+  Ytrain <- .as_float32_matrix(Ytrain, "Ytrain")
+  cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
+  ncomp <- as.integer(cap$ncomp)
+  max_ncomp <- max(ncomp)
+  scaled <- .float32_center_scale(Xtrain, scaling)
+  Xc <- scaled$X
+  mY <- float::fl(matrix(as.numeric(colMeans(Ytrain)), nrow = 1L))
+  Yc <- .float32_sweep_cols(Ytrain, mY, "-")
+  S <- crossprod(Xc, Yc)
+  sv <- .float32_rsvd(S, max_ncomp, rsvd_oversample, rsvd_power, seed)
+  U <- sv$u
+  V <- sv$v
+  d <- as.numeric(sv$d)
+  Ttrain <- Xc %*% U
+  G <- crossprod(Ttrain)
+  W_latent <- vector("list", length(ncomp))
+  Yfit <- vector("list", length(ncomp))
+  R2Y <- rep(NA_real_, length(ncomp))
+  for (i in seq_along(ncomp)) {
+    k <- ncomp[[i]]
+    D <- float::fl(diag(d[seq_len(k)], nrow = k, ncol = k))
+    Ck <- solve(G[seq_len(k), seq_len(k), drop = FALSE], D)
+    Wk <- Ck %*% t(V[, seq_len(k), drop = FALSE])
+    W_latent[[i]] <- Wk
+    if (isTRUE(fit)) {
+      yf <- Ttrain[, seq_len(k), drop = FALSE] %*% Wk
+      R2Y[[i]] <- .float32_rq(Yc, yf)
+      Yfit[[i]] <- .float32_sweep_cols(yf, mY, "+")
+    }
+  }
+  names(W_latent) <- .fastpls_ncomp_names(ncomp)
+  names(Yfit) <- .fastpls_ncomp_names(ncomp)
+  model <- list(
+    R = U,
+    Q = V,
+    Ttrain = Ttrain,
+    W_latent = W_latent,
+    mX = scaled$mX,
+    vX = scaled$vX,
+    mY = mY,
+    p = ncol(Xtrain),
+    m = ncol(Ytrain),
+    ncomp = ncomp,
+    Yfit = if (isTRUE(fit)) Yfit else NULL,
+    R2Y = R2Y,
+    pls_method = "plssvd",
+    predict_latent_ok = TRUE,
+    predict_backend = "float32",
+    precision = "float32",
+    xprod_default = FALSE
+  )
+  class(model) <- "fastPLS"
+  model
+}
+
+.float32_fit_simpls <- function(Xtrain, Ytrain, ncomp, scaling, fit,
+                                rsvd_oversample, rsvd_power, seed) {
+  Xtrain <- .as_float32_matrix(Xtrain, "Xtrain")
+  Ytrain <- .as_float32_matrix(Ytrain, "Ytrain")
+  ncomp <- as.integer(ncomp)
+  ncomp[ncomp < 1L] <- 1L
+  max_ncomp <- max(ncomp)
+  scaled <- .float32_center_scale(Xtrain, scaling)
+  Xc <- scaled$X
+  mY <- float::fl(matrix(as.numeric(colMeans(Ytrain)), nrow = 1L))
+  Yc <- .float32_sweep_cols(Ytrain, mY, "-")
+  S <- crossprod(Xc, Yc)
+  RR <- .float32_zeros(ncol(Xc), max_ncomp)
+  QQ <- .float32_zeros(ncol(Yc), max_ncomp)
+  VV <- .float32_zeros(ncol(Xc), max_ncomp)
+  Yfit_cur <- .float32_zeros(nrow(Xc), ncol(Yc))
+  Yfit <- vector("list", length(ncomp))
+  R2Y <- rep(NA_real_, length(ncomp))
+  out_idx <- 1L
+  for (a in seq_len(max_ncomp)) {
+    sv <- .float32_rsvd(S, 1L, rsvd_oversample, rsvd_power, seed + a - 1L)
+    rr <- sv$u[, 1L, drop = FALSE]
+    tt <- Xc %*% rr
+    tnorm <- sqrt(sum(tt * tt))
+    if (!is.finite(as.numeric(tnorm)) || as.numeric(tnorm) <= 0) {
+      break
+    }
+    tt <- tt / tnorm
+    rr <- rr / tnorm
+    pp <- crossprod(Xc, tt)
+    qq <- crossprod(Yc, tt)
+    vv <- pp
+    if (a > 1L) {
+      Vprev <- VV[, seq_len(a - 1L), drop = FALSE]
+      vv <- vv - Vprev %*% (crossprod(Vprev, pp))
+      vv <- vv - Vprev %*% (crossprod(Vprev, vv))
+    }
+    vnorm <- sqrt(sum(vv * vv))
+    if (!is.finite(as.numeric(vnorm)) || as.numeric(vnorm) <= 0) {
+      break
+    }
+    vv <- vv / vnorm
+    S <- S - vv %*% crossprod(vv, S)
+    RR[, a] <- rr[, 1L]
+    QQ[, a] <- qq[, 1L]
+    VV[, a] <- vv[, 1L]
+    if (isTRUE(fit)) {
+      Yfit_cur <- Yfit_cur + tt %*% t(qq)
+    }
+    while (out_idx <= length(ncomp) && a == ncomp[[out_idx]]) {
+      if (isTRUE(fit)) {
+        R2Y[[out_idx]] <- .float32_rq(Yc, Yfit_cur)
+        Yfit[[out_idx]] <- .float32_sweep_cols(Yfit_cur, mY, "+")
+      }
+      out_idx <- out_idx + 1L
+    }
+  }
+  names(Yfit) <- .fastpls_ncomp_names(ncomp)
+  model <- list(
+    P = NULL,
+    Q = QQ,
+    Ttrain = NULL,
+    R = RR,
+    mX = scaled$mX,
+    vX = scaled$vX,
+    mY = mY,
+    p = ncol(Xtrain),
+    m = ncol(Ytrain),
+    ncomp = ncomp,
+    Yfit = if (isTRUE(fit)) Yfit else NULL,
+    R2Y = R2Y,
+    pls_method = "simpls",
+    predict_latent_ok = TRUE,
+    predict_backend = "float32",
+    precision = "float32",
+    xprod_default = FALSE
+  )
+  class(model) <- "fastPLS"
+  model
+}
+
+.fit_float32_pls <- function(Xtrain, Ytrain, ncomp, scaling, method,
+                             rsvd_oversample, rsvd_power, seed, fit) {
+  yprep <- .float32_prepare_response(Ytrain)
+  if (identical(method, "plssvd")) {
+    model <- .float32_fit_plssvd(
+      Xtrain, yprep$Ytrain, ncomp, scaling, fit,
+      rsvd_oversample, rsvd_power, seed
+    )
+  } else {
+    model <- .float32_fit_simpls(
+      Xtrain, yprep$Ytrain, ncomp, scaling, fit,
+      rsvd_oversample, rsvd_power, seed
+    )
+  }
+  model$classification <- yprep$classification
+  model$lev <- yprep$lev
+  model
+}
+
 .normalize_pls_method <- function(method) {
   method <- match.arg(method, c("simpls", "plssvd", "opls", "kernelpls"))
   switch(
@@ -3048,6 +3436,16 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
   object <- .fastpls_restore_internal_output_fields(object)
   backend <- match.arg(backend)
   top <- .resolve_top_k(top, top5)
+  if (identical(object$precision, "float32")) {
+    return(.predict_fastpls_float32(
+      object,
+      newdata,
+      Ytest = Ytest,
+      proj = proj,
+      top = top,
+      raw_scores = raw_scores
+    ))
+  }
   Xtest=as.matrix(newdata)
   use_cuda_flash <- identical(backend, "cuda_flash") ||
     (identical(backend, "auto") &&
@@ -6741,7 +7139,16 @@ plot.permutation <- function(x,
 #' can include predictions for held-out samples, latent scores, fitted values,
 #' variance summaries, and optional classification heads.
 #'
-#' @param Xtrain Numeric training predictor matrix.
+#' If `Xtrain`, `Xtest`, `Ytrain`, or `Ytest` are supplied as `float::float32`
+#' objects, `pls()` uses a float32 route instead of converting them to double.
+#' In the current implementation this route is available for `backend = "cpu"`,
+#' `svd.method = "rsvd"`, and `method = "plssvd"` or `method = "simpls"`.
+#' Classification with float32 input currently uses `classifier = "argmax"`.
+#' Unsupported float32 combinations stop with a clear error rather than silently
+#' upcasting to double.
+#'
+#' @param Xtrain Numeric training predictor matrix, or a `float::float32`
+#'   predictor matrix for the supported float32 route.
 #' @param Ytrain Training response (numeric or factor).
 #' @param Xtest Optional test predictor matrix.
 #' @param Ytest Optional test response for `Q2Y`.
@@ -6968,6 +7375,48 @@ pls =  function (Xtrain,
 	  on.exit(options(old_class_bias_options), add = TRUE)
 
   backend_control <- NULL
+
+  float32_input <- .has_float32_input(Xtrain, Ytrain, Xtest, Ytest)
+  if (isTRUE(float32_input)) {
+    if (!identical(backend, "cpu")) {
+      stop("float32 input currently requires backend = 'cpu'; refusing to upcast to double.", call. = FALSE)
+    }
+    if (!identical(svd.method, "cpu_rsvd")) {
+      stop("float32 input currently supports svd.method = 'rsvd' only.", call. = FALSE)
+    }
+    if (!requested_method %in% c("plssvd", "simpls")) {
+      stop("float32 input currently supports method = 'plssvd' or method = 'simpls'.", call. = FALSE)
+    }
+    if (!identical(classifier, "argmax")) {
+      stop("float32 classification currently supports classifier = 'argmax' only.", call. = FALSE)
+    }
+    if (isTRUE(return_loadings)) {
+      stop("return_loadings = TRUE is not yet available for float32 input.", call. = FALSE)
+    }
+    if (isTRUE(perm.test)) {
+      stop("perm.test = TRUE is not yet available for float32 input.", call. = FALSE)
+    }
+    model <- .fit_float32_pls(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      ncomp = ncomp,
+      scaling = scal,
+      method = requested_method,
+      rsvd_oversample = rsvd_oversample,
+      rsvd_power = rsvd_power,
+      seed = seed,
+      fit = fit
+    )
+    if (!isTRUE(fit) && !is.null(model$R2Y)) {
+      model$R2Y <- rep(NA_real_, length(model$ncomp))
+    }
+    if (!is.null(Xtest)) {
+      res <- predict(model, Xtest, Ytest = Ytest, proj = proj)
+      model <- c(model, res)
+    }
+    model <- .attach_backend_control(model, backend_control)
+    return(.fastpls_public_pls_output(model, model$ncomp))
+  }
 
   if (identical(backend, "metal")) {
     model <- .pls_metal(

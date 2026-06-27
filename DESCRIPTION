@@ -15,7 +15,7 @@ Maintainer: Stefano Cacciatore <stefano.cacciatore@icgeb.org>
 Description: An implementation in 'Rcpp' / 'RcppArmadillo' of Partial Least Square algorithms. This package includes other functions to perform the double cross-validation and a fast correlation.
 License: GPL-3
 Depends: R (>= 2.10.0), Matrix
-Imports: Rcpp (>= 0.12.17), methods
+Imports: Rcpp (>= 0.12.17), methods, float
 LinkingTo: Rcpp, RcppArmadillo, Matrix
 Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr

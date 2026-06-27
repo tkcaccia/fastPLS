@@ -47,6 +47,7 @@ A practical starting point is:
 | Small or moderate data | `backend = "cpu"` |
 | Large dense matrices or many classes/responses | `backend = "cuda"` when available |
 | Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
+| Float32 CPU input | `float::fl(X)`, `backend = "cpu"`, `svd.method = "rsvd"` |
 
 ## Classification Tasks
 
@@ -468,8 +469,39 @@ fit_reg <- pls(
 fit_reg$Q2Y
 ```
 
-For regression, `Ypred` is a numeric prediction array with one slice for each
-requested number of components. Here the last slice corresponds to the largest
+### Float32 Input
+
+`pls()` also accepts predictor and response matrices from the `float` package.
+When a `float::float32` object is supplied, the supported CPU rSVD route keeps
+centering, scaling, cross-products, randomized SVD sketches, latent scores, and
+predictions in 32-bit arithmetic. This is currently available for
+`method = "plssvd"` or `method = "simpls"` with `backend = "cpu"` and
+`svd.method = "rsvd"`. Unsupported combinations stop with an error rather than
+silently converting the data to double.
+
+```{r}
+if (requireNamespace("float", quietly = TRUE)) {
+  Xreg32 <- float::fl(Xreg_train)
+  Yreg32 <- float::fl(Ytrain_reg)
+  fit_reg32 <- pls(
+    Xreg32,
+    Yreg32,
+    float::fl(Xreg_test),
+    float::fl(Ytest_reg),
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    return_variance = FALSE
+  )
+  fit_reg32$Q2Y
+}
+```
+
+For standard double-precision regression, `Ypred` is a numeric prediction array
+with one slice for each requested number of components. For float32 input,
+`Ypred` is kept as a named list of `float::float32` prediction matrices. In the
+standard example below, the last array slice corresponds to the largest
 requested component count (`ncomp = 3`). The metric vectors are named by
 component count, for example `fit_reg$Q2Y["ncomp=3"]`.
 

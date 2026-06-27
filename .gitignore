@@ -18,3 +18,4 @@ nvidia_*_results/
 .bench-lib*/
 benchmark/results/
 package_check_artifacts*/
+output/

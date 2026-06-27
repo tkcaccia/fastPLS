@@ -36,7 +36,8 @@ pls(
 )
 }
 \arguments{
-\item{Xtrain}{Numeric training predictor matrix. Alternatively, a result
+\item{Xtrain}{Numeric training predictor matrix, or a \code{float::float32}
+predictor matrix for the supported float32 route. Alternatively, a result
 returned by \code{pls.single.cv()}. In that case \code{pls()} refits the selected
 model on the full cross-validation training set and predicts \code{Xtest} using
 \code{best_ncomp} and the selected tuning settings.}
@@ -176,6 +177,14 @@ Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or
 classification using a selected CPU, CUDA, or Metal backend. The fitted model
 can include predictions for held-out samples, latent scores, fitted values,
 variance summaries, and optional classification heads.
+
+If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as
+\code{float::float32} objects, \code{pls()} uses a float32 route instead of
+converting them to double. In the current implementation this route is
+available for \code{backend = "cpu"}, \code{svd.method = "rsvd"}, and
+\code{method = "plssvd"} or \code{method = "simpls"}. Classification with
+float32 input currently uses \code{classifier = "argmax"}. Unsupported float32
+combinations stop with a clear error rather than silently upcasting to double.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
