@@ -123,13 +123,16 @@ the training kernel is centered and the selected PLS core is fitted in kernel
 space. The same user-facing `pls()` function therefore covers linear PLSSVD,
 SIMPLS, OPLS, and kernel PLS while sharing the accelerated low-rank machinery.
 
-Classification is handled as PLS-DA with one of three decoding heads:
-`classifier = "argmax"` uses the largest predicted dummy-response score,
-`classifier = "lda"` fits a regularized linear discriminant analysis model in
-the PLS score space following Fisher's discriminant principle (Fisher, 1936),
-and `classifier = "cknn"` reranks centroid-selected candidate classes by
-nearest-neighbour evidence in the supervised latent space, following the
-nearest-neighbour principle of Cover and Hart (1967).
+### Classifiers
+
+Classification is handled as PLS-DA followed by one of three decoding heads.
+`classifier = "argmax"` uses the largest predicted dummy-response score and is
+the standard PLS-DA decoding rule. `classifier = "lda"` fits a regularized
+linear discriminant analysis model in the PLS score space following Fisher's
+discriminant principle (Fisher, 1936). `classifier = "cknn"` reranks
+centroid-selected candidate classes by nearest-neighbour evidence in the
+supervised latent space, following the nearest-neighbour principle of Cover and
+Hart (1967).
 
 ### Backends
 
