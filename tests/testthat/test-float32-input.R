@@ -17,9 +17,12 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
     return_variance = FALSE
   )
 
+  expect_s3_class(fit, "fastPLS")
+  expect_false(any(grepl("attr(", capture.output(print(fit)), fixed = TRUE)))
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
   expect_true(inherits(fit$Ypred[[1L]], "float32"))
   expect_named(fit$Q2Y, c("ncomp=1", "ncomp=2"))
+  expect_false("predict_backend" %in% names(predict(fit, X[1:2, ])))
 })
 
 test_that("pls accepts float32 classification input with argmax", {
@@ -41,6 +44,8 @@ test_that("pls accepts float32 classification input with argmax", {
     return_variance = FALSE
   )
 
+  expect_s3_class(fit, "fastPLS")
+  expect_false(any(grepl("attr(", capture.output(print(fit)), fixed = TRUE)))
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
   expect_true(is.factor(fit$Ypred[[1L]]))
   expect_named(fit$accuracy, "ncomp=2")

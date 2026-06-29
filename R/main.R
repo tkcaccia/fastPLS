@@ -1911,6 +1911,7 @@
   if (!length(present)) {
     return(x)
   }
+  cls <- class(x)
   internal <- attr(x, "fastPLS_internal", exact = TRUE)
   if (is.null(internal)) {
     internal <- list()
@@ -1918,6 +1919,7 @@
   internal[present] <- x[present]
   x[present] <- NULL
   attr(x, "fastPLS_internal") <- internal
+  class(x) <- cls
   x
 }
 
@@ -1926,10 +1928,12 @@
   if (is.null(internal) || !length(internal)) {
     return(x)
   }
+  cls <- class(x)
   missing <- setdiff(names(internal), names(x))
   if (length(missing)) {
     x[missing] <- internal[missing]
   }
+  class(x) <- cls
   x
 }
 
@@ -1944,6 +1948,14 @@ print.fastPLS <- function(x, ...) {
 .fastpls_public_pls_output <- function(x, ncomp = NULL) {
   x <- .fastpls_name_pls_metric_paths(x, ncomp)
   .fastpls_hide_internal_output_fields(x)
+}
+
+.fastpls_public_predict_output <- function(x, ncomp = NULL) {
+  if (!is.null(ncomp)) {
+    x <- .fastpls_name_pls_metric_paths(x, ncomp)
+  }
+  x[c("predict_backend", "direct")] <- NULL
+  x
 }
 
 .predict_fastpls_float32 <- function(object, newdata, Ytest = NULL, proj = FALSE,
@@ -3437,14 +3449,14 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
   backend <- match.arg(backend)
   top <- .resolve_top_k(top, top5)
   if (identical(object$precision, "float32")) {
-    return(.predict_fastpls_float32(
+    return(.fastpls_public_predict_output(.predict_fastpls_float32(
       object,
       newdata,
       Ytest = Ytest,
       proj = proj,
       top = top,
       raw_scores = raw_scores
-    ))
+    ), object$ncomp))
   }
   Xtest=as.matrix(newdata)
   use_cuda_flash <- identical(backend, "cuda_flash") ||
@@ -3493,7 +3505,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
       res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
-		    return(.fastpls_name_pls_metric_paths(res, object$ncomp))
+		    return(.fastpls_public_predict_output(res, object$ncomp))
 		  }
 	  if (isTRUE(object$classification) &&
 	      !is.null(object$classification_rule) &&
@@ -3509,7 +3521,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	      cand_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, cand_res$Ypred)
 	      cand_res$Q2Y <- rep(NA_real_, length(object$ncomp))
 	    }
-	    return(.fastpls_name_pls_metric_paths(cand_res, object$ncomp))
+	    return(.fastpls_public_predict_output(cand_res, object$ncomp))
 	  }
 	  if (isTRUE(object$classification) &&
 	      is.null(Ytest) &&
@@ -3535,7 +3547,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       bias_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, bias_res$Ypred)
       bias_res$Q2Y <- rep(NA_real_, length(object$ncomp))
     }
-    return(.fastpls_name_pls_metric_paths(bias_res, object$ncomp))
+    return(.fastpls_public_predict_output(bias_res, object$ncomp))
   }
 	  res <- if (isTRUE(use_metal)) {
     .pls_predict_metal(object, Xtest, proj)
@@ -3626,7 +3638,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
     }
   }
-  .fastpls_name_pls_metric_paths(res, object$ncomp)
+  .fastpls_public_predict_output(res, object$ncomp)
 }
 
 .fastpls_preprocess_train <- function(X, scaling) {
@@ -7413,6 +7425,7 @@ pls =  function (Xtrain,
     if (!is.null(Xtest)) {
       res <- predict(model, Xtest, Ytest = Ytest, proj = proj)
       model <- c(model, res)
+      class(model) <- "fastPLS"
     }
     model <- .attach_backend_control(model, backend_control)
     return(.fastpls_public_pls_output(model, model$ncomp))

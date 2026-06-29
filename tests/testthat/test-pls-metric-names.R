@@ -79,6 +79,7 @@ test_that("pls hides internal implementation fields from public output", {
     classifier = "argmax",
     return_variance = FALSE
   )
+  expect_s3_class(fit, "fastPLS")
   hidden <- c(
     "p",
     "m",
@@ -105,7 +106,9 @@ test_that("pls hides internal implementation fields from public output", {
   printed <- capture.output(print(fit))
   hidden_labels <- paste0("$", hidden)
   expect_false(any(printed %in% hidden_labels))
+  expect_false(any(grepl("attr(", printed, fixed = TRUE)))
 
   pred <- predict(fit, X[1:5, , drop = FALSE])
+  expect_false("predict_backend" %in% names(pred))
   expect_s3_class(pred$Ypred[[1]], "factor")
 })
