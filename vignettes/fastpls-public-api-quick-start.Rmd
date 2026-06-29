@@ -49,6 +49,57 @@ A practical starting point is:
 | Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
 | Float32 CPU input | `float::fl(X)`, `backend = "cpu"`, `svd.method = "rsvd"` |
 
+## Implementation Summary
+
+`fastPLS` separates the statistical PLS model from the numerical backend used
+to compute the dominant latent directions. The same public function, `pls()`,
+can therefore fit PLSSVD, SIMPLS, OPLS, and kernel PLS while dispatching the
+expensive linear algebra to CPU, CUDA, or Apple Metal backends when available.
+The CPU backend is the most portable route and supports the bundled truncated
+SVD engines used throughout the package. CUDA is intended for larger dense
+problems, high component counts, many classes, or many response variables,
+where GPU matrix products can offset host-device transfer overhead. The Metal
+backend provides the corresponding Apple Silicon route for exploratory GPU
+acceleration and portability testing.
+
+The inner singular-vector step is controlled by `svd.method`. The default
+`svd.method = "rsvd"` uses a randomized SVD range-finder, while
+`svd.method = "irlba"` uses a bundled implicitly restarted Lanczos
+bidiagonalization-style solver on CPU. Both are truncated methods: they compute
+only the leading directions needed by the requested PLS components instead of
+forming a full dense SVD. The stand-alone `fastsvd()` and `pca()` functions use
+the same backend selector (`backend = "cpu"`, `"cuda"`, or `"metal"` with
+`method = "rsvd"` or `"irlba"` where supported), so users can access the same
+low-rank machinery outside a PLS fit.
+
+`method = "plssvd"` implements the direct PLS-SVD formulation, in which the
+dominant singular subspace of the predictor-response cross-covariance matrix is
+computed once and reused for the requested component path. `method = "simpls"`
+is the optimized SIMPLS implementation and is the default general-purpose PLS
+core. It preserves the SIMPLS deflation geometry but accelerates fitting by
+using compiled matrix operations, cached deflation updates, low-rank prediction
+factors, and backend-specific truncated SVD calls. `method = "opls"` adds an
+orthogonal-signal filtering step before the optimized PLS core, while
+`method = "kernelpls"` fits the same PLS machinery in a kernel representation
+using linear, radial-basis, or polynomial kernels.
+
+For large predictor-response cross-products, selected backends can use the
+matrix-free `xprod` route. Instead of explicitly materializing
+`S = X^T Y`, the SVD backend evaluates products with `S` and `S^T` only when
+needed, for example `Sv = X^T(Yv)` and `S^Tu = Y^T(Xu)`. This preserves the
+same mathematical operator while reducing memory pressure. For classification,
+factor labels are handled as PLS-DA responses, and large multiclass problems
+can avoid constructing a dense one-hot response matrix where the backend
+supports label-aware products.
+
+Classification is performed after the PLS fit using one of three heads:
+`classifier = "argmax"` for ordinary PLS-DA score decoding,
+`classifier = "lda"` for discriminant analysis in the PLS score space, and
+`classifier = "cknn"` for candidate-neighbour classification in the supervised
+latent space. These classification heads are selected through `pls()` and
+`predict()`; users do not need to call the lower-level C++, CUDA, or Metal
+helpers directly.
+
 ## Classification Tasks
 
 For classification, responses are supplied as factors. `fastPLS` handles the
