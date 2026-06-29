@@ -149,28 +149,6 @@ fit_cls <- pls(
 fit_cls$accuracy
 ```
 
-The predicted labels can be visualized against the observed labels. Correct
-classification appears on the diagonal.
-
-```{r fig.width=4.8, fig.height=4}
-pred_cls <- fit_cls$Ypred[["ncomp=2"]]
-plot(
-  as.integer(Ytest_cls),
-  as.integer(pred_cls),
-  xaxt = "n",
-  yaxt = "n",
-  pch = 21,
-  bg = "#59A14F",
-  col = "black",
-  xlab = "Observed class",
-  ylab = "Predicted class",
-  main = "Classification: observed vs predicted"
-)
-axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-abline(0, 1, col = "#D55E00", lwd = 2)
-```
-
 Classification models can also be fitted once and predicted later. `predict()`
 can optionally return ranked classes by setting `top` or `top5 = TRUE`. The
 ordinary prediction in `Ypred` is always the rank-1 class. When `top > 1`,
