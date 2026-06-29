@@ -170,35 +170,10 @@ eval_cls
 ```
 
 Rows of the confusion matrix are predicted labels and columns are observed
-labels.
+labels. The confusion matrix is returned as an ordinary R table.
 
 ```{r}
 eval_cls$confusion
-```
-
-A compact bubble plot is often easier to inspect than the printed table,
-especially when there are many classes.
-
-```{r fig.width=4.8, fig.height=4}
-confusion_df <- as.data.frame(eval_cls$confusion)
-names(confusion_df) <- c("Predicted", "Observed", "Count")
-
-plot(
-  as.integer(confusion_df$Observed),
-  as.integer(confusion_df$Predicted),
-  cex = sqrt(confusion_df$Count + 0.5),
-  pch = 21,
-  bg = "#4E79A7",
-  col = "black",
-  xaxt = "n",
-  yaxt = "n",
-  xlab = "Observed class",
-  ylab = "Predicted class",
-  main = "Confusion matrix"
-)
-axis(1, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-axis(2, at = seq_along(levels(Y_cls)), labels = levels(Y_cls), las = 2)
-abline(0, 1, col = "#D55E00", lwd = 2)
 ```
 
 When class-score matrices are available, `evaluate()` can also report top-k
@@ -482,12 +457,12 @@ silently converting the data to double.
 ```{r}
 if (requireNamespace("float", quietly = TRUE)) {
   Xreg32 <- float::fl(Xreg_train)
-  Yreg32 <- float::fl(Ytrain_reg)
+  Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
   fit_reg32 <- pls(
     Xreg32,
     Yreg32,
     float::fl(Xreg_test),
-    float::fl(Ytest_reg),
+    float::fl(matrix(Ytest_reg, ncol = 1)),
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
