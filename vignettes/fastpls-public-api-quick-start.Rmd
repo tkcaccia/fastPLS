@@ -51,54 +51,109 @@ A practical starting point is:
 
 ## Implementation Summary
 
-`fastPLS` separates the statistical PLS model from the numerical backend used
-to compute the dominant latent directions. The same public function, `pls()`,
-can therefore fit PLSSVD, SIMPLS, OPLS, and kernel PLS while dispatching the
-expensive linear algebra to CPU, CUDA, or Apple Metal backends when available.
-The CPU backend is the most portable route and supports the bundled truncated
-SVD engines used throughout the package. CUDA is intended for larger dense
-problems, high component counts, many classes, or many response variables,
-where GPU matrix products can offset host-device transfer overhead. The Metal
-backend provides the corresponding Apple Silicon route for exploratory GPU
-acceleration and portability testing.
+### SVD Algorithms
 
-The inner singular-vector step is controlled by `svd.method`. The default
-`svd.method = "rsvd"` uses a randomized SVD range-finder, while
-`svd.method = "irlba"` uses a bundled implicitly restarted Lanczos
-bidiagonalization-style solver on CPU. Both are truncated methods: they compute
-only the leading directions needed by the requested PLS components instead of
-forming a full dense SVD. The stand-alone `fastsvd()` and `pca()` functions use
-the same backend selector (`backend = "cpu"`, `"cuda"`, or `"metal"` with
-`method = "rsvd"` or `"irlba"` where supported), so users can access the same
-low-rank machinery outside a PLS fit.
+`fastPLS` separates the PLS model from the singular-vector algorithm used
+inside the fit. The default `svd.method = "rsvd"` is a randomized SVD backend
+following the randomized range-finder strategy of Halko, Martinsson, and Tropp
+(2011). In the compiled CPU implementation, a Gaussian test matrix is generated,
+the target matrix is sketched, optional power iterations are applied, the sketch
+is orthonormalized by an economic QR decomposition, and the final singular
+vectors are obtained from a much smaller projected matrix. When the randomized
+sketch dimension reaches the numerical rank of the target matrix, or when one
+matrix dimension is very small, the code falls back to an exact SVD because a
+truncated randomized approximation would no longer reduce the computation.
+
+The alternative `svd.method = "irlba"` is CPU-only and uses the bundled
+implicitly restarted Lanczos bidiagonalization implementation, following the
+IRLBA approach of Baglama and Reichel (2005). The package calls the internal C
+IRLBA operator with a working subspace, maximum iteration count, convergence
+tolerance, epsilon threshold, and singular-value tolerance. These controls can
+be supplied through `...` in `pls()` or directly in `fastsvd()`. The IRLBA
+backend is also used in a matrix-free form for selected `xprod` paths, where
+the algorithm receives functions that compute products with the cross-product
+operator rather than a precomputed dense matrix.
+
+For large predictor-response cross-products, `fastPLS` can avoid forming
+`S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD
+backend evaluates products with `S` and `S^T` only when needed, for example
+`Sv = X^T(Yv)` and `S^Tu = Y^T(Xu)`. This preserves the same mathematical
+operator while reducing memory pressure. For classification, labels can be used
+as PLS-DA responses without explicitly materializing a large dense one-hot
+matrix in the label-aware paths.
+
+### PLS Algorithms
 
 `method = "plssvd"` implements the direct PLS-SVD formulation, in which the
 dominant singular subspace of the predictor-response cross-covariance matrix is
-computed once and reused for the requested component path. `method = "simpls"`
-is the optimized SIMPLS implementation and is the default general-purpose PLS
-core. It preserves the SIMPLS deflation geometry but accelerates fitting by
-using compiled matrix operations, cached deflation updates, low-rank prediction
-factors, and backend-specific truncated SVD calls. `method = "opls"` adds an
-orthogonal-signal filtering step before the optimized PLS core, while
-`method = "kernelpls"` fits the same PLS machinery in a kernel representation
-using linear, radial-basis, or polynomial kernels.
+computed once and reused for all requested component counts. This makes PLSSVD
+efficient when the response rank is the limiting dimension. The implementation
+adds compact latent prediction factors: instead of always storing and applying
+a full coefficient array, prediction can be performed through low-rank factors
+based on the latent projection and response-side coefficients. PLSSVD can also
+use the matrix-free `xprod` route for randomized SVD or bundled IRLBA when the
+cross-covariance matrix would be large.
 
-For large predictor-response cross-products, selected backends can use the
-matrix-free `xprod` route. Instead of explicitly materializing
-`S = X^T Y`, the SVD backend evaluates products with `S` and `S^T` only when
-needed, for example `Sv = X^T(Yv)` and `S^Tu = Y^T(Xu)`. This preserves the
-same mathematical operator while reducing memory pressure. For classification,
-factor labels are handled as PLS-DA responses, and large multiclass problems
-can avoid constructing a dense one-hot response matrix where the backend
-supports label-aware products.
+`method = "simpls"` is the optimized SIMPLS implementation and is the default
+general-purpose PLS core. The statistical structure follows de Jong's SIMPLS
+algorithm (de Jong, 1993): each component is obtained from the current
+cross-covariance state, converted into a score and loading direction, and
+followed by SIMPLS orthogonalization and deflation. The fastPLS implementation
+improves the execution strategy. Candidate directions can be refreshed from the
+current deflated cross-covariance using randomized/block-style subspace ideas
+related to modern randomized low-rank methods (Halko, Martinsson, and Tropp,
+2011), then consumed sequentially so that the accepted components still follow
+the SIMPLS deflation geometry. The C++ core also uses cached rank-one deflation,
+warm starts from the previous latent direction, optional reorthogonalization of
+deflation vectors, and incremental prediction updates. For low-dimensional
+high-sample problems, the code can cache cross-products such as `X^T X` and
+`X^T Y`; for large response or predictor dimensions, it can instead use
+matrix-free `xprod` products.
 
-Classification is performed after the PLS fit using one of three heads:
-`classifier = "argmax"` for ordinary PLS-DA score decoding,
-`classifier = "lda"` for discriminant analysis in the PLS score space, and
-`classifier = "cknn"` for candidate-neighbour classification in the supervised
-latent space. These classification heads are selected through `pls()` and
-`predict()`; users do not need to call the lower-level C++, CUDA, or Metal
-helpers directly.
+`method = "opls"` implements orthogonal PLS following the orthogonal signal
+correction idea of Trygg and Wold (2002). It estimates response-orthogonal
+variation in `X`, subtracts this structured variation, stores the orthogonal
+filter, and then fits the optimized PLS core to the filtered matrix. The same
+filter is applied to new samples at prediction time.
+
+`method = "kernelpls"` follows kernel PLS as described by Rosipal and Trejo
+(2001). Linear kernel PLS is dispatched to the ordinary linear PLS core to avoid
+unnecessary kernel materialization. For radial-basis and polynomial kernels,
+the training kernel is centered and the selected PLS core is fitted in kernel
+space. The same user-facing `pls()` function therefore covers linear PLSSVD,
+SIMPLS, OPLS, and kernel PLS while sharing the accelerated low-rank machinery.
+
+Classification is handled as PLS-DA with one of three decoding heads:
+`classifier = "argmax"` uses the largest predicted dummy-response score,
+`classifier = "lda"` fits a regularized linear discriminant analysis model in
+the PLS score space following Fisher's discriminant principle (Fisher, 1936),
+and `classifier = "cknn"` reranks centroid-selected candidate classes by
+nearest-neighbour evidence in the supervised latent space, following the
+nearest-neighbour principle of Cover and Hart (1967).
+
+### Backends
+
+The `backend` argument selects where the main numerical work is performed.
+`backend = "cpu"` is the portable compiled C++/RcppArmadillo backend and
+supports both `rsvd` and `irlba`. It is usually best for small and moderate
+datasets, low-dimensional problems, and machines without GPU support.
+
+`backend = "cuda"` uses CUDA-native routines when the package is compiled with
+CUDA and a compatible NVIDIA runtime is available. CUDA paths perform the main
+PLSSVD and SIMPLS randomized-SVD matrix products, selected `xprod` products,
+low-rank prediction, LDA scoring, and candidate-kNN scoring on the GPU. CUDA is
+most useful for large dense matrices, high component counts, many classes, or
+many response variables, where GPU matrix multiplication offsets transfer and
+kernel-launch overhead.
+
+`backend = "metal"` provides an Apple Silicon backend. The Metal SVD and PCA
+paths offload the large randomized-SVD matrix multiplications to Apple Metal
+Performance Shaders while keeping QR and the final small SVD on CPU. The PLS
+Metal route extends the same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS by
+dispatching large cross-products, score projections, deflation matrix products,
+and prediction products through Metal where implemented. Metal is intended for
+portability and exploratory acceleration on Apple hardware; CPU remains the
+most robust fallback for small examples.
 
 ## Classification Tasks
 
