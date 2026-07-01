@@ -25,6 +25,17 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
   throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
 }
 
+arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
+                                       const arma::fmat& B,
+                                       bool transpose_left,
+                                       bool transpose_right) {
+  (void) A;
+  (void) B;
+  (void) transpose_left;
+  (void) transpose_right;
+  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+}
+
 arma::mat metal_crossprod(const arma::mat& A, const arma::mat& B) {
   (void) A;
   (void) B;

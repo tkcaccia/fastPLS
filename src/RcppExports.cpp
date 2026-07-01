@@ -49,6 +49,101 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cuda_float32_rsvd_sample_cpp
+Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
+RcppExport SEXP _fastPLS_cuda_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type l(lSEXP);
+    Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_float32_rsvd_sample_cpp(ASEXP, l, power_iters, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_float32_matrix_multiply_cpp
+Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right);
+RcppExport SEXP _fastPLS_metal_float32_matrix_multiply_cpp(SEXP ASEXPSEXP, SEXP BSEXPSEXP, SEXP transpose_leftSEXP, SEXP transpose_rightSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type BSEXP(BSEXPSEXP);
+    Rcpp::traits::input_parameter< bool >::type transpose_left(transpose_leftSEXP);
+    Rcpp::traits::input_parameter< bool >::type transpose_right(transpose_rightSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_float32_matrix_multiply_cpp(ASEXP, BSEXP, transpose_left, transpose_right));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_float32_rsvd_sample_cpp
+Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
+RcppExport SEXP _fastPLS_metal_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type l(lSEXP);
+    Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_float32_rsvd_sample_cpp(ASEXP, l, power_iters, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_float32_irlba_cpp
+Rcpp::List metal_float32_irlba_cpp(SEXP ASEXP, int k, int seed, bool left_only);
+RcppExport SEXP _fastPLS_metal_float32_irlba_cpp(SEXP ASEXPSEXP, SEXP kSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_float32_irlba_cpp(ASEXP, k, seed, left_only));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastsvd_float32_cpp
+Rcpp::List fastsvd_float32_cpp(SEXP ASEXP, int k, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed, bool left_only);
+RcppExport SEXP _fastPLS_fastsvd_float32_cpp(SEXP ASEXPSEXP, SEXP kSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
+    rcpp_result_gen = Rcpp::wrap(fastsvd_float32_cpp(ASEXP, k, backend, svd_method, rsvd_oversample, rsvd_power, seed, left_only));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_float32_cpu_cpp
+Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
+RcppExport SEXP _fastPLS_pls_float32_cpu_cpp(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_float32_cpu_cpp(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // has_cuda
 bool has_cuda();
 RcppExport SEXP _fastPLS_has_cuda() {
@@ -757,6 +852,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
     {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
+    {"_fastPLS_cuda_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_cuda_float32_rsvd_sample_cpp, 4},
+    {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
+    {"_fastPLS_metal_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_metal_float32_rsvd_sample_cpp, 4},
+    {"_fastPLS_metal_float32_irlba_cpp", (DL_FUNC) &_fastPLS_metal_float32_irlba_cpp, 4},
+    {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
+    {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},

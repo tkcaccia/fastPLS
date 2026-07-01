@@ -75,8 +75,6 @@ are always held out together and are never split across training and test.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-
-
 \item{classifier}{Classification rule for factor responses: \code{"argmax"},
 \code{"lda"}, or \code{"cknn"}. Multiple values are treated as a tuning grid.}
 
@@ -106,10 +104,9 @@ candidate-score cache in blocks for scalar component counts. \code{auto}
 chooses a memory-aware strategy from the data size.}
 
 \item{fit}{Fit one additional model on the full dataset and return its
-fitted values (\code{Yfit}) and training \code{R2Y} path. The default is
-\code{TRUE} for backward compatibility. Set to \code{FALSE} to skip this extra
-full-data fit; held-out cross-validated \code{Q2Y} and \code{RMSD} are still
-calculated.}
+fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
+backward compatibility. Set to \code{FALSE} to skip this extra full-data fit;
+held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}
@@ -128,7 +125,8 @@ A list describing the cross-validation run and selected model:
 \item \code{best_ncomp}: number of components selected by the chosen metric.
 \item \code{best_index}: position of \code{best_ncomp} in the tested component grid.
 \item \code{selection_metric}: metric used for optimization. With \code{"auto"},
-classification uses accuracy and regression uses the default prediction error rule.
+classification uses accuracy and regression uses the default prediction
+error rule.
 \item \code{best_metric_name} and \code{best_metric_value}: name and value of the
 metric at the selected component count.
 \item \code{Q2Y}: held-out cross-validated Q2. For factor responses, Q2 is
@@ -139,21 +137,22 @@ calculated on the dummy-coded PLS-DA response scores.
 \item \code{Yfit}: fitted values from the full-data model when \code{fit = TRUE}.
 \item \code{R2Y}: training-set explained-variance path from a model fitted on
 the full dataset when \code{fit = TRUE}; otherwise \code{NA}. For factor
-responses, this is calculated on the dummy-coded PLS-DA response scores, not on
-the decoded class labels.
+responses, this is calculated on the dummy-coded PLS-DA response scores,
+not on the decoded class labels.
 \item \code{fold}: fold assignment used for each sample.
-\item \code{pred}: decoded cross-validated predictions when predictions are stored.
+\item \code{pred}: decoded cross-validated predictions when predictions are
+stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
 \item \code{metrics}: per-component metric table returned by the CV backend.
 \item \code{best_parameters}: compact list containing only \code{ncomp} plus the
 arguments that were actually optimized, for example \code{classifier} when
 \code{classifier = c("argmax", "lda")}.
 \item \code{tuning_config}: relevant selected configuration used for the run.
-Irrelevant classifier- or method-specific defaults are omitted; for example,
-cKNN controls are not shown when \code{classifier = "argmax"}.
+Irrelevant classifier- or method-specific defaults are omitted; for
+example, cKNN controls are not shown when \code{classifier = "argmax"}.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
-\item The returned object can be passed as the first argument to \code{pls()} to
+\item The returned object can be passed as the first argument to \code{\link[=pls]{pls()}} to
 refit the selected model on the full training data and predict new samples.
 }
 }

@@ -49,6 +49,21 @@ void copy_arma_to_mps_buffer(const arma::mat& X,
   }
 }
 
+void copy_fmat_to_mps_buffer(const arma::fmat& X,
+                             id<MTLBuffer> buffer,
+                             const NSUInteger row_bytes) {
+  const arma::uword nr = X.n_rows;
+  const arma::uword nc = X.n_cols;
+  char* base = static_cast<char*>([buffer contents]);
+
+  for (arma::uword i = 0; i < nr; ++i) {
+    float* row = reinterpret_cast<float*>(base + static_cast<NSUInteger>(i) * row_bytes);
+    for (arma::uword j = 0; j < nc; ++j) {
+      row[j] = X(i, j);
+    }
+  }
+}
+
 arma::mat copy_mps_buffer_to_arma(id<MTLBuffer> buffer,
                                   const arma::uword nr,
                                   const arma::uword nc,
@@ -60,6 +75,23 @@ arma::mat copy_mps_buffer_to_arma(id<MTLBuffer> buffer,
     const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
     for (arma::uword j = 0; j < nc; ++j) {
       out(i, j) = static_cast<double>(row[j]);
+    }
+  }
+
+  return out;
+}
+
+arma::fmat copy_mps_buffer_to_fmat(id<MTLBuffer> buffer,
+                                   const arma::uword nr,
+                                   const arma::uword nc,
+                                   const NSUInteger row_bytes) {
+  arma::fmat out(nr, nc);
+  const char* base = static_cast<const char*>([buffer contents]);
+
+  for (arma::uword i = 0; i < nr; ++i) {
+    const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
+    for (arma::uword j = 0; j < nc; ++j) {
+      out(i, j) = row[j];
     }
   }
 
@@ -91,6 +123,12 @@ MetalMatrix make_matrix(id<MTLDevice> device,
 MetalMatrix make_matrix_from_arma(id<MTLDevice> device, const arma::mat& X) {
   MetalMatrix M = make_matrix(device, static_cast<NSUInteger>(X.n_rows), static_cast<NSUInteger>(X.n_cols));
   copy_arma_to_mps_buffer(X, M.buffer, M.row_bytes);
+  return M;
+}
+
+MetalMatrix make_matrix_from_fmat(id<MTLDevice> device, const arma::fmat& X) {
+  MetalMatrix M = make_matrix(device, static_cast<NSUInteger>(X.n_rows), static_cast<NSUInteger>(X.n_cols));
+  copy_fmat_to_mps_buffer(X, M.buffer, M.row_bytes);
   return M;
 }
 
@@ -373,6 +411,37 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
     }
 
     return copy_mps_buffer_to_arma(c_buffer, a_rows, b_cols, c_row_bytes);
+  }
+}
+
+arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
+                                       const arma::fmat& B,
+                                       const bool transpose_left,
+                                       const bool transpose_right) {
+  const arma::uword a_rows = transpose_left ? A.n_cols : A.n_rows;
+  const arma::uword a_cols = transpose_left ? A.n_rows : A.n_cols;
+  const arma::uword b_rows = transpose_right ? B.n_cols : B.n_rows;
+  const arma::uword b_cols = transpose_right ? B.n_rows : B.n_cols;
+
+  if (a_cols != b_rows) {
+    throw std::runtime_error("metal_matrix_multiply_float: non-conformable matrices");
+  }
+
+  @autoreleasepool {
+    id<MTLDevice> device = default_device();
+    if (device == nil) {
+      throw std::runtime_error("metal_matrix_multiply_float: no Metal device available");
+    }
+
+    id<MTLCommandQueue> queue = default_command_queue();
+    if (queue == nil) {
+      throw std::runtime_error("metal_matrix_multiply_float: failed to create Metal command queue");
+    }
+
+    MetalMatrix Ag = make_matrix_from_fmat(device, A);
+    MetalMatrix Bg = make_matrix_from_fmat(device, B);
+    MetalMatrix Cg = metal_matmul(device, queue, Ag, Bg, transpose_left, transpose_right);
+    return copy_mps_buffer_to_fmat(Cg.buffer, a_rows, b_cols, Cg.row_bytes);
   }
 }
 

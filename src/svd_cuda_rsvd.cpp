@@ -2700,6 +2700,73 @@ void cuda_rsvd_sample_y(
   g_workspace.sample_y(hA, m, n, hOmega, l, power_iters, hY);
 }
 
+void cuda_rsvd_sample_y_float(
+  const float* hA,
+  int m,
+  int n,
+  const float* hOmega,
+  int l,
+  int power_iters,
+  float* hY
+) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+  if (m <= 0 || n <= 0 || l <= 0) {
+    throw std::runtime_error("cuda_rsvd_sample_y_float received non-positive dimensions");
+  }
+
+  cublasHandle_t handle = nullptr;
+  float* dA = nullptr;
+  float* dOmega = nullptr;
+  float* dY = nullptr;
+  float* dZ = nullptr;
+  auto cleanup = [&]() {
+    if (dZ != nullptr) cudaFree(dZ);
+    if (dY != nullptr) cudaFree(dY);
+    if (dOmega != nullptr) cudaFree(dOmega);
+    if (dA != nullptr) cudaFree(dA);
+    if (handle != nullptr) cublasDestroy(handle);
+  };
+
+  try {
+    check_cublas(cublasCreate(&handle), "cublasCreate(float)");
+    const size_t bytes_A = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
+    const size_t bytes_Omega = sizeof(float) * static_cast<size_t>(n) * static_cast<size_t>(l);
+    const size_t bytes_Y = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(l);
+    const size_t bytes_Z = sizeof(float) * static_cast<size_t>(n) * static_cast<size_t>(l);
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dA), bytes_A), "cudaMalloc(float A)");
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dOmega), bytes_Omega), "cudaMalloc(float Omega)");
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dY), bytes_Y), "cudaMalloc(float Y)");
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dZ), bytes_Z), "cudaMalloc(float Z)");
+    check_cuda(cudaMemcpy(dA, hA, bytes_A, cudaMemcpyHostToDevice), "cudaMemcpy(float A)");
+    check_cuda(cudaMemcpy(dOmega, hOmega, bytes_Omega, cudaMemcpyHostToDevice), "cudaMemcpy(float Omega)");
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    check_cublas(
+      cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA, m, dOmega, n, &beta, dY, m),
+      "cublasSgemm(float A*Omega)"
+    );
+    const int q = std::max(power_iters, 0);
+    for (int i = 0; i < q; ++i) {
+      check_cublas(
+        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA, m, dY, m, &beta, dZ, n),
+        "cublasSgemm(float A^T*Y)"
+      );
+      check_cublas(
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA, m, dZ, n, &beta, dY, m),
+        "cublasSgemm(float A*Z)"
+      );
+    }
+    check_cuda(cudaMemcpy(hY, dY, bytes_Y, cudaMemcpyDeviceToHost), "cudaMemcpy(float Y)");
+    cleanup();
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+}
+
 void cuda_rsvd_set_resident_matrix(
   const double* hA,
   int m,
@@ -4359,6 +4426,18 @@ void cuda_rsvd_sample_y(
   int,
   int,
   double*
+) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+void cuda_rsvd_sample_y_float(
+  const float*,
+  int,
+  int,
+  const float*,
+  int,
+  int,
+  float*
 ) {
   throw std::runtime_error("CUDA backend not compiled");
 }

@@ -4,6 +4,7 @@
 #include <R_ext/Rdynload.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <cctype>
 #include <limits>
@@ -1682,6 +1683,890 @@ arma::mat transformy(arma::ivec y){
     }
   }
   return yy;
+}
+
+namespace {
+
+arma::fmat float32_bits_to_fmat(SEXP xSEXP, const char* name) {
+  Rcpp::S4 x(xSEXP);
+  Rcpp::IntegerMatrix bits = x.slot("Data");
+  if (bits.nrow() < 1 || bits.ncol() < 1) {
+    Rcpp::stop("%s must be a non-empty float32 matrix", name);
+  }
+  arma::fmat out(bits.nrow(), bits.ncol());
+  const int* src = INTEGER(bits);
+  float* dst = out.memptr();
+  const arma::uword n = out.n_elem;
+  for (arma::uword i = 0; i < n; ++i) {
+    static_assert(sizeof(float) == sizeof(int), "float32 bridge requires 32-bit float and int");
+    std::memcpy(dst + i, src + i, sizeof(float));
+  }
+  return out;
+}
+
+Rcpp::IntegerMatrix fmat_to_float32_bits(const arma::fmat& x) {
+  Rcpp::IntegerMatrix bits(x.n_rows, x.n_cols);
+  int* dst = INTEGER(bits);
+  const float* src = x.memptr();
+  const arma::uword n = x.n_elem;
+  for (arma::uword i = 0; i < n; ++i) {
+    std::memcpy(dst + i, src + i, sizeof(float));
+  }
+  return bits;
+}
+
+arma::frowvec float_col_sd(const arma::fmat& X) {
+  arma::frowvec out(X.n_cols, arma::fill::ones);
+  if (X.n_rows < 2) {
+    return out;
+  }
+  for (arma::uword j = 0; j < X.n_cols; ++j) {
+    const float mu = arma::mean(X.col(j));
+    double ss = 0.0;
+    for (arma::uword i = 0; i < X.n_rows; ++i) {
+      const double d = static_cast<double>(X(i, j) - mu);
+      ss += d * d;
+    }
+    const double sd = std::sqrt(ss / static_cast<double>(X.n_rows - 1));
+    out(j) = (std::isfinite(sd) && sd > 0.0) ? static_cast<float>(sd) : 1.0f;
+  }
+  return out;
+}
+
+float rq_float32(const arma::fmat& yData, const arma::fmat& yPred) {
+  double tss = 0.0;
+  double press = 0.0;
+  for (arma::uword j = 0; j < yData.n_cols; ++j) {
+    const double mu = arma::mean(arma::conv_to<arma::vec>::from(yData.col(j)));
+    for (arma::uword i = 0; i < yData.n_rows; ++i) {
+      const double obs = static_cast<double>(yData(i, j));
+      const double pred = static_cast<double>(yPred(i, j));
+      const double d = obs - mu;
+      const double e = obs - pred;
+      tss += d * d;
+      press += e * e;
+    }
+  }
+  if (!std::isfinite(tss) || tss <= 0.0) {
+    return NA_REAL;
+  }
+  return static_cast<float>(1.0 - press / tss);
+}
+
+arma::fmat gaussian_matrix_float(arma::uword n_rows, arma::uword n_cols, unsigned int seed) {
+  std::mt19937 rng(seed);
+  std::normal_distribution<float> norm(0.0f, 1.0f);
+  arma::fmat out(n_rows, n_cols);
+  float* ptr = out.memptr();
+  for (arma::uword i = 0; i < out.n_elem; ++i) {
+    ptr[i] = norm(rng);
+  }
+  return out;
+}
+
+Rcpp::List rsvd_float32(const arma::fmat& A,
+                        int k,
+                        int oversample,
+                        int power_iters,
+                        unsigned int seed,
+                        bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  const arma::uword l = std::min<arma::uword>(
+    max_rank,
+    target + static_cast<arma::uword>(std::max(oversample, 0))
+  );
+
+  arma::fmat U;
+  arma::fvec s;
+  arma::fmat V;
+
+  if (l >= max_rank) {
+    arma::svd_econ(U, s, V, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = U.cols(0, target - 1),
+      Rcpp::Named("d") = s.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+    );
+  }
+
+  arma::fmat Omega = gaussian_matrix_float(A.n_cols, l, seed);
+  arma::fmat Y = A * Omega;
+  const int q = std::max(power_iters, 0);
+  for (int i = 0; i < q; ++i) {
+    arma::fmat Z = A.t() * Y;
+    arma::fmat Qz;
+    arma::fmat Rz;
+    arma::qr_econ(Qz, Rz, Z);
+    Y = A * Qz;
+  }
+
+  arma::fmat Q;
+  arma::fmat R;
+  arma::qr_econ(Q, R, Y);
+  arma::fmat B = Q.t() * A;
+  arma::fmat Uhat;
+  arma::svd_econ(Uhat, s, V, B, left_only ? "left" : "both");
+  U = Q * Uhat;
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = U.cols(0, target - 1),
+    Rcpp::Named("d") = s.subvec(0, target - 1),
+    Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+  );
+}
+
+Rcpp::List irlba_float32(const arma::fmat& A,
+                         int k,
+                         int work,
+                         unsigned int seed,
+                         bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  if (target < 1) {
+    return Rcpp::List::create(
+      Rcpp::Named("u") = arma::fmat(),
+      Rcpp::Named("d") = arma::fvec(),
+      Rcpp::Named("v") = arma::fmat()
+    );
+  }
+  if (target >= max_rank || max_rank < 6) {
+    arma::fmat U;
+    arma::fvec s;
+    arma::fmat V;
+    arma::svd_econ(U, s, V, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = U.cols(0, target - 1),
+      Rcpp::Named("d") = s.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+    );
+  }
+
+  arma::uword l = static_cast<arma::uword>(std::max(work, std::max(k + 7, 8)));
+  l = std::min<arma::uword>(l, max_rank);
+
+  arma::fmat U(A.n_rows, l, arma::fill::zeros);
+  arma::fmat V(A.n_cols, l, arma::fill::zeros);
+  arma::fmat B(l, l, arma::fill::zeros);
+
+  arma::fmat omega = gaussian_matrix_float(A.n_cols, 1, seed);
+  arma::fvec v = omega.col(0);
+  float vnorm = arma::norm(v, 2);
+  if (!std::isfinite(vnorm) || vnorm <= 0.0f) {
+    v.fill(0.0f);
+    v(0) = 1.0f;
+  } else {
+    v /= vnorm;
+  }
+  arma::fvec u_prev(A.n_rows, arma::fill::zeros);
+  float beta_prev = 0.0f;
+  arma::uword actual = 0;
+
+  for (arma::uword j = 0; j < l; ++j) {
+    arma::fvec u = A * v - beta_prev * u_prev;
+    if (j > 0) {
+      arma::fmat Uprev = U.cols(0, j - 1);
+      u -= Uprev * (Uprev.t() * u);
+    }
+    float alpha = arma::norm(u, 2);
+    if (!std::isfinite(alpha) || alpha <= 1e-7f) {
+      break;
+    }
+    u /= alpha;
+    U.col(j) = u;
+    V.col(j) = v;
+    B(j, j) = alpha;
+    actual = j + 1;
+
+    arma::fvec w = A.t() * u - alpha * v;
+    arma::fmat Vprev = V.cols(0, j);
+    w -= Vprev * (Vprev.t() * w);
+    float beta = arma::norm(w, 2);
+    if (!std::isfinite(beta) || beta <= 1e-7f || j + 1 >= l) {
+      break;
+    }
+    B(j, j + 1) = beta;
+    v = w / beta;
+    u_prev = u;
+    beta_prev = beta;
+  }
+
+  if (actual < target) {
+    arma::fmat Ue;
+    arma::fvec se;
+    arma::fmat Ve;
+    arma::svd_econ(Ue, se, Ve, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = Ue.cols(0, target - 1),
+      Rcpp::Named("d") = se.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : Ve.cols(0, target - 1)
+    );
+  }
+
+  arma::fmat Usmall;
+  arma::fvec s;
+  arma::fmat Vsmall;
+  arma::fmat Bsmall = B.submat(0, 0, actual - 1, actual - 1);
+  arma::svd_econ(Usmall, s, Vsmall, Bsmall, left_only ? "left" : "both");
+  arma::fmat Uout = U.cols(0, actual - 1) * Usmall.cols(0, target - 1);
+  arma::fmat Vout;
+  if (!left_only) {
+    Vout = V.cols(0, actual - 1) * Vsmall.cols(0, target - 1);
+  }
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = Uout,
+    Rcpp::Named("d") = s.subvec(0, target - 1),
+    Rcpp::Named("v") = left_only ? arma::fmat() : Vout
+  );
+}
+
+Rcpp::List irlba_float32_metal(const arma::fmat& A,
+                               int k,
+                               int work,
+                               unsigned int seed,
+                               bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  if (target < 1) {
+    return Rcpp::List::create(
+      Rcpp::Named("u") = arma::fmat(),
+      Rcpp::Named("d") = arma::fvec(),
+      Rcpp::Named("v") = arma::fmat()
+    );
+  }
+  if (target >= max_rank || max_rank < 6) {
+    arma::fmat U;
+    arma::fvec s;
+    arma::fmat V;
+    arma::svd_econ(U, s, V, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = U.cols(0, target - 1),
+      Rcpp::Named("d") = s.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+    );
+  }
+
+  arma::uword l = static_cast<arma::uword>(std::max(work, std::max(k + 7, 8)));
+  l = std::min<arma::uword>(l, max_rank);
+  arma::fmat U(A.n_rows, l, arma::fill::zeros);
+  arma::fmat V(A.n_cols, l, arma::fill::zeros);
+  arma::fmat B(l, l, arma::fill::zeros);
+
+  arma::fmat omega = gaussian_matrix_float(A.n_cols, 1, seed);
+  arma::fvec v = omega.col(0);
+  float vnorm = arma::norm(v, 2);
+  if (!std::isfinite(vnorm) || vnorm <= 0.0f) {
+    v.fill(0.0f);
+    v(0) = 1.0f;
+  } else {
+    v /= vnorm;
+  }
+  arma::fvec u_prev(A.n_rows, arma::fill::zeros);
+  float beta_prev = 0.0f;
+  arma::uword actual = 0;
+
+  for (arma::uword j = 0; j < l; ++j) {
+    arma::fmat vmat(v.n_elem, 1);
+    vmat.col(0) = v;
+    arma::fvec u = fastpls_svd::metal_matrix_multiply_float(A, vmat, false, false).col(0) -
+      beta_prev * u_prev;
+    if (j > 0) {
+      arma::fmat Uprev = U.cols(0, j - 1);
+      u -= Uprev * (Uprev.t() * u);
+    }
+    float alpha = arma::norm(u, 2);
+    if (!std::isfinite(alpha) || alpha <= 1e-7f) {
+      break;
+    }
+    u /= alpha;
+    U.col(j) = u;
+    V.col(j) = v;
+    B(j, j) = alpha;
+    actual = j + 1;
+
+    arma::fmat umat(u.n_elem, 1);
+    umat.col(0) = u;
+    arma::fvec w = fastpls_svd::metal_matrix_multiply_float(A, umat, true, false).col(0) -
+      alpha * v;
+    arma::fmat Vprev = V.cols(0, j);
+    w -= Vprev * (Vprev.t() * w);
+    float beta = arma::norm(w, 2);
+    if (!std::isfinite(beta) || beta <= 1e-7f || j + 1 >= l) {
+      break;
+    }
+    B(j, j + 1) = beta;
+    v = w / beta;
+    u_prev = u;
+    beta_prev = beta;
+  }
+
+  if (actual < target) {
+    return irlba_float32(A, k, work, seed, left_only);
+  }
+
+  arma::fmat Usmall;
+  arma::fvec s;
+  arma::fmat Vsmall;
+  arma::fmat Bsmall = B.submat(0, 0, actual - 1, actual - 1);
+  arma::svd_econ(Usmall, s, Vsmall, Bsmall, left_only ? "left" : "both");
+  arma::fmat Uout = U.cols(0, actual - 1) * Usmall.cols(0, target - 1);
+  arma::fmat Vout;
+  if (!left_only) {
+    Vout = V.cols(0, actual - 1) * Vsmall.cols(0, target - 1);
+  }
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = Uout,
+    Rcpp::Named("d") = s.subvec(0, target - 1),
+    Rcpp::Named("v") = left_only ? arma::fmat() : Vout
+  );
+}
+
+Rcpp::List truncated_svd_float32(const arma::fmat& A,
+                                 int k,
+                                 int svd_method,
+                                 int rsvd_oversample,
+                                 int rsvd_power,
+                                 unsigned int seed,
+                                 bool left_only) {
+  if (svd_method == 1) {
+    return irlba_float32(A, k, 0, seed, left_only);
+  }
+  return rsvd_float32(A, k, rsvd_oversample, rsvd_power, seed, left_only);
+}
+
+arma::fmat rsvd_sample_float32_metal(const arma::fmat& A,
+                                     int l,
+                                     int power_iters,
+                                     unsigned int seed,
+                                     arma::fmat* omega_out);
+
+Rcpp::List rsvd_float32_metal(const arma::fmat& A,
+                              int k,
+                              int oversample,
+                              int power_iters,
+                              unsigned int seed,
+                              bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  const arma::uword l = std::min<arma::uword>(
+    max_rank,
+    target + static_cast<arma::uword>(std::max(oversample, 0))
+  );
+  if (target < 1) {
+    return Rcpp::List::create(
+      Rcpp::Named("u") = arma::fmat(),
+      Rcpp::Named("d") = arma::fvec(),
+      Rcpp::Named("v") = arma::fmat()
+    );
+  }
+  if (l >= max_rank || max_rank < 6) {
+    arma::fmat U;
+    arma::fvec s;
+    arma::fmat V;
+    arma::svd_econ(U, s, V, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = U.cols(0, target - 1),
+      Rcpp::Named("d") = s.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+    );
+  }
+
+  arma::fmat Omega;
+  arma::fmat Y = rsvd_sample_float32_metal(
+    A,
+    static_cast<int>(l),
+    power_iters,
+    seed,
+    &Omega
+  );
+  (void) Omega;
+
+  arma::fmat Q;
+  arma::fmat R;
+  arma::qr_econ(Q, R, Y);
+  arma::fmat Bt = fastpls_svd::metal_matrix_multiply_float(A, Q, true, false);
+  arma::fmat B = Bt.t();
+  arma::fmat Uhat;
+  arma::fvec s;
+  arma::fmat V;
+  arma::svd_econ(Uhat, s, V, B, left_only ? "left" : "both");
+  arma::fmat U = Q * Uhat;
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = U.cols(0, target - 1),
+    Rcpp::Named("d") = s.subvec(0, target - 1),
+    Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+  );
+}
+
+arma::fmat rsvd_sample_float32_cuda(const arma::fmat& A,
+                                    int l,
+                                    int power_iters,
+                                    unsigned int seed,
+                                    arma::fmat* omega_out);
+
+Rcpp::List rsvd_float32_cuda(const arma::fmat& A,
+                             int k,
+                             int oversample,
+                             int power_iters,
+                             unsigned int seed,
+                             bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  const arma::uword l = std::min<arma::uword>(
+    max_rank,
+    target + static_cast<arma::uword>(std::max(oversample, 0))
+  );
+  if (target < 1) {
+    return Rcpp::List::create(
+      Rcpp::Named("u") = arma::fmat(),
+      Rcpp::Named("d") = arma::fvec(),
+      Rcpp::Named("v") = arma::fmat()
+    );
+  }
+  if (l >= max_rank || max_rank < 6) {
+    arma::fmat U;
+    arma::fvec s;
+    arma::fmat V;
+    arma::svd_econ(U, s, V, A, left_only ? "left" : "both");
+    return Rcpp::List::create(
+      Rcpp::Named("u") = U.cols(0, target - 1),
+      Rcpp::Named("d") = s.subvec(0, target - 1),
+      Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+    );
+  }
+
+  arma::fmat Omega;
+  arma::fmat Y = rsvd_sample_float32_cuda(
+    A,
+    static_cast<int>(l),
+    power_iters,
+    seed,
+    &Omega
+  );
+  (void) Omega;
+
+  arma::fmat Q;
+  arma::fmat R;
+  arma::qr_econ(Q, R, Y);
+
+  // The large range-finder products above stay in float32 CUDA. The projected
+  // matrix is only l x ncol(A), so forming the small SVD on host keeps the
+  // implementation portable while preserving the float32 operator path.
+  arma::fmat B = Q.t() * A;
+  arma::fmat Uhat;
+  arma::fvec s;
+  arma::fmat V;
+  arma::svd_econ(Uhat, s, V, B, left_only ? "left" : "both");
+  arma::fmat U = Q * Uhat;
+
+  return Rcpp::List::create(
+    Rcpp::Named("u") = U.cols(0, target - 1),
+    Rcpp::Named("d") = s.subvec(0, target - 1),
+    Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
+  );
+}
+
+Rcpp::List truncated_svd_float32_backend(const arma::fmat& A,
+                                         int k,
+                                         int backend,
+                                         int svd_method,
+                                         int rsvd_oversample,
+                                         int rsvd_power,
+                                         unsigned int seed,
+                                         bool left_only) {
+  if (backend == 2) {
+    if (!fastpls_svd::has_metal_backend()) {
+      Rcpp::stop("backend = 'metal' requires Apple Metal support");
+    }
+    if (svd_method == 1) {
+      return irlba_float32_metal(A, k, 0, seed, left_only);
+    }
+    return rsvd_float32_metal(A, k, rsvd_oversample, rsvd_power, seed, left_only);
+  }
+  if (backend == 1) {
+    if (svd_method == 1) {
+      Rcpp::stop("float32 CUDA currently supports method = 'rsvd'; use backend = 'cpu' for float32 irlba");
+    }
+    return rsvd_float32_cuda(A, k, rsvd_oversample, rsvd_power, seed, left_only);
+  }
+  if (backend == 0) {
+    return truncated_svd_float32(A, k, svd_method, rsvd_oversample, rsvd_power, seed, left_only);
+  }
+  Rcpp::stop("float32 SVD currently supports backend = 'cpu', 'cuda', or 'metal'");
+}
+
+arma::fmat rsvd_sample_float32_cuda(const arma::fmat& A,
+                                    int l,
+                                    int power_iters,
+                                    unsigned int seed,
+                                    arma::fmat* omega_out = nullptr) {
+  if (l < 1) {
+    Rcpp::stop("l must be positive");
+  }
+  arma::fmat Omega = gaussian_matrix_float(A.n_cols, static_cast<arma::uword>(l), seed);
+  arma::fmat Y(A.n_rows, static_cast<arma::uword>(l), arma::fill::zeros);
+  fastpls_svd::cuda_rsvd_sample_y_float(
+    A.memptr(),
+    static_cast<int>(A.n_rows),
+    static_cast<int>(A.n_cols),
+    Omega.memptr(),
+    l,
+    std::max(power_iters, 0),
+    Y.memptr()
+  );
+  if (omega_out != nullptr) {
+    *omega_out = Omega;
+  }
+  return Y;
+}
+
+arma::fmat rsvd_sample_float32_metal(const arma::fmat& A,
+                                     int l,
+                                     int power_iters,
+                                     unsigned int seed,
+                                     arma::fmat* omega_out = nullptr) {
+  if (l < 1) {
+    Rcpp::stop("l must be positive");
+  }
+  arma::fmat Omega = gaussian_matrix_float(A.n_cols, static_cast<arma::uword>(l), seed);
+  arma::fmat Y = fastpls_svd::metal_matrix_multiply_float(A, Omega, false, false);
+  const int q = std::max(power_iters, 0);
+  for (int i = 0; i < q; ++i) {
+    arma::fmat Z = fastpls_svd::metal_matrix_multiply_float(A, Y, true, false);
+    Y = fastpls_svd::metal_matrix_multiply_float(A, Z, false, false);
+  }
+  if (omega_out != nullptr) {
+    *omega_out = Omega;
+  }
+  return Y;
+}
+
+Rcpp::List fmat_list_to_bits(const std::vector<arma::fmat>& xs, const arma::ivec& ncomp) {
+  Rcpp::List out(xs.size());
+  Rcpp::CharacterVector names(xs.size());
+  for (std::size_t i = 0; i < xs.size(); ++i) {
+    out[i] = fmat_to_float32_bits(xs[i]);
+    names[i] = std::string("ncomp=") + std::to_string(ncomp(static_cast<arma::uword>(i)));
+  }
+  out.attr("names") = names;
+  return out;
+}
+
+} // namespace
+
+// [[Rcpp::export]]
+Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP,
+                                        int l,
+                                        int power_iters,
+                                        int seed) {
+  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
+  arma::fmat Omega;
+  arma::fmat Y = rsvd_sample_float32_cuda(
+    A,
+    l,
+    power_iters,
+    static_cast<unsigned int>(seed),
+    &Omega
+  );
+  return Rcpp::List::create(
+    Rcpp::Named("Y") = fmat_to_float32_bits(Y),
+    Rcpp::Named("Omega") = fmat_to_float32_bits(Omega)
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP,
+                                             SEXP BSEXP,
+                                             bool transpose_left = false,
+                                             bool transpose_right = false) {
+  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
+  arma::fmat B = float32_bits_to_fmat(BSEXP, "B");
+  arma::fmat C = fastpls_svd::metal_matrix_multiply_float(
+    A,
+    B,
+    transpose_left,
+    transpose_right
+  );
+  return Rcpp::List::create(Rcpp::Named("C") = fmat_to_float32_bits(C));
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP,
+                                         int l,
+                                         int power_iters,
+                                         int seed) {
+  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
+  arma::fmat Omega;
+  arma::fmat Y = rsvd_sample_float32_metal(
+    A,
+    l,
+    power_iters,
+    static_cast<unsigned int>(seed),
+    &Omega
+  );
+  return Rcpp::List::create(
+    Rcpp::Named("Y") = fmat_to_float32_bits(Y),
+    Rcpp::Named("Omega") = fmat_to_float32_bits(Omega)
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_irlba_cpp(SEXP ASEXP,
+                                   int k,
+                                   int seed,
+                                   bool left_only = false) {
+  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
+  Rcpp::List sv = irlba_float32_metal(
+    A,
+    k,
+    0,
+    static_cast<unsigned int>(seed),
+    left_only
+  );
+  arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+  arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
+  arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
+  return Rcpp::List::create(
+    Rcpp::Named("u") = fmat_to_float32_bits(U),
+    Rcpp::Named("d") = d,
+    Rcpp::Named("v") = left_only ?
+      Rcpp::RObject(R_NilValue) :
+      Rcpp::RObject(fmat_to_float32_bits(V))
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List fastsvd_float32_cpp(SEXP ASEXP,
+                               int k,
+                               int backend,
+                               int svd_method,
+                               int rsvd_oversample,
+                               int rsvd_power,
+                               int seed,
+                               bool left_only = false) {
+  arma::fmat A = float32_bits_to_fmat(ASEXP, "x");
+  Rcpp::List sv = truncated_svd_float32_backend(
+    A,
+    k,
+    backend,
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    static_cast<unsigned int>(seed),
+    left_only
+  );
+
+  arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+  arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
+  arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
+  return Rcpp::List::create(
+    Rcpp::Named("u") = fmat_to_float32_bits(U),
+    Rcpp::Named("d") = d,
+    Rcpp::Named("v") = left_only ?
+      Rcpp::RObject(R_NilValue) :
+      Rcpp::RObject(fmat_to_float32_bits(V))
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List pls_float32_cpu_cpp(
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
+  arma::ivec ncomp,
+  int scaling,
+  bool fit,
+  int method,
+  int backend,
+  int svd_method,
+  int rsvd_oversample,
+  int rsvd_power,
+  int seed
+) {
+  arma::fmat Xtrain = float32_bits_to_fmat(XtrainSEXP, "Xtrain");
+  arma::fmat Ytrain = float32_bits_to_fmat(YtrainSEXP, "Ytrain");
+  if (Xtrain.n_rows != Ytrain.n_rows) {
+    Rcpp::stop("Xtrain and Ytrain must have the same number of rows");
+  }
+  if (ncomp.n_elem < 1) {
+    Rcpp::stop("ncomp must contain at least one value");
+  }
+  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+    if (ncomp(i) < 1) ncomp(i) = 1;
+  }
+  if (method == 1) {
+    const int rank_cap = static_cast<int>(std::min(Xtrain.n_cols, Ytrain.n_cols));
+    for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
+      if (ncomp(i) > rank_cap) ncomp(i) = rank_cap;
+    }
+  }
+
+  const int max_ncomp = arma::max(ncomp);
+  const int length_ncomp = static_cast<int>(ncomp.n_elem);
+  const int n = static_cast<int>(Xtrain.n_rows);
+  const int p = static_cast<int>(Xtrain.n_cols);
+  const int m = static_cast<int>(Ytrain.n_cols);
+
+  arma::frowvec mX(p, arma::fill::zeros);
+  if (scaling < 3) {
+    mX = arma::mean(Xtrain, 0);
+    Xtrain.each_row() -= mX;
+  }
+  arma::frowvec vX(p, arma::fill::ones);
+  if (scaling == 2) {
+    vX = float_col_sd(Xtrain);
+    Xtrain.each_row() /= vX;
+  }
+  arma::frowvec mY = arma::mean(Ytrain, 0);
+  Ytrain.each_row() -= mY;
+
+  arma::fmat S = Xtrain.t() * Ytrain;
+  arma::fmat Rmat(p, max_ncomp, arma::fill::zeros);
+  arma::fmat Qmat(m, max_ncomp, arma::fill::zeros);
+  arma::fvec R2Y(length_ncomp, arma::fill::value(NA_REAL));
+  std::vector<arma::fmat> Yfit_vec(length_ncomp);
+  std::vector<arma::fmat> Wlat_vec(length_ncomp);
+
+  if (method == 1) {
+    Rcpp::List sv = truncated_svd_float32_backend(
+      S,
+      max_ncomp,
+      backend,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      static_cast<unsigned int>(seed),
+      false
+    );
+    arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+    arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
+    arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
+    Rmat.cols(0, U.n_cols - 1) = U;
+    Qmat.cols(0, V.n_cols - 1) = V;
+
+    arma::fmat Ttrain = Xtrain * U;
+    arma::fmat G = Ttrain.t() * Ttrain;
+    for (int i = 0; i < length_ncomp; ++i) {
+      const int k = ncomp(i);
+      arma::fmat D(k, k, arma::fill::zeros);
+      for (int j = 0; j < k; ++j) D(j, j) = d(j);
+      arma::fmat Ck = arma::solve(G.submat(0, 0, k - 1, k - 1), D);
+      arma::fmat Wk = Ck * V.cols(0, k - 1).t();
+      Wlat_vec[static_cast<std::size_t>(i)] = Wk;
+      if (fit) {
+        arma::fmat yf = Ttrain.cols(0, k - 1) * Wk;
+        R2Y(i) = rq_float32(Ytrain, yf);
+        yf.each_row() += mY;
+        Yfit_vec[static_cast<std::size_t>(i)] = yf;
+      }
+    }
+    Rcpp::RObject Yfit_obj = fit ?
+      Rcpp::RObject(fmat_list_to_bits(Yfit_vec, ncomp)) :
+      Rcpp::RObject(R_NilValue);
+
+    return Rcpp::List::create(
+      Rcpp::Named("R") = fmat_to_float32_bits(Rmat),
+      Rcpp::Named("Q") = fmat_to_float32_bits(Qmat),
+      Rcpp::Named("Ttrain") = fmat_to_float32_bits(Ttrain),
+      Rcpp::Named("W_latent") = fmat_list_to_bits(Wlat_vec, ncomp),
+      Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(mX)),
+      Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(vX)),
+      Rcpp::Named("mY") = fmat_to_float32_bits(arma::fmat(mY)),
+      Rcpp::Named("p") = p,
+      Rcpp::Named("m") = m,
+      Rcpp::Named("ncomp") = ncomp,
+      Rcpp::Named("Yfit") = Yfit_obj,
+      Rcpp::Named("R2Y") = R2Y,
+      Rcpp::Named("pls_method") = "plssvd"
+    );
+  }
+
+  arma::fmat Vmat(p, max_ncomp, arma::fill::zeros);
+  arma::fmat Yfit_cur(n, m, arma::fill::zeros);
+  int out_idx = 0;
+  for (int a = 0; a < max_ncomp; ++a) {
+    Rcpp::List sv = truncated_svd_float32_backend(
+      S,
+      1,
+      backend,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      static_cast<unsigned int>(seed + a),
+      true
+    );
+    arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+    if (U.n_cols < 1) break;
+    arma::fvec rr = U.col(0);
+    arma::fvec tt = Xtrain * rr;
+    const float tnorm = arma::norm(tt, 2);
+    if (!std::isfinite(tnorm) || tnorm <= 0.0f) break;
+    tt /= tnorm;
+    rr /= tnorm;
+    arma::fvec pp = Xtrain.t() * tt;
+    arma::fvec qq = Ytrain.t() * tt;
+    arma::fvec vv = pp;
+    if (a > 0) {
+      arma::fmat Vprev = Vmat.cols(0, a - 1);
+      vv -= Vprev * (Vprev.t() * pp);
+      vv -= Vprev * (Vprev.t() * vv);
+    }
+    const float vnorm = arma::norm(vv, 2);
+    if (!std::isfinite(vnorm) || vnorm <= 0.0f) break;
+    vv /= vnorm;
+    S -= vv * (vv.t() * S);
+    Rmat.col(a) = rr;
+    Qmat.col(a) = qq;
+    Vmat.col(a) = vv;
+    if (fit) {
+      Yfit_cur += tt * qq.t();
+    }
+    while (out_idx < length_ncomp && ncomp(out_idx) == a + 1) {
+      if (fit) {
+        R2Y(out_idx) = rq_float32(Ytrain, Yfit_cur);
+        arma::fmat yf = Yfit_cur;
+        yf.each_row() += mY;
+        Yfit_vec[static_cast<std::size_t>(out_idx)] = yf;
+      }
+      ++out_idx;
+    }
+  }
+  Rcpp::RObject Yfit_obj = fit ?
+    Rcpp::RObject(fmat_list_to_bits(Yfit_vec, ncomp)) :
+    Rcpp::RObject(R_NilValue);
+
+  return Rcpp::List::create(
+    Rcpp::Named("P") = R_NilValue,
+    Rcpp::Named("R") = fmat_to_float32_bits(Rmat),
+    Rcpp::Named("Q") = fmat_to_float32_bits(Qmat),
+    Rcpp::Named("Ttrain") = R_NilValue,
+    Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(mX)),
+    Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(vX)),
+    Rcpp::Named("mY") = fmat_to_float32_bits(arma::fmat(mY)),
+    Rcpp::Named("p") = p,
+    Rcpp::Named("m") = m,
+    Rcpp::Named("ncomp") = ncomp,
+    Rcpp::Named("Yfit") = Yfit_obj,
+    Rcpp::Named("R2Y") = R2Y,
+    Rcpp::Named("pls_method") = "simpls"
+  );
 }
 
 // [[Rcpp::export]]

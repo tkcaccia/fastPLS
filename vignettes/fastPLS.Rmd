@@ -510,11 +510,13 @@ fit_reg$Q2Y
 ### Float32 Input
 
 `pls()` also accepts predictor and response matrices from the `float` package.
-When a `float::float32` object is supplied, the supported CPU rSVD route keeps
-centering, scaling, cross-products, randomized SVD sketches, latent scores, and
-predictions in 32-bit arithmetic. This is currently available for
-`method = "plssvd"` or `method = "simpls"` with `backend = "cpu"` and
-`svd.method = "rsvd"`. Unsupported combinations stop with an error rather than
+When a `float::float32` object is supplied, the float32 route keeps centering,
+scaling, cross-products, low-rank SVD steps, latent scores, and predictions in
+32-bit arithmetic. This is currently available for `method = "plssvd"` or
+`method = "simpls"`. CPU and Metal support `svd.method = "rsvd"` or
+`svd.method = "irlba"`, while CUDA supports float32 randomized SVD. For
+classification, float32 models support `classifier = "argmax"`, `classifier = "lda"`, and
+`classifier = "cknn"`. Unsupported combinations stop with an error rather than
 silently converting the data to double.
 
 ```{r}
@@ -525,8 +527,7 @@ fit_reg32 <- pls(
   Yreg32,
   float::fl(as.matrix(Xreg_test)),
   float::fl(matrix(Ytest_reg, ncol = 1)),
-  ncomp = 1:2,
-  return_variance = FALSE
+  ncomp = 1:2
 )
 fit_reg32$Q2Y
 ```

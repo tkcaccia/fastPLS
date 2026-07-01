@@ -13,6 +13,30 @@ transformy <- function(y) {
     .Call(`_fastPLS_transformy`, y)
 }
 
+cuda_float32_rsvd_sample_cpp <- function(ASEXP, l, power_iters, seed) {
+    .Call(`_fastPLS_cuda_float32_rsvd_sample_cpp`, ASEXP, l, power_iters, seed)
+}
+
+metal_float32_matrix_multiply_cpp <- function(ASEXP, BSEXP, transpose_left = FALSE, transpose_right = FALSE) {
+    .Call(`_fastPLS_metal_float32_matrix_multiply_cpp`, ASEXP, BSEXP, transpose_left, transpose_right)
+}
+
+metal_float32_rsvd_sample_cpp <- function(ASEXP, l, power_iters, seed) {
+    .Call(`_fastPLS_metal_float32_rsvd_sample_cpp`, ASEXP, l, power_iters, seed)
+}
+
+metal_float32_irlba_cpp <- function(ASEXP, k, seed, left_only = FALSE) {
+    .Call(`_fastPLS_metal_float32_irlba_cpp`, ASEXP, k, seed, left_only)
+}
+
+fastsvd_float32_cpp <- function(ASEXP, k, backend, svd_method, rsvd_oversample, rsvd_power, seed, left_only = FALSE) {
+    .Call(`_fastPLS_fastsvd_float32_cpp`, ASEXP, k, backend, svd_method, rsvd_oversample, rsvd_power, seed, left_only)
+}
+
+pls_float32_cpu_cpp <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
+    .Call(`_fastPLS_pls_float32_cpu_cpp`, XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed)
+}
+
 has_cuda <- function() {
     .Call(`_fastPLS_has_cuda`)
 }

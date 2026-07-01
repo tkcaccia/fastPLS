@@ -17,28 +17,27 @@
 )
 }
 \arguments{
-\item{x}{A \code{fastPLS} model fitted with \code{perm.test = TRUE}, or a
-permutation data frame stored in \code{model$permutation}.}
+\item{x}{A \code{fastPLS} model fitted with \code{perm.test = TRUE}, or a permutation
+data frame stored in \code{model$permutation}.}
 
-\item{ncomp}{Component count to plot. Defaults to the largest component stored
-in the permutation table.}
+\item{ncomp}{Component count to plot. Defaults to the largest component
+stored in the permutation table.}
 
 \item{main, xlab, ylab}{Plot title and axis labels.}
 
 \item{col, pch}{Colors and point symbols for R2 and Q2.}
 
-\item{legend_position}{Legend position passed to \code{legend()}.}
+\item{legend_position}{Legend position passed to \code{\link[=legend]{legend()}}.}
 
-\item{...}{Additional graphical parameters passed to \code{plot()}.}
+\item{...}{Additional graphical parameters passed to \code{\link[=plot]{plot()}}.}
 }
 \value{
 Invisibly returns the plotted permutation data.
 }
 \description{
-Draws the permutation-test diagnostic plot produced by
-\code{pls(..., perm.test = TRUE)}. The x-axis is the correlation between the
-original and permuted response structure; the y-axis is the observed or permuted
-R2/Q2 value. R2 is shown in blue and Q2 in red.
+Draws the permutation-test diagnostic plot produced by \code{pls(..., perm.test = TRUE)}. The x-axis is the correlation between the original and
+permuted response structure; the y-axis is the observed or permuted R2/Q2
+value. R2 is shown in blue and Q2 in red.
 }
 \examples{
 set.seed(1)

@@ -124,6 +124,15 @@ void cuda_rsvd_sample_y(
   int power_iters,
   double* hY
 );
+void cuda_rsvd_sample_y_float(
+  const float* hA,
+  int m,
+  int n,
+  const float* hOmega,
+  int l,
+  int power_iters,
+  float* hY
+);
 bool cuda_rsvd_prefer_block_gpu(int m, int n, int l, int power_iters);
 void cuda_rsvd_set_resident_matrix(
   const double* hA,

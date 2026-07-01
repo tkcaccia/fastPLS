@@ -37,14 +37,9 @@ pls(
 }
 \arguments{
 \item{Xtrain}{Numeric training predictor matrix, or a \code{float::float32}
-predictor matrix for the supported float32 route. Alternatively, a result
-returned by \code{pls.single.cv()}. In that case \code{pls()} refits the selected
-model on the full cross-validation training set and predicts \code{Xtest} using
-\code{best_ncomp} and the selected tuning settings.}
+predictor matrix for the supported float32 route.}
 
-\item{Ytrain}{Training response (numeric or factor). When \code{Xtrain} is a
-\code{pls.single.cv()} result, the second positional argument may be used as
-\code{Xtest}.}
+\item{Ytrain}{Training response (numeric or factor).}
 
 \item{Xtest}{Optional test predictor matrix.}
 
@@ -60,8 +55,6 @@ model on the full cross-validation training set and predicts \code{Xtest} using
 \item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
 \code{rsvd}. Use CUDA or Metal backends for native GPU
 fits where available.}
-
-
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
@@ -105,8 +98,8 @@ explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
 \item{return_loadings}{Compute and store predictor loadings \code{P}. The default
-is \code{FALSE} because \code{P} is mainly used for interpretation/loading plots and
-is not needed for prediction, VIP, or the benchmark pipelines.}
+is \code{FALSE} because most prediction workflows only need the projection
+weights and response-side coefficients.}
 
 \item{proj}{Return projected \code{Ttest} when \code{TRUE}.}
 
@@ -115,9 +108,9 @@ is not needed for prediction, VIP, or the benchmark pipelines.}
 model is refitted, and the permuted test-set \code{Q2Y} path is compared with
 the observed \code{Q2Y} path.}
 
-\item{times}{Number of permutations. For \code{pls()}, the empirical p-value
-for each component is \code{mean(Q2Y_permuted > Q2Y_observed)} and is returned
-in \code{pval}. No +1 correction is applied.}
+\item{times}{Number of permutations. For \code{pls()}, the empirical p-value for
+each component is \code{mean(Q2Y_permuted > Q2Y_observed)} and is returned in
+\code{pval}. No +1 correction is applied.}
 
 \item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
 for CUDA-native fitting, or experimental \code{metal} for Apple Metal
@@ -143,48 +136,77 @@ A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
 summaries were requested. Common fields are:
 \itemize{
-\item \code{P}: predictor loadings, with one column per latent component. By default this is an empty \code{0 x 0} matrix; set \code{return_loadings = TRUE} to compute it for interpretation or loading plots.
+\item \code{P}: predictor loadings, with one column per latent component.
 \item \code{Q}: response loadings or response-side latent coefficients.
-\item \code{R}: predictor weights/rotations used to project new samples into the PLS latent space.
-\item \code{Ttrain}: training latent scores. This is returned when the backend stores scores or when they are needed for fitted values, classifiers, variance summaries, or compact prediction.
-\item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by PLSSVD-style compact prediction when a full coefficient array is avoided.
-\item \code{B}: regression coefficient matrix or coefficient array, when stored. For vector-valued \code{ncomp}, a three-dimensional array may contain the coefficient path for all requested component counts.
-\item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one when no scaling is applied.
+\item \code{R}: predictor weights/rotations used to project new samples into the PLS
+latent space.
+\item \code{Ttrain}: training latent scores. This is returned when the backend stores
+scores or when they are needed for fitted values, classifiers, variance
+summaries, or compact prediction.
+\item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by
+PLSSVD-style compact prediction when a full coefficient array is avoided.
+\item \code{B}: regression coefficient matrix or coefficient array, when stored.
+For vector-valued \code{ncomp}, a three-dimensional array may contain the
+coefficient path for all requested component counts.
+\item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one
+when no scaling is applied.
 \item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
 \item \code{lev}: factor levels used for classification.
-\item \code{Yfit}: fitted training responses or fitted class labels, returned when \code{fit = TRUE}.
-\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE}; otherwise \code{NA} placeholders may be returned for compatibility. Elements are named by component count, for example \code{"ncomp=2"}.
-\item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied to \code{pls()}. For classification this contains predicted factor labels; for regression it contains numeric predictions.
-\item \code{Ypred_index}: integer class indices for classification predictions, when available.
+\item \code{Yfit}: fitted training responses or fitted class labels, returned when
+\code{fit = TRUE}.
+\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE};
+otherwise \code{NA} placeholders may be returned for compatibility. Elements
+are named by component count, for example \code{"ncomp=2"}.
+\item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
+to \code{pls()}. For classification this contains predicted factor labels; for
+regression it contains numeric predictions.
+\item \code{Ypred_index}: integer class indices for classification predictions, when
+available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for factor \code{Ytest}, returned when response scores are available. Elements are named by component count.
-\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when classification predictions are available. Elements are named by component count.
-\item \code{pval}: single-split permutation-test p-values by component, returned when \code{perm.test = TRUE}. Each p-value is the fraction of permuted \code{Q2Y} values larger than the observed \code{Q2Y}.
-\item \code{permutation}: long-format permutation table, returned when \code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the permutation correlation used by \code{plot.permutation()}.
-\item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained}, \code{variance_total}, \code{variance_basis}: predictor-space variance summaries returned when \code{return_variance = TRUE}.
-\item \code{x_variance}, \code{x_variance_explained}, \code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the predictor-space variance summaries.
+\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for
+factor \code{Ytest}, returned when response scores are available. Elements are
+named by component count.
+\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when
+classification predictions are available. Elements are named by component
+count.
+\item \code{pval}: single-split permutation-test p-values by component, returned
+when \code{perm.test = TRUE}. Each p-value is the fraction of permuted
+\code{Q2Y} values larger than the observed \code{Q2Y}.
+\item \code{permutation}: long-format permutation table, returned when
+\code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the
+permutation correlation used by \code{plot.permutation()}.
+\item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained},
+\code{variance_total}, \code{variance_basis}: predictor-space variance summaries
+returned when \code{return_variance = TRUE}.
+\item \code{x_variance}, \code{x_variance_explained},
+\code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the
+predictor-space variance summaries.
 \item \code{inner_model}: fitted inner PLS model used by OPLS.
-\item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine}, \code{xprod_mode}, \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
-\item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific kernel settings and execution metadata.
+\item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine}, \code{xprod_mode},
+\code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
+\item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific
+kernel settings and execution metadata.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
-resolved classifier backend, are retained internally for prediction and plotting
-but are not shown as public output fields.
+resolved classifier backend, are retained internally for prediction and
+plotting but are not shown as public output fields.
 }
 \description{
 Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or
 classification using a selected CPU, CUDA, or Metal backend. The fitted model
 can include predictions for held-out samples, latent scores, fitted values,
 variance summaries, and optional classification heads.
-
-If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as
-\code{float::float32} objects, \code{pls()} uses a float32 route instead of
-converting them to double. In the current implementation this route is
-available for \code{backend = "cpu"}, \code{svd.method = "rsvd"}, and
-\code{method = "plssvd"} or \code{method = "simpls"}. Classification with
-float32 input currently uses \code{classifier = "argmax"}. Unsupported float32
-combinations stop with a clear error rather than silently upcasting to double.
+}
+\details{
+If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as \code{float::float32}
+objects, \code{pls()} uses a float32 route instead of converting them to double.
+In the current implementation this route is available for \code{method = "plssvd"}
+or \code{method = "simpls"}. CPU and Metal support \code{svd.method = "rsvd"} or
+\code{svd.method = "irlba"}; CUDA supports float32 randomized SVD. Classification
+with float32 input supports \code{classifier = "argmax"}, \code{classifier = "lda"},
+and \code{classifier = "cknn"}. Unsupported float32 combinations stop with a clear
+error rather than silently upcasting to double.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])

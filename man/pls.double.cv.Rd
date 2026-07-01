@@ -74,8 +74,7 @@ better, such as \code{Q2Y}, the empirical p-value is
 better, such as RMSD, it is \code{mean(loss_permuted <= loss_observed)}. No +1
 correction is applied.}
 
-\item{runn}{Number of repeated runs. When \code{runn = 1}, repeated-run
-summary fields such as \code{medianQ2Y} and \code{CI95Q2Y} are not returned.}
+\item{runn}{Number of repeated runs.}
 
 \item{kfold_inner}{Inner-fold count, or \code{"loocv"} to leave out one
 constraint group at a time inside each outer training set.}
@@ -94,8 +93,6 @@ sharing the same constraint value are never split across training and test.}
 \item{degree}{Polynomial kernel degree.}
 
 \item{coef0}{Polynomial kernel offset.}
-
-
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
@@ -146,42 +143,39 @@ also be controlled with \code{selection_metric = "auto"}, \code{"accuracy"}, \co
 A list with the following elements:
 \itemize{
 \item \code{results}: list with one element per repeated run. Each run stores
-\code{Ypred}/\code{pred}, the outer \code{fold} assignment,
-\code{best_ncomp} selected in each outer fold, fold-level
-\code{best_parameters}, the complete inner-CV objects in \code{inner},
-run-level \code{metric_name} and \code{metric_value}, and the default
-\code{backend} and \code{method}.
-\item \code{Ypred}: final cross-validated predictions. For classification,
-repeated runs are combined by voting; for regression, numeric predictions are
+\code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
+each outer fold, fold-level \code{best_parameters}, the complete inner-CV
+objects in \code{inner}, run-level \code{metric_name} and \code{metric_value}, and the
+default \code{backend} and \code{method}.
+\item \code{Ypred}: final cross-validated predictions. For classification, repeated
+runs are combined by voting; for regression, numeric predictions are
 averaged across runs.
-\item \code{Q2Y}: one held-out Q2 value per repeated run. For factor responses
-this is calculated on dummy-coded PLS-DA response scores.
-\item \code{R2Y}: one training-fit R2 value per repeated run, averaged across
-the selected outer-fold models.
-\item \code{RMSD}: one held-out RMSD value per repeated run for numeric
-responses; \code{NA} for classification.
+\item \code{Q2Y}: one held-out Q2 value per repeated run. For factor responses this
+is calculated on dummy-coded PLS-DA response scores.
+\item \code{R2Y}: one training-fit R2 value per repeated run, averaged across the
+selected outer-fold models.
+\item \code{RMSD}: one held-out RMSD value per repeated run for numeric responses;
+\code{NA} for classification.
 \item \code{metric_name}: held-out metric used for each repeated run.
-\item \code{bcomp}: most frequently selected component count across outer folds
-and repeated runs.
-\item \code{backend}, \code{method}: default backend and PLS method supplied to
-the call. If vector-valued methods or backends are tuned, selected fold-level
-values are stored in \code{results[[run]]$best_parameters}.
+\item \code{bcomp}: most frequently selected component count across outer folds and
+repeated runs.
+\item \code{backend}, \code{method}: default backend and PLS method supplied to the call.
+If vector-valued methods or backends are tuned, selected fold-level values
+are stored in \code{results[[run]]$best_parameters}.
 \item \code{selection_metric}: criterion used by the inner CV loop.
 \item \code{acc_tot}: classification-only text summary of correctly classified
 samples and percentage accuracy.
 \item \code{conf}: classification-only confusion matrix printed as counts and
 column percentages.
-\item \code{vote_counts}: classification-only vote-count matrix with one row
-per sample and one column per class.
-\item \code{accuracy}: classification-only decoded-label accuracy, one value
-per repeated run.
-\item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y},
-\code{medianRMSD}, \code{CI95RMSD}: repeated-run summaries returned only when
-\code{runn > 1}.
+\item \code{vote_counts}: classification-only vote-count matrix with one row per
+sample and one column per class.
+\item \code{accuracy}: classification-only decoded-label accuracy, one value per
+repeated run.
+\item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y}, \code{medianRMSD},
+\code{CI95RMSD}: repeated-run summaries returned only when \code{runn > 1}.
 \item \code{Q2Ysampled}: permutation median-Q2 values returned when
 \code{perm.test = TRUE}.
-\item \code{p.value}: permutation-test p-value returned when
-\code{perm.test = TRUE}.
+\item \code{p.value}: permutation-test p-value returned when \code{perm.test = TRUE}.
 }
 }
 \description{

@@ -11,6 +11,10 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
                                 const arma::mat& B,
                                 bool transpose_left,
                                 bool transpose_right);
+arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
+                                       const arma::fmat& B,
+                                       bool transpose_left,
+                                       bool transpose_right);
 arma::mat metal_crossprod(const arma::mat& A, const arma::mat& B);
 Rcpp::List metal_simpls_resident(const arma::mat& X,
                                  const arma::mat& Y,
