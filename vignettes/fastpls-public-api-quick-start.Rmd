@@ -542,22 +542,20 @@ predictions in 32-bit arithmetic. This is currently available for
 silently converting the data to double.
 
 ```{r}
-if (requireNamespace("float", quietly = TRUE)) {
-  Xreg32 <- float::fl(as.matrix(Xreg_train))
-  Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
-  fit_reg32 <- pls(
-    Xreg32,
-    Yreg32,
-    float::fl(as.matrix(Xreg_test)),
-    float::fl(matrix(Ytest_reg, ncol = 1)),
-    ncomp = 1:2,
-    method = "simpls",
-    backend = "cpu",
-    svd.method = "rsvd",
-    return_variance = FALSE
-  )
-  fit_reg32$Q2Y
-}
+Xreg32 <- float::fl(as.matrix(Xreg_train))
+Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
+fit_reg32 <- pls(
+  Xreg32,
+  Yreg32,
+  float::fl(as.matrix(Xreg_test)),
+  float::fl(matrix(Ytest_reg, ncol = 1)),
+  ncomp = 1:2,
+  method = "simpls",
+  backend = "cpu",
+  svd.method = "rsvd",
+  return_variance = FALSE
+)
+fit_reg32$Q2Y
 ```
 
 For standard double-precision regression, `Ypred` is a numeric prediction array
