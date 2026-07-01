@@ -25,6 +25,39 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
   expect_false("predict_backend" %in% names(predict(fit, X[1:2, ])))
 })
 
+test_that("float32 detection handles S4 float matrices used in the vignette", {
+  skip_if_not_installed("float")
+  set.seed(12)
+  Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
+  Yreg <- matrix(mtcars$mpg, ncol = 1)
+  idx <- sample(seq_len(nrow(Xreg)), 8)
+  Xreg_train <- Xreg[-idx, , drop = FALSE]
+  Xreg_test <- Xreg[idx, , drop = FALSE]
+  Ytrain_reg <- Yreg[-idx, , drop = FALSE]
+  Ytest_reg <- Yreg[idx, , drop = FALSE]
+
+  Xreg32 <- float::fl(as.matrix(Xreg_train))
+  Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
+  expect_true(methods::is(Xreg32, "float32"))
+  expect_true(.has_float32_input(Xreg32, Yreg32))
+
+  fit_reg32 <- pls(
+    Xreg32,
+    Yreg32,
+    float::fl(as.matrix(Xreg_test)),
+    float::fl(matrix(Ytest_reg, ncol = 1)),
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    return_variance = FALSE
+  )
+
+  expect_equal(attr(fit_reg32, "fastPLS_internal")$precision, "float32")
+  expect_named(fit_reg32$Q2Y, c("ncomp=1", "ncomp=2"))
+  expect_true(all(is.finite(fit_reg32$Q2Y)))
+})
+
 test_that("pls accepts float32 classification input with argmax", {
   skip_if_not_installed("float")
   set.seed(11)

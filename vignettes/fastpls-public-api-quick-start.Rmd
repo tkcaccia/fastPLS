@@ -543,12 +543,12 @@ silently converting the data to double.
 
 ```{r}
 if (requireNamespace("float", quietly = TRUE)) {
-  Xreg32 <- float::fl(Xreg_train)
+  Xreg32 <- float::fl(as.matrix(Xreg_train))
   Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
   fit_reg32 <- pls(
     Xreg32,
     Yreg32,
-    float::fl(Xreg_test),
+    float::fl(as.matrix(Xreg_test)),
     float::fl(matrix(Ytest_reg, ncol = 1)),
     ncomp = 1:2,
     method = "simpls",

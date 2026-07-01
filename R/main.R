@@ -2698,7 +2698,7 @@ print.fastPLS <- function(x, ...) {
 }
 
 .is_float32 <- function(x) {
-  inherits(x, "float32")
+  inherits(x, "float32") || methods::is(x, "float32")
 }
 
 .has_float32_input <- function(...) {
