@@ -1,4 +1,4 @@
-# fastPLS 0.3
+# fastPLS 0.99.0
 
 * Added public PLS, PCA, SVD, prediction, evaluation and cross-validation
   interfaces for CPU, optional CUDA and optional Apple Metal backends.
