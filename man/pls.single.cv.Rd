@@ -53,9 +53,9 @@ each sample is treated as its own group.}
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
 \code{metal}. Multiple values are treated as a tuning grid.}
 
-\item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
-\code{rsvd}. Use CUDA or Metal backends for native GPU
-fits where available.}
+\item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
+randomized SVD for the selected backend, and \code{irlba} uses the bundled CPU
+iterative backend.}
 
 \item{seed}{Random seed used for fold assignment and randomized SVD steps.}
 

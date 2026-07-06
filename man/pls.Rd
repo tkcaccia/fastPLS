@@ -52,9 +52,9 @@ predictor matrix for the supported float32 route.}
 \item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.
 \code{simpls} uses the fastPLS accelerated SIMPLS core.}
 
-\item{svd.method}{SVD algorithm family for compiled CPU fits: \code{irlba} or
-\code{rsvd}. Use CUDA or Metal backends for native GPU
-fits where available.}
+\item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
+randomized SVD for the selected backend, and \code{irlba} uses the bundled CPU
+iterative backend.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on

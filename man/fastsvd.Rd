@@ -40,13 +40,12 @@ implied by \code{nu} and \code{nv}; the final rank is always capped at
 \code{min(nrow(x), ncol(x))}.}
 
 \item{backend}{Compute backend. \code{cpu} runs on the host CPU. \code{cuda}
-dispatches randomized SVD to the CUDA-native backend and requires
-\code{has_cuda()} to be \code{TRUE}. \code{metal} dispatches randomized SVD to
-the Apple Metal backend and requires \code{has_metal()} to be \code{TRUE}.}
+dispatches randomized SVD to a CUDA-capable backend. \code{metal} dispatches
+randomized SVD to the Apple Metal backend.}
 
 \item{method}{SVD algorithm family. \code{irlba} uses the bundled iterative
 IRLBA-style CPU backend and is valid only with \code{backend = cpu}.
-\code{rsvd} uses randomized SVD on the selected backend.}
+\code{rsvd} uses the native fastPLS randomized SVD on the selected backend.}
 
 \item{oversample}{Non-negative oversampling dimension used by randomized SVD.
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the

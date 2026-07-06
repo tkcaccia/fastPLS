@@ -3757,8 +3757,11 @@ List pls_model2_fast_gpu(
   double svds_tol,
   int seed
 ) {
-  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD || !fastpls_svd::has_cuda_backend()) {
-    stop("pls_model2_fast_gpu requires svd.method='cuda_rsvd' with CUDA available");
+  if (!fastpls_svd::has_cuda_backend()) {
+    stop("pls_model2_fast_gpu requires CUDA available");
+  }
+  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD) {
+    stop("pls_model2_fast_gpu requires svd.method='cuda_rsvd'");
   }
 
   const int n = Xtrain.n_rows;
@@ -7017,6 +7020,7 @@ List pls_model1_gpu(
   arma::ivec ncomp,
   int scaling,
   bool fit,
+  int svd_method,
   int rsvd_oversample,
   int rsvd_power,
   double svds_tol,
@@ -7024,6 +7028,9 @@ List pls_model1_gpu(
 ) {
   if (!fastpls_svd::has_cuda_backend()) {
     stop("pls_model1_gpu requires CUDA support");
+  }
+  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD) {
+    stop("pls_model1_gpu requires svd.method='cuda_rsvd'");
   }
 
   const int n = Xtrain.n_rows;
@@ -7059,14 +7066,15 @@ List pls_model1_gpu(
   arma::mat mY = mean(Ytrain, 0);
   Ytrain.each_row() -= mY;
 
-  fastpls_svd::SVDOptions opt;
-  opt.method = fastpls_svd::Method::RSVD;
-  opt.oversample = std::max(rsvd_oversample, 0);
-  opt.power_iters = std::max(rsvd_power, 0);
-  opt.svds_tol = std::max(svds_tol, 0.0);
-  opt.seed = static_cast<unsigned int>(seed);
-  opt.left_only = false;
-  opt.use_full_svd = false;
+  fastpls_svd::SVDOptions opt = fastpls_svd::options_from_method_id(
+    svd_method,
+    rsvd_oversample,
+    rsvd_power,
+    svds_tol,
+    static_cast<unsigned int>(seed),
+    false,
+    false
+  );
 
   fastpls_svd::PLSSVDGPUResult gpu = fastpls_svd::cuda_plssvd_fit(
     Xtrain,
@@ -8251,6 +8259,7 @@ List pls_cv_predict_compiled(
         } else {
           model = pls_model1_gpu(
             fit_input_X(Xtrain), std::move(Ytrain), ncomp, fit_scaling, false,
+            fastpls_svd::SVD_METHOD_CUDA_RSVD,
             rsvd_oversample, rsvd_power, svds_tol, seed + f
           );
         }

@@ -1,0 +1,46 @@
+fastPLS system requirements
+===========================
+
+fastPLS builds and runs in CPU-only mode by default. CUDA and Apple Metal
+support are optional acceleration backends and are not required to install the
+package.
+
+CPU-only installation
+---------------------
+
+No external GPU software is required. Standard R package installation should
+build the CPU implementation on Linux, macOS and Windows.
+
+CUDA installation
+-----------------
+
+CUDA support requires an NVIDIA GPU, a compatible NVIDIA driver and the CUDA
+Toolkit. To request a CUDA build from source, set FASTPLS_USE_CUDA=1 and set
+CUDA_ROOT or CUDA_PATH if the toolkit is not installed in a standard location.
+
+Examples:
+
+  FASTPLS_USE_CUDA=1 CUDA_ROOT=/usr/local/cuda R CMD INSTALL fastPLS
+
+On Windows, CUDA_ROOT can point to a toolkit directory such as:
+
+  C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6
+
+If FASTPLS_USE_CUDA is unset, unavailable CUDA software is ignored and the
+package builds in CPU-only mode. Set FASTPLS_REQUIRE_CUDA=1 only when a missing
+CUDA toolkit should be treated as an installation error.
+
+Apple Metal installation
+------------------------
+
+Metal support is available only on macOS with Apple's developer tools. To
+request a Metal build from source, set:
+
+  FASTPLS_USE_METAL=1
+
+Bioconductor GPU builds
+-----------------------
+
+The package declares optional GPU reliance. Bioconductor builders without GPU
+support should build and test the CPU implementation, while GPU-aware builders
+can exercise CUDA tests when the required hardware and libraries are available.

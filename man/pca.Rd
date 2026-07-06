@@ -25,8 +25,8 @@ are applied to \code{xtest}.}
 \code{cuda} and \code{metal} use the corresponding native randomized-SVD
 backend when available.}
 \item{method}{SVD algorithm family. \code{irlba} is available only with
-\code{backend = cpu}. \code{rsvd} uses randomized SVD on the selected
-backend.}
+\code{backend = cpu}. \code{rsvd} uses native fastPLS randomized SVD on the
+selected backend.}
 \item{...}{Additional arguments passed to \code{\link{fastsvd}}.}
 }
 \value{

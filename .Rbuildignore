@@ -2,6 +2,9 @@
 ^API_AUDIT_NOTE[.]md$
 ^README_DEV[.]md$
 ^\.DS_Store$
+^\.BBSoptions$
+^fastPLS\.BiocCheck$
+^fastPLS\.Rcheck$
 ^\.\.Rcheck$
 ^\.gitignore$
 ^\.git$

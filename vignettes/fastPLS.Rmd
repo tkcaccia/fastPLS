@@ -1,6 +1,6 @@
 ---
 title: "fastPLS Public API and Implementation"
-output: rmarkdown::html_vignette
+output: BiocStyle::html_document
 vignette: >
   %\VignetteIndexEntry{fastPLS Public API and Implementation}
   %\VignetteEngine{knitr::rmarkdown}
@@ -168,7 +168,7 @@ regression models and are not used for numeric responses. The examples in this
 section use the `iris` data for compact classification examples and the bundled
 `colon` and `breast` omics datasets for score plots.
 
-```{r}
+```{r chunk-002}
 library(fastPLS)
 
 set.seed(100)
@@ -188,7 +188,7 @@ implementation, and `classifier` selects the classification head. The default
 classification head is `classifier = "argmax"`, which predicts the class with
 the largest PLS-DA response score.
 
-```{r}
+```{r chunk-003}
 fit_cls <- pls(
   Xtrain,
   Ytrain_cls,
@@ -211,7 +211,7 @@ the predicted class, `rank2` is the next most likely class, and so on. If
 available, `Ypred_top_score` contains the corresponding class scores used to
 create that ranking.
 
-```{r}
+```{r chunk-004}
 fit_cls_train_only <- pls(
   Xtrain,
   Ytrain_cls,
@@ -240,7 +240,7 @@ Use `evaluate()` to summarize predicted class labels or class-score matrices.
 For classification, the complete output includes global metrics, per-class
 metrics, and the confusion matrix.
 
-```{r}
+```{r chunk-005}
 eval_cls <- evaluate(
   observed = Ytest_cls,
   predicted = fit_cls$Ypred[["ncomp=2"]]
@@ -252,7 +252,7 @@ eval_cls
 Rows of the confusion matrix are predicted labels and columns are observed
 labels. The confusion matrix is returned as an ordinary R table.
 
-```{r}
+```{r chunk-006}
 eval_cls$confusion
 ```
 
@@ -262,7 +262,7 @@ first `k` ranked labels. Thus top-1 accuracy is ordinary classification accuracy
 while top-5 accuracy gives credit when the correct class appears among the five
 highest-scoring alternatives.
 
-```{r}
+```{r chunk-007}
 score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
 
 evaluate(
@@ -280,7 +280,7 @@ decoders applied after the PLS model has produced class-response scores or
 latent scores. For regression, leave `classifier` at its default; numeric
 responses are predicted directly as continuous values.
 
-```{r}
+```{r chunk-008}
 fit_cls_plssvd <- pls(
   Xtrain,
   Ytrain_cls,
@@ -303,7 +303,7 @@ For PLS-DA with an LDA prediction head, use `classifier = "lda"`. On systems
 with GPU support, the backend is selected through `backend = "cuda"` or
 `backend = "metal"` where available:
 
-```{r eval = FALSE}
+```{r chunk-009, eval = FALSE}
 fit_cls_lda_gpu <- pls(
   Xtrain,
   Ytrain_cls,
@@ -318,7 +318,7 @@ fit_cls_lda_gpu <- pls(
 
 When a GPU backend is unavailable, the compiled CPU fallback is:
 
-```{r}
+```{r chunk-010}
 fit_cls_lda_cpu <- pls(
   Xtrain,
   Ytrain_cls,
@@ -345,7 +345,7 @@ keeps predictions closer to the global class-centroid ranking; smaller `alpha`
 lets local neighbours dominate the reranking. `top_m` controls how many
 centroid-ranked classes are passed to this reranker.
 
-```{r}
+```{r chunk-011}
 fit_cls_cknn <- pls(
   Xtrain,
   Ytrain_cls,
@@ -371,7 +371,7 @@ The `linear` kernel is equivalent to an ordinary inner-product representation an
 is useful as a fast baseline. The `rbf` kernel uses a radial-basis similarity;
 the `poly` kernel uses polynomial interactions among features.
 
-```{r}
+```{r chunk-012}
 kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
   pls(
     Xtrain, Ytrain_cls, Xtest, Ytest_cls,
@@ -396,7 +396,7 @@ kernel_accuracy
 training scores, or predict with `proj = TRUE` to store test scores. Ellipses can
 be ordinary confidence ellipses or Hotelling T2 ellipses.
 
-```{r fig.width = 5, fig.height = 4}
+```{r chunk-013, fig.width = 5, fig.height = 4}
 plot(fit_cls, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
 ```
 
@@ -475,7 +475,7 @@ OPLS. Regression does not use `classifier = "argmax"`, `classifier = "lda"`, or
 For numeric responses, `pls()` returns continuous predictions and regression
 metrics such as `R2Y`, `Q2Y`, and `RMSD`.
 
-```{r}
+```{r chunk-016}
 set.seed(100)
 Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
 Y_reg <- matrix(mtcars$mpg, ncol = 1)
@@ -492,7 +492,7 @@ The simplest workflow is to provide both the training data and an independent
 test set directly to `pls()`. In this case the fitted object already contains
 test-set predictions and, if `Ytest` is supplied, predictive metrics.
 
-```{r}
+```{r chunk-017}
 fit_reg <- pls(
   Xreg_train,
   Ytrain_reg,
@@ -519,7 +519,7 @@ classification, float32 models support `classifier = "argmax"`, `classifier = "l
 `classifier = "cknn"`. Unsupported combinations stop with an error rather than
 silently converting the data to double.
 
-```{r}
+```{r chunk-018}
 Xreg32 <- float::fl(as.matrix(Xreg_train))
 Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
 fit_reg32 <- pls(
@@ -539,7 +539,7 @@ standard example below, the last array slice corresponds to the largest
 requested component count (`ncomp = 3`). The metric vectors are named by
 component count, for example `fit_reg$Q2Y["ncomp=3"]`.
 
-```{r fig.width=4.8, fig.height=4}
+```{r chunk-019, fig.width=4.8, fig.height=4}
 reg_component <- dim(fit_reg$Ypred)[3L]
 pred_mpg <- fit_reg$Ypred[, , reg_component]
 plot(
@@ -560,7 +560,7 @@ The alternative workflow is to fit the model once without a test set, then call
 independent datasets. `predict()` automatically applies the centering/scaling
 stored in the fitted object.
 
-```{r}
+```{r chunk-020}
 fit_reg_train_only <- pls(
   Xreg_train,
   Ytrain_reg,
@@ -587,7 +587,7 @@ median relative error percentage, RPD, and correlations. If `ytrain` is supplied
 Q2 is calculated relative to the training-set response mean, which is the
 preferred setting for independent test-set evaluation.
 
-```{r}
+```{r chunk-021}
 eval_reg <- evaluate(
   observed = Ytest_reg,
   predicted = pred_mpg,
@@ -602,7 +602,7 @@ eval_reg
 OPLS is accessed through the same `pls()` function with `method = "opls"`. It is
 often used to separate predictive variation from response-orthogonal variation.
 
-```{r}
+```{r chunk-022}
 fit_opls <- pls(
   Xreg_train,
   Ytrain_reg,
@@ -639,7 +639,7 @@ inside each fold.
 In ordinary k-fold CV, samples are split directly into `kfold` folds. The
 example below validates a fixed two-component SIMPLS classifier with five folds.
 
-```{r}
+```{r chunk-023}
 cv_kfold <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -662,7 +662,7 @@ the same patient, giving them the same patient identifier in `constrain` ensures
 that both spectra are placed either in the training set or in the test set,
 never one in each.
 
-```{r}
+```{r chunk-024}
 patient_id <- rep(seq_len(ceiling(nrow(Xtrain) / 2)), each = 2)[seq_len(nrow(Xtrain))]
 
 cv_grouped <- pls.single.cv(
@@ -688,7 +688,7 @@ or replicate group is held out together at each iteration. Numeric `kfold`
 values greater than or equal to the number of constraint groups are also treated
 as leave-one-group-out CV.
 
-```{r}
+```{r chunk-025}
 cv_loocv <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -712,7 +712,7 @@ prediction error for multivariate regression outputs. Predictive arguments can
 also be supplied as vectors to tune a compact grid. Fold-control arguments such
 as `kfold` remain single settings for the whole CV run.
 
-```{r}
+```{r chunk-026}
 cv_opt <- pls.single.cv(
   Xdata = Xreg_train,
   Ydata = Ytrain_reg,
@@ -740,7 +740,7 @@ scores, `accuracy` reports decoded-label accuracy, and `R2Y` is calculated from
 the full-data PLS-DA fit on the dummy-coded response scores. `RMSD` is not used
 for classification.
 
-```{r}
+```{r chunk-027}
 data.frame(
   ncomp = cv_opt$ncomp,
   training_R2Y = round(cv_opt$R2Y, 3),
@@ -761,7 +761,7 @@ be visualized with `plot.permutation()`, where the x-axis is the correlation
 between the original and permuted response structure and the y-axis shows R2
 and Q2.
 
-```{r}
+```{r chunk-028}
 perm_fit <- pls(
   Xtrain = Xreg_train,
   Ytrain = Ytrain_reg,
@@ -785,7 +785,7 @@ median values. For metrics where larger is better, the p-value is
 `mean(Q2Y_permuted >= Q2Y_observed)`; for loss metrics where smaller is better,
 it is `mean(loss_permuted <= loss_observed)`.
 
-```{r}
+```{r chunk-029}
 dcv_perm <- pls.double.cv(
   Xdata = Xreg_train[1:20, ],
   Ydata = Ytrain_reg[1:20],
@@ -807,7 +807,7 @@ The selected CV object can then be passed directly to `pls()`. The final model
 is refitted on the full training set using the selected component count and
 selected tuning settings, then applied to the independent test set.
 
-```{r}
+```{r chunk-030}
 cv_select <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -834,7 +834,7 @@ For example, `kernelpls` can select the best combination of component count and
 kernel setting. The selected values are returned in `best_parameters`, and the
 same CV object can be passed to `pls()` for the final refit.
 
-```{r}
+```{r chunk-031}
 cv_kernel <- pls.single.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -879,7 +879,7 @@ the corresponding outer training set and predicts the outer test fold. Both
 `kfold_inner` and `kfold_outer` can be ordinary fold counts or `"loocv"`, and
 both respect `constrain`.
 
-```{r}
+```{r chunk-032}
 cv_double <- pls.double.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -905,7 +905,7 @@ inner loop chooses the best combination of `ncomp`, `kernel`, and `gamma` for
 `kernelpls`. The outer loop then uses the selected combination for each held-out
 outer fold.
 
-```{r}
+```{r chunk-033}
 cv_double_kernel <- pls.double.cv(
   Xdata = Xtrain,
   Ydata = Ytrain_cls,
@@ -981,18 +981,18 @@ PCA object stores the training centering, scaling, and loading matrix, so the
 same projection can be applied to independent data either during fitting with
 `xtest` or later with `predict()`.
 
-```{r}
+```{r chunk-034}
 s <- fastsvd(Xtrain, ncomp = 3, seed = 104)
 names(s)
 s$d
 ```
 
-```{r fig.width = 5, fig.height = 4}
+```{r chunk-035, fig.width = 5, fig.height = 4}
 pc <- pca(Xtrain, ncomp = 3, xtest = Xtest, seed = 105)
 plot(pc, groups = Ytrain_cls, ellipse = TRUE)
 ```
 
-```{r}
+```{r chunk-036}
 head(pc$scores_test)
 head(predict(pc, Xtest, ncomp = 2))
 ```
@@ -1002,7 +1002,7 @@ is fitted only on the training matrix, the training scores are plotted first,
 and the independent test samples are projected with the stored training
 centering, scaling, and loadings before being overlaid on the same score map.
 
-```{r fig.width = 5, fig.height = 4}
+```{r chunk-037, fig.width = 5, fig.height = 4}
 data(breast)
 
 pp <- pca(breast$X_train)
@@ -1017,12 +1017,12 @@ points(qq, bg = breast$y_test)
 CUDA and Apple Metal are optional. Use `has_cuda()` before selecting
 `backend = "cuda"` and `has_metal()` before selecting `backend = "metal"`.
 
-```{r}
+```{r chunk-038}
 has_cuda()
 has_metal()
 ```
 
-```{r eval = FALSE}
+```{r chunk-039, eval = FALSE}
 if (has_cuda()) {
   fit_gpu <- pls(
     Xtrain,
@@ -1046,7 +1046,7 @@ if (has_cuda()) {
 }
 ```
 
-```{r eval = FALSE}
+```{r chunk-040, eval = FALSE}
 if (has_metal()) {
   fit_metal <- pls(
     Xtrain,
@@ -1075,12 +1075,12 @@ clinical variables; larger values indicate stronger contribution to the fitted
 latent predictive model. These functions are ordinary R-level helpers and are
 independent of CUDA or Metal availability.
 
-```{r}
+```{r chunk-041}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
 dim(C)
 ```
 
-```{r}
+```{r chunk-042}
 vip <- ViP(fit_reg)
 dim(vip)
 ```
@@ -1303,3 +1303,9 @@ blocks that the package implements and accelerates.
 - Wold, S., Sjostrom, M., and Eriksson, L. (2001). PLS-regression: a basic tool
   of chemometrics. *Chemometrics and Intelligent Laboratory Systems*, 58,
   109-130.
+
+## Session Information
+
+```{r session-info}
+sessionInfo()
+```

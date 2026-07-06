@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
-Title: A Fast Implementation of Partial Least Square
-Version: 0.3
-Date: 2026-06-17
+Title: Fast Partial Least Squares for High-Dimensional Data
+Version: 0.3.0
+Date: 2026-07-05
 Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "cre"),email = "stefano.cacciatore@icgeb.org", comment = c(ORCID = "0000-0001-7052-7156")),
              person("Dupe", "Ojo", role = "aut",email = "dupe.ojo@icgeb.org", comment = c(ORCID = "0000-0002-5301-8592")),
              person("Leonardo", "Tenori", role = "aut",email = "tenori@cerm.unifi.it", comment = c(ORCID = "0000-0001-6438-059X")),
@@ -12,17 +12,27 @@ Author: Stefano Cacciatore [aut, cre] (<https://orcid.org/0000-0001-7052-7156>),
   Leonardo Tenori [aut] (<https://orcid.org/0000-0001-6438-059X>),
   Alessia Vignoli [aut] (<https://orcid.org/0000-0003-4038-6596>)
 Maintainer: Stefano Cacciatore <stefano.cacciatore@icgeb.org>
-Description: An implementation in 'Rcpp' / 'RcppArmadillo' of Partial Least Square algorithms. This package includes other functions to perform the double cross-validation and a fast correlation.
+Description: Fast implementations of partial least squares models for
+    high-dimensional regression and classification. The package provides
+    compiled implementations of PLS-SVD, SIMPLS, OPLS and kernel PLS, together
+    with truncated singular value decomposition backends, discriminant
+    classifiers, cross-validation utilities and optional CUDA or Apple Metal
+    acceleration when the required system libraries are available.
 License: GPL-3
-Depends: R (>= 2.10.0), Matrix
+URL: https://github.com/tkcaccia/fastPLS
+BugReports: https://github.com/tkcaccia/fastPLS/issues
+biocViews: Software, DimensionReduction, Classification, Regression,
+    GeneExpression, Metabolomics, SingleCell, GPU
+SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
+    acceleration; optional Apple Metal framework on macOS for Metal
+    acceleration. CPU-only builds do not require GPU software.
+Depends: R (>= 4.6.0), Matrix
 Imports: Rcpp (>= 0.12.17), methods, float
 LinkingTo: Rcpp, RcppArmadillo, Matrix
-Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
+Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3
 Encoding: UTF-8
-LazyData: true
-LazyDataCompression: xz
-RoxygenNote: 7.3.2
 Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.0.0

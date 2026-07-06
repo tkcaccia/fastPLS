@@ -37,11 +37,21 @@ find_cuda_root() {
 cuda_root="$(find_cuda_root || true)"
 cuda_header="${cuda_root}/include/cuda_runtime.h"
 cuda_lib_dir=""
+cuda_include_dir=""
 if [ -n "${cuda_root}" ]; then
+  if [ -f "${cuda_root}/include/cuda_runtime.h" ]; then
+    cuda_include_dir="${cuda_root}/include"
+    cuda_header="${cuda_include_dir}/cuda_runtime.h"
+  elif [ -f "${cuda_root}/targets/x86_64-linux/include/cuda_runtime.h" ]; then
+    cuda_include_dir="${cuda_root}/targets/x86_64-linux/include"
+    cuda_header="${cuda_include_dir}/cuda_runtime.h"
+  fi
   if [ -d "${cuda_root}/lib64" ]; then
     cuda_lib_dir="${cuda_root}/lib64"
   elif [ -d "${cuda_root}/lib" ]; then
     cuda_lib_dir="${cuda_root}/lib"
+  elif [ -d "${cuda_root}/targets/x86_64-linux/lib" ]; then
+    cuda_lib_dir="${cuda_root}/targets/x86_64-linux/lib"
   fi
 fi
 have_cuda=0
@@ -65,7 +75,7 @@ fi
 
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure: CUDA Toolkit found at ${cuda_root}"
-  cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_root}/include"
+  cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_include_dir}"
   cuda_nvcc="${cuda_root}/bin/nvcc"
   if [ -x "${cuda_nvcc}" ]; then
     cuda_flags="${cuda_flags} -DFASTPLS_HAS_CUDA_KERNELS"
@@ -124,7 +134,7 @@ if [ -n "${cuda_objects}" ]; then
   cat >> src/Makevars <<EOF
 
 CUDA_NVCC = ${cuda_root}/bin/nvcc
-CUDA_NVCCFLAGS = -std=c++17 -I${cuda_root}/include -Xcompiler -fPIC
+CUDA_NVCCFLAGS = -std=c++17 --extended-lambda --expt-relaxed-constexpr ${cuda_flags} -Xcompiler -fPIC
 
 %.o: %.cu
 	\$(CUDA_NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@

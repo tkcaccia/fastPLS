@@ -699,8 +699,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_model1_gpu
-List pls_model1_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
-RcppExport SEXP _fastPLS_pls_model1_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+List pls_model1_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model1_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -709,11 +709,12 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model1_gpu(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model1_gpu(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -894,7 +895,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
     {"_fastPLS_pls_model1_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model1_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},
-    {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 9},
+    {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 10},
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
     {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
     {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 27},

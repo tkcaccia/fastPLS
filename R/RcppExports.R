@@ -181,8 +181,8 @@ pls_model2_fast_rsvd_xprod_precision <- function(Xtrain, Ytrain, ncomp, scaling,
     .Call(`_fastPLS_pls_model2_fast_rsvd_xprod_precision`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision)
 }
 
-pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
-    .Call(`_fastPLS_pls_model1_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed)
+pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
+    .Call(`_fastPLS_pls_model1_gpu`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
 pls_model1_gpu_implicit_xprod <- function(Xtrain, Ytrain, ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed) {
