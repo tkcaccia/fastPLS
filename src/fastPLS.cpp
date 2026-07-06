@@ -1687,6 +1687,8 @@ arma::mat transformy(arma::ivec y){
 
 namespace {
 
+#ifndef _WIN32
+
 arma::fmat float32_bits_to_fmat(SEXP xSEXP, const char* name) {
   Rcpp::S4 x(xSEXP);
   Rcpp::IntegerMatrix bits = x.slot("Data");
@@ -2270,7 +2272,11 @@ Rcpp::List fmat_list_to_bits(const std::vector<arma::fmat>& xs, const arma::ivec
   return out;
 }
 
+#endif
+
 } // namespace
+
+#ifndef _WIN32
 
 // [[Rcpp::export]]
 Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP,
@@ -2568,6 +2574,46 @@ Rcpp::List pls_float32_cpu_cpp(
     Rcpp::Named("pls_method") = "simpls"
   );
 }
+
+#else
+
+namespace {
+Rcpp::List windows_float32_unavailable() {
+  Rcpp::stop("Native float32 fastPLS kernels are not available on Windows because the R Windows BLAS/LAPACK toolchain does not provide the required single-precision Fortran symbols; use standard numeric input on Windows or a Linux/macOS/CUDA build for native float32 execution.");
+}
+}
+
+// [[Rcpp::export]]
+Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP, int, int, int) {
+  return windows_float32_unavailable();
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_matrix_multiply_cpp(SEXP, SEXP, bool, bool) {
+  return windows_float32_unavailable();
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_rsvd_sample_cpp(SEXP, int, int, int) {
+  return windows_float32_unavailable();
+}
+
+// [[Rcpp::export]]
+Rcpp::List metal_float32_irlba_cpp(SEXP, int, int, bool) {
+  return windows_float32_unavailable();
+}
+
+// [[Rcpp::export]]
+Rcpp::List fastsvd_float32_cpp(SEXP, int, int, int, int, int, int, bool) {
+  return windows_float32_unavailable();
+}
+
+// [[Rcpp::export]]
+Rcpp::List pls_float32_cpu_cpp(SEXP, SEXP, arma::ivec, int, bool, int, int, int, int, int, int) {
+  return windows_float32_unavailable();
+}
+
+#endif
 
 // [[Rcpp::export]]
 bool has_cuda() {
