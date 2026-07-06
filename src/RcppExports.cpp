@@ -3,6 +3,7 @@
 
 #include "../inst/include/fastPLS.h"
 #include <RcppArmadillo.h>
+#include <RcppEigen.h>
 #include <Rcpp.h>
 
 using namespace Rcpp;
@@ -799,6 +800,56 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fastpls_cpp_core_rsvd
+Rcpp::List fastpls_cpp_core_rsvd(SEXP A, int k, int oversample, int power, int seed, bool use_float);
+RcppExport SEXP _fastPLS_fastpls_cpp_core_rsvd(SEXP ASEXP, SEXP kSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type A(ASEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_rsvd(A, k, oversample, power, seed, use_float));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastpls_cpp_core_plssvd
+Rcpp::List fastpls_cpp_core_plssvd(SEXP X, SEXP Y, int ncomp, int oversample, int power, int seed, bool use_float);
+RcppExport SEXP _fastPLS_fastpls_cpp_core_plssvd(SEXP XSEXP, SEXP YSEXP, SEXP ncompSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_plssvd(X, Y, ncomp, oversample, power, seed, use_float));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastpls_cpp_core_simpls
+Rcpp::List fastpls_cpp_core_simpls(SEXP X, SEXP Y, int ncomp, int oversample, int power, int seed, bool use_float);
+RcppExport SEXP _fastPLS_fastpls_cpp_core_simpls(SEXP XSEXP, SEXP YSEXP, SEXP ncompSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_simpls(X, Y, ncomp, oversample, power, seed, use_float));
+    return rcpp_result_gen;
+END_RCPP
+}
 // has_metal
 bool has_metal();
 RcppExport SEXP _fastPLS_has_metal() {
@@ -899,6 +950,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
     {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
     {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 27},
+    {"_fastPLS_fastpls_cpp_core_rsvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_rsvd, 6},
+    {"_fastPLS_fastpls_cpp_core_plssvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_plssvd, 7},
+    {"_fastPLS_fastpls_cpp_core_simpls", (DL_FUNC) &_fastPLS_fastpls_cpp_core_simpls, 7},
     {"_fastPLS_has_metal", (DL_FUNC) &_fastPLS_has_metal, 0},
     {"_fastPLS_metal_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_matrix_multiply_cpp, 2},
     {"_fastPLS_metal_crossprod_cpp", (DL_FUNC) &_fastPLS_metal_crossprod_cpp, 2},

@@ -27,7 +27,7 @@ SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
     acceleration. CPU-only builds do not require GPU software.
 Depends: R (>= 4.6.0), Matrix
 Imports: Rcpp (>= 0.12.17), methods, float
-LinkingTo: Rcpp, RcppArmadillo, Matrix
+LinkingTo: Rcpp, RcppArmadillo, RcppEigen, Matrix
 Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes

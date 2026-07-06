@@ -197,6 +197,18 @@ pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfo
     .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, k, tau, alpha, top_m, store_predictions, metric_id)
 }
 
+fastpls_cpp_core_rsvd <- function(A, k, oversample = 10L, power = 1L, seed = 1L, use_float = FALSE) {
+    .Call(`_fastPLS_fastpls_cpp_core_rsvd`, A, k, oversample, power, seed, use_float)
+}
+
+fastpls_cpp_core_plssvd <- function(X, Y, ncomp, oversample = 10L, power = 1L, seed = 1L, use_float = FALSE) {
+    .Call(`_fastPLS_fastpls_cpp_core_plssvd`, X, Y, ncomp, oversample, power, seed, use_float)
+}
+
+fastpls_cpp_core_simpls <- function(X, Y, ncomp, oversample = 10L, power = 1L, seed = 1L, use_float = FALSE) {
+    .Call(`_fastPLS_fastpls_cpp_core_simpls`, X, Y, ncomp, oversample, power, seed, use_float)
+}
+
 has_metal <- function() {
     .Call(`_fastPLS_has_metal`)
 }
