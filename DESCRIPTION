@@ -21,8 +21,7 @@ Description: Fast implementations of partial least squares models for
 License: GPL-3
 URL: https://github.com/tkcaccia/fastPLS
 BugReports: https://github.com/tkcaccia/fastPLS/issues
-biocViews: Software, DimensionReduction, Classification, Regression,
-    GeneExpression, Metabolomics, SingleCell, GPU
+biocViews: Software, DimensionReduction, Classification, Regression, GeneExpression, Metabolomics, SingleCell, GPU
 SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
     acceleration; optional Apple Metal framework on macOS for Metal
     acceleration. CPU-only builds do not require GPU software.
