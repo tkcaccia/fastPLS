@@ -1,5 +1,13 @@
+skip_native_float32_on_windows <- function() {
+  skip_if(
+    .Platform$OS.type == "windows",
+    "native float32 kernels are not available on Windows"
+  )
+}
+
 test_that("pls accepts float32 regression input without upcasting predictions", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(10)
   X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")]))
   y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
@@ -28,6 +36,7 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
 
 test_that("float32 detection handles S4 float matrices used in the vignette", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(12)
   Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
   Yreg <- matrix(mtcars$mpg, ncol = 1)
@@ -75,6 +84,7 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
 
 test_that("pls accepts float32 classification input with argmax", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(11)
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
@@ -102,6 +112,7 @@ test_that("pls accepts float32 classification input with argmax", {
 
 test_that("float32 input refuses unsupported non-float routes", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
@@ -120,6 +131,7 @@ test_that("float32 input refuses unsupported non-float routes", {
 
 test_that("float32 input supports CPU IRLBA-style SVD", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(13)
   Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
   Yreg <- matrix(mtcars$mpg, ncol = 1)
@@ -159,6 +171,7 @@ test_that("float32 input supports CPU IRLBA-style SVD", {
 
 test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_cuda(), "CUDA backend not available")
 
   set.seed(123)
@@ -175,6 +188,7 @@ test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
 
 test_that("public CUDA float32 rSVD and PLS routes work when available", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_cuda(), "CUDA backend not available")
 
   set.seed(1234)
@@ -212,6 +226,7 @@ test_that("public CUDA float32 rSVD and PLS routes work when available", {
 
 test_that("Metal float32 matrix multiply stays float32", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
 
   set.seed(124)
@@ -236,6 +251,7 @@ test_that("Metal float32 matrix multiply stays float32", {
 
 test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
 
   set.seed(125)
@@ -253,6 +269,7 @@ test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
 
 test_that("Metal float32 IRLBA-style SVD returns a valid approximation", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
 
   set.seed(126)
@@ -276,6 +293,7 @@ test_that("Metal float32 IRLBA-style SVD returns a valid approximation", {
 
 test_that("fastsvd supports public float32 CPU routes", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(127)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
 
@@ -295,6 +313,7 @@ test_that("fastsvd supports public float32 CPU routes", {
 
 test_that("fastsvd supports public float32 Metal rSVD route", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
   set.seed(128)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
@@ -314,6 +333,7 @@ test_that("fastsvd supports public float32 Metal rSVD route", {
 
 test_that("pca and predict preserve float32 matrices", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(129)
   X <- float::fl(as.matrix(iris[, 1:4]))
   pc <- pca(X, ncomp = 2, backend = "cpu", method = "rsvd", seed = 1)
@@ -329,6 +349,7 @@ test_that("pca and predict preserve float32 matrices", {
 
 test_that("pls supports float32 Metal backend when available", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
 
   set.seed(130)
@@ -354,6 +375,7 @@ test_that("pls supports float32 Metal backend when available", {
 
 test_that("pls supports float32 LDA and cKNN classifiers", {
   skip_if_not_installed("float")
+  skip_native_float32_on_windows()
   set.seed(131)
   idx <- sample(seq_len(nrow(iris)), 30)
   Xtrain <- float::fl(as.matrix(iris[-idx, 1:4]))
