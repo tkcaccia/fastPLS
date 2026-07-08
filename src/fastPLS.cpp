@@ -2584,32 +2584,32 @@ Rcpp::List windows_float32_unavailable() {
 }
 
 // [[Rcpp::export]]
-Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP, int, int, int) {
+Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
   return windows_float32_unavailable();
 }
 
 // [[Rcpp::export]]
-Rcpp::List metal_float32_matrix_multiply_cpp(SEXP, SEXP, bool, bool) {
+Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right) {
   return windows_float32_unavailable();
 }
 
 // [[Rcpp::export]]
-Rcpp::List metal_float32_rsvd_sample_cpp(SEXP, int, int, int) {
+Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
   return windows_float32_unavailable();
 }
 
 // [[Rcpp::export]]
-Rcpp::List metal_float32_irlba_cpp(SEXP, int, int, bool) {
+Rcpp::List metal_float32_irlba_cpp(SEXP ASEXP, int k, int seed, bool left_only) {
   return windows_float32_unavailable();
 }
 
 // [[Rcpp::export]]
-Rcpp::List fastsvd_float32_cpp(SEXP, int, int, int, int, int, int, bool) {
+Rcpp::List fastsvd_float32_cpp(SEXP ASEXP, int k, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed, bool left_only) {
   return windows_float32_unavailable();
 }
 
 // [[Rcpp::export]]
-Rcpp::List pls_float32_cpu_cpp(SEXP, SEXP, arma::ivec, int, bool, int, int, int, int, int, int) {
+Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
   return windows_float32_unavailable();
 }
 

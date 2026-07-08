@@ -3,6 +3,7 @@
 ^README_DEV[.]md$
 ^\.DS_Store$
 ^\.BBSoptions$
+^[.]Rd2pdf
 ^fastPLS\.BiocCheck$
 ^fastPLS\.Rcheck$
 ^\.\.Rcheck$
