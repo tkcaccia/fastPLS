@@ -20,6 +20,8 @@
 ^fastPLS[.]Rcheck$
 ^fastPLS-src[.]Rcheck$
 ^fastPLS_[0-9].*[.]tar[.]gz$
+^fastPLS_reference_manual_.*[.]pdf$
+^fastPLS_vignette_.*[.]html$
 ^src/.*\.(o|so)$
 ^src/symbols[.]rds$
 ^src/Makevars$

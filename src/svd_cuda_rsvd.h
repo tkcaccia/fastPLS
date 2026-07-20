@@ -22,6 +22,21 @@ struct LDAGPUModel {
   arma::rowvec constants;
   Vec priors;
   double ridge = 0.0;
+  double relative_ridge = 0.0;
+};
+
+struct LDAFloatGPUModel {
+  arma::fmat means;
+  arma::fmat linear;
+  arma::frowvec constants;
+  arma::fvec priors;
+  float ridge = 0.0f;
+  float relative_ridge = 0.0f;
+};
+
+struct LDAFloatPrediction {
+  std::vector<int> pred;
+  arma::fmat scores;
 };
 
 SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt);
@@ -111,6 +126,17 @@ Rcpp::List cuda_lda_project_predict(
   const Mat& linear,
   const arma::rowvec& constants,
   bool return_scores
+);
+std::vector<LDAFloatGPUModel> cuda_lda_train_prefix_float(
+  const arma::fmat& Ttrain,
+  const arma::ivec& y,
+  int n_classes,
+  const arma::ivec& ncomp
+);
+LDAFloatPrediction cuda_lda_predict_float(
+  const arma::fmat& Ttest,
+  const arma::fmat& linear,
+  const arma::frowvec& constants
 );
 bool cuda_lda_native_available();
 bool cuda_runtime_available();

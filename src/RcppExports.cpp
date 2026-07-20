@@ -50,6 +50,58 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// lda_train_prefix_float32_cpp
+Rcpp::List lda_train_prefix_float32_cpp(SEXP TtrainSEXP, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp);
+RcppExport SEXP _fastPLS_lda_train_prefix_float32_cpp(SEXP TtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type TtrainSEXP(TtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_prefix_float32_cpp(TtrainSEXP, y, n_classes, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_float32_cpp
+Rcpp::List lda_predict_float32_cpp(SEXP TtestSEXP, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_float32_cpp(SEXP TtestSEXPSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type TtestSEXP(TtestSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cpp(TtestSEXP, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_train_prefix_float32_cuda
+Rcpp::List lda_train_prefix_float32_cuda(SEXP TtrainSEXP, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp);
+RcppExport SEXP _fastPLS_lda_train_prefix_float32_cuda(SEXP TtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type TtrainSEXP(TtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_prefix_float32_cuda(TtrainSEXP, y, n_classes, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_predict_float32_cuda
+Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda);
+RcppExport SEXP _fastPLS_lda_predict_float32_cuda(SEXP TtestSEXPSEXP, SEXP ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type TtestSEXP(TtestSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cuda(TtestSEXP, lda));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cuda_float32_rsvd_sample_cpp
 Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
 RcppExport SEXP _fastPLS_cuda_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
@@ -249,6 +301,21 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
     rcpp_result_gen = Rcpp::wrap(lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge));
+    return rcpp_result_gen;
+END_RCPP
+}
+// lda_train_moments_prefix_cpp
+Rcpp::List lda_train_moments_prefix_cpp(const arma::mat& gram, const arma::mat& class_sums, const arma::vec& counts, int n, const Rcpp::IntegerVector& ncomp);
+RcppExport SEXP _fastPLS_lda_train_moments_prefix_cpp(SEXP gramSEXP, SEXP class_sumsSEXP, SEXP countsSEXP, SEXP nSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type gram(gramSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type class_sums(class_sumsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type counts(countsSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_train_moments_prefix_cpp(gram, class_sums, counts, n, ncomp));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -904,6 +971,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
     {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
+    {"_fastPLS_lda_train_prefix_float32_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cpp, 4},
+    {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 2},
+    {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
+    {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 2},
     {"_fastPLS_cuda_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_cuda_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
     {"_fastPLS_metal_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_metal_float32_rsvd_sample_cpp, 4},
@@ -918,6 +989,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_candidate_knn_predict_cuda", (DL_FUNC) &_fastPLS_candidate_knn_predict_cuda, 10},
     {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
     {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},
+    {"_fastPLS_lda_train_moments_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp, 5},
     {"_fastPLS_lda_project_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp, 7},
     {"_fastPLS_lda_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_cuda, 5},
     {"_fastPLS_lda_project_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cuda, 7},

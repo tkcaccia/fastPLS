@@ -101,3 +101,26 @@ test_that("label-aware PLSSVD model avoids dense response storage", {
   expect_equal(dim(pred$Ypred_top[[1]]), c(length(idx), 5L))
   expect_true(all(as.character(pred$Ypred[[1]]) %in% levels(y)))
 })
+
+test_that("label-aware PLSSVD class sums are invariant to first-seen class order", {
+  set.seed(20260720)
+  y <- factor(rep(paste0("K", 1:3), each = 12))
+  X <- matrix(rnorm(36 * 7), nrow = 36, ncol = 7)
+  X[, 1] <- as.integer(y) * 3 + rnorm(36, sd = 0.05)
+  order <- c(25L, 1L, 13L, sample(setdiff(seq_len(36), c(25L, 1L, 13L))))
+  X <- X[order, , drop = FALSE]
+  y <- y[order]
+
+  fit <- fastPLS:::.plssvd_label_aware_stream_model(
+    X, y, ncomp = 1:2, scaling = 1L, backend = "cpp",
+    block_size = nrow(X)
+  )
+  Xc <- sweep(X, 2L, colMeans(X), "-")
+  Y <- fastPLS:::transformy(y)
+  Yc <- sweep(Y, 2L, colMeans(Y), "-")
+  reference <- svd(crossprod(Xc, Yc), nu = 2L, nv = 2L)
+
+  alignment <- abs(crossprod(fit$R[, 1:2, drop = FALSE],
+                             reference$u[, 1:2, drop = FALSE]))
+  expect_equal(diag(alignment), rep(1, 2), tolerance = 1e-8)
+})

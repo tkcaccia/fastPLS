@@ -53,8 +53,8 @@ predictor matrix for the supported float32 route.}
 \code{simpls} uses the fastPLS accelerated SIMPLS core.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
-randomized SVD for the selected backend, and \code{irlba} uses the bundled CPU
-iterative backend.}
+randomized SVD for the selected backend, and \code{irlba} uses the bundled
+CPU iterative backend.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
@@ -65,7 +65,8 @@ the same PLS score space. The compiled implementation is selected automatically 
 \code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
 where available.}
 
-\item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+\item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
+scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
 
 \item{k}{Number of same-class PLS-score neighbours used by
 the candidate-kNN classifier. Larger values use more neighbours per
@@ -194,9 +195,9 @@ plotting but are not shown as public output fields.
 }
 \description{
 Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or
-classification using a selected CPU, CUDA, or Metal backend. The fitted model
-can include predictions for held-out samples, latent scores, fitted values,
-variance summaries, and optional classification heads.
+classification using a selected CPU, CUDA, or Metal backend. The fitted
+model can include predictions for held-out samples, latent scores, fitted
+values, variance summaries, and optional classification heads.
 }
 \details{
 If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as \code{float::float32}
@@ -207,6 +208,18 @@ or \code{method = "simpls"}. CPU and Metal support \code{svd.method = "rsvd"} or
 with float32 input supports \code{classifier = "argmax"}, \code{classifier = "lda"},
 and \code{classifier = "cknn"}. Unsupported float32 combinations stop with a clear
 error rather than silently upcasting to double.
+
+For latent-space LDA, the pooled covariance is computed as
+\eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
+centered class blocks. Class coefficients are obtained by Cholesky
+factorization and triangular solves, never by explicit covariance
+inversion. Let \eqn{s = \mathrm{trace}(\Sigma)/q}, with \eqn{s=1} when the
+scale is non-finite or non-positive. The implementation tries
+\eqn{\lambda=\rho s} for \eqn{\rho} equal to \code{1e-8}, \code{1e-6},
+\code{1e-5}, \code{1e-4}, \code{1e-3}, and \code{1e-2}, in that order, and
+advances only after Cholesky failure. This is a deterministic numerical
+fallback, not a fitted hyperparameter. Prediction uses
+\eqn{t^T w_c - 0.5\mu_c^T w_c + \log(n_c/n)}.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])

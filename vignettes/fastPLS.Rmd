@@ -1213,10 +1213,20 @@ The LDA head, `classifier = "lda"`, fits a
 regularized linear discriminant model on the PLS latent scores, following the
 linear discriminant principle of Fisher (1936). For each class, fastPLS
 estimates a score-space mean, an empirical prior, and a common pooled
-within-class covariance matrix. A small ridge term scaled by the average
-covariance diagonal is added for numerical stability. Prediction uses the
-standard LDA discriminant score and returns the largest-scoring class. The CUDA
-and Metal routes are selected automatically from `backend` when available.
+within-class covariance matrix. If `T` contains the training scores, the pooled
+covariance is computed without materializing class-centered score blocks as
+`(T^T T - sum_c n_c mu_c mu_c^T) / max(1, n - C)`. The class systems are solved
+by Cholesky factorization and triangular solves; fastPLS neither explicitly
+inverts the covariance nor uses Gauss-Jordan elimination. Numerical recovery is
+deterministic. With `s = trace(Sigma) / q` (or one when this scale is invalid),
+the implementation tries `lambda = rho * s` for `rho = 1e-8, 1e-6, 1e-5,
+1e-4, 1e-3, 1e-2`, increasing the value only when Cholesky fails. Prediction
+uses the standard discriminant
+`t^T w_c - 0.5 mu_c^T w_c + log(n_c / n)`. Float32 inputs keep LDA moments,
+factorization, coefficients, and prediction buffers in float32 on the native
+CPU and CUDA paths. CUDA reuses a persistent device workspace across component
+prefixes and predictions; Metal score projection is followed by the native
+float32 CPU LDA solve.
 
 The cKNN head, `classifier = "cknn"`, is the short public name for the
 candidate-kNN classifier used in large multiclass PLS-DA.

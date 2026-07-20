@@ -57,8 +57,8 @@ replicate stay together in training or test data. The default
 \code{metal}. Multiple values are tuned in the inner loop.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
-randomized SVD for the selected backend, and \code{irlba} uses the bundled CPU
-iterative backend.}
+randomized SVD for the selected backend, and \code{irlba} uses the bundled
+CPU iterative backend.}
 
 \item{seed}{Random seed used for outer/inner fold assignment and randomized
 SVD steps.}
@@ -103,7 +103,8 @@ the same PLS score space. The compiled implementation is selected automatically 
 \code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
 where available.}
 
-\item{lda_ridge}{Relative diagonal ridge added to the pooled LDA covariance.}
+\item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
+scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
 
 \item{k}{Number of same-class PLS-score neighbours used by
 the candidate-kNN classifier. Larger values use more neighbours per

@@ -54,8 +54,8 @@ each sample is treated as its own group.}
 \code{metal}. Multiple values are treated as a tuning grid.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
-randomized SVD for the selected backend, and \code{irlba} uses the bundled CPU
-iterative backend.}
+randomized SVD for the selected backend, and \code{irlba} uses the bundled
+CPU iterative backend.}
 
 \item{seed}{Random seed used for fold assignment and randomized SVD steps.}
 
@@ -78,8 +78,8 @@ are always held out together and are never split across training and test.}
 \item{classifier}{Classification rule for factor responses: \code{"argmax"},
 \code{"lda"}, or \code{"cknn"}. Multiple values are treated as a tuning grid.}
 
-\item{lda_ridge}{Ridge added to the pooled LDA covariance diagonal. Multiple
-values are used only when \code{classifier = "lda"}.}
+\item{lda_ridge}{Retained for source compatibility. LDA regularization is a
+deterministic numerical fallback and is not tuned during cross-validation.}
 
 \item{k}{Number of same-class PLS-score neighbours used by
 candidate-kNN when \code{classifier = "cknn"}.}

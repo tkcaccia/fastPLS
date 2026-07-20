@@ -695,6 +695,15 @@
   isTRUE(dense_y_mb >= threshold)
 }
 
+.rowsum_compact_codes <- function(x, codes, n_groups) {
+  sums <- rowsum(x, group = as.integer(codes), reorder = FALSE)
+  out <- matrix(0, nrow = n_groups, ncol = ncol(x))
+  positions <- suppressWarnings(as.integer(rownames(sums)))
+  valid <- !is.na(positions) & positions >= 1L & positions <= n_groups
+  out[positions[valid], ] <- sums[valid, , drop = FALSE]
+  out
+}
+
 .plssvd_label_aware_stream_model <- function(Xtrain,
                                              y_train,
                                              ncomp,
@@ -755,18 +764,7 @@
     if (as.integer(scaling) == 2L) {
       Xb <- sweep(Xb, 2L, vX, "/", check.margin = FALSE)
     }
-    rs <- rowsum(
-      Xb,
-      group = factor(y_code[rows], levels = seq_len(m)),
-      reorder = FALSE
-    )
-    rs <- as.matrix(rs)
-    if (nrow(rs) != m) {
-      rs_full <- matrix(0, nrow = m, ncol = ncol(Xb))
-      row_pos <- match(rownames(rs), as.character(seq_len(m)))
-      rs_full[row_pos[!is.na(row_pos)], ] <- rs[!is.na(row_pos), , drop = FALSE]
-      rs <- rs_full
-    }
+    rs <- .rowsum_compact_codes(Xb, y_code[rows], m)
     class_sums <- class_sums + t(rs)
   }
   total_sums <- rowSums(class_sums)
@@ -1469,66 +1467,21 @@
       Tb <- sweep(Tb, 2L, offset, "-", check.margin = FALSE)
     }
     gram <- gram + crossprod(Tb)
-    rs <- rowsum(
-      Tb,
-      group = factor(y_codes[rows], levels = seq_len(n_classes)),
-      reorder = FALSE
-    )
-    rs <- as.matrix(rs)
-    if (nrow(rs) != n_classes) {
-      full <- matrix(0, nrow = n_classes, ncol = kmax)
-      pos <- match(rownames(rs), as.character(seq_len(n_classes)))
-      full[pos[!is.na(pos)], ] <- rs[!is.na(pos), , drop = FALSE]
-      rs <- full
-    }
+    rs <- .rowsum_compact_codes(Tb, y_codes[rows], n_classes)
     class_sums <- class_sums + rs
     rm(Xb, Tb, rs)
     if ((start %/% block_size) %% 16L == 0L) gc(FALSE)
   }
 
-  means <- sweep(class_sums, 1L, pmax(as.numeric(counts), 1), "/", check.margin = FALSE)
-  pooled_full <- gram
-  for (c in seq_len(n_classes)) {
-    mu <- means[c, , drop = FALSE]
-    pooled_full <- pooled_full - counts[[c]] * crossprod(mu)
-  }
-  pooled_full <- (pooled_full + t(pooled_full)) / 2
-  pooled_full <- pooled_full / max(1, n - n_classes)
-
   unique_ncomp <- sort(unique(pmax(1L, pmin(ncomp, kmax))))
-  models <- vector("list", length(unique_ncomp))
+  models <- lda_train_moments_prefix_cpp(
+    gram,
+    class_sums,
+    as.numeric(counts),
+    n,
+    unique_ncomp
+  )
   names(models) <- as.character(unique_ncomp)
-  ridge <- as.numeric(ridge)[1L]
-  if (!is.finite(ridge) || ridge < 0) ridge <- 1e-8
-
-  for (i in seq_along(unique_ncomp)) {
-    kk <- unique_ncomp[[i]]
-    pooled <- pooled_full[seq_len(kk), seq_len(kk), drop = FALSE]
-    means_k <- means[, seq_len(kk), drop = FALSE]
-    ridge_scale <- sum(diag(pooled)) / max(1L, kk)
-    if (!is.finite(ridge_scale) || ridge_scale <= 0) ridge_scale <- 1
-    lambda <- ridge * ridge_scale
-    diag(pooled) <- diag(pooled) + lambda
-    inv_cov <- tryCatch(
-      solve(pooled),
-      error = function(e) qr.solve(pooled)
-    )
-    linear <- means_k %*% inv_cov
-    constants <- numeric(n_classes)
-    priors <- as.numeric(counts) / n
-    for (c in seq_len(n_classes)) {
-      constants[[c]] <- -0.5 * drop(means_k[c, , drop = FALSE] %*% t(linear[c, , drop = FALSE])) +
-        log(max(priors[[c]], .Machine$double.xmin))
-    }
-    models[[i]] <- list(
-      means = means_k,
-      inv_cov = inv_cov,
-      linear = linear,
-      constants = matrix(constants, nrow = 1L),
-      priors = matrix(priors, ncol = 1L),
-      ridge = lambda
-    )
-  }
   models
 }
 
@@ -1980,18 +1933,21 @@ print.fastPLS <- function(x, ...) {
       }
       max_k <- max(ncomp)
       Ttest32 <- Xtest %*% object$R[, seq_len(max_k), drop = FALSE]
-      Ttest <- .float32_to_numeric_matrix(Ttest32)
+      use_cuda <- identical(object$lda$train_backend, "float32_cuda_lda") &&
+        isTRUE(has_cuda()) &&
+        exists("lda_predict_float32_cuda", envir = asNamespace("fastPLS"), inherits = FALSE)
+      predict_fun <- if (use_cuda) lda_predict_float32_cuda else lda_predict_float32_cpp
       for (i in seq_along(ncomp)) {
         k <- ncomp[[i]]
         lda_model <- object$lda$models[[as.character(k)]]
         if (is.null(lda_model)) {
           stop(sprintf("No fitted float32 LDA classifier for ncomp=%s", k), call. = FALSE)
         }
-        pred <- lda_predict_cpp(Ttest[, seq_len(k), drop = FALSE], lda_model)
+        pred <- predict_fun(Ttest32[, seq_len(k), drop = FALSE], lda_model)
         labels <- as.integer(pred$pred)
         Ypred[[i]] <- factor(object$lev[labels], levels = object$lev)
         if (!is.null(score_cube)) {
-          score_cube[, , i] <- as.matrix(pred$scores)
+          score_cube[, , i] <- .float32_to_numeric_matrix(.float32_from_bits(pred$scores))
         }
       }
       res <- list(Ypred = Ypred, Q2Y = NULL)
@@ -2954,28 +2910,31 @@ print.fastPLS <- function(x, ...) {
     stop("float32 classifier received labels outside the training levels", call. = FALSE)
   }
   Ttrain32 <- .float32_train_scores(model, Xtrain)
-  Ttrain <- .float32_to_numeric_matrix(Ttrain32)
   unique_ncomp <- sort(unique(as.integer(model$ncomp)))
 
   if (.is_lda_classifier(classifier)) {
-    lda_models <- lda_train_prefix_cpp(
-      Ttrain,
+    use_cuda <- identical(model$predict_backend, "float32_cuda") &&
+      isTRUE(has_cuda()) &&
+      exists("lda_train_prefix_float32_cuda", envir = asNamespace("fastPLS"), inherits = FALSE)
+    train_fun <- if (use_cuda) lda_train_prefix_float32_cuda else lda_train_prefix_float32_cpp
+    lda_models <- train_fun(
+      Ttrain32,
       y_codes,
       length(model$lev),
-      as.integer(unique_ncomp),
-      as.numeric(lda_ridge)[1L]
+      as.integer(unique_ncomp)
     )
     names(lda_models) <- as.character(unique_ncomp)
     model$lda <- list(
       ncomp = unique_ncomp,
       models = lda_models,
-      ridge = as.numeric(lda_ridge)[1L],
-      train_backend = "float32_scores_cpp_lda"
+      ridge = vapply(lda_models, `[[`, numeric(1L), "ridge"),
+      train_backend = if (use_cuda) "float32_cuda_lda" else "float32_cpp_lda"
     )
     return(model)
   }
 
   if (.is_candidate_knn_classifier(classifier)) {
+    Ttrain <- .float32_to_numeric_matrix(Ttrain32)
     k <- max(1L, as.integer(k)[1L])
     tau <- as.numeric(tau)[1L]
     alpha <- as.numeric(alpha)[1L]
@@ -3246,7 +3205,7 @@ print.fastPLS <- function(x, ...) {
     as.integer(scaling),
     isTRUE(fit),
     if (identical(method, "plssvd")) 1L else 3L,
-    switch(backend, cpu = 0L, metal = 2L, 0L),
+    switch(backend, cpu = 0L, cuda = 1L, metal = 2L),
     if (identical(svd.method, "irlba")) 1L else 3L,
     as.integer(rsvd_oversample),
     as.integer(rsvd_power),
@@ -7595,6 +7554,18 @@ plot.permutation <- function(x,
 #' and `classifier = "cknn"`. Unsupported float32 combinations stop with a clear
 #' error rather than silently upcasting to double.
 #'
+#' @details For latent-space LDA, the pooled covariance is computed as
+#'   \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
+#'   centered class blocks. Class coefficients are obtained by Cholesky
+#'   factorization and triangular solves, never by explicit covariance
+#'   inversion. Let \eqn{s = \mathrm{trace}(\Sigma)/q}, with \eqn{s=1} when the
+#'   scale is non-finite or non-positive. The implementation tries
+#'   \eqn{\lambda=\rho s} for \eqn{\rho} equal to \code{1e-8}, \code{1e-6},
+#'   \code{1e-5}, \code{1e-4}, \code{1e-3}, and \code{1e-2}, in that order, and
+#'   advances only after Cholesky failure. This is a deterministic numerical
+#'   fallback, not a fitted hyperparameter. Prediction uses
+#'   \eqn{t^T w_c - 0.5\mu_c^T w_c + \log(n_c/n)}.
+#'
 #' @param Xtrain Numeric training predictor matrix, or a `float::float32`
 #'   predictor matrix for the supported float32 route.
 #' @param Ytrain Training response (numeric or factor).
@@ -7634,7 +7605,8 @@ plot.permutation <- function(x,
 #'   latent-score memory. \code{streaming} additionally builds the training
 #'   candidate-score cache in blocks for scalar component counts. \code{auto}
 #'   chooses a memory-aware strategy from the data size.
-#' @param lda_ridge Relative diagonal ridge added to the pooled LDA covariance.
+#' @param lda_ridge Retained for source compatibility. PLS-LDA uses a fixed,
+#'   scale-normalized Cholesky fallback sequence rather than a tuned ridge.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param return_variance Compute predictor-space latent-variable variance
 #'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
@@ -8494,9 +8466,7 @@ pls =  function (Xtrain,
     cfg$top_m <- 20L
     cfg$cknn_memory <- "auto"
   }
-  if (!identical(cfg$classifier, "lda")) {
-    cfg$lda_ridge <- 1e-8
-  }
+  cfg$lda_ridge <- 1e-8
   cfg
 }
 
@@ -8587,7 +8557,7 @@ pls =  function (Xtrain,
         name = "classifier",
         normalizer = classifier_normalizer
       ),
-      lda_ridge = .cv_grid_scalar_values(lda_ridge, name = "lda_ridge", cast = as.numeric, allow_null = FALSE),
+      lda_ridge = 1e-8,
       k = .cv_grid_scalar_values(k, name = "k", cast = as.integer, allow_null = FALSE),
       tau = .cv_grid_scalar_values(tau, name = "tau", cast = as.numeric, allow_null = FALSE),
       alpha = .cv_grid_scalar_values(alpha, name = "alpha", cast = as.numeric, allow_null = FALSE),
@@ -8650,9 +8620,7 @@ pls =  function (Xtrain,
       keep <- c(keep, "gamma", "degree", "coef0")
     }
   }
-  if (identical(cfg$classifier, "lda")) {
-    keep <- c(keep, "lda_ridge")
-  } else if (identical(cfg$classifier, "cknn")) {
+  if (identical(cfg$classifier, "cknn")) {
     keep <- c(keep, "k", "tau", "alpha", "top_m", "cknn_memory")
   }
   keep <- intersect(unique(keep), names(cfg))
@@ -8782,8 +8750,8 @@ pls =  function (Xtrain,
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
 #' @param classifier Classification rule for factor responses: `"argmax"`,
 #'   `"lda"`, or `"cknn"`. Multiple values are treated as a tuning grid.
-#' @param lda_ridge Ridge added to the pooled LDA covariance diagonal. Multiple
-#'   values are used only when `classifier = "lda"`.
+#' @param lda_ridge Retained for source compatibility. LDA regularization is a
+#'   deterministic numerical fallback and is not tuned during cross-validation.
 #' @param k Number of same-class PLS-score neighbours used by
 #'   candidate-kNN when `classifier = "cknn"`.
 #' @param tau Positive temperature for smoothing the top neighbour

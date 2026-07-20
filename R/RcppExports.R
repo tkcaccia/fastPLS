@@ -13,6 +13,22 @@ transformy <- function(y) {
     .Call(`_fastPLS_transformy`, y)
 }
 
+lda_train_prefix_float32_cpp <- function(TtrainSEXP, y, n_classes, ncomp) {
+    .Call(`_fastPLS_lda_train_prefix_float32_cpp`, TtrainSEXP, y, n_classes, ncomp)
+}
+
+lda_predict_float32_cpp <- function(TtestSEXP, lda) {
+    .Call(`_fastPLS_lda_predict_float32_cpp`, TtestSEXP, lda)
+}
+
+lda_train_prefix_float32_cuda <- function(TtrainSEXP, y, n_classes, ncomp) {
+    .Call(`_fastPLS_lda_train_prefix_float32_cuda`, TtrainSEXP, y, n_classes, ncomp)
+}
+
+lda_predict_float32_cuda <- function(TtestSEXP, lda) {
+    .Call(`_fastPLS_lda_predict_float32_cuda`, TtestSEXP, lda)
+}
+
 cuda_float32_rsvd_sample_cpp <- function(ASEXP, l, power_iters, seed) {
     .Call(`_fastPLS_cuda_float32_rsvd_sample_cpp`, ASEXP, l, power_iters, seed)
 }
@@ -67,6 +83,10 @@ cuda_thin_qr <- function(A) {
 
 lda_train_prefix_cpp <- function(Ttrain, y, n_classes, ncomp, ridge) {
     .Call(`_fastPLS_lda_train_prefix_cpp`, Ttrain, y, n_classes, ncomp, ridge)
+}
+
+lda_train_moments_prefix_cpp <- function(gram, class_sums, counts, n, ncomp) {
+    .Call(`_fastPLS_lda_train_moments_prefix_cpp`, gram, class_sums, counts, n, ncomp)
 }
 
 lda_project_train_prefix_cpp <- function(Xtrain, R, offset, y, n_classes, ncomp, ridge) {

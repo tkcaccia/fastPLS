@@ -96,8 +96,7 @@ test_that("pls.single.cv tuning_config omits irrelevant classifier controls", {
     classifier = "lda",
     seed = 2
   )
-  expect_true("lda_ridge" %in% names(lda$tuning_config))
-  expect_false(any(c("k", "tau", "alpha", "top_m", "cknn_memory") %in% names(lda$tuning_config)))
+  expect_false(any(c("lda_ridge", "k", "tau", "alpha", "top_m", "cknn_memory") %in% names(lda$tuning_config)))
 
   cknn <- pls.single.cv(
     X,
