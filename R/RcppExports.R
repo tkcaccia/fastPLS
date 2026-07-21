@@ -13,6 +13,26 @@ transformy <- function(y) {
     .Call(`_fastPLS_transformy`, y)
 }
 
+kernel_matrix_float32_cpp <- function(X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend) {
+    .Call(`_fastPLS_kernel_matrix_float32_cpp`, X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend)
+}
+
+center_kernel_train_float32_cpp <- function(KSEXP) {
+    .Call(`_fastPLS_center_kernel_train_float32_cpp`, KSEXP)
+}
+
+center_kernel_test_float32_cpp <- function(KtestSEXP, trainColMeansSEXP, train_grand_mean) {
+    .Call(`_fastPLS_center_kernel_test_float32_cpp`, KtestSEXP, trainColMeansSEXP, train_grand_mean)
+}
+
+opls_filter_float32_cpp <- function(XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
+    .Call(`_fastPLS_opls_filter_float32_cpp`, XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed)
+}
+
+opls_apply_filter_float32_cpp <- function(XSEXP, mXSEXP, vXSEXP, WSEXP, PSEXP, backend) {
+    .Call(`_fastPLS_opls_apply_filter_float32_cpp`, XSEXP, mXSEXP, vXSEXP, WSEXP, PSEXP, backend)
+}
+
 lda_train_prefix_float32_cpp <- function(TtrainSEXP, y, n_classes, ncomp) {
     .Call(`_fastPLS_lda_train_prefix_float32_cpp`, TtrainSEXP, y, n_classes, ncomp)
 }

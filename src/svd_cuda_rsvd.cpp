@@ -2352,6 +2352,93 @@ Mat cuda_matrix_multiply(const Mat& A, const Mat& B) {
   }
 }
 
+arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
+                                      const arma::fmat& B,
+                                      const bool transpose_left,
+                                      const bool transpose_right) {
+  if (!cuda_runtime_available()) {
+    throw std::runtime_error("CUDA runtime not available");
+  }
+
+  const arma::uword a_rows = transpose_left ? A.n_cols : A.n_rows;
+  const arma::uword a_cols = transpose_left ? A.n_rows : A.n_cols;
+  const arma::uword b_rows = transpose_right ? B.n_cols : B.n_rows;
+  const arma::uword b_cols = transpose_right ? B.n_rows : B.n_cols;
+  if (a_cols != b_rows) {
+    throw std::runtime_error("cuda_matrix_multiply_float: non-conformable matrices");
+  }
+  if (A.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      A.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      B.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      B.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_matrix_multiply_float: matrix dimension exceeds CUDA int limits");
+  }
+
+  const int m = static_cast<int>(a_rows);
+  const int k = static_cast<int>(a_cols);
+  const int n = static_cast<int>(b_cols);
+  if (m < 1 || k < 1 || n < 1) {
+    return arma::fmat(a_rows, b_cols, arma::fill::zeros);
+  }
+
+  float* dA = nullptr;
+  float* dB = nullptr;
+  float* dC = nullptr;
+  cublasHandle_t handle = nullptr;
+  auto cleanup = [&]() {
+    if (dA) cudaFree(dA);
+    if (dB) cudaFree(dB);
+    if (dC) cudaFree(dC);
+    if (handle) cublasDestroy(handle);
+  };
+
+  try {
+    const size_t bytes_A = sizeof(float) * static_cast<size_t>(A.n_elem);
+    const size_t bytes_B = sizeof(float) * static_cast<size_t>(B.n_elem);
+    const size_t bytes_C = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
+    arma::fmat C(a_rows, b_cols, arma::fill::none);
+
+    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_matrix_multiply_float)");
+    check_cuda(cudaMalloc(&dA, bytes_A), "cudaMalloc(cuda_matrix_multiply_float A)");
+    check_cuda(cudaMalloc(&dB, bytes_B), "cudaMalloc(cuda_matrix_multiply_float B)");
+    check_cuda(cudaMalloc(&dC, bytes_C), "cudaMalloc(cuda_matrix_multiply_float C)");
+    check_cuda(cudaMemcpy(dA, A.memptr(), bytes_A, cudaMemcpyHostToDevice),
+               "cudaMemcpy(cuda_matrix_multiply_float A)");
+    check_cuda(cudaMemcpy(dB, B.memptr(), bytes_B, cudaMemcpyHostToDevice),
+               "cudaMemcpy(cuda_matrix_multiply_float B)");
+
+    const float one = 1.0f;
+    const float zero = 0.0f;
+    check_cublas(
+      cublasSgemm(
+        handle,
+        transpose_left ? CUBLAS_OP_T : CUBLAS_OP_N,
+        transpose_right ? CUBLAS_OP_T : CUBLAS_OP_N,
+        m,
+        n,
+        k,
+        &one,
+        dA,
+        static_cast<int>(A.n_rows),
+        dB,
+        static_cast<int>(B.n_rows),
+        &zero,
+        dC,
+        m
+      ),
+      "cublasSgemm(cuda_matrix_multiply_float)"
+    );
+    check_cuda(cudaMemcpy(C.memptr(), dC, bytes_C, cudaMemcpyDeviceToHost),
+               "cudaMemcpy(cuda_matrix_multiply_float C)");
+
+    cleanup();
+    return C;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+}
+
 Mat cuda_candidate_knn_scores(
   const Mat& Ttest,
   const Mat& Ttrain,
@@ -4754,6 +4841,13 @@ arma::imat cuda_flash_lowrank_predict_classes(
 }
 
 Mat cuda_matrix_multiply(const Mat&, const Mat&) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+arma::fmat cuda_matrix_multiply_float(const arma::fmat&,
+                                      const arma::fmat&,
+                                      bool,
+                                      bool) {
   throw std::runtime_error("CUDA backend not compiled");
 }
 

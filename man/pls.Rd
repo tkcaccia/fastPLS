@@ -202,12 +202,15 @@ values, variance summaries, and optional classification heads.
 \details{
 If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as \code{float::float32}
 objects, \code{pls()} uses a float32 route instead of converting them to double.
-In the current implementation this route is available for \code{method = "plssvd"}
-or \code{method = "simpls"}. CPU and Metal support \code{svd.method = "rsvd"} or
-\code{svd.method = "irlba"}; CUDA supports float32 randomized SVD. Classification
-with float32 input supports \code{classifier = "argmax"}, \code{classifier = "lda"},
-and \code{classifier = "cknn"}. Unsupported float32 combinations stop with a clear
-error rather than silently upcasting to double.
+This route is available for \code{method = "plssvd"}, \code{"simpls"}, \code{"opls"}, and
+\code{"kernelpls"}. OPLS filtering and kernel construction/centering retain
+float32 storage and arithmetic; a linear kernel uses the direct SIMPLS path,
+whereas nonlinear kernels still require an n-by-n Gram matrix. CPU
+and Metal support \code{svd.method = "rsvd"} or \code{svd.method = "irlba"}; CUDA
+supports float32 randomized SVD. Classification with float32 input supports
+\code{classifier = "argmax"}, \code{classifier = "lda"}, and \code{classifier = "cknn"}.
+Unsupported float32 combinations stop with a clear error rather than
+silently upcasting to double.
 
 For a factor response with \eqn{C} levels, centred dummy coding has rank at
 most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective

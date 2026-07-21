@@ -512,12 +512,17 @@ fit_reg$Q2Y
 `pls()` also accepts predictor and response matrices from the `float` package.
 When a `float::float32` object is supplied, the float32 route keeps centering,
 scaling, cross-products, low-rank SVD steps, latent scores, and predictions in
-32-bit arithmetic. This is currently available for `method = "plssvd"` or
-`method = "simpls"`. CPU and Metal support `svd.method = "rsvd"` or
-`svd.method = "irlba"`, while CUDA supports float32 randomized SVD. For
-classification, float32 models support `classifier = "argmax"`, `classifier = "lda"`, and
-`classifier = "cknn"`. Unsupported combinations stop with an error rather than
-silently converting the data to double.
+32-bit arithmetic. This applies to PLSSVD, SIMPLS, OPLS, and kernel-PLS. OPLS
+stores and reapplies its orthogonal filter in float32. Kernel-PLS constructs and
+centers nonlinear kernel matrices in float32, while its linear kernel uses the
+direct SIMPLS path to avoid an unnecessary Gram matrix. CPU and Metal support
+`svd.method = "rsvd"` or `svd.method = "irlba"`, while CUDA supports float32
+randomized SVD. For classification, float32 models support
+`classifier = "argmax"`, `classifier = "lda"`, and `classifier = "cknn"`.
+Unsupported combinations stop with an error rather than silently converting
+the data to double. Nonlinear kernel-PLS still stores an (n \times n) training
+kernel, so float32 reduces its storage but does not remove its quadratic memory
+scaling.
 
 ```{r chunk-018}
 Xreg32 <- float::fl(as.matrix(Xreg_train))
@@ -1187,6 +1192,9 @@ the optimized PLS core to the filtered matrix. The number of orthogonal
 components is controlled by `north`. The filtering step estimates orthogonal
 scores and loadings, subtracts the corresponding variation from `X`, and stores
 the orthogonal filter so the same transformation is applied at prediction time.
+With float32 input, preprocessing, response cross-products, orthogonal scores,
+loadings, deflation, and prediction filtering remain in float32 for CPU, CUDA,
+and Metal execution.
 Users select OPLS with `method = "opls"`; the lower-level implementation details
 are handled internally.
 
@@ -1197,7 +1205,10 @@ are handled internally.
 inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
 For nonlinear kernels, the training kernel matrix is centered and the PLS model
 is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
-kernel materialization and uses the ordinary linear PLS path.
+kernel materialization and uses the ordinary linear PLS path. Float32 input
+keeps kernel products, distances, centering statistics, the centered kernel,
+and subsequent PLS calculations in float32. The CUDA and Metal paths execute
+the dominant kernel matrix multiplication on the selected device.
 
 ### Classification heads
 

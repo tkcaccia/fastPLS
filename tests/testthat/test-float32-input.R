@@ -426,3 +426,126 @@ test_that("pls supports float32 LDA and cKNN classifiers", {
   expect_true(is.factor(fit_cknn$Ypred[[1L]]))
   expect_named(fit_cknn$accuracy, "ncomp=2")
 })
+
+test_that("float32 OPLS supports regression, classification, and independent prediction", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(132)
+  train <- sample(seq_len(nrow(iris)), 110)
+  Xtrain <- as.matrix(iris[train, 1:4])
+  Xtest <- as.matrix(iris[-train, 1:4])
+  ytrain <- droplevels(iris$Species[train])
+  ytest <- factor(iris$Species[-train], levels = levels(ytrain))
+
+  fit32 <- pls(
+    float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
+    ncomp = 2, method = "opls", north = 1, backend = "cpu",
+    svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+    seed = 12
+  )
+  fit64 <- pls(
+    Xtrain, ytrain, Xtest, ytest,
+    ncomp = 2, method = "opls", north = 1, backend = "cpu",
+    svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+    seed = 12
+  )
+
+  expect_s3_class(fit32, "fastPLSOpls")
+  expect_identical(attr(fit32, "fastPLS_internal")$precision, "float32")
+  expect_true(inherits(fit32$mX, "float32"))
+  expect_true(inherits(fit32$W_orth, "float32"))
+  expect_equal(fit32$accuracy, fit64$accuracy, tolerance = 0.05)
+  pred <- predict(fit32, float::fl(Xtest[1:5, , drop = FALSE]))
+  expect_true(is.factor(pred$Ypred[[1L]]))
+
+  Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
+  Yreg <- matrix(mtcars$mpg, ncol = 1L)
+  reg32 <- pls(
+    float::fl(Xreg[1:24, , drop = FALSE]),
+    float::fl(Yreg[1:24, , drop = FALSE]),
+    float::fl(Xreg[25:32, , drop = FALSE]),
+    float::fl(Yreg[25:32, , drop = FALSE]),
+    ncomp = 1:2, method = "opls", backend = "cpu",
+    svd.method = "rsvd", fit = TRUE, return_variance = FALSE, seed = 13
+  )
+  expect_true(all(is.finite(reg32$Q2Y)))
+  expect_true(all(vapply(reg32$Ypred, inherits, logical(1L), "float32")))
+})
+
+test_that("float32 kernel PLS supports linear, RBF, and polynomial kernels", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(133)
+  train <- sample(seq_len(nrow(iris)), 110)
+  Xtrain <- as.matrix(iris[train, 1:4])
+  Xtest <- as.matrix(iris[-train, 1:4])
+  ytrain <- droplevels(iris$Species[train])
+  ytest <- factor(iris$Species[-train], levels = levels(ytrain))
+
+  for (kernel in c("linear", "rbf", "poly")) {
+    fit32 <- pls(
+      float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
+      ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
+      svd.method = "rsvd", classifier = "argmax", return_variance = FALSE,
+      seed = 14
+    )
+    fit64 <- pls(
+      Xtrain, ytrain, Xtest, ytest,
+      ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
+      svd.method = "rsvd", classifier = "argmax", return_variance = FALSE,
+      seed = 14
+    )
+    expect_identical(attr(fit32, "fastPLS_internal")$precision, "float32")
+    expect_equal(fit32$accuracy, fit64$accuracy, tolerance = 0.02)
+    pred <- predict(fit32, float::fl(Xtest[1:5, , drop = FALSE]))
+    expect_true(is.factor(pred$Ypred[[1L]]))
+    if (!identical(kernel, "linear")) {
+      expect_s3_class(fit32, "fastPLSKernel")
+      expect_true(inherits(fit32$Xref, "float32"))
+      expect_true(inherits(fit32$kernel_center$col_means, "float32"))
+    }
+  }
+})
+
+test_that("float32 OPLS and kernel PLS use Metal when available", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  skip_if_not(has_metal(), "Metal backend not available")
+  X <- float::fl(as.matrix(iris[, 1:4]))
+  y <- iris$Species
+
+  opls_fit <- pls(
+    X, y, X[1:12, ], y[1:12], ncomp = 2, method = "opls",
+    backend = "metal", svd.method = "rsvd", return_variance = FALSE,
+    seed = 15
+  )
+  kernel_fit <- pls(
+    X, y, X[1:12, ], y[1:12], ncomp = 2, method = "kernelpls",
+    kernel = "rbf", backend = "metal", svd.method = "rsvd",
+    return_variance = FALSE, seed = 15
+  )
+  expect_identical(attr(opls_fit, "fastPLS_internal")$precision, "float32")
+  expect_identical(attr(kernel_fit, "fastPLS_internal")$precision, "float32")
+  expect_match(opls_fit$opls_engine, "metal")
+  expect_match(kernel_fit$kernel_engine, "metal")
+  expect_true(is.factor(opls_fit$Ypred[[1L]]))
+  expect_true(is.factor(kernel_fit$Ypred[[1L]]))
+})
+
+test_that("float32 OPLS and kernel PLS use CUDA when available", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  skip_if_not(has_cuda(), "CUDA backend not available")
+  X <- float::fl(as.matrix(iris[, 1:4]))
+  y <- iris$Species
+
+  for (method in c("opls", "kernelpls")) {
+    fit <- pls(
+      X, y, X[1:12, ], y[1:12], ncomp = 2, method = method,
+      kernel = "rbf", backend = "cuda", svd.method = "rsvd",
+      return_variance = FALSE, seed = 16
+    )
+    expect_identical(attr(fit, "fastPLS_internal")$precision, "float32")
+    expect_true(is.factor(fit$Ypred[[1L]]))
+  }
+})

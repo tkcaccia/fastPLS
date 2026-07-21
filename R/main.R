@@ -3268,6 +3268,200 @@ print.fastPLS <- function(x, ...) {
   model
 }
 
+.float32_backend_id <- function(backend) {
+  switch(backend, cpu = 0L, cuda = 1L, metal = 2L)
+}
+
+.float32_svd_id <- function(svd.method) {
+  if (identical(svd.method, "irlba")) 1L else 3L
+}
+
+.float32_outer_model_fields <- function(inner) {
+  list(
+    ncomp = inner$ncomp,
+    Yfit = inner$Yfit,
+    R2Y = inner$R2Y,
+    classification = inner$classification,
+    lev = inner$lev,
+    classification_rule = inner$classification_rule,
+    precision = "float32",
+    predict_backend = inner$predict_backend,
+    pls_method = inner$pls_method,
+    xprod_mode = inner$xprod_mode,
+    gpu_resident = isTRUE(inner$gpu_resident)
+  )
+}
+
+.fit_float32_opls <- function(Xtrain,
+                              Ytrain,
+                              ncomp,
+                              scaling,
+                              north,
+                              backend,
+                              svd.method,
+                              rsvd_oversample,
+                              rsvd_power,
+                              seed,
+                              fit,
+                              classifier,
+                              lda_ridge,
+                              k,
+                              tau,
+                              alpha,
+                              top_m) {
+  yprep <- .float32_prepare_response(Ytrain)
+  filt_raw <- opls_filter_float32_cpp(
+    .as_float32_matrix(Xtrain, "Xtrain"),
+    yprep$Ytrain,
+    as.integer(north),
+    as.integer(scaling),
+    .float32_backend_id(backend),
+    .float32_svd_id(svd.method),
+    as.integer(rsvd_oversample),
+    as.integer(rsvd_power),
+    as.integer(seed)
+  )
+  filt <- lapply(filt_raw[c("X", "mX", "vX", "W_orth", "P_orth")], .float32_from_bits)
+  filt$north <- as.integer(filt_raw$north)
+  inner <- .fit_float32_pls(
+    Xtrain = filt$X,
+    Ytrain = Ytrain,
+    ncomp = ncomp,
+    scaling = 3L,
+    method = "simpls",
+    backend = backend,
+    svd.method = svd.method,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    seed = seed,
+    fit = fit
+  )
+  inner <- .attach_float32_classifier(
+    inner,
+    Xtrain = filt$X,
+    Ytrain_original = Ytrain,
+    classifier = classifier,
+    lda_ridge = lda_ridge,
+    k = k,
+    tau = tau,
+    alpha = alpha,
+    top_m = top_m
+  )
+  out <- c(
+    list(
+      inner_model = inner,
+      mX = filt$mX,
+      vX = filt$vX,
+      W_orth = filt$W_orth,
+      P_orth = filt$P_orth,
+      north = filt$north,
+      opls_engine = paste0("float32_", backend)
+    ),
+    .float32_outer_model_fields(inner)
+  )
+  class(out) <- c("fastPLSOpls", "fastPLS")
+  out
+}
+
+.fit_float32_kernelpls <- function(Xtrain,
+                                   Ytrain,
+                                   ncomp,
+                                   scaling,
+                                   kernel,
+                                   gamma,
+                                   degree,
+                                   coef0,
+                                   backend,
+                                   svd.method,
+                                   rsvd_oversample,
+                                   rsvd_power,
+                                   seed,
+                                   fit,
+                                   classifier,
+                                   lda_ridge,
+                                   k,
+                                   tau,
+                                   alpha,
+                                   top_m) {
+  kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
+  if (identical(kernel, "linear")) {
+    inner <- .fit_float32_pls(
+      Xtrain, Ytrain, ncomp, scaling, "simpls", backend, svd.method,
+      rsvd_oversample, rsvd_power, seed, fit
+    )
+    inner <- .attach_float32_classifier(
+      inner, Xtrain, Ytrain, classifier, lda_ridge, k, tau, alpha, top_m
+    )
+    inner$kernel <- "linear"
+    inner$kernel_engine <- paste0("float32_", backend, "_direct")
+    inner$kernel_linear_direct <- TRUE
+    return(inner)
+  }
+
+  X32 <- .as_float32_matrix(Xtrain, "Xtrain")
+  prep <- .float32_center_scale(X32, scaling)
+  gamma <- .kernel_pls_gamma(gamma, prep$X)
+  kernel_id <- .kernel_pls_kernel_id(kernel)
+  K_raw <- kernel_matrix_float32_cpp(
+    prep$X,
+    prep$X,
+    kernel_id,
+    gamma,
+    as.integer(degree),
+    coef0,
+    .float32_backend_id(backend)
+  )
+  K <- .float32_from_bits(K_raw$K)
+  kc_raw <- center_kernel_train_float32_cpp(K)
+  kc <- list(
+    K = .float32_from_bits(kc_raw$K),
+    col_means = .float32_from_bits(kc_raw$col_means),
+    grand_mean = as.numeric(kc_raw$grand_mean)
+  )
+  inner <- .fit_float32_pls(
+    Xtrain = kc$K,
+    Ytrain = Ytrain,
+    ncomp = ncomp,
+    scaling = 3L,
+    method = "simpls",
+    backend = backend,
+    svd.method = svd.method,
+    rsvd_oversample = rsvd_oversample,
+    rsvd_power = rsvd_power,
+    seed = seed,
+    fit = fit
+  )
+  inner <- .attach_float32_classifier(
+    inner,
+    Xtrain = kc$K,
+    Ytrain_original = Ytrain,
+    classifier = classifier,
+    lda_ridge = lda_ridge,
+    k = k,
+    tau = tau,
+    alpha = alpha,
+    top_m = top_m
+  )
+  out <- c(
+    list(
+      inner_model = inner,
+      Xref = prep$X,
+      mX = prep$mX,
+      vX = prep$vX,
+      kernel = kernel,
+      kernel_id = kernel_id,
+      gamma = gamma,
+      degree = as.integer(degree),
+      coef0 = coef0,
+      kernel_center = kc[c("col_means", "grand_mean")],
+      kernel_engine = paste0("float32_", backend)
+    ),
+    .float32_outer_model_fields(inner)
+  )
+  class(out) <- c("fastPLSKernel", "fastPLS")
+  out
+}
+
 .normalize_pls_method <- function(method) {
   method <- match.arg(method, c("simpls", "plssvd", "opls", "kernelpls"))
   switch(
@@ -4179,6 +4373,34 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
   if (!is(object, "fastPLSKernel")) {
     stop("object is not a fastPLSKernel object", call. = FALSE)
   }
+  object <- .fastpls_restore_internal_output_fields(object)
+  if (identical(object$precision, "float32")) {
+    Xnew <- .as_float32_matrix(newdata, "newdata")
+    Xnew <- .float32_sweep_cols(Xnew, object$mX, "-")
+    Xnew <- .float32_sweep_cols(Xnew, object$vX, "/")
+    Kraw <- kernel_matrix_float32_cpp(
+      Xnew,
+      object$Xref,
+      object$kernel_id,
+      object$gamma,
+      object$degree,
+      object$coef0,
+      .float32_backend_id(sub("^float32_", "", object$kernel_engine))
+    )
+    Ktest <- .float32_from_bits(Kraw$K)
+    centered <- center_kernel_test_float32_cpp(
+      Ktest,
+      object$kernel_center$col_means,
+      object$kernel_center$grand_mean
+    )
+    return(predict.fastPLS(
+      object$inner_model,
+      .float32_from_bits(centered$K),
+      Ytest = Ytest,
+      proj = proj,
+      ...
+    ))
+  }
   Xnew <- .fastpls_preprocess_test(newdata, object$mX, object$vX)
   if (identical(object$kernel_engine, "metal")) {
     Ktest <- .kernel_matrix_metal(Xnew, object$Xref, object$kernel, object$gamma, object$degree, object$coef0)
@@ -4344,6 +4566,25 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
 predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...) {
   if (!is(object, "fastPLSOpls")) {
     stop("object is not a fastPLSOpls object", call. = FALSE)
+  }
+  object <- .fastpls_restore_internal_output_fields(object)
+  if (identical(object$precision, "float32")) {
+    engine <- sub("^float32_", "", object$opls_engine)
+    filtered <- opls_apply_filter_float32_cpp(
+      .as_float32_matrix(newdata, "newdata"),
+      object$mX,
+      object$vX,
+      object$W_orth,
+      object$P_orth,
+      .float32_backend_id(engine)
+    )
+    return(predict.fastPLS(
+      object$inner_model,
+      .float32_from_bits(filtered$X),
+      Ytest = Ytest,
+      proj = proj,
+      ...
+    ))
   }
   Xnew <- if (identical(object$opls_engine, "metal")) {
     .opls_apply_filter_metal(newdata, object$mX, object$vX, object$W_orth, object$P_orth)
@@ -7642,12 +7883,15 @@ plot.permutation <- function(x,
 #'
 #' If `Xtrain`, `Xtest`, `Ytrain`, or `Ytest` are supplied as `float::float32`
 #' objects, `pls()` uses a float32 route instead of converting them to double.
-#' In the current implementation this route is available for `method = "plssvd"`
-#' or `method = "simpls"`. CPU and Metal support `svd.method = "rsvd"` or
-#' `svd.method = "irlba"`; CUDA supports float32 randomized SVD. Classification
-#' with float32 input supports `classifier = "argmax"`, `classifier = "lda"`,
-#' and `classifier = "cknn"`. Unsupported float32 combinations stop with a clear
-#' error rather than silently upcasting to double.
+#' This route is available for `method = "plssvd"`, `"simpls"`, `"opls"`, and
+#' `"kernelpls"`. OPLS filtering and kernel construction/centering retain
+#' float32 storage and arithmetic; a linear kernel uses the direct SIMPLS path,
+#' whereas nonlinear kernels still require an n-by-n Gram matrix. CPU
+#' and Metal support `svd.method = "rsvd"` or `svd.method = "irlba"`; CUDA
+#' supports float32 randomized SVD. Classification with float32 input supports
+#' `classifier = "argmax"`, `classifier = "lda"`, and `classifier = "cknn"`.
+#' Unsupported float32 combinations stop with a clear error rather than
+#' silently upcasting to double.
 #'
 #' For a factor response with \eqn{C} levels, centred dummy coding has rank at
 #' most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
@@ -7923,46 +8167,58 @@ pls =  function (Xtrain,
     if (!svd.method %in% c("cpu_rsvd", "irlba")) {
       stop("float32 input currently supports svd.method = 'rsvd' or svd.method = 'irlba'.", call. = FALSE)
     }
-    if (!requested_method %in% c("plssvd", "simpls")) {
-      stop("float32 input currently supports method = 'plssvd' or method = 'simpls'.", call. = FALSE)
-    }
     if (isTRUE(return_loadings)) {
       stop("return_loadings = TRUE is not yet available for float32 input.", call. = FALSE)
     }
     if (isTRUE(perm.test)) {
       stop("perm.test = TRUE is not yet available for float32 input.", call. = FALSE)
     }
-    model <- .fit_float32_pls(
-      Xtrain = Xtrain,
-      Ytrain = Ytrain,
-      ncomp = ncomp,
-      scaling = scal,
-      method = requested_method,
-      backend = backend,
-      svd.method = svd.method,
-      rsvd_oversample = rsvd_oversample,
-      rsvd_power = rsvd_power,
-      seed = seed,
-      fit = fit
-    )
-    model <- .attach_float32_classifier(
-      model,
-      Xtrain = Xtrain,
-      Ytrain_original = Ytrain,
-      classifier = classifier,
-      lda_ridge = lda_ridge,
-      k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m
-    )
+    model <- if (identical(requested_method, "opls")) {
+      .fit_float32_opls(
+        Xtrain, Ytrain, ncomp, scal, north, backend, svd.method,
+        rsvd_oversample, rsvd_power, seed, fit, classifier, lda_ridge,
+        k, tau, alpha, top_m
+      )
+    } else if (identical(requested_method, "kernelpls")) {
+      .fit_float32_kernelpls(
+        Xtrain, Ytrain, ncomp, scal, kernel, gamma, degree, coef0,
+        backend, svd.method, rsvd_oversample, rsvd_power, seed, fit,
+        classifier, lda_ridge, k, tau, alpha, top_m
+      )
+    } else {
+      fitted <- .fit_float32_pls(
+        Xtrain = Xtrain,
+        Ytrain = Ytrain,
+        ncomp = ncomp,
+        scaling = scal,
+        method = requested_method,
+        backend = backend,
+        svd.method = svd.method,
+        rsvd_oversample = rsvd_oversample,
+        rsvd_power = rsvd_power,
+        seed = seed,
+        fit = fit
+      )
+      .attach_float32_classifier(
+        fitted,
+        Xtrain = Xtrain,
+        Ytrain_original = Ytrain,
+        classifier = classifier,
+        lda_ridge = lda_ridge,
+        k = k,
+        tau = tau,
+        alpha = alpha,
+        top_m = top_m
+      )
+    }
     if (!isTRUE(fit) && !is.null(model$R2Y)) {
       model$R2Y <- rep(NA_real_, length(model$ncomp))
     }
     if (!is.null(Xtest)) {
+      model_class <- class(model)
       res <- predict(model, Xtest, Ytest = Ytest, proj = proj)
       model <- c(model, res)
-      class(model) <- "fastPLS"
+      class(model) <- model_class
     }
     model <- .attach_backend_control(model, backend_control)
     return(.fastpls_public_pls_output(model, model$ncomp))

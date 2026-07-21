@@ -70,6 +70,12 @@ arma::imat cuda_flash_lowrank_predict_classes(
   const arma::ivec& ncomp
 );
 Mat cuda_matrix_multiply(const Mat& A, const Mat& B);
+arma::fmat cuda_matrix_multiply_float(
+  const arma::fmat& A,
+  const arma::fmat& B,
+  bool transpose_left = false,
+  bool transpose_right = false
+);
 Mat cuda_candidate_knn_scores(
   const Mat& Ttest,
   const Mat& Ttrain,

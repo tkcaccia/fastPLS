@@ -2386,11 +2386,277 @@ Rcpp::List fmat_list_to_bits(const std::vector<arma::fmat>& xs, const arma::ivec
   return out;
 }
 
+arma::fmat float32_backend_matmul(const arma::fmat& A,
+                                  const arma::fmat& B,
+                                  const int backend,
+                                  const bool transpose_left = false,
+                                  const bool transpose_right = false) {
+  if (backend == 1) {
+    return fastpls_svd::cuda_matrix_multiply_float(
+      A, B, transpose_left, transpose_right
+    );
+  }
+  if (backend == 2) {
+    return fastpls_svd::metal_matrix_multiply_float(
+      A, B, transpose_left, transpose_right
+    );
+  }
+  if (backend != 0) {
+    Rcpp::stop("float32 matrix multiplication requires backend 0, 1, or 2");
+  }
+  if (transpose_left && transpose_right) return A.t() * B.t();
+  if (transpose_left) return A.t() * B;
+  if (transpose_right) return A * B.t();
+  return A * B;
+}
+
+arma::fmat float32_bits_to_fmat_allow_empty(SEXP xSEXP, const char* name) {
+  Rcpp::S4 x(xSEXP);
+  Rcpp::IntegerMatrix bits = x.slot("Data");
+  if (bits.nrow() < 1 || bits.ncol() < 0) {
+    Rcpp::stop("%s must be a float32 matrix", name);
+  }
+  arma::fmat out(bits.nrow(), bits.ncol());
+  const int* src = INTEGER(bits);
+  float* dst = out.memptr();
+  for (arma::uword i = 0; i < out.n_elem; ++i) {
+    std::memcpy(dst + i, src + i, sizeof(float));
+  }
+  return out;
+}
+
 #endif
 
 } // namespace
 
 #ifndef _WIN32
+
+// [[Rcpp::export]]
+Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP,
+                                     SEXP X2SEXP,
+                                     int kernel,
+                                     double gamma,
+                                     int degree,
+                                     double coef0,
+                                     int backend) {
+  const arma::fmat X1 = float32_bits_to_fmat(X1SEXP, "X1");
+  const arma::fmat X2 = float32_bits_to_fmat(X2SEXP, "X2");
+  if (X1.n_cols != X2.n_cols) {
+    Rcpp::stop("X1 and X2 must have the same number of columns");
+  }
+  arma::fmat dots = float32_backend_matmul(X1, X2, backend, false, true);
+  if (kernel == 1) {
+    return Rcpp::List::create(
+      Rcpp::Named("K") = fmat_to_float32_bits(dots)
+    );
+  }
+  const float gamma_f = static_cast<float>(gamma);
+  const float coef0_f = static_cast<float>(coef0);
+  if (kernel == 3) {
+    dots.transform([gamma_f, coef0_f, degree](float value) {
+      return static_cast<float>(std::pow(gamma_f * value + coef0_f, degree));
+    });
+    return Rcpp::List::create(
+      Rcpp::Named("K") = fmat_to_float32_bits(dots)
+    );
+  }
+  if (kernel != 2) {
+    Rcpp::stop("Unknown kernel id");
+  }
+
+  const arma::fvec n1 = arma::sum(arma::square(X1), 1);
+  const arma::frowvec n2 = arma::sum(arma::square(X2), 1).t();
+  arma::fmat dist2 = arma::repmat(n1, 1, X2.n_rows) +
+    arma::repmat(n2, X1.n_rows, 1) - 2.0f * dots;
+  dist2.transform([gamma_f](float value) {
+    if (value < 0.0f && value > -1e-5f) value = 0.0f;
+    return std::exp(-gamma_f * value);
+  });
+  return Rcpp::List::create(
+    Rcpp::Named("K") = fmat_to_float32_bits(dist2)
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP) {
+  arma::fmat K = float32_bits_to_fmat(KSEXP, "K");
+  const arma::frowvec col_means = arma::mean(K, 0);
+  const arma::fvec row_means = arma::mean(K, 1);
+  const float grand_mean = arma::mean(col_means);
+  K.each_row() -= col_means;
+  K.each_col() -= row_means;
+  K += grand_mean;
+  return Rcpp::List::create(
+    Rcpp::Named("K") = fmat_to_float32_bits(K),
+    Rcpp::Named("col_means") = fmat_to_float32_bits(arma::fmat(col_means)),
+    Rcpp::Named("grand_mean") = grand_mean
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP,
+                                          SEXP trainColMeansSEXP,
+                                          double train_grand_mean) {
+  arma::fmat Ktest = float32_bits_to_fmat(KtestSEXP, "Ktest");
+  const arma::fmat means_matrix = float32_bits_to_fmat(
+    trainColMeansSEXP, "train_col_means"
+  );
+  const arma::frowvec train_col_means = arma::vectorise(means_matrix, 1);
+  if (Ktest.n_cols != train_col_means.n_cols) {
+    Rcpp::stop("Ktest columns must match the training kernel size");
+  }
+  const arma::fvec row_means = arma::mean(Ktest, 1);
+  Ktest.each_row() -= train_col_means;
+  Ktest.each_col() -= row_means;
+  Ktest += static_cast<float>(train_grand_mean);
+  return Rcpp::List::create(
+    Rcpp::Named("K") = fmat_to_float32_bits(Ktest)
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List opls_filter_float32_cpp(SEXP XSEXP,
+                                   SEXP YSEXP,
+                                   int north,
+                                   int scaling,
+                                   int backend,
+                                   int svd_method,
+                                   int rsvd_oversample,
+                                   int rsvd_power,
+                                   int seed) {
+  arma::fmat X = float32_bits_to_fmat(XSEXP, "X");
+  arma::fmat Y = float32_bits_to_fmat(YSEXP, "Y");
+  if (X.n_rows != Y.n_rows) {
+    Rcpp::stop("X and Y must have the same number of rows");
+  }
+  if (north < 0) {
+    Rcpp::stop("north must be >= 0");
+  }
+
+  arma::frowvec mX(X.n_cols, arma::fill::zeros);
+  if (scaling < 3) {
+    mX = arma::mean(X, 0);
+    X.each_row() -= mX;
+  }
+  arma::frowvec vX(X.n_cols, arma::fill::ones);
+  if (scaling == 2) {
+    vX = float_col_sd(X);
+    X.each_row() /= vX;
+  }
+  const arma::frowvec mY = arma::mean(Y, 0);
+  Y.each_row() -= mY;
+
+  arma::fmat W_orth(X.n_cols, static_cast<arma::uword>(north), arma::fill::zeros);
+  arma::fmat P_orth(X.n_cols, static_cast<arma::uword>(north), arma::fill::zeros);
+  int used = 0;
+  for (int component = 0; component < north; ++component) {
+    const arma::fmat S = float32_backend_matmul(X, Y, backend, true, false);
+    Rcpp::List sv = truncated_svd_float32_backend(
+      S,
+      1,
+      backend,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      static_cast<unsigned int>(seed + component),
+      true
+    );
+    const arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+    if (U.n_cols < 1) break;
+    arma::fvec w = U.col(0);
+    const float w_norm = arma::norm(w, 2);
+    if (!std::isfinite(w_norm) || w_norm <= 0.0f) break;
+    w /= w_norm;
+
+    arma::fmat w_matrix(w.n_elem, 1);
+    w_matrix.col(0) = w;
+    const arma::fvec t = float32_backend_matmul(
+      X, w_matrix, backend, false, false
+    ).col(0);
+    const float t_ss = arma::dot(t, t);
+    if (!std::isfinite(t_ss) || t_ss <= 0.0f) break;
+    arma::fmat t_matrix(t.n_elem, 1);
+    t_matrix.col(0) = t;
+    const arma::fvec p = float32_backend_matmul(
+      X, t_matrix, backend, true, false
+    ).col(0) / t_ss;
+
+    const float ww = arma::dot(w, w);
+    arma::fvec w_orth = p - w * (arma::dot(w, p) / ww);
+    const float wo_norm = arma::norm(w_orth, 2);
+    if (!std::isfinite(wo_norm) || wo_norm <= 0.0f) break;
+    w_orth /= wo_norm;
+    arma::fmat wo_matrix(w_orth.n_elem, 1);
+    wo_matrix.col(0) = w_orth;
+    const arma::fvec t_orth = float32_backend_matmul(
+      X, wo_matrix, backend, false, false
+    ).col(0);
+    const float to_ss = arma::dot(t_orth, t_orth);
+    if (!std::isfinite(to_ss) || to_ss <= 0.0f) break;
+    arma::fmat to_matrix(t_orth.n_elem, 1);
+    to_matrix.col(0) = t_orth;
+    const arma::fvec p_orth = float32_backend_matmul(
+      X, to_matrix, backend, true, false
+    ).col(0) / to_ss;
+    arma::fmat po_matrix(p_orth.n_elem, 1);
+    po_matrix.col(0) = p_orth;
+    X -= float32_backend_matmul(to_matrix, po_matrix, backend, false, true);
+    W_orth.col(static_cast<arma::uword>(used)) = w_orth;
+    P_orth.col(static_cast<arma::uword>(used)) = p_orth;
+    ++used;
+  }
+
+  if (used == 0) {
+    W_orth.set_size(X.n_cols, 0);
+    P_orth.set_size(X.n_cols, 0);
+  } else if (used < north) {
+    W_orth = W_orth.cols(0, static_cast<arma::uword>(used - 1));
+    P_orth = P_orth.cols(0, static_cast<arma::uword>(used - 1));
+  }
+  return Rcpp::List::create(
+    Rcpp::Named("X") = fmat_to_float32_bits(X),
+    Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(mX)),
+    Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(vX)),
+    Rcpp::Named("W_orth") = fmat_to_float32_bits(W_orth),
+    Rcpp::Named("P_orth") = fmat_to_float32_bits(P_orth),
+    Rcpp::Named("north") = used
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP,
+                                         SEXP mXSEXP,
+                                         SEXP vXSEXP,
+                                         SEXP WSEXP,
+                                         SEXP PSEXP,
+                                         int backend) {
+  arma::fmat X = float32_bits_to_fmat(XSEXP, "X");
+  const arma::frowvec mX = arma::vectorise(
+    float32_bits_to_fmat(mXSEXP, "mX"), 1
+  );
+  const arma::frowvec vX = arma::vectorise(
+    float32_bits_to_fmat(vXSEXP, "vX"), 1
+  );
+  if (X.n_cols != mX.n_cols || X.n_cols != vX.n_cols) {
+    Rcpp::stop("X columns must match stored OPLS preprocessing");
+  }
+  X.each_row() -= mX;
+  X.each_row() /= vX;
+  const arma::fmat W = float32_bits_to_fmat_allow_empty(WSEXP, "W_orth");
+  const arma::fmat P = float32_bits_to_fmat_allow_empty(PSEXP, "P_orth");
+  if (W.n_cols != P.n_cols || W.n_rows != X.n_cols || P.n_rows != X.n_cols) {
+    Rcpp::stop("Invalid OPLS orthogonal filter dimensions");
+  }
+  for (arma::uword component = 0; component < W.n_cols; ++component) {
+    const arma::fmat w = W.col(component);
+    const arma::fmat p = P.col(component);
+    const arma::fmat t = float32_backend_matmul(X, w, backend, false, false);
+    X -= float32_backend_matmul(t, p, backend, false, true);
+  }
+  return Rcpp::List::create(
+    Rcpp::Named("X") = fmat_to_float32_bits(X)
+  );
+}
 
 // [[Rcpp::export]]
 Rcpp::List lda_train_prefix_float32_cpp(SEXP TtrainSEXP,
@@ -2888,6 +3154,26 @@ Rcpp::List fastsvd_float32_cpp(SEXP ASEXP, int k, int backend, int svd_method, i
 }
 
 Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
+  return windows_float32_unavailable();
+}
+
+Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend) {
+  return windows_float32_unavailable();
+}
+
+Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP) {
+  return windows_float32_unavailable();
+}
+
+Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP, SEXP trainColMeansSEXP, double train_grand_mean) {
+  return windows_float32_unavailable();
+}
+
+Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
+  return windows_float32_unavailable();
+}
+
+Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, SEXP WSEXP, SEXP PSEXP, int backend) {
   return windows_float32_unavailable();
 }
 
