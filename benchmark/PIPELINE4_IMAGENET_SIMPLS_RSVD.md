@@ -1,9 +1,12 @@
-# Pipeline 4: ImageNet SIMPLS rSVD classifier scaling
+# Pipeline 4: ImageNet requested-SIMPLS rSVD classifier scaling
 
-Pipeline 4 evaluates ImageNet-scale DINOv2 feature classification using
-`fastPLS` SIMPLS with randomized SVD.  It is designed for the large prepared
-ImageNet task with 1,000,000 training samples, 281,167 test samples,
-1,024 DINOv2 features, and 1,000 classes.
+Pipeline 4 requests `fastPLS` SIMPLS with randomized SVD for ImageNet-scale
+DINOv2 feature classification. The output records both `requested_method` and
+`executed_method`. In release 0.99.5, the large-class CUDA memory guard may
+execute label-aware PLS-SVD instead of sequential SIMPLS; such rows must be
+reported as PLS-SVD and include the substitution reason. The prepared task has
+1,000,000 training samples, 281,167 test samples, 1,024 DINOv2 features, and
+1,000 classes.
 
 ## Run
 
@@ -39,6 +42,6 @@ RAM pressure on high component counts.
 - run manifest
 - stdout, timing, and failure logs
 
-The output reports fitting time, prediction time, total runtime, top-1
-accuracy, top-5 accuracy where available, peak host RAM, peak GPU memory where
-available, and execution status.
+The output reports requested and executed estimators, fitting time, prediction
+time, total runtime, top-1 accuracy, top-5 accuracy where available, peak host
+RAM, peak GPU memory where available, and execution status.

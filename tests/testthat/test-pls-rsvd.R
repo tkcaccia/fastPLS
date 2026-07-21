@@ -287,3 +287,41 @@ test_that("Rcpp plssvd handles ncomp above rank by capping internally", {
     expect_true(is.data.frame(fit$Ypred))
   }, "rank is limited")
 })
+
+test_that("centered factor-response PLSSVD respects the C minus 1 rank bound", {
+  set.seed(79)
+  X <- matrix(rnorm(90 * 12), nrow = 90, ncol = 12)
+  y <- factor(rep(letters[1:3], each = 30))
+
+  expect_warning(
+    fit <- pls(
+      X,
+      y,
+      ncomp = 3,
+      method = "plssvd",
+      backend = "cpu",
+      svd.method = "rsvd",
+      return_variance = FALSE
+    ),
+    "rank is limited to 2"
+  )
+  expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), 2L)
+})
+
+test_that("estimator substitutions are warned and retained as internal metadata", {
+  model <- structure(list(pls_method = "plssvd"), class = "fastPLS")
+  expect_warning(
+    model <- fastPLS:::.record_pls_method_substitution(
+      model,
+      requested = "simpls",
+      executed = "plssvd",
+      reason = "test memory path"
+    ),
+    "method='simpls' requested, but method='plssvd' was executed"
+  )
+  public <- fastPLS:::.fastpls_public_pls_output(model)
+  internal <- attr(public, "fastPLS_internal")
+  expect_equal(internal$requested_pls_method, "simpls")
+  expect_equal(internal$pls_method, "plssvd")
+  expect_equal(internal$method_substitution_reason, "test memory path")
+})

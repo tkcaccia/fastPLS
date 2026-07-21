@@ -21,9 +21,19 @@
   if (is.null(x)) y else x
 }
 
-.cap_plssvd_ncomp <- function(ncomp, nrows_x, ncols_x, ncols_y, warn = TRUE) {
+.cap_plssvd_ncomp <- function(ncomp, nrows_x, ncols_x, ncols_y,
+                              factor_response = FALSE, warn = TRUE) {
   ncomp <- as.integer(ncomp)
-  max_plssvd_rank <- min(as.integer(nrows_x), as.integer(ncols_x), as.integer(ncols_y))
+  response_rank_bound <- as.integer(ncols_y)
+  if (isTRUE(factor_response)) {
+    # Centered C-column indicator responses have at most C - 1 independent columns.
+    response_rank_bound <- response_rank_bound - 1L
+  }
+  max_plssvd_rank <- min(
+    as.integer(nrows_x),
+    as.integer(ncols_x),
+    response_rank_bound
+  )
   if (max_plssvd_rank < 1L) {
     stop("plssvd rank is < 1")
   }
@@ -39,6 +49,26 @@
   }
   ncomp <- pmin(pmax(ncomp, 1L), max_plssvd_rank)
   list(ncomp = ncomp, max_rank = max_plssvd_rank, capped = isTRUE(over))
+}
+
+.record_pls_method_substitution <- function(model, requested, executed, reason,
+                                            warn = TRUE) {
+  requested <- as.character(requested)[1L]
+  executed <- as.character(executed)[1L]
+  reason <- as.character(reason)[1L]
+  if (isTRUE(warn)) {
+    warning(
+      sprintf(
+        "method='%s' requested, but method='%s' was executed: %s",
+        requested, executed, reason
+      ),
+      call. = FALSE
+    )
+  }
+  model$requested_pls_method <- requested
+  model$pls_method <- executed
+  model$method_substitution_reason <- reason
+  model
 }
 
 .restore_env_scalar <- function(name, value) {
@@ -721,7 +751,9 @@
   if (n < 1L || p < 1L || m < 2L) {
     stop("label-aware PLSSVD requires non-empty X and at least two classes", call. = FALSE)
   }
-  cap <- .cap_plssvd_ncomp(ncomp, n, p, m, warn = TRUE)
+  cap <- .cap_plssvd_ncomp(
+    ncomp, n, p, m, factor_response = TRUE, warn = TRUE
+  )
   ncomp <- as.integer(cap$ncomp)
   max_rank <- max(ncomp)
   if (is.null(block_size)) {
@@ -849,7 +881,9 @@
   n <- nrow(Xtrain)
   p <- ncol(Xtrain)
   m <- length(lev)
-  cap <- .cap_plssvd_ncomp(ncomp, n, p, m, warn = TRUE)
+  cap <- .cap_plssvd_ncomp(
+    ncomp, n, p, m, factor_response = TRUE, warn = TRUE
+  )
   ncomp <- as.integer(cap$ncomp)
   max_rank <- max(ncomp)
   stats <- label_crossprod_scaled_cpp(Xtrain, y_code, m, as.integer(scaling))
@@ -1843,6 +1877,8 @@
   "B_stored",
   "compact_prediction",
   "pls_method",
+  "requested_pls_method",
+  "method_substitution_reason",
   "predict_latent_ok",
   "xprod_default",
   "predict_backend",
@@ -3198,6 +3234,17 @@ print.fastPLS <- function(x, ...) {
 .fit_float32_pls <- function(Xtrain, Ytrain, ncomp, scaling, method,
                              backend, svd.method, rsvd_oversample, rsvd_power, seed, fit) {
   yprep <- .float32_prepare_response(Ytrain)
+  if (identical(method, "plssvd") && isTRUE(yprep$classification)) {
+    cap <- .cap_plssvd_ncomp(
+      ncomp,
+      nrow(Xtrain),
+      ncol(Xtrain),
+      ncol(yprep$Ytrain),
+      factor_response = TRUE,
+      warn = TRUE
+    )
+    ncomp <- cap$ncomp
+  }
   model <- .wrap_float32_cpp_model(pls_float32_cpu_cpp(
     .as_float32_matrix(Xtrain, "Xtrain"),
     yprep$Ytrain,
@@ -4382,6 +4429,15 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 	      scaling = scal,
 	      backend = "cuda"
 	    )
+	    model <- .record_pls_method_substitution(
+	      model,
+	      requested = "simpls",
+	      executed = "plssvd",
+	      reason = paste(
+	        "the label-aware large-class memory path avoids materializing",
+	        "the dense indicator response"
+	      )
+	    )
 	    model <- .attach_lda_classifier(
 	      model,
 	      Xtrain,
@@ -4403,6 +4459,15 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       Ytrain_original,
       ncomp = as.integer(ncomp),
       scaling = scal
+    )
+    model <- .record_pls_method_substitution(
+      model,
+      requested = "simpls",
+      executed = "plssvd",
+      reason = paste(
+        "the large-class CUDA LDA path uses label-aware PLS-SVD scores",
+        "to avoid materializing the dense indicator response"
+      )
     )
     cuda_reset_workspace()
     model$classification <- TRUE
@@ -4588,6 +4653,18 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
+
+  if (classification) {
+    cap <- .cap_plssvd_ncomp(
+      ncomp,
+      nrow(Xtrain),
+      ncol(Xtrain),
+      ncol(Ytrain),
+      factor_response = TRUE,
+      warn = TRUE
+    )
+    ncomp <- cap$ncomp
+  }
 
   use_xprod_default <- identical(svd.method, "cuda_rsvd") &&
     .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
@@ -5233,7 +5310,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }
 
   if (identical(method, "plssvd")) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), q_response, warn = TRUE)
+    cap <- .cap_plssvd_ncomp(
+      ncomp, nrow(Xdata), ncol(Xdata), q_response,
+      factor_response = classification, warn = TRUE
+    )
     ncomp <- cap$ncomp
   }
 
@@ -5579,7 +5659,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     q_response <- ncol(Yoriginal)
   }
   if (identical(method, "plssvd")) {
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata), q_response, warn = TRUE)
+    cap <- .cap_plssvd_ncomp(
+      ncomp, nrow(Xdata), ncol(Xdata), q_response,
+      factor_response = classification, warn = TRUE
+    )
     ncomp <- cap$ncomp
   }
 
@@ -7438,6 +7521,18 @@ plot.permutation <- function(x,
   Ymat <- yprep$Ytrain
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
 
+  if (identical(method, "plssvd") && isTRUE(yprep$classification)) {
+    cap <- .cap_plssvd_ncomp(
+      ncomp,
+      nrow(Xtrain),
+      ncol(Xtrain),
+      ncol(Ymat),
+      factor_response = TRUE,
+      warn = TRUE
+    )
+    ncomp <- cap$ncomp
+  }
+
   if (identical(method, "opls")) {
     filt <- .opls_filter_metal(Xtrain, .supervised_response_matrix(Ytrain_original), north, scaling)
     inner <- .pls_metal_fit_core(
@@ -7553,6 +7648,15 @@ plot.permutation <- function(x,
 #' with float32 input supports `classifier = "argmax"`, `classifier = "lda"`,
 #' and `classifier = "cknn"`. Unsupported float32 combinations stop with a clear
 #' error rather than silently upcasting to double.
+#'
+#' For a factor response with \eqn{C} levels, centred dummy coding has rank at
+#' most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
+#' component count at \eqn{C-1}. On very large CUDA classification problems, a
+#' memory guard may replace a requested SIMPLS fit with the label-aware PLS-SVD
+#' projection to avoid a dense indicator matrix. Such substitution emits a
+#' warning and records the requested method, executed method, and reason in the
+#' fitted object's internal metadata. The current CUDA SIMPLS-LDA path similarly
+#' records that its latent score model was constructed by PLS-SVD.
 #'
 #' @details For latent-space LDA, the pooled covariance is computed as
 #'   \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
@@ -8024,7 +8128,10 @@ pls =  function (Xtrain,
   xprod_precision_default <- if (identical(svd.method, "irlba")) "implicit_irlba" else "implicit64"
 
   if(meth==1){
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), warn = TRUE)
+    cap <- .cap_plssvd_ncomp(
+      ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain),
+      factor_response = classification, warn = TRUE
+    )
     ncomp <- cap$ncomp
     if (use_xprod_default) {
       model=pls.model1.rsvd.xprod.precision(

@@ -89,10 +89,12 @@ Default outputs:
 - `rearranged_tables/pipeline3_opls_cv10_wide_table.csv`
 - `rearranged_tables/pipeline3_kernelpls_cv10_wide_table.csv`
 
-## Pipeline 4: ImageNet DINOv2 SIMPLS classifier scaling
+## Pipeline 4: ImageNet DINOv2 requested-SIMPLS classifier scaling
 
-Purpose: test ImageNet-scale SIMPLS with randomized SVD on DINOv2 features,
-including argmax, LDA, and candidate-kNN classification heads.
+Purpose: request ImageNet-scale SIMPLS with randomized SVD on DINOv2 features,
+including argmax, LDA, and candidate-kNN heads. Outputs retain both requested
+and executed estimators. Large-class CUDA rows routed by the memory guard are
+labelled as label-aware PLS-SVD rather than sequential SIMPLS.
 
 Run:
 

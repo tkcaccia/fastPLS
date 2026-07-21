@@ -550,7 +550,11 @@ safe_effective_ncomp <- function(task, requested_ncomp, method_family = NULL) {
   )
 
   if (identical(method_family, "plssvd")) {
-    base_cap <- min(base_cap, as.integer(task$n_classes))
+    response_cap <- as.integer(task$n_classes)
+    if (identical(task$task_type, "classification")) {
+      response_cap <- response_cap - 1L
+    }
+    base_cap <- min(base_cap, response_cap)
   }
 
   max(1L, base_cap)

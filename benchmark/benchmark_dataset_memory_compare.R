@@ -126,6 +126,8 @@ row_template <- data.frame(
   dataset = task$dataset,
   task_type = task$task_type,
   variant_name = variant_name,
+  requested_method = spec$method_family,
+  executed_method = spec$method_family,
   method_family = spec$method_family,
   method_panel = method_panel_label(spec$method_family),
   engine = spec$engine,
@@ -175,21 +177,26 @@ result_row <- tryCatch({
   } else {
     isTRUE(fastPLS::has_cuda())
   }
+  response_cap <- if (identical(task$task_type, "classification")) {
+    as.integer(task$n_classes) - 1L
+  } else {
+    as.integer(task$n_classes)
+  }
   if (identical(spec$engine, "GPU") && !isTRUE(gpu_available)) {
     row_template$status <- paste0("skipped_no_", gpu_backend)
     row_template$msg <- sprintf("%s backend not available for library at %s", gpu_backend, lib_loc)
     skip_row <- row_template
   } else if (identical(spec$method_family, "plssvd") &&
              is.finite(requested_ncomp) &&
-             requested_ncomp > task$n_classes) {
-    row_template$effective_ncomp <- as.integer(task$n_classes)
+             requested_ncomp > response_cap) {
+    row_template$effective_ncomp <- response_cap
     if (identical(task$task_type, "classification")) {
       row_template$status <- "skipped_ncomp_above_class_cap"
       row_template$msg <- sprintf(
-        "%s skipped: requested_ncomp=%s exceeds n_classes=%s for classification task",
+        "%s skipped: requested_ncomp=%s exceeds centered class-response rank cap=%s",
         spec$method_family,
         as.integer(requested_ncomp),
-        as.integer(task$n_classes)
+        response_cap
       )
     } else {
       row_template$status <- "skipped_ncomp_above_y_cap"
@@ -307,12 +314,24 @@ result_row <- tryCatch({
   }
 
   metric <- metric_from_pred(task$Ytest, pred_obj, y_train = task$Ytrain)
+  internal <- if (!identical(spec$backend, "pls_pkg")) {
+    attr(fit_obj, "fastPLS_internal", exact = TRUE)
+  } else {
+    NULL
+  }
+  executed <- if (!is.null(internal$pls_method)) {
+    as.character(internal$pls_method)[1L]
+  } else {
+    as.character(spec$method_family)[1L]
+  }
 
   if (nzchar(pred_out)) {
     dir.create(dirname(pred_out), recursive = TRUE, showWarnings = FALSE)
     saveRDS(
       list(
         variant_name = variant_name,
+        requested_method = spec$method_family,
+        executed_method = executed,
         replicate = as.integer(replicate_id),
         requested_ncomp = as.integer(requested_ncomp),
         effective_ncomp = as.integer(effective_cap),
@@ -327,6 +346,30 @@ result_row <- tryCatch({
   }
 
   row_ok <- row_template
+  if (!identical(spec$backend, "pls_pkg")) {
+    row_ok$executed_method <- executed
+    if (!identical(executed, as.character(spec$method_family)[1L])) {
+      row_ok$method_family <- executed
+      row_ok$method_panel <- method_panel_label(executed)
+      row_ok$implementation_label <- sprintf(
+        "%s (executed %s; requested %s)",
+        spec$implementation_label,
+        executed,
+        spec$method_family
+      )
+      reason <- if (!is.null(internal$method_substitution_reason)) {
+        as.character(internal$method_substitution_reason)[1L]
+      } else {
+        ""
+      }
+      row_ok$msg <- sprintf(
+        "requested_method=%s; executed_method=%s%s",
+        spec$method_family,
+        executed,
+        if (nzchar(reason)) paste0("; reason=", reason) else ""
+      )
+    }
+  }
   row_ok$effective_ncomp <- as.integer(effective_cap)
   row_ok$fit_time_ms <- as.numeric(fit_ms)
   row_ok$predict_time_ms <- as.numeric(pred_ms)
@@ -335,7 +378,6 @@ result_row <- tryCatch({
   row_ok$metric_value <- as.numeric(metric$metric_value)
   row_ok$accuracy <- if (identical(metric$metric_name, "accuracy")) as.numeric(metric$metric_value) else NA_real_
     row_ok$status <- status
-    row_ok$msg <- ""
     row_ok
   }
 }, error = function(e) {

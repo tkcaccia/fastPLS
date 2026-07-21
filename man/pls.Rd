@@ -209,6 +209,15 @@ with float32 input supports \code{classifier = "argmax"}, \code{classifier = "ld
 and \code{classifier = "cknn"}. Unsupported float32 combinations stop with a clear
 error rather than silently upcasting to double.
 
+For a factor response with \eqn{C} levels, centred dummy coding has rank at
+most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
+component count at \eqn{C-1}. On very large CUDA classification problems, a
+memory guard may replace a requested SIMPLS fit with the label-aware PLS-SVD
+projection to avoid a dense indicator matrix. Such substitution emits a
+warning and records the requested method, executed method, and reason in the
+fitted object's internal metadata. The current CUDA SIMPLS-LDA path similarly
+records that its latent score model was constructed by PLS-SVD.
+
 For latent-space LDA, the pooled covariance is computed as
 \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
 centered class blocks. Class coefficients are obtained by Cholesky

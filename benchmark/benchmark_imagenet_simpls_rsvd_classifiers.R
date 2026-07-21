@@ -113,7 +113,9 @@ base_row <- data.frame(
   test_n = NA_integer_,
   p = NA_integer_,
   q = NA_integer_,
-  method = "simpls",
+  requested_method = "simpls",
+  executed_method = NA_character_,
+  method_note = "",
   svd_method = "rsvd",
   backend = backend,
   classifier = classifier,
@@ -147,7 +149,8 @@ tryCatch({
 
   Xtrain <- read_matrix_binary_cache(task$train_bin, task$n_train, task$p, task$feat_cols)
   Ytrain <- task$Ytrain
-  log_msg("Fitting simpls/rsvd backend=", backend, " classifier=", classifier, " ncomp=", ncomp)
+  log_msg("Fitting requested_method=simpls svd_method=rsvd backend=", backend,
+          " classifier=", classifier, " ncomp=", ncomp)
   t_fit <- system.time({
     model <- pls(
       Xtrain,
@@ -162,6 +165,15 @@ tryCatch({
       return_variance = FALSE
     )
   })[["elapsed"]]
+  internal <- attr(model, "fastPLS_internal", exact = TRUE)
+  base_row$executed_method <- if (!is.null(internal$pls_method)) {
+    as.character(internal$pls_method)[1L]
+  } else {
+    "simpls"
+  }
+  if (!is.null(internal$method_substitution_reason)) {
+    base_row$method_note <- as.character(internal$method_substitution_reason)[1L]
+  }
   rm(Xtrain)
   gc()
 
