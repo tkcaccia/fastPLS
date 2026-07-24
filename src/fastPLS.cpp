@@ -1717,6 +1717,45 @@ Rcpp::IntegerMatrix fmat_to_float32_bits(const arma::fmat& x) {
   return bits;
 }
 
+// Rcpp may simplify a one-column Armadillo matrix returned through an
+// intermediate List to a numeric vector. Keep the numerical value in
+// float32 and restore its unambiguous one-column matrix form for the
+// rank-one response case used by univariate PLS regression.
+arma::fmat r_object_to_fmat(SEXP xSEXP, const char* name) {
+  if (!Rf_isReal(xSEXP)) {
+    Rcpp::stop("%s must be a numeric matrix or vector", name);
+  }
+  SEXP dims = Rf_getAttrib(xSEXP, R_DimSymbol);
+  const R_xlen_t rows = (dims != R_NilValue && XLENGTH(dims) == 2)
+    ? INTEGER(dims)[0]
+    : XLENGTH(xSEXP);
+  const R_xlen_t cols = (dims != R_NilValue && XLENGTH(dims) == 2)
+    ? INTEGER(dims)[1]
+    : 1;
+  if (rows < 1 || cols < 1 || rows * cols != XLENGTH(xSEXP)) {
+    Rcpp::stop("%s must be a non-empty numeric matrix or vector", name);
+  }
+  arma::fmat out(static_cast<arma::uword>(rows), static_cast<arma::uword>(cols));
+  const double* src = REAL(xSEXP);
+  float* dst = out.memptr();
+  for (R_xlen_t i = 0; i < XLENGTH(xSEXP); ++i) {
+    dst[i] = static_cast<float>(src[i]);
+  }
+  return out;
+}
+
+arma::fvec r_object_to_fvec(SEXP xSEXP, const char* name) {
+  if (Rf_isReal(xSEXP)) {
+    Rcpp::NumericVector x(xSEXP);
+    arma::fvec out(x.size());
+    for (R_xlen_t i = 0; i < x.size(); ++i) {
+      out(static_cast<arma::uword>(i)) = static_cast<float>(x[i]);
+    }
+    return out;
+  }
+  Rcpp::stop("%s must be a numeric vector", name);
+}
+
 arma::fmat integer_bits_to_fmat(SEXP xSEXP, const char* name) {
   Rcpp::IntegerMatrix bits(xSEXP);
   if (bits.nrow() < 1 || bits.ncol() < 1) {
@@ -3011,9 +3050,9 @@ Rcpp::List pls_float32_cpu_cpp(
       static_cast<unsigned int>(seed),
       false
     );
-    arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
-    arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
-    arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
+    arma::fmat U = r_object_to_fmat(sv["u"], "float32 left singular vectors");
+    arma::fmat V = r_object_to_fmat(sv["v"], "float32 right singular vectors");
+    arma::fvec d = r_object_to_fvec(sv["d"], "float32 singular values");
     Rmat.cols(0, U.n_cols - 1) = U;
     Qmat.cols(0, V.n_cols - 1) = V;
 
@@ -3069,7 +3108,7 @@ Rcpp::List pls_float32_cpu_cpp(
       static_cast<unsigned int>(seed + a),
       true
     );
-    arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
+    arma::fmat U = r_object_to_fmat(sv["u"], "float32 left singular vectors");
     if (U.n_cols < 1) break;
     arma::fvec rr = U.col(0);
     arma::fvec tt = Xtrain * rr;
@@ -4367,14 +4406,18 @@ List pls_model2_fast(
   };
 
   const bool can_incremental = (incremental_svd == 1) && (S.n_rows > 5) && (S.n_cols > 1);
-  const bool use_optimized_top1_rsvd =
+  // The refresh workspace is an rSVD acceleration only.  In particular, an
+  // explicit IRLBA request must retain the IRLBA update at every deflated
+  // SIMPLS step rather than silently substituting a randomized direction.
+  const bool use_incremental_refresh =
     (fast_optimized == 1) &&
-    (fast_top1_rsvd == 1) &&
     can_incremental &&
     is_rsvd_backend_method(svd_method);
+  const bool use_optimized_top1_rsvd =
+    use_incremental_refresh &&
+    (fast_top1_rsvd == 1);
   const bool use_gpu_refresh =
-    (fast_optimized == 1) &&
-    can_incremental &&
+    use_incremental_refresh &&
     (svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD) &&
     fastpls_svd::cuda_rsvd_prefer_block_gpu(
       static_cast<int>(S.n_rows),
@@ -4415,7 +4458,7 @@ List pls_model2_fast(
       const int k_block = std::min(refresh_cfg.first, remaining);
       const int power_iters_block = refresh_cfg.second;
       arma::mat Ublock;
-      if (can_incremental) {
+      if (use_incremental_refresh) {
         const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
         if (!refresh_ws.refresh(
               S,

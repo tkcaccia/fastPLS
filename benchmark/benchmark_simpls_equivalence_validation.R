@@ -1,10 +1,20 @@
 #!/usr/bin/env Rscript
 
-# Controlled numerical validation of accelerated SIMPLS.  This script compares
-# the current state-reuse path, the retained non-optimized path, and the
-# independent pls::simpls.fit implementation on the same fixed synthetic data.
+# Controlled numerical validation of SIMPLS. This script compares the compiled
+# implementation with pls::simpls.fit on fixed synthetic data. With --svd=irlba
+# the comparison checks the deterministic de Jong estimator; --svd=rsvd is
+# retained as a separate, explicitly approximate low-rank comparison.
 
 library(fastPLS)
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(name, default) {
+  key <- paste0("--", name, "=")
+  hit <- args[startsWith(args, key)]
+  if (!length(hit)) return(default)
+  sub(key, "", hit[[1L]], fixed = TRUE)
+}
+svd_method <- match.arg(get_arg("svd", "irlba"), c("irlba", "rsvd"))
 
 if (!requireNamespace("pls", quietly = TRUE)) {
   stop("The 'pls' package is required for this validation.", call. = FALSE)
@@ -70,12 +80,12 @@ fit_fastpls <- function(task, optimized, ncomp) {
       task$Xtrain, task$Ytrain,
       Xtest = task$Xtest, Ytest = task$Ytest,
       ncomp = ncomp, scaling = "centering", method = "simpls",
-      backend = "cpu", svd.method = "rsvd", fit = TRUE,
+      backend = "cpu", svd.method = svd_method, fit = TRUE,
       return_variance = FALSE, seed = 123L
     ))
   })[["elapsed"]]
   list(
-    label = if (optimized) "fastPLS_SIMPLS_state_reuse" else "fastPLS_SIMPLS_no_state_reuse",
+    label = if (optimized) "fastPLS_SIMPLS_accelerated" else "fastPLS_SIMPLS_reference_execution",
     fit = fit,
     prediction = prediction_slice(fit$Ypred, ncomp),
     elapsed = elapsed,
@@ -124,6 +134,7 @@ for (scenario in c("well_conditioned", "ill_conditioned", "rank_deficient")) {
     rows[[row_id]] <- data.frame(
       scenario = scenario,
       implementation = model$label,
+      svd_method = svd_method,
       n_train = nrow(task$Xtrain), p = ncol(task$Xtrain), q = ncol(task$Ytrain), ncomp = ncomp,
       elapsed_sec = model$elapsed,
       test_rmsd = sqrt(mean(err^2)),
@@ -143,6 +154,6 @@ results <- do.call(rbind, rows)
 stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
 csv <- file.path(out_dir, paste0("simpls_equivalence_", stamp, ".csv"))
 utils::write.csv(results, csv, row.names = FALSE)
-saveRDS(list(results = results, session = utils::sessionInfo()), sub("[.]csv$", ".rds", csv))
+saveRDS(list(results = results, svd_method = svd_method, session = utils::sessionInfo()), sub("[.]csv$", ".rds", csv))
 print(results)
 cat("Saved: ", normalizePath(csv, winslash = "/", mustWork = FALSE), "\n", sep = "")

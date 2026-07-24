@@ -98,10 +98,13 @@ if [ -f "${FLOAT32_RAW}" ] && [ -f "${FLOAT64_RAW}" ]; then
     "${FLOAT32_RAW}" "${FLOAT64_RAW}" "${RUN_ROOT}/precision_comparison"
 fi
 
+# External R packages accept ordinary double matrices. Keeping this comparison
+# in float64 prevents fastPLS from receiving a precision-only advantage;
+# float32 is evaluated separately by the matched memory stage.
 run_stage pipeline2 env \
   FASTPLS_PKG_COMPARE_RESULTS_DIR="${RUN_ROOT}/pipeline2" \
   FASTPLS_BENCH_LIB="${BENCH_LIB}" \
-  FASTPLS_BENCH_PRECISION=float32 \
+  FASTPLS_BENCH_PRECISION=float64 \
   FASTPLS_PKG_COMPARE_REPS=3 \
   FASTPLS_PKG_COMPARE_TIMEOUT_SEC=3600 \
   bash "${REPO_ROOT}/benchmark/run_pipeline2_package_comparison.sh"

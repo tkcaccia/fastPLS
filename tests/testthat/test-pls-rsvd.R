@@ -275,6 +275,31 @@ test_that("simpls path uses the SVD backend selector", {
   )
 })
 
+test_that("accelerated SIMPLS honours an explicit IRLBA request", {
+  set.seed(91)
+  X <- matrix(rnorm(120 * 30), nrow = 120, ncol = 30)
+  Y <- matrix(rnorm(120 * 8), nrow = 120, ncol = 8)
+  ncomp <- 1:5
+
+  # pls.model2 is the retained component-by-component SIMPLS reference.
+  reference <- fastPLS:::pls.model2(
+    X, Y, ncomp = ncomp, scaling = 1L, fit = TRUE,
+    svd.method = fastPLS:::.svd_method_id("irlba"), seed = 91L
+  )
+  accelerated <- pls(
+    X, Y, ncomp = ncomp, method = "simpls", backend = "cpu",
+    svd.method = "irlba", fit = TRUE, return_variance = FALSE, seed = 91L
+  )
+  signs <- sign(colSums(accelerated$R * reference$R))
+  signs[!is.finite(signs) | signs == 0] <- 1
+  aligned_R <- sweep(accelerated$R, 2L, signs, "*")
+  aligned_Q <- sweep(accelerated$Q, 2L, signs, "*")
+
+  expect_equal(accelerated$B, reference$B, tolerance = 1e-7)
+  expect_equal(aligned_Q, reference$Q, tolerance = 1e-7)
+  expect_equal(aligned_R, reference$R, tolerance = 1e-7)
+})
+
 test_that("Rcpp plssvd handles ncomp above rank by capping internally", {
   set.seed(78)
   X <- matrix(rnorm(180 * 45), nrow = 180, ncol = 45)
