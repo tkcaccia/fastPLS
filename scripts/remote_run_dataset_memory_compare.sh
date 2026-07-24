@@ -7,7 +7,7 @@ REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 RESULTS_DIR="${FASTPLS_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_dataset_memory_compare}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-${HOME}/R/fastpls_bench_fresh}"
-DATASETS="${FASTPLS_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,singlecell,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
+DATASETS="${FASTPLS_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,retina,tabula,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
 NCOMP_LIST="${FASTPLS_NCOMP_LIST:-2,5,10,18,20,50}"
 METREF_NCOMP_LIST="${FASTPLS_METREF_NCOMP_LIST:-2,5,10,22,50,100}"
 CCLE_NCOMP_LIST="${FASTPLS_CCLE_NCOMP_LIST:-2,5,10,18,50,100}"
@@ -19,7 +19,9 @@ MID_MULTI_NCOMP_LIST="${FASTPLS_MID_MULTI_NCOMP_LIST:-2,5,10,20,50,100}"
 GTEX_V8_NCOMP_LIST="${FASTPLS_GTEX_V8_NCOMP_LIST:-2,5,10,20,32,50,100}"
 TCGA_PAN_CANCER_NCOMP_LIST="${FASTPLS_TCGA_PAN_CANCER_NCOMP_LIST:-2,5,10,20,32,50,100}"
 REPS="${FASTPLS_COMPARE_REPS:-3}"
+LARGE_REPS="${FASTPLS_COMPARE_LARGE_REPS:-${REPS}}"
 SPLIT_SEED="${FASTPLS_SPLIT_SEED:-123}"
+PRECISION="${FASTPLS_BENCH_PRECISION:-float32}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 TIME_ARGS="${TIME_ARGS:--v}"
@@ -203,6 +205,8 @@ row <- data.frame(
   dataset = task$dataset,
   task_type = task$task_type,
   variant_name = variant_name,
+  requested_method = spec$method_family,
+  executed_method = spec$method_family,
   method_family = spec$method_family,
   method_panel = method_panel_label(spec$method_family),
   engine = spec$engine,
@@ -216,15 +220,26 @@ row <- data.frame(
   n_test = as.integer(task$n_test),
   p = as.integer(task$p),
   n_classes = as.integer(task$n_classes),
+  precision = if (!is.null(task$precision)) task$precision else benchmark_matrix_precision(task$Xtrain),
+  execution_precision = NA_character_,
+  classifier_backend = NA_character_,
+  classifier_numeric_path = NA_character_,
+  input_storage_mb = if (!is.null(task$input_storage_mb)) as.numeric(task$input_storage_mb) else NA_real_,
   fit_time_ms = NA_real_,
   predict_time_ms = NA_real_,
   total_time_ms = NA_real_,
   metric_name = metric_name,
   metric_value = NA_real_,
   accuracy = NA_real_,
+  top5_accuracy = NA_real_,
+  balanced_accuracy = NA_real_,
+  macro_f1 = NA_real_,
   prediction_file = pred_file,
   peak_host_rss_mb = host_rss,
   peak_gpu_mem_mb = gpu_peak,
+  rss_before_fit_mb = NA_real_,
+  rss_after_fit_mb = NA_real_,
+  rss_after_predict_mb = NA_real_,
   status = status,
   msg = msg,
   dataset_path = task$dataset_path,
@@ -254,7 +269,7 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     nmr)
       dataset_ncomp_list="${NMR_NCOMP_LIST}"
       ;;
-    singlecell|tcga_brca|tcga_hnsc_methylation)
+    retina|singlecell|tabula|tcga_brca|tcga_hnsc_methylation)
       dataset_ncomp_list="${SMALL_MULTI_NCOMP_LIST}"
       ;;
     gtex_v8)
@@ -275,14 +290,15 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
     --dataset-id="${dataset_id}" \
     --task-rds="${task_rds}" \
     --meta-rds="${meta_rds}" \
-    --split-seed="${SPLIT_SEED}"
+    --split-seed="${SPLIT_SEED}" \
+    --precision="${PRECISION}"
 
   variants="$(TASK_META_RDS="${meta_rds}" Rscript -e "source('${REPO_ROOT}/benchmark/helpers_dataset_memory_compare.R'); specs <- variant_specs(); meta <- readRDS(Sys.getenv('TASK_META_RDS')); if (!identical(meta\$task_type, 'classification')) specs <- specs[specs\$classifier == 'argmax', , drop = FALSE]; keep <- trimws(Sys.getenv('FASTPLS_VARIANTS', '')); if (nzchar(keep)) { keep_vec <- trimws(strsplit(keep, ',', fixed = TRUE)[[1L]]); specs <- specs[specs\$variant_name %in% keep_vec, , drop = FALSE] }; cat(paste(specs\$variant_name, collapse=' '))")"
 
   dataset_reps="${REPS}"
   case "${dataset_id}" in
     cifar100|imagenet|nmr|prism)
-      dataset_reps=1
+      dataset_reps="${LARGE_REPS}"
       ;;
   esac
 
@@ -295,7 +311,7 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
       fi
       rep_id=1
       while [ "${rep_id}" -le "${dataset_reps}" ]; do
-        run_id="$(printf '%s__%s__n%s__rep%s' "${dataset_id}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
+        run_id="$(printf '%s__%s__%s__n%s__rep%s' "${dataset_id}" "${PRECISION}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
         row_csv="${RUN_ROWS_DIR}/${run_id}.csv"
         pid_file="${RUN_ROWS_DIR}/${run_id}.pid"
         if [ "${SAVE_PREDICTIONS}" = "true" ]; then

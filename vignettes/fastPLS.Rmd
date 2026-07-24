@@ -129,10 +129,12 @@ Classification is handled as PLS-DA followed by one of three decoding heads.
 `classifier = "argmax"` uses the largest predicted dummy-response score and is
 the standard PLS-DA decoding rule. `classifier = "lda"` fits a regularized
 linear discriminant analysis model in the PLS score space following Fisher's
-discriminant principle (Fisher, 1936). `classifier = "cknn"` reranks
+discriminant principle (Fisher, 1936). `classifier = "cknn"` optionally reranks
 centroid-selected candidate classes by nearest-neighbour evidence in the
 supervised latent space, following the nearest-neighbour principle of Cover and
-Hart (1967).
+Hart (1967). cKNN is included as a proof of concept for sample-rich PLS score
+spaces; it is not the default PLS-DA decoder and should be compared with argmax
+or LDA on the data being analysed.
 
 ### Backends
 
@@ -237,6 +239,10 @@ head(pred_cls_later$Ypred_top[["ncomp=2"]])
 ### Evaluate Classification Predictions
 
 Use `evaluate()` to summarize predicted class labels or class-score matrices.
+For classification, `lift_accuracy` is accuracy divided by the
+`no_information_rate`, the accuracy obtained by always predicting the most
+frequent observed class. Values above one therefore improve on this simple
+majority-class baseline.
 For classification, the complete output includes global metrics, per-class
 metrics, and the confusion matrix.
 
@@ -247,6 +253,14 @@ eval_cls <- evaluate(
 )
 
 eval_cls
+```
+
+The same complete evaluation is also stored automatically in a fitted PLS
+object when observed test responses are supplied. Results are grouped first by
+data role and then by component count.
+
+```{r chunk-005a}
+fit_cls$metrics$test[["ncomp=2"]]$metrics
 ```
 
 Rows of the confusion matrix are predicted labels and columns are observed
@@ -333,8 +347,11 @@ fit_cls_lda_cpu <- pls(
 head(fit_cls_lda_cpu$Ypred)
 ```
 
-The candidate-kNN head is selected with `classifier = "cknn"`. It is most useful
-for larger multiclass data, but the same syntax works on smaller examples:
+The candidate-kNN head is selected with `classifier = "cknn"`. It is intended
+as an optional case study for sample-rich multiclass data. Local-neighbour
+evidence can be unstable when few training samples are available per class, so
+its performance should be validated against argmax and LDA rather than assumed
+to improve every dataset. The same syntax works on smaller examples:
 The main tuning parameters control how strongly the local neighbourhood can
 modify the global PLS class ranking. `k` is the number of same-class neighbours
 used for each candidate class. `tau` is a positive temperature: small values make
@@ -524,6 +541,14 @@ the data to double. Nonlinear kernel-PLS still stores an (n \times n) training
 kernel, so float32 reduces its storage but does not remove its quadratic memory
 scaling.
 
+On Windows, the standard R toolchain does not expose the single-precision
+BLAS/LAPACK symbols needed by the compiled float32 kernels. For this platform,
+fastPLS provides a portable CPU fallback for PLS-SVD and SIMPLS with
+`backend = "cpu"`, `svd.method = "rsvd"`, and `classifier = "argmax"`.
+It preserves float32 input, factors, and predictions, but is slower than the
+compiled CPU route. Windows float32 OPLS, nonlinear kernel-PLS, LDA, and
+accelerator backends currently return a clear unsupported-combination error.
+
 ```{r chunk-018}
 Xreg32 <- float::fl(as.matrix(Xreg_train))
 Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
@@ -592,6 +617,12 @@ median relative error percentage, RPD, and correlations. If `ytrain` is supplied
 Q2 is calculated relative to the training-set response mean, which is the
 preferred setting for independent test-set evaluation.
 
+For wide multivariate responses, `pls()`, `pls.single.cv()`, and
+`pls.double.cv()` return aggregate evaluation metrics by default. Set
+`bycol = TRUE` to also calculate the full response-wise metric table; this is
+useful for inspecting individual spectral bins, but can be expensive for NMR
+data with many response columns.
+
 ```{r chunk-021}
 eval_reg <- evaluate(
   observed = Ytest_reg,
@@ -654,8 +685,13 @@ cv_kfold <- pls.single.cv(
   seed = 103
 )
 
-cv_kfold$metrics
+cv_kfold$metrics$cross_validated[["ncomp=2"]]$metrics
 ```
+
+`metrics$cross_validated` contains the complete `evaluate()` output for each
+tested component count, while `selection_metrics` is the compact internal table
+used to select the best setting. When `fit = TRUE`, `metrics$fitted` evaluates
+the corresponding model fitted to the full dataset.
 
 ### Grouped k-fold CV with `constrain`
 
@@ -936,6 +972,7 @@ The most commonly used `pls.double.cv()` output fields are:
 | `accuracy`, `Q2Y`, `RMSD` | Outer-CV predictive performance, depending on task type. |
 | `Ypred` | Final cross-validated prediction for each sample. |
 | `conf` | Classification confusion matrix. |
+| `metrics` | Complete `evaluate()` results for each outer-CV run and the aggregate prediction. |
 | `results` | Detailed per-run and per-fold information. |
 
 Important elements returned by `pls.double.cv()` are:

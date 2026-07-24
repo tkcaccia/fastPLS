@@ -46,14 +46,16 @@ PLSSVDGPUResult cuda_plssvd_fit(
   const Mat& Ytrain,
   const arma::ivec& ncomp,
   bool fit,
-  const SVDOptions& opt
+  const SVDOptions& opt,
+  bool return_B = false
 );
 PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   const Mat& Xtrain,
   const Mat& Ytrain,
   const arma::ivec& ncomp,
   bool fit,
-  const SVDOptions& opt
+  const SVDOptions& opt,
+  bool return_B = false
 );
 arma::cube cuda_flash_lowrank_predict(
   const Mat& Xtest,

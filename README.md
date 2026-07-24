@@ -50,12 +50,13 @@ fallback. An experimental fused CUDA PLS+LDA path is available with
 rather than the default.
 
 For PLS-DA latent-score prediction, `classifier = "cknn"` uses cKNN, the short
-public name for the PLS-score candidate-kNN classifier.
+public name for the optional PLS-score candidate-kNN classifier.
 The model first ranks classes by centroids in the supervised PLS score space and
 then reranks every sample by same-class kNN among the top candidate classes. The
-default tuning is the ImageNet setting `candidate_knn_k = 10`,
-`candidate_tau = 0.2`, and `candidate_alpha = 0.75`; `candidate_top_m` controls
-the number of candidate classes. `predict()` also supports `top` and
+defaults are `k = 10`, `tau = 0.2`, and `alpha = 0.75`; `top_m` controls the
+number of candidate classes. cKNN is a proof-of-concept downstream classifier
+for sample-rich PLS score spaces, not the default PLS-DA decoder; compare it
+with argmax or LDA for the dataset being analysed. `predict()` also supports `top` and
 `top5 = TRUE` to return ranked class labels and scores for ImageNet-style top-5
 evaluation.
 
@@ -69,14 +70,14 @@ compact latent scores.
 The default threshold is controlled by `FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`
 and the candidate-kNN cache is stored in compact latent-score form.
 
-For the ImageNet/DINOv2 experiments, the strongest PLS-only classifier is the
-same latent-score candidate-kNN idea at larger scale: PLS scores are first used
-to build CUDA prototype scores and every sample is reranked by CUDA candidate
-kNN within the PLS score space. The obsolete gated/calibrated class-bias variants
-have been removed; tune only `candidate_knn_k`, `candidate_tau`, and
-`candidate_alpha`. The generic `pls()` API exposes the same decision rule through
-`classifier = "cknn"` and chooses the C++/CUDA/Metal implementation
-from `backend`.
+For the ImageNet/DINOv2 experiments, the latent-score candidate-kNN case study
+uses PLS scores to build CUDA prototype scores and reranks each sample by CUDA
+candidate kNN within the PLS score space. The obsolete gated/calibrated
+class-bias variants have been removed; tune only `k`, `tau`, `alpha`, and
+`top_m`. The generic `pls()` API exposes the same decision rule through
+`classifier = "cknn"` and chooses the backend-specific route. CPU uses compiled
+C++, CUDA accelerates supported scoring operations, and Metal projects scores
+on Metal before CPU neighbour scoring.
 
 ## Backends
 

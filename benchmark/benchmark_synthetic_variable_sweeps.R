@@ -100,6 +100,13 @@ max_host_rss_mb <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_SYNTH_VAR_MAX
 if (!is.finite(max_host_rss_mb) || is.na(max_host_rss_mb) || max_host_rss_mb <= 0) max_host_rss_mb <- Inf
 base_seed <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_SYNTH_VAR_SEED", "123")))
 if (!is.finite(base_seed) || is.na(base_seed)) base_seed <- 123L
+benchmark_precision <- tolower(Sys.getenv("FASTPLS_BENCH_PRECISION", "float32"))
+if (!benchmark_precision %in% c("float32", "float64")) {
+  stop("FASTPLS_BENCH_PRECISION must be float32 or float64")
+}
+if (identical(benchmark_precision, "float32") && !requireNamespace("float", quietly = TRUE)) {
+  stop("The float package is required for float32 synthetic benchmarks")
+}
 
 include_gpu <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_GPU", TRUE)
 include_r <- bool_env("FASTPLS_SYNTH_VAR_INCLUDE_R", FALSE)
@@ -320,6 +327,28 @@ make_task <- function(family, x_value, seed) {
   }
 }
 
+coerce_synthetic_precision <- function(task, precision) {
+  convert <- function(x) {
+    if (identical(precision, "float32")) float::fl(as.matrix(x)) else as.matrix(x)
+  }
+  task$Xtrain <- convert(task$Xtrain)
+  task$Xtest <- convert(task$Xtest)
+  if (!identical(task$task_type, "classification")) {
+    task$Ytrain <- convert(task$Ytrain)
+    task$Ytest <- convert(task$Ytest)
+  }
+  task$precision <- precision
+  task$input_storage_mb <- as.numeric(
+    object.size(task$Xtrain) + object.size(task$Xtest) +
+      object.size(task$Ytrain) + object.size(task$Ytest)
+  ) / (1024^2)
+  task
+}
+
+as_double_matrix <- function(x) {
+  if (inherits(x, "float32")) float::dbl(x) else as.matrix(x)
+}
+
 read_proc_rss_mb <- function(pid = Sys.getpid()) {
   path <- file.path("/proc", as.character(pid), "status")
   if (!file.exists(path)) return(NA_real_)
@@ -407,17 +436,38 @@ stop_memory_monitor <- function(mon) {
 }
 
 metric_from_prediction <- function(task, pred) {
+  last_prediction_value <- function(x) {
+    if (is.list(x) && !is.data.frame(x)) return(x[[length(x)]])
+    if (length(dim(x)) == 3L) return(x[, , dim(x)[3L], drop = TRUE])
+    x
+  }
   if (identical(task$task_type, "classification")) {
-    yhat <- pred$Ypred
+    yhat <- last_prediction_value(pred$Ypred)
     if (is.data.frame(yhat)) yhat <- yhat[[ncol(yhat)]]
     acc <- mean(as.character(yhat) == as.character(task$Ytest), na.rm = TRUE)
     return(list(metric_name = "accuracy", metric_value = as.numeric(acc), accuracy = as.numeric(acc), q2 = NA_real_, rmsd = NA_real_))
   }
-  ypred <- pred$Ypred
+  ypred <- last_prediction_value(pred$Ypred)
   if (is.null(ypred)) stop("Prediction object does not contain Ypred")
+  if (inherits(ypred, "float32") && inherits(task$Ytest, "float32")) {
+    if (!identical(dim(ypred), dim(task$Ytest))) {
+      stop("Float32 prediction dimensions do not match the response dimensions")
+    }
+    residual <- ypred - task$Ytest
+    press <- as.numeric(float::dbl(sum(residual * residual)))
+    if (ncol(task$Ytest) == 1L) {
+      train_mean <- as.numeric(float::dbl(colMeans(task$Ytrain)))[[1L]]
+      centered <- task$Ytest - train_mean
+      tss <- as.numeric(float::dbl(sum(centered * centered)))
+      q2 <- if (is.finite(tss) && tss > 0) 1 - press / tss else NA_real_
+      return(list(metric_name = "Q2", metric_value = q2, accuracy = NA_real_, q2 = q2, rmsd = sqrt(press / nrow(task$Ytest))))
+    }
+    rmsd <- sqrt(press / (nrow(task$Ytest) * ncol(task$Ytest)))
+    return(list(metric_name = "RMSD", metric_value = rmsd, accuracy = NA_real_, q2 = NA_real_, rmsd = rmsd))
+  }
   if (length(dim(ypred)) == 3L) ypred <- ypred[, , dim(ypred)[3L], drop = TRUE]
-  ypred <- as.matrix(ypred)
-  ytrue <- as.matrix(task$Ytest)
+  ypred <- as_double_matrix(ypred)
+  ytrue <- as_double_matrix(task$Ytest)
   if (!all(dim(ypred) == dim(ytrue))) {
     ypred <- matrix(as.numeric(ypred), nrow = nrow(ytrue), ncol = ncol(ytrue))
   }
@@ -435,7 +485,7 @@ pls_pkg_fit <- function(task, method_panel, ncomp_run) {
     Ymm <- model.matrix(~ task$Ytrain - 1)
     colnames(Ymm) <- levels(task$Ytrain)
   } else {
-    Ymm <- as.matrix(task$Ytrain)
+    Ymm <- as_double_matrix(task$Ytrain)
   }
   fit_fun <- switch(
     method_panel,
@@ -445,7 +495,7 @@ pls_pkg_fit <- function(task, method_panel, ncomp_run) {
     stop("pls_pkg is not available for ", method_panel)
   )
   t0 <- proc.time()[3]
-  mdl <- fit_fun(task$Xtrain, Ymm, ncomp = as.integer(ncomp_run), center = TRUE, stripped = TRUE)
+  mdl <- fit_fun(as_double_matrix(task$Xtrain), Ymm, ncomp = as.integer(ncomp_run), center = TRUE, stripped = TRUE)
   fit_ms <- (proc.time()[3] - t0) * 1000
   list(model = mdl, fit_ms = fit_ms, levels_y = if (is.factor(task$Ytrain)) levels(task$Ytrain) else NULL)
 }
@@ -458,7 +508,7 @@ pls_pkg_predict <- function(fit, task, ncomp_run) {
     nout <- if (identical(task$task_type, "classification")) length(fit$levels_y) else length(mdl$Ymeans)
     coef_mat <- matrix(coef_mat, ncol = nout)
   }
-  Xc <- sweep(as.matrix(task$Xtest), 2L, mdl$Xmeans, "-", check.margin = FALSE)
+  Xc <- sweep(as_double_matrix(task$Xtest), 2L, mdl$Xmeans, "-", check.margin = FALSE)
   pred <- Xc %*% coef_mat + matrix(mdl$Ymeans, nrow = nrow(Xc), ncol = length(mdl$Ymeans), byrow = TRUE)
   if (identical(task$task_type, "classification")) {
     lev <- colnames(pred) %||% fit$levels_y
@@ -486,7 +536,7 @@ variant_specs <- function(task) {
       specs,
       data.table(
         variant_name = c(
-          "gpu_plssvd_fp64", "gpu_simpls_fp64", "gpu_opls_fp64", "gpu_kernelpls_fp64"
+          "gpu_plssvd_rsvd", "gpu_simpls_rsvd", "gpu_opls_rsvd", "gpu_kernelpls_rsvd"
         ),
         method_panel = c(
           "plssvd", "simpls", "opls", "kernelpls"
@@ -563,21 +613,21 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   fit_call <- function() {
   if (identical(spec$engine, "GPU")) {
       if (identical(spec$method_panel, "plssvd")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = gpu_backend, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "plssvd", backend = gpu_backend, svd.method = "rsvd", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "simpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = gpu_backend, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "simpls", backend = gpu_backend, svd.method = "rsvd", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "opls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = gpu_backend, north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = opls_layout$ncomp, method = "opls", backend = gpu_backend, svd.method = "rsvd", north = opls_layout$north, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
       if (identical(spec$method_panel, "kernelpls")) {
-        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = gpu_backend, kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
+        return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = "kernelpls", backend = gpu_backend, svd.method = "rsvd", kernel = "linear", classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
       }
     }
 
-    backend <- "cpp"
-    svd_method <- if (identical(spec$backend_algorithm, "rsvd_cpu")) "cpu_rsvd" else "irlba"
+    backend <- "cpu"
+    svd_method <- if (identical(spec$backend_algorithm, "rsvd_cpu")) "rsvd" else "irlba"
     if (identical(spec$method_panel, "plssvd") || identical(spec$method_panel, "simpls")) {
       return(fastPLS::pls(task$Xtrain, task$Ytrain, ncomp = as.integer(ncomp_run), method = spec$method_panel, backend = backend, svd.method = svd_method, classifier = spec$classifier, fit = FALSE, return_variance = FALSE, seed = as.integer(seed)))
     }
@@ -594,7 +644,10 @@ fit_predict_variant <- function(task, spec, ncomp_run, seed) {
   model <- fit_call()
   fit_ms <- (proc.time()[3] - t0) * 1000
   t1 <- proc.time()[3]
-  pred <- predict(model, newdata = task$Xtest, Ytest = NULL, proj = FALSE, top5 = FALSE)
+  pred <- predict(
+    model, newdata = task$Xtest, Ytest = NULL, proj = FALSE,
+    top5 = identical(task$task_type, "classification")
+  )
   predict_ms <- (proc.time()[3] - t1) * 1000
   metric <- metric_from_prediction(task, pred)
   mem <- stop_memory_monitor(mon)
@@ -688,7 +741,7 @@ if (file.exists(progress_file)) unlink(progress_file)
 log_msg("Synthetic variable-sweep benchmark started")
 log_msg("out_dir=", out_dir)
 log_msg("families=", paste(families, collapse = ","))
-log_msg("reps=", reps, " ncomp=", ncomp, " timeout_sec=", timeout_sec, " max_host_rss_mb=", if (is.finite(max_host_rss_mb)) max_host_rss_mb else "Inf", " include_gpu=", include_gpu, " gpu_backend=", gpu_backend, " gpu_ok=", gpu_ok, " include_r=", include_r, " include_pls_pkg=", include_pls_pkg)
+log_msg("reps=", reps, " ncomp=", ncomp, " precision=", benchmark_precision, " timeout_sec=", timeout_sec, " max_host_rss_mb=", if (is.finite(max_host_rss_mb)) max_host_rss_mb else "Inf", " include_gpu=", include_gpu, " gpu_backend=", gpu_backend, " gpu_ok=", gpu_ok, " include_r=", include_r, " include_pls_pkg=", include_pls_pkg)
 
 all_rows <- list()
 row_idx <- 0L
@@ -706,6 +759,7 @@ for (family in families) {
     for (rep_id in seq_len(reps)) {
       seed <- as.integer(base_seed + match(family, names(family_meta)) * 100000L + rep_id * 1000L + round(as.numeric(x_value) * 10))
       task <- make_task(family, x_value, seed)
+      task <- coerce_synthetic_precision(task, benchmark_precision)
       ncomp_eff <- min(as.integer(ncomp), task$n_train - 1L, task$p, task$n_classes)
       specs <- variant_specs(task)
       log_msg("[RUN] family=", family, " ", meta$variable, "=", x_value, " rep=", rep_id, " methods=", nrow(specs), " ncomp_eff=", ncomp_eff)
@@ -744,6 +798,8 @@ for (family in families) {
           p = as.integer(task$p),
           q = as.integer(task$q),
           n_classes = as.integer(task$n_classes),
+          precision = task$precision,
+          input_storage_mb = as.numeric(task$input_storage_mb),
           noise = as.numeric(task$noise),
           rank_true = as.integer(task$rank_true),
           fit_time_ms = as.numeric(result$fit_time_ms %||% NA_real_),
@@ -786,7 +842,7 @@ summary_dt <- raw[status == "ok", .(
   family, task_type, swept_variable, x_value, x_label,
   variant_name, method_panel, engine, implementation, backend_algorithm,
   classifier,
-  requested_ncomp, effective_ncomp, n_train, n_test, p, q, n_classes, noise, rank_true, metric_name
+  precision, requested_ncomp, effective_ncomp, n_train, n_test, p, q, n_classes, noise, rank_true, metric_name
 )]
 fwrite(summary_dt, summary_file)
 
@@ -796,6 +852,7 @@ writeLines(c(
   sprintf("families = %s", paste(families, collapse = ",")),
   sprintf("reps = %d", reps),
   sprintf("requested_ncomp = %d", ncomp),
+  sprintf("precision = %s", benchmark_precision),
   sprintf("timeout_sec = %.0f", timeout_sec),
   sprintf("max_host_rss_mb = %s", if (is.finite(max_host_rss_mb)) sprintf("%.0f", max_host_rss_mb) else "Inf"),
   sprintf("gpu_backend = %s", gpu_backend),

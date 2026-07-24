@@ -38,6 +38,11 @@ Default outputs:
 Purpose: compare `fastPLS` against independent PLS implementations available
 in R packages on real datasets at dataset-specific component counts.
 
+Successful configurations use all requested replicates. If an attempted
+replicate ends in a timeout, process kill, package limitation, or deterministic
+error, later replicates are recorded as `skipped_after_previous_failure`
+instead of repeating the same failed computation.
+
 Run:
 
 ```sh
@@ -89,12 +94,16 @@ Default outputs:
 - `rearranged_tables/pipeline3_opls_cv10_wide_table.csv`
 - `rearranged_tables/pipeline3_kernelpls_cv10_wide_table.csv`
 
-## Pipeline 4: ImageNet DINOv2 requested-SIMPLS classifier scaling
+## Pipeline 4: ImageNet DINOv2 SIMPLS classifier scaling
 
-Purpose: request ImageNet-scale SIMPLS with randomized SVD on DINOv2 features,
-including argmax, LDA, and candidate-kNN heads. Outputs retain both requested
-and executed estimators. Large-class CUDA rows routed by the memory guard are
-labelled as label-aware PLS-SVD rather than sequential SIMPLS.
+Purpose: benchmark ImageNet-scale SIMPLS with randomized SVD on float32 DINOv2
+features, including argmax, LDA, and candidate-kNN heads. Outputs retain both
+requested and executed estimators so any documented large-class memory routing
+remains explicit. Candidate-kNN rows also identify their mixed-precision score
+cache and memory mode rather than being described as end-to-end float32.
+Candidate-kNN is treated as an optional downstream case study showing how the
+supervised PLS score space can support a nonparametric classifier; it is not the
+default decoder or part of the core PLS algorithm.
 
 Run:
 
@@ -105,16 +114,110 @@ bash benchmark/run_pipeline4_imagenet_simpls_rsvd.sh
 Core script:
 
 - `benchmark/benchmark_imagenet_simpls_rsvd_classifiers.R`
+- `benchmark/prepare_imagenet_float32_task.R`
+- `benchmark/plot_imagenet_simpls_rsvd_classifiers.R`
 
 Default outputs:
 
-- `imagenet_simpls_rsvd_classifiers_raw.csv`
-- `imagenet_simpls_rsvd_classifiers_time.csv`
-- `imagenet_simpls_rsvd_classifiers_joined.csv`
+- `pipeline4_imagenet_raw.csv`
+- `pipeline4_imagenet_summary.csv`
+- accuracy, runtime, host-memory, and GPU-memory plots
 - run manifest and logs
 
 Pipeline 4 expects a prepared ImageNet/DINOv2 task RDS on the remote machine.
 The path can be overridden with `TASK_RDS`.
+
+## Publication rerun
+
+`scripts/run_publication_benchmarks.sh` runs Pipelines 1-4 sequentially in an
+isolated output tree. It uses float32 for the main real, simulated, package,
+and ImageNet benchmarks; adds matched float64 runs for the precision-memory
+comparison; and retains per-stage status files so a failed optional method does
+not erase completed results. The matched precision summary only includes rows
+whose recorded execution precision equals the requested comparison precision.
+It reports both absolute peak RSS and incremental RSS above the isolated
+process baseline, together with the input-storage reduction, prediction delta,
+and execution scope. This avoids diluting the measured float32 memory benefit
+with the fixed cost of loading R and the package.
+
+The current float32 CUDA path keeps model arithmetic in float32 and accelerates
+the randomized-SVD range products and supported classifier kernels on CUDA.
+The outer PLS recurrence is still executed by the compiled host float32 core;
+therefore publication summaries describe this path as GPU-accelerated rather
+than claiming that the complete float32 fit is device-resident. Candidate-kNN
+also records its mixed-precision latent-score cache explicitly.
+
+`benchmark/plot_publication_backend_overview.R` converts the completed raw
+real-dataset table into estimator-matched CPU-rSVD/CUDA-rSVD manuscript panels.
+It excludes cKNN from the core backend comparison, requires matching executed
+estimators and effective component counts, and reports runtime, CUDA speedup,
+predictive deviation, and peak host memory with one shared external legend.
+
+`benchmark/plot_publication_cknn_case_study.R` evaluates cKNN separately as an
+optional downstream classifier on PLS scores. It compares cKNN with matched
+argmax/LDA configurations across the ordinary classification datasets and then
+shows ImageNet top-1, top-5, and prediction-time trajectories. This separation
+prevents the cKNN case study from being interpreted as evidence about the core
+PLS estimators.
+
+`benchmark/plot_publication_precision_overview.R` creates a compact matched
+float32/float64 figure for input storage, incremental host RSS, peak GPU memory,
+and predictive deviation. It excludes cKNN because that classifier currently
+uses a mixed-precision latent-score cache.
+
+## Representative NMR spectrum figure
+
+`benchmark/plot_nmr_spectrum_prediction.R` fits float32 SIMPLS with randomized
+SVD to the prepared NMR task and overlays one observed test spectrum with its
+prediction. To avoid selecting an unusually favorable example, the script uses
+the test sample whose RMSD is closest to the median test-set RMSD. It saves the
+observed and predicted spectrum, a residual panel, the plotted values, and
+metadata containing the selected sample, RMSD, correlation, and timings.
+
+`scripts/run_nmr_publication_figure_after_suite.sh` can wait for the publication
+benchmark suite to finish and then generate the NMR figure without competing
+with the benchmark for memory or compute resources.
+
+`scripts/run_backend_publication_overview_after_suite.sh` applies the same
+wait-until-complete rule to the estimator-matched backend overview.
+
+`scripts/run_cknn_publication_case_study_after_suite.sh` waits for both the
+real-dataset table and Pipeline 4 ImageNet summary before creating the cKNN
+case-study tables and figure.
+
+`scripts/run_precision_publication_overview_after_suite.sh` waits for the
+matched precision table and creates the float32/float64 manuscript figure.
+
+## Supplementary kernel sensitivity
+
+`benchmark/benchmark_kernel_sensitivity.R` evaluates linear, RBF, and
+polynomial kernel PLS on representative classification (MetRef and CCLE) and
+multivariate-regression (PRISM and NMR) tasks. Kernel and component settings
+are selected by five-fold cross-validation using the training data only. The
+selected configuration for each kernel family is then refitted on the full
+training set and evaluated on the unchanged test set with both CPU-rSVD and
+CUDA-rSVD. Classification uses argmax throughout so the comparison isolates
+the kernel rather than a downstream LDA or cKNN effect.
+
+The RBF search uses `0.25`, `1`, and `4` times a median-distance scale estimated
+from at most 512 training observations. Polynomial models use the same three
+scale multipliers around `1 / p`, degrees 2 and 3, and intercepts 0 and 1.
+Nonlinear kernels are deliberately not run on the sample-rich image and
+single-cell tasks because their required `n x n` Gram matrix would make those
+runs a quadratic-storage stress test rather than a useful kernel comparison.
+
+`scripts/run_kernel_sensitivity_after_suite.sh` waits for the publication
+suite, reuses its prepared task objects and package installation, records
+isolated-process runtime, peak host RSS, and PID-specific CUDA memory, and then
+runs `benchmark/plot_kernel_sensitivity.R`. Outputs include complete tuning,
+selected-configuration, raw, summary, and failure tables plus separate
+classification and regression figures whose facets share a y-axis within each
+metric row.
+
+`scripts/local_copy_publication_results_after_suite.sh` waits for the suite and
+post-processing figures, then copies publication tables and figures locally.
+It deliberately excludes task matrices, installed libraries, per-run row files,
+and memory-sampling logs.
 
 ## Common environment variables
 

@@ -464,6 +464,14 @@ class CudaRSVDWorkspace {
     }
   }
 
+  void release_pls_coefficient_buffer() {
+    if (dBcur_ != nullptr) {
+      cudaFree(dBcur_);
+      dBcur_ = nullptr;
+      bytes_Bcur_ = 0;
+    }
+  }
+
   void simpls_fast_begin_device_loop(
     int n,
     int p,
@@ -952,7 +960,8 @@ class CudaRSVDWorkspace {
     const arma::mat& Ytrain,
     const arma::ivec& ncomp,
     bool fit,
-    const SVDOptions& opt
+    const SVDOptions& opt,
+    bool return_B
   ) {
     const int n = static_cast<int>(Xtrain.n_rows);
     const int p = static_cast<int>(Xtrain.n_cols);
@@ -969,7 +978,11 @@ class CudaRSVDWorkspace {
     release_pls_ytrain_buffer();
     ensure_buffer(dRRmat_, bytes_for(n, target), bytes_RRmat_, "cudaMalloc(dRRmat)");
     ensure_buffer(dQQmat_, bytes_for(target, target), bytes_QQmat_, "cudaMalloc(dQQmat)");
-    ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+    if (return_B) {
+      ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+    } else {
+      release_pls_coefficient_buffer();
+    }
     if (fit) {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
     }
@@ -1051,8 +1064,10 @@ class CudaRSVDWorkspace {
       }
     }
 
-    out.B.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(m), ncomp.n_elem);
-    out.B.zeros();
+    if (return_B) {
+      out.B.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(m), ncomp.n_elem);
+      out.B.zeros();
+    }
     out.C_latent.set_size(
       static_cast<arma::uword>(target),
       static_cast<arma::uword>(target),
@@ -1106,14 +1121,16 @@ class CudaRSVDWorkspace {
       check_cuda(cudaMemcpy(w_host.memptr(), dBsmall_, bytes_for(mc, m), cudaMemcpyDeviceToHost), "cudaMemcpy(W_latent)");
       out.W_latent.slice(a).submat(0, 0, mc - 1, m - 1) = w_host;
 
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
-        "cublasDgemm(B=U*W)"
-      );
-      check_cuda(
-        cudaMemcpy(out.B.slice(a).memptr(), dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost),
-        "cudaMemcpy(B_slice)"
-      );
+      if (return_B) {
+        check_cublas(
+          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
+          "cublasDgemm(B=U*W)"
+        );
+        check_cuda(
+          cudaMemcpy(out.B.slice(a).memptr(), dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost),
+          "cudaMemcpy(B_slice)"
+        );
+      }
 
       if (fit) {
         check_cublas(
@@ -1136,7 +1153,8 @@ class CudaRSVDWorkspace {
     const arma::mat& Ytrain,
     const arma::ivec& ncomp,
     bool fit,
-    const SVDOptions& opt
+    const SVDOptions& opt,
+    bool return_B
   ) {
     const int n = static_cast<int>(Xtrain.n_rows);
     const int p = static_cast<int>(Xtrain.n_cols);
@@ -1201,7 +1219,11 @@ class CudaRSVDWorkspace {
       "cudaMemcpy(G_full_plssvd)"
     );
 
-    ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+    if (return_B) {
+      ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+    } else {
+      release_pls_coefficient_buffer();
+    }
     if (fit) {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
     }
@@ -1225,8 +1247,10 @@ class CudaRSVDWorkspace {
       }
     }
 
-    out.B.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(m), ncomp.n_elem);
-    out.B.zeros();
+    if (return_B) {
+      out.B.set_size(static_cast<arma::uword>(p), static_cast<arma::uword>(m), ncomp.n_elem);
+      out.B.zeros();
+    }
     out.C_latent.set_size(
       static_cast<arma::uword>(target),
       static_cast<arma::uword>(target),
@@ -1280,14 +1304,16 @@ class CudaRSVDWorkspace {
       check_cuda(cudaMemcpy(w_host.memptr(), dBsmall_, bytes_for(mc, m), cudaMemcpyDeviceToHost), "cudaMemcpy(W_latent)");
       out.W_latent.slice(a).submat(0, 0, mc - 1, m - 1) = w_host;
 
-      check_cublas(
-        cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
-        "cublasDgemm(B=U*W)"
-      );
-      check_cuda(
-        cudaMemcpy(out.B.slice(a).memptr(), dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost),
-        "cudaMemcpy(B_slice)"
-      );
+      if (return_B) {
+        check_cublas(
+          cublasDgemm(handle_, CUBLAS_OP_N, CUBLAS_OP_N, p, m, mc, &alpha, dQ_, p, dBsmall_, mc, &beta, dBcur_, p),
+          "cublasDgemm(B=U*W)"
+        );
+        check_cuda(
+          cudaMemcpy(out.B.slice(a).memptr(), dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost),
+          "cudaMemcpy(B_slice)"
+        );
+      }
 
       if (fit) {
         check_cublas(
@@ -3275,12 +3301,13 @@ PLSSVDGPUResult cuda_plssvd_fit(
   const Mat& Ytrain,
   const arma::ivec& ncomp,
   bool fit,
-  const SVDOptions& opt
+  const SVDOptions& opt,
+  bool return_B
 ) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  return g_workspace.plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt);
+  return g_workspace.plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt, return_B);
 }
 
 PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
@@ -3288,12 +3315,13 @@ PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   const Mat& Ytrain,
   const arma::ivec& ncomp,
   bool fit,
-  const SVDOptions& opt
+  const SVDOptions& opt,
+  bool return_B
 ) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  return g_workspace.plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt);
+  return g_workspace.plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt, return_B);
 }
 
 arma::cube cuda_flash_lowrank_predict(
@@ -4805,7 +4833,8 @@ PLSSVDGPUResult cuda_plssvd_fit(
   const Mat&,
   const arma::ivec&,
   bool,
-  const SVDOptions&
+  const SVDOptions&,
+  bool
 ) {
   throw std::runtime_error("CUDA backend not compiled");
 }
@@ -4815,7 +4844,8 @@ PLSSVDGPUResult cuda_plssvd_fit_implicit_xprod(
   const Mat&,
   const arma::ivec&,
   bool,
-  const SVDOptions&
+  const SVDOptions&,
+  bool
 ) {
   throw std::runtime_error("CUDA backend not compiled");
 }

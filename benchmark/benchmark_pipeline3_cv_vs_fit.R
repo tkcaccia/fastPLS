@@ -64,7 +64,8 @@ if (!is.finite(cknn_top_m) || is.na(cknn_top_m) || cknn_top_m < 1L) cknn_top_m <
 
 classification_dataset_ids <- c(
   "ccle", "cifar100", "gtex_v8", "imagenet", "metref",
-  "singlecell", "tcga_brca", "tcga_hnsc_methylation", "tcga_pan_cancer"
+  "retina", "singlecell", "tabula", "tcga_brca", "tcga_hnsc_methylation",
+  "tcga_pan_cancer"
 )
 regression_dataset_ids <- c("cbmc_citeseq", "nmr", "prism")
 
@@ -137,12 +138,16 @@ empty_row <- function(status, msg, task = NULL, spec = NULL) {
     n_total = if (!is.null(task)) task$n_train + task$n_test else NA_integer_,
     p = if (!is.null(task)) task$p else NA_integer_,
     q = if (!is.null(task)) task$n_classes else NA_integer_,
+    input_precision = if (!is.null(task)) task$precision else NA_character_,
+    input_storage_mb = if (!is.null(task)) task$input_storage_mb else NA_real_,
     ncomp_requested = ncomp_requested,
     effective_ncomp = NA_integer_,
     kfold = kfold,
     benchmark_mode = benchmark_mode,
     method_id = method_id,
     method = if (!is.null(spec)) spec$method else NA_character_,
+    requested_estimator = if (!is.null(spec)) spec$method else NA_character_,
+    executed_estimator = if (!is.null(spec)) spec$method else NA_character_,
     backend = if (!is.null(spec)) spec$backend else NA_character_,
     svd.method = if (!is.null(spec)) spec$svd_method else NA_character_,
     classifier = if (!is.null(spec)) spec$classifier else NA_character_,
@@ -152,6 +157,8 @@ empty_row <- function(status, msg, task = NULL, spec = NULL) {
     cv_time_sec = NA_real_,
     metric_name = NA_character_,
     metric_value = NA_real_,
+    balanced_accuracy = NA_real_,
+    macro_f1 = NA_real_,
     status = status,
     error_message = msg,
     stringsAsFactors = FALSE
@@ -166,8 +173,8 @@ if (identical(mode, "missing_row")) {
 load_pipeline3_task <- function(dataset_id, split_seed) {
   path <- find_dataset_rdata(dataset_id)
   task <- as_task(path, dataset_id = dataset_id, split_seed = split_seed)
-  task$Xtrain <- as.matrix(task$Xtrain)
-  task$Xtest <- as.matrix(task$Xtest)
+  precision <- tolower(Sys.getenv("FASTPLS_BENCH_PRECISION", "float32"))
+  task <- coerce_task_precision(task, precision = precision)
   if (identical(task$task_type, "classification")) {
     task$Ytrain <- droplevels(as.factor(task$Ytrain))
     task$Ytest <- factor(task$Ytest, levels = levels(task$Ytrain))
@@ -177,8 +184,8 @@ load_pipeline3_task <- function(dataset_id, split_seed) {
     task$n_test <- nrow(task$Xtest)
     task$n_classes <- nlevels(task$Ytrain)
   } else {
-    task$Ytrain <- as.matrix(task$Ytrain)
-    task$Ytest <- as.matrix(task$Ytest)
+    task$Ytrain <- coerce_benchmark_matrix(task$Ytrain, precision)
+    task$Ytest <- coerce_benchmark_matrix(task$Ytest, precision)
     task$n_classes <- ncol(task$Ytrain)
   }
   task
@@ -256,7 +263,7 @@ write_pipeline3_wide_tables <- function(raw, results_dir, benchmark_mode = "cv10
   method_order <- c("plssvd", "simpls", "opls", "kernelpls")
   dataset_order <- c(
     "metref", "ccle", "tcga_brca", "tcga_hnsc_methylation",
-    "gtex_v8", "tcga_pan_cancer", "singlecell", "cifar100",
+    "gtex_v8", "tcga_pan_cancer", "retina", "tabula", "cifar100",
     "cbmc_citeseq", "prism", "nmr", "imagenet"
   )
   dataset_order <- dataset_order[dataset_order %in% unique(d$dataset)]
@@ -371,7 +378,10 @@ run_fit_predict <- function(task, spec, effective_ncomp) {
     total_time_sec = as.numeric(t2 - t0),
     cv_time_sec = NA_real_,
     metric_name = met$metric_name,
-    metric_value = met$metric_value
+    metric_value = met$metric_value,
+    balanced_accuracy = met$balanced_accuracy %||% NA_real_,
+    macro_f1 = met$macro_f1 %||% NA_real_,
+    executed_estimator = benchmark_executed_method(fit, spec$method)
   )
 }
 
@@ -408,6 +418,7 @@ run_cv10 <- function(task, spec, effective_ncomp) {
     alpha = cknn_alpha,
     top_m = cknn_top_m,
     north = if (identical(spec$method, "opls")) 1L else 1L,
+    fit = FALSE,
     seed = 123L + replicate_id,
     selection_metric = selection_metric
   )
@@ -419,7 +430,12 @@ run_cv10 <- function(task, spec, effective_ncomp) {
     total_time_sec = NA_real_,
     cv_time_sec = as.numeric(elapsed),
     metric_name = met$metric_name,
-    metric_value = met$metric_value
+    metric_value = met$metric_value,
+    balanced_accuracy = NA_real_,
+    macro_f1 = NA_real_,
+    executed_estimator = as.character(
+      attr(cv, "fastPLS_internal", exact = TRUE)$pls_method %||% spec$method
+    )[1L]
   )
 }
 
@@ -431,7 +447,7 @@ summarize_results <- function(results_dir) {
   if (!nrow(ok)) return(invisible(NULL))
   ok$speed_sec <- ifelse(ok$benchmark_mode == "cv10", ok$cv_time_sec, ok$total_time_sec)
   summary <- aggregate(
-    cbind(speed_sec, metric_value) ~ dataset + task_type + method_id + method + backend + svd.method + classifier + benchmark_mode + ncomp_requested + effective_ncomp + metric_name,
+    cbind(speed_sec, metric_value, peak_host_rss_mb) ~ dataset + task_type + input_precision + method_id + method + requested_estimator + executed_estimator + backend + svd.method + classifier + benchmark_mode + ncomp_requested + effective_ncomp + metric_name,
     ok,
     median,
     na.rm = TRUE
@@ -526,14 +542,18 @@ row <- data.frame(
   n_train = task$n_train,
   n_test = task$n_test,
   n_total = task$n_train + task$n_test,
-  p = task$p,
-  q = task$n_classes,
+    p = task$p,
+    q = task$n_classes,
+  input_precision = task$precision,
+  input_storage_mb = task$input_storage_mb,
   ncomp_requested = ncomp_requested,
   effective_ncomp = effective_ncomp,
   kfold = kfold,
   benchmark_mode = benchmark_mode,
   method_id = method_id,
   method = spec$method,
+  requested_estimator = spec$method,
+  executed_estimator = res$executed_estimator,
   backend = spec$backend,
   svd.method = spec$svd_method,
   classifier = spec$classifier,
@@ -543,6 +563,8 @@ row <- data.frame(
   cv_time_sec = res$cv_time_sec,
   metric_name = res$metric_name,
   metric_value = res$metric_value,
+  balanced_accuracy = res$balanced_accuracy,
+  macro_f1 = res$macro_f1,
   status = "ok",
   error_message = "",
   stringsAsFactors = FALSE

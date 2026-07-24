@@ -201,7 +201,11 @@ for (ds in unique(sumdt$dataset)) {
       labs(
         x = if (show_x) "Requested components" else NULL,
         y = if (identical(metric_name, "Total time (ms)")) "Total time (ms, log scale)" else metric_name,
-        caption = "OPLS panels use total requested components = predictive + 1 orthogonal when feasible."
+        caption = if (show_x) {
+          "OPLS panels use total requested components = predictive + 1 orthogonal when feasible."
+        } else {
+          NULL
+        }
       ) +
       theme_bw(base_size = 15) +
       theme(

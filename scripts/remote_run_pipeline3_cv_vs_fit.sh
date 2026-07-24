@@ -7,11 +7,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 RESULTS_DIR="${FASTPLS_PIPELINE3_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_pipeline3_cv_vs_fit}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-}"
-DATASETS="${FASTPLS_PIPELINE3_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,singlecell,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
+DATASETS="${FASTPLS_PIPELINE3_DATASETS:-metref,ccle,tcga_brca,tcga_hnsc_methylation,gtex_v8,tcga_pan_cancer,retina,tabula,cifar100,prism,nmr,cbmc_citeseq}"
 if [ "${FASTPLS_PIPELINE3_INCLUDE_IMAGENET:-false}" = "true" ]; then
   DATASETS="${DATASETS},imagenet"
 fi
-REPS="${FASTPLS_PIPELINE3_REPS:-1}"
+REPS="${FASTPLS_PIPELINE3_REPS:-3}"
 KFOLD="${FASTPLS_PIPELINE3_KFOLD:-10}"
 TIMEOUT_SEC="${FASTPLS_PIPELINE3_TIMEOUT_SEC:-3600}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
@@ -19,6 +19,7 @@ TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 METHOD_FILTER="${FASTPLS_PIPELINE3_METHODS:-}"
 MODE_FILTER="${FASTPLS_PIPELINE3_BENCHMARK_MODES:-fit_predict,cv10}"
+PRECISION="${FASTPLS_BENCH_PRECISION:-float32}"
 
 mkdir -p "${RESULTS_DIR}/run_rows" "${RESULTS_DIR}/logs"
 
@@ -50,6 +51,41 @@ with open(raw, "w", newline="") as fh:
 PY
 }
 
+annotate_resource_row() {
+  local row_csv="$1"
+  local time_log="$2"
+  local process_status="$3"
+  "${PYTHON_BIN}" - "$row_csv" "$time_log" "$process_status" <<'PY'
+import csv, os, re, sys
+
+row_path, time_path, process_status = sys.argv[1:]
+if not os.path.exists(row_path) or os.path.getsize(row_path) == 0:
+    raise SystemExit(0)
+text = open(time_path, errors="replace").read() if os.path.exists(time_path) else ""
+
+def number(label):
+    match = re.search(r"^\s*" + re.escape(label) + r":\s*([0-9.]+)\s*$", text, re.M)
+    return float(match.group(1)) if match else None
+
+rss_kb = number("Maximum resident set size (kbytes)")
+user_sec = number("User time (seconds)")
+system_sec = number("System time (seconds)")
+rows = list(csv.DictReader(open(row_path, newline="")))
+if not rows:
+    raise SystemExit(0)
+for row in rows:
+    row["peak_host_rss_mb"] = "" if rss_kb is None else f"{rss_kb / 1024.0:.6f}"
+    row["user_cpu_sec"] = "" if user_sec is None else f"{user_sec:.6f}"
+    row["system_cpu_sec"] = "" if system_sec is None else f"{system_sec:.6f}"
+    row["process_status"] = process_status
+fields = list(rows[0].keys())
+with open(row_path, "w", newline="") as fh:
+    writer = csv.DictWriter(fh, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+PY
+}
+
 ncomp_for_dataset() {
   case "$1" in
     metref) echo "${FASTPLS_PIPELINE3_METREF_NCOMP:-22}" ;;
@@ -60,7 +96,9 @@ ncomp_for_dataset() {
     imagenet) echo "${FASTPLS_PIPELINE3_IMAGENET_NCOMP:-100}" ;;
     nmr) echo "${FASTPLS_PIPELINE3_NMR_NCOMP:-50}" ;;
     prism) echo "${FASTPLS_PIPELINE3_PRISM_NCOMP:-5}" ;;
+    retina) echo "${FASTPLS_PIPELINE3_RETINA_NCOMP:-50}" ;;
     singlecell) echo "${FASTPLS_PIPELINE3_SINGLECELL_NCOMP:-50}" ;;
+    tabula) echo "${FASTPLS_PIPELINE3_TABULA_NCOMP:-50}" ;;
     tcga_brca) echo "${FASTPLS_PIPELINE3_TCGA_BRCA_NCOMP:-5}" ;;
     tcga_hnsc_methylation) echo "${FASTPLS_PIPELINE3_TCGA_HNSC_METHYLATION_NCOMP:-2}" ;;
     tcga_pan_cancer) echo "${FASTPLS_PIPELINE3_TCGA_PAN_CANCER_NCOMP:-50}" ;;
@@ -85,6 +123,7 @@ selected() {
   echo "Modes: ${MODE_FILTER}"
   echo "kfold: ${KFOLD}"
   echo "timeout_sec: ${TIMEOUT_SEC}"
+  echo "precision: ${PRECISION}"
   echo "FASTPLS_BENCH_LIB: ${LIB_LOC:-<default>}"
 } | tee "${RESULTS_DIR}/launch.log"
 
@@ -145,6 +184,13 @@ for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
             --message="${msg}" \
             --row-out="${row_csv}" >>"${stdout_log}" 2>>"${time_log}" || true
         fi
+        process_status="ok"
+        if [ "${status}" -eq 124 ]; then
+          process_status="killed_timeout"
+        elif [ "${status}" -ne 0 ]; then
+          process_status="error_${status}"
+        fi
+        annotate_resource_row "${row_csv}" "${time_log}" "${process_status}"
         rep_id=$((rep_id + 1))
       done
     done

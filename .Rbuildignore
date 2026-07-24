@@ -2,6 +2,7 @@
 ^API_AUDIT_NOTE[.]md$
 ^README_DEV[.]md$
 ^\.DS_Store$
+^Rplots[.]pdf$
 ^\.BBSoptions$
 ^[.]Rd2pdf
 ^fastPLS\.BiocCheck$

@@ -21,6 +21,7 @@ pls(
   top_m = 20L,
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = FALSE,
+  bycol = FALSE,
   return_variance = TRUE,
   return_loadings = FALSE,
   proj = FALSE,
@@ -58,12 +59,15 @@ CPU iterative backend.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
-the PLS latent scores. \code{cknn} is the compact name for the PLS-score
+the PLS latent scores. \code{cknn} is the compact name for an optional PLS-score
 candidate-kNN classifier: class centroids in PLS score space choose
 candidate classes, then every sample is reranked by within-candidate kNN in
-the same PLS score space. The compiled implementation is selected automatically from
-\code{backend}: C++ for \code{cpu}, CUDA for \code{cuda}, and Metal for \code{metal}
-where available.}
+the same PLS score space. The route is selected automatically from
+\code{backend}: compiled C++ for \code{cpu}, CUDA acceleration for \code{cuda},
+and Metal projection followed by CPU neighbour scoring for \code{metal}.
+It is a proof-of-concept downstream classifier for sample-rich
+latent spaces, not the default PLS-DA decoder, and should be validated against
+\code{argmax} and \code{lda}.}
 
 \item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
 scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
@@ -93,6 +97,10 @@ candidate-score cache in blocks for scalar component counts. \code{auto}
 chooses a memory-aware strategy from the data size.}
 
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
+
+\item{bycol}{For matrix-valued regression responses, calculate response-wise
+metrics in \code{metrics}. The default \code{FALSE} returns only aggregate
+metrics.}
 
 \item{return_variance}{Compute predictor-space latent-variable variance
 explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
@@ -135,7 +143,10 @@ Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
 \value{
 A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
-summaries were requested. Common fields are:
+summaries were requested. \code{metrics} is a list of complete
+\code{evaluate()} results, organized as \code{metrics$fitted} and
+\code{metrics$test}, with one element per requested component count. Common
+fields are:
 \itemize{
 \item \code{P}: predictor loadings, with one column per latent component.
 \item \code{Q}: response loadings or response-side latent coefficients.
@@ -170,6 +181,14 @@ named by component count.
 \item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when
 classification predictions are available. Elements are named by component
 count.
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{fitted} evaluates
+\code{Yfit} against \code{Ytrain} when \code{fit = TRUE}; \code{test} evaluates
+\code{Ypred} against \code{Ytest} when test data are supplied. Each contains
+one element per requested component count, including global metrics,
+per-class metrics, and a confusion matrix for classification. For multivariate
+regression, per-response metrics are included only when \code{bycol = TRUE}.
+When \code{perm.test = TRUE}, \code{metrics$permutation} contains the
+observed/permuted metric table and empirical p-values.
 \item \code{pval}: single-split permutation-test p-values by component, returned
 when \code{perm.test = TRUE}. Each p-value is the fraction of permuted
 \code{Q2Y} values larger than the observed \code{Q2Y}.
@@ -211,6 +230,13 @@ supports float32 randomized SVD. Classification with float32 input supports
 \code{classifier = "argmax"}, \code{classifier = "lda"}, and \code{classifier = "cknn"}.
 Unsupported float32 combinations stop with a clear error rather than
 silently upcasting to double.
+On Windows, where the standard R toolchain does not provide the
+single-precision BLAS/LAPACK symbols used by the compiled kernels,
+\code{backend = "cpu"} and \code{svd.method = "rsvd"} use a portable
+\code{float}-package fallback for PLS-SVD and SIMPLS with
+\code{classifier = "argmax"}. This preserves float32 matrices and results,
+but is slower than the compiled CPU route. Windows float32 OPLS, nonlinear
+kernel PLS, LDA, and accelerator backends are not currently supported.
 
 For a factor response with \eqn{C} levels, centred dummy coding has rank at
 most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective

@@ -17,5 +17,6 @@ src/svd_metal_backend.mm
 nvidia_*_results/
 .bench-lib*/
 benchmark/results/
+benchmark_results*/
 package_check_artifacts*/
 output/

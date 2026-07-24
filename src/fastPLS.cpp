@@ -3055,6 +3055,7 @@ Rcpp::List pls_float32_cpu_cpp(
   }
 
   arma::fmat Vmat(p, max_ncomp, arma::fill::zeros);
+  arma::fmat Tmat(n, max_ncomp, arma::fill::zeros);
   arma::fmat Yfit_cur(n, m, arma::fill::zeros);
   int out_idx = 0;
   for (int a = 0; a < max_ncomp; ++a) {
@@ -3091,6 +3092,7 @@ Rcpp::List pls_float32_cpu_cpp(
     Rmat.col(a) = rr;
     Qmat.col(a) = qq;
     Vmat.col(a) = vv;
+    Tmat.col(a) = tt;
     if (fit) {
       Yfit_cur += tt * qq.t();
     }
@@ -3112,7 +3114,7 @@ Rcpp::List pls_float32_cpu_cpp(
     Rcpp::Named("P") = R_NilValue,
     Rcpp::Named("R") = fmat_to_float32_bits(Rmat),
     Rcpp::Named("Q") = fmat_to_float32_bits(Qmat),
-    Rcpp::Named("Ttrain") = R_NilValue,
+    Rcpp::Named("Ttrain") = fmat_to_float32_bits(Tmat),
     Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(mX)),
     Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(vX)),
     Rcpp::Named("mY") = fmat_to_float32_bits(arma::fmat(mY)),
@@ -7811,12 +7813,14 @@ List pls_model1_gpu(
     false
   );
 
+  const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
   fastpls_svd::PLSSVDGPUResult gpu = fastpls_svd::cuda_plssvd_fit(
     Xtrain,
     Ytrain,
     ncomp,
     fit,
-    opt
+    opt,
+    store_B
   );
 
   arma::cube Yfit = gpu.Yfit;
@@ -7826,7 +7830,6 @@ List pls_model1_gpu(
     }
   }
 
-  const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
   List out = List::create(
     Named("C_latent") = gpu.C_latent,
     Named("W_latent") = gpu.W_latent,
@@ -7907,12 +7910,14 @@ List pls_model1_gpu_implicit_xprod(
   opt.left_only = false;
   opt.use_full_svd = false;
 
+  const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
   fastpls_svd::PLSSVDGPUResult gpu = fastpls_svd::cuda_plssvd_fit_implicit_xprod(
     Xtrain,
     Ytrain,
     ncomp,
     fit,
-    opt
+    opt,
+    store_B
   );
 
   arma::cube Yfit = gpu.Yfit;
@@ -7922,7 +7927,6 @@ List pls_model1_gpu_implicit_xprod(
     }
   }
 
-  const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
   List out = List::create(
     Named("C_latent") = gpu.C_latent,
     Named("W_latent") = gpu.W_latent,
@@ -8029,9 +8033,10 @@ List pls_lda_gpu_native(
     opt.left_only = false;
     opt.use_full_svd = false;
 
+    const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
     direct_gpu = xprod ?
-      fastpls_svd::cuda_plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt) :
-      fastpls_svd::cuda_plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt);
+      fastpls_svd::cuda_plssvd_fit_implicit_xprod(Xtrain, Ytrain, ncomp, fit, opt, store_B) :
+      fastpls_svd::cuda_plssvd_fit(Xtrain, Ytrain, ncomp, fit, opt, store_B);
     direct_plssvd_gpu = true;
 
     arma::cube Yfit = direct_gpu.Yfit;
@@ -8041,7 +8046,6 @@ List pls_lda_gpu_native(
       }
     }
 
-    const bool store_B = should_store_coefficients(p, m, ncomp.n_elem, true);
     model = List::create(
       Named("C_latent") = direct_gpu.C_latent,
       Named("W_latent") = direct_gpu.W_latent,

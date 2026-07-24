@@ -28,6 +28,7 @@ pls.single.cv(
   top_m = 20L,
   cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = TRUE,
+  bycol = FALSE,
   xprod = NULL,
   ...
 )
@@ -76,7 +77,9 @@ are always held out together and are never split across training and test.}
 \item{coef0}{Polynomial kernel offset.}
 
 \item{classifier}{Classification rule for factor responses: \code{"argmax"},
-\code{"lda"}, or \code{"cknn"}. Multiple values are treated as a tuning grid.}
+\code{"lda"}, or the optional proof-of-concept \code{"cknn"} decoder. Multiple
+values are treated as a tuning grid; cKNN should be validated against argmax or
+LDA because it depends on sample density within each class.}
 
 \item{lda_ridge}{Retained for source compatibility. LDA regularization is a
 deterministic numerical fallback and is not tuned during cross-validation.}
@@ -107,6 +110,10 @@ chooses a memory-aware strategy from the data size.}
 fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
 backward compatibility. Set to \code{FALSE} to skip this extra full-data fit;
 held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
+
+\item{bycol}{For matrix-valued regression responses, calculate response-wise
+metrics in the returned \code{metrics} list. The default \code{FALSE} returns
+only aggregate metrics.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}
@@ -143,7 +150,15 @@ not on the decoded class labels.
 \item \code{pred}: decoded cross-validated predictions when predictions are
 stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
-\item \code{metrics}: per-component metric table returned by the CV backend.
+\item \code{metrics}: complete \code{evaluate()} results. \code{cross_validated}
+contains one result per requested component count from held-out predictions;
+\code{fitted} contains one result per component from the optional full-data
+fit. The fold-aware \code{Q2Y} path remains a separate top-level output,
+because its reference mean is determined separately within each fold. For
+multivariate regression, per-response metrics are included only when
+\code{bycol = TRUE}.
+\item \code{selection_metrics}: compact per-component metric table used for
+component selection by the CV backend.
 \item \code{best_parameters}: compact list containing only \code{ncomp} plus the
 arguments that were actually optimized, for example \code{classifier} when
 \code{classifier = c("argmax", "lda")}.

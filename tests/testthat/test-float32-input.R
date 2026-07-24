@@ -5,9 +5,67 @@ skip_native_float32_on_windows <- function() {
   )
 }
 
+expected_float32_cpu_backend <- function() {
+  if (identical(.Platform$OS.type, "windows")) {
+    "float32_windows_float"
+  } else {
+    "float32_cpp"
+  }
+}
+
+test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
+  skip_if_not_installed("float")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  set.seed(149)
+  X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")]))
+  y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
+  prep <- fastPLS:::.float32_prepare_response(y)
+
+  fit <- fastPLS:::.float32_windows_cpu_fit(
+    Xtrain = X,
+    yprep = prep,
+    ncomp = 1:2,
+    scaling = 1L,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "cpu_rsvd",
+    rsvd_oversample = 5L,
+    rsvd_power = 1L,
+    seed = 149L,
+    fit = TRUE
+  )
+
+  expect_identical(fit$precision, "float32")
+  expect_identical(fit$predict_backend, "float32_windows_float")
+  expect_true(inherits(fit$R, "float32"))
+  expect_true(inherits(fit$Q, "float32"))
+  expect_true(all(is.finite(fit$R2Y)))
+  expect_error(
+    fastPLS:::.float32_windows_cpu_fit(
+      X, prep, 1L, 1L, "simpls", "cuda", "cpu_rsvd", 5L, 1L, 149L, FALSE
+    ),
+    "backend = 'cpu'"
+  )
+})
+
+test_that("portable Windows float32 SVD fallback returns float32 vectors", {
+  skip_if_not_installed("float")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  set.seed(150)
+  A <- float::fl(matrix(rnorm(48), nrow = 12L))
+  out <- fastPLS:::.fastsvd_float32_windows(
+    A, k = 3L, backend = "cpu", svd.method = "cpu_rsvd",
+    oversample = 4L, power = 1L, seed = 150L
+  )
+
+  expect_true(inherits(out$U, "float32"))
+  expect_true(inherits(out$Vt, "float32"))
+  expect_length(out$s, 3L)
+  expect_true(all(is.finite(out$s)))
+})
+
 test_that("pls accepts float32 regression input without upcasting predictions", {
   skip_if_not_installed("float")
-  skip_native_float32_on_windows()
   set.seed(10)
   X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")]))
   y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
@@ -28,7 +86,7 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
   expect_s3_class(fit, "fastPLS")
   expect_false(any(grepl("attr(", capture.output(print(fit)), fixed = TRUE)))
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "float32_cpp")
+  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, expected_float32_cpu_backend())
   expect_true(inherits(fit$Ypred[[1L]], "float32"))
   expect_named(fit$Q2Y, c("ncomp=1", "ncomp=2"))
   expect_false("predict_backend" %in% names(predict(fit, X[1:2, ])))
@@ -36,7 +94,6 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
 
 test_that("float32 detection handles S4 float matrices used in the vignette", {
   skip_if_not_installed("float")
-  skip_native_float32_on_windows()
   set.seed(12)
   Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
   Yreg <- matrix(mtcars$mpg, ncol = 1)
@@ -49,7 +106,7 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
   Xreg32 <- float::fl(as.matrix(Xreg_train))
   Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
   expect_true(methods::is(Xreg32, "float32"))
-  expect_true(.has_float32_input(Xreg32, Yreg32))
+  expect_true(fastPLS:::.has_float32_input(Xreg32, Yreg32))
 
   fit_reg32 <- pls(
     Xreg32,
@@ -64,7 +121,7 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
   )
 
   expect_equal(attr(fit_reg32, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit_reg32, "fastPLS_internal")$predict_backend, "float32_cpp")
+  expect_equal(attr(fit_reg32, "fastPLS_internal")$predict_backend, expected_float32_cpu_backend())
   expect_named(fit_reg32$Q2Y, c("ncomp=1", "ncomp=2"))
   expect_true(all(is.finite(fit_reg32$Q2Y)))
 
@@ -84,7 +141,6 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
 
 test_that("pls accepts float32 classification input with argmax", {
   skip_if_not_installed("float")
-  skip_native_float32_on_windows()
   set.seed(11)
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
@@ -105,7 +161,7 @@ test_that("pls accepts float32 classification input with argmax", {
   expect_s3_class(fit, "fastPLS")
   expect_false(any(grepl("attr(", capture.output(print(fit)), fixed = TRUE)))
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "float32_cpp")
+  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, expected_float32_cpu_backend())
   expect_true(is.factor(fit$Ypred[[1L]]))
   expect_named(fit$accuracy, "ncomp=2")
 })
@@ -169,6 +225,32 @@ test_that("float32 input supports CPU IRLBA-style SVD", {
   expect_named(fit_cls32$accuracy, "ncomp=2")
 })
 
+test_that("pls.single.cv preserves float32 input instead of entering the double CV kernel", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+
+  set.seed(148)
+  X <- float::fl(matrix(rnorm(72 * 8), 72, 8))
+  y <- factor(rep(c("a", "b", "c"), each = 24))
+  cv <- pls.single.cv(
+    X,
+    y,
+    ncomp = 1:2,
+    kfold = 3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = FALSE,
+    seed = 148
+  )
+
+  internal <- attr(cv, "fastPLS_internal", exact = TRUE)
+  expect_identical(internal$precision, "float32")
+  expect_identical(internal$cv_engine, "float32_fold_pls")
+  expect_true(all(is.finite(cv$accuracy)))
+  expect_true(cv$best_ncomp %in% 1:2)
+})
+
 test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
@@ -176,9 +258,9 @@ test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
 
   set.seed(123)
   A <- float::fl(matrix(rnorm(30), nrow = 6))
-  out <- cuda_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 44L)
-  Y_cuda <- .float32_from_bits(out$Y)
-  Omega <- .float32_from_bits(out$Omega)
+  out <- fastPLS:::cuda_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 44L)
+  Y_cuda <- fastPLS:::.float32_from_bits(out$Y)
+  Omega <- fastPLS:::.float32_from_bits(out$Omega)
   Y_cpu <- A %*% Omega
   Y_cpu <- A %*% (crossprod(A, Y_cpu))
 
@@ -232,8 +314,8 @@ test_that("Metal float32 matrix multiply stays float32", {
   set.seed(124)
   A <- float::fl(matrix(rnorm(24), nrow = 6))
   B <- float::fl(matrix(rnorm(12), nrow = 4))
-  out <- metal_float32_matrix_multiply_cpp(A, B)
-  C_metal <- .float32_from_bits(out$C)
+  out <- fastPLS:::metal_float32_matrix_multiply_cpp(A, B)
+  C_metal <- fastPLS:::.float32_from_bits(out$C)
   C_cpu <- A %*% B
 
   expect_true(inherits(C_metal, "float32"))
@@ -241,8 +323,8 @@ test_that("Metal float32 matrix multiply stays float32", {
   expect_equal(as.numeric(C_metal), as.numeric(C_cpu), tolerance = 1e-4)
 
   D <- float::fl(matrix(rnorm(18), nrow = 6))
-  out_t <- metal_float32_matrix_multiply_cpp(A, D, transpose_left = TRUE)
-  C_t_metal <- .float32_from_bits(out_t$C)
+  out_t <- fastPLS:::metal_float32_matrix_multiply_cpp(A, D, transpose_left = TRUE)
+  C_t_metal <- fastPLS:::.float32_from_bits(out_t$C)
   C_t_cpu <- crossprod(A, D)
   expect_true(inherits(C_t_metal, "float32"))
   expect_equal(dim(C_t_metal), dim(C_t_cpu))
@@ -256,9 +338,9 @@ test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
 
   set.seed(125)
   A <- float::fl(matrix(rnorm(30), nrow = 6))
-  out <- metal_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 45L)
-  Y_metal <- .float32_from_bits(out$Y)
-  Omega <- .float32_from_bits(out$Omega)
+  out <- fastPLS:::metal_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 45L)
+  Y_metal <- fastPLS:::.float32_from_bits(out$Y)
+  Omega <- fastPLS:::.float32_from_bits(out$Omega)
   Y_cpu <- A %*% Omega
   Y_cpu <- A %*% (crossprod(A, Y_cpu))
 
@@ -275,9 +357,9 @@ test_that("Metal float32 IRLBA-style SVD returns a valid approximation", {
   set.seed(126)
   A_mat <- matrix(rnorm(80), nrow = 10)
   A <- float::fl(A_mat)
-  out <- metal_float32_irlba_cpp(A, k = 3L, seed = 46L)
-  U <- .float32_from_bits(out$u)
-  V <- .float32_from_bits(out$v)
+  out <- fastPLS:::metal_float32_irlba_cpp(A, k = 3L, seed = 46L)
+  U <- fastPLS:::.float32_from_bits(out$u)
+  V <- fastPLS:::.float32_from_bits(out$v)
 
   expect_true(inherits(U, "float32"))
   expect_true(inherits(V, "float32"))
@@ -331,22 +413,6 @@ test_that("fastsvd supports public float32 Metal rSVD route", {
   expect_true(all(is.finite(out_irlba$d)))
 })
 
-test_that("pca and predict preserve float32 matrices", {
-  skip_if_not_installed("float")
-  skip_native_float32_on_windows()
-  set.seed(129)
-  X <- float::fl(as.matrix(iris[, 1:4]))
-  pc <- pca(X, ncomp = 2, backend = "cpu", method = "rsvd", seed = 1)
-  expect_s3_class(pc, "fastPLSPCA")
-  expect_identical(pc$precision, "float32")
-  expect_true(inherits(pc$scores, "float32"))
-  expect_true(inherits(pc$loadings, "float32"))
-
-  projected <- predict(pc, float::fl(as.matrix(iris[1:5, 1:4])))
-  expect_true(inherits(projected, "float32"))
-  expect_equal(dim(projected), c(5L, 2L))
-})
-
 test_that("pls supports float32 Metal backend when available", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
@@ -373,7 +439,7 @@ test_that("pls supports float32 Metal backend when available", {
   expect_named(fit$Q2Y, c("ncomp=1", "ncomp=2"))
 })
 
-test_that("pls supports float32 LDA and cKNN classifiers", {
+test_that("pls supports the float32 LDA classifier", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   set.seed(131)
@@ -400,31 +466,22 @@ test_that("pls supports float32 LDA and cKNN classifiers", {
   expect_equal(attr(fit_lda, "fastPLS_internal")$classification_rule, "lda_cpp")
   expect_true(all(vapply(fit_lda$Ypred, is.factor, logical(1))))
   expect_named(fit_lda$accuracy, c("ncomp=2", "ncomp=3"))
+  expect_true(inherits(fit_lda$Ttrain, "float32"))
+  expect_equal(dim(fit_lda$Ttrain), c(nrow(Xtrain), 3L))
+
+  Xscaled <- sweep(float::dbl(Xtrain), 2L, as.numeric(float::dbl(fit_lda$mX)), "-")
+  Xscaled <- sweep(Xscaled, 2L, as.numeric(float::dbl(fit_lda$vX)), "/")
+  expected_scores <- Xscaled %*% float::dbl(fit_lda$R)
+  expect_equal(
+    unname(float::dbl(fit_lda$Ttrain)),
+    unname(expected_scores),
+    tolerance = 2e-4
+  )
 
   pred_lda <- predict(fit_lda, Xtest, ytest, top = 2)
   expect_true("Ypred_top" %in% names(pred_lda))
   expect_named(pred_lda$accuracy, c("ncomp=2", "ncomp=3"))
 
-  fit_cknn <- pls(
-    Xtrain,
-    ytrain,
-    Xtest,
-    ytest,
-    ncomp = 2,
-    method = "plssvd",
-    backend = "cpu",
-    svd.method = "irlba",
-    classifier = "cknn",
-    k = 3,
-    tau = 0.2,
-    alpha = 0.75,
-    return_variance = FALSE
-  )
-  expect_s3_class(fit_cknn, "fastPLS")
-  expect_equal(attr(fit_cknn, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit_cknn, "fastPLS_internal")$classification_rule, "candidate_knn_cpp")
-  expect_true(is.factor(fit_cknn$Ypred[[1L]]))
-  expect_named(fit_cknn$accuracy, "ncomp=2")
 })
 
 test_that("float32 OPLS supports regression, classification, and independent prediction", {

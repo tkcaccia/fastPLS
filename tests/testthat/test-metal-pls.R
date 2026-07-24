@@ -75,8 +75,9 @@ test_that("Metal backend is available through public CV helpers", {
   )
   expect_identical(fixed$backend, "metal")
   expect_identical(fixed$prediction_backend, "metal")
-  expect_equal(nrow(fixed$metrics), 2L)
-  expect_true(all(is.finite(fixed$metrics$metric_value)))
+  expect_equal(nrow(fixed$selection_metrics), 2L)
+  expect_true(all(is.finite(fixed$selection_metrics$metric_value)))
+  expect_equal(length(fixed$metrics$cross_validated), 2L)
 
   opt <- fastPLS::pls.single.cv(
     Xdata = X,

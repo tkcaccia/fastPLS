@@ -78,7 +78,7 @@ classification_only_method_ids <- c(
 if (identical(mode, "list_methods")) {
   classification_dataset_ids <- c(
     "ccle", "cifar100", "gtex_v8", "imagenet",
-    "metref", "singlecell", "tcga_brca", "tcga_hnsc_methylation",
+    "metref", "retina", "singlecell", "tabula", "tcga_brca", "tcga_hnsc_methylation",
     "tcga_pan_cancer"
   )
   regression_dataset_ids <- c("cbmc_citeseq", "nmr", "prism")
@@ -110,9 +110,9 @@ package_version_chr <- function(pkg) {
 
 load_compare_task <- function(dataset_id, split_seed) {
   path <- find_dataset_rdata(dataset_id)
-  task <- load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed)
-  task$Xtrain <- as.matrix(task$Xtrain)
-  task$Xtest <- as.matrix(task$Xtest)
+  task <- as_task(path, dataset_id = dataset_id, split_seed = split_seed)
+  precision <- tolower(Sys.getenv("FASTPLS_BENCH_PRECISION", "float32"))
+  task <- coerce_task_precision(task, precision = precision)
   if (identical(task$task_type, "classification")) {
     task$Ytrain <- droplevels(as.factor(task$Ytrain))
     task$Ytest <- factor(task$Ytest, levels = levels(task$Ytrain))
@@ -122,8 +122,8 @@ load_compare_task <- function(dataset_id, split_seed) {
     task$n_test <- nrow(task$Xtest)
     task$n_classes <- nlevels(task$Ytrain)
   } else {
-    task$Ytrain <- as.matrix(task$Ytrain)
-    task$Ytest <- as.matrix(task$Ytest)
+    task$Ytrain <- coerce_benchmark_matrix(task$Ytrain, precision)
+    task$Ytest <- coerce_benchmark_matrix(task$Ytest, precision)
     task$n_classes <- ncol(task$Ytrain)
   }
   task
@@ -131,10 +131,10 @@ load_compare_task <- function(dataset_id, split_seed) {
 
 task <- load_compare_task(dataset_id, split_seed)
 task_type <- task$task_type
-Xtrain <- task$Xtrain
-Xtest <- task$Xtest
-Ytrain <- task$Ytrain
-Ytest <- task$Ytest
+Xtrain <- if (is_float32_matrix(task$Xtrain)) float::dbl(task$Xtrain) else as.matrix(task$Xtrain)
+Xtest <- if (is_float32_matrix(task$Xtest)) float::dbl(task$Xtest) else as.matrix(task$Xtest)
+Ytrain <- if (is_float32_matrix(task$Ytrain)) float::dbl(task$Ytrain) else task$Ytrain
+Ytest <- if (is_float32_matrix(task$Ytest)) float::dbl(task$Ytest) else task$Ytest
 
 if (identical(task_type, "classification")) {
   class_levels <- levels(Ytrain)
@@ -185,7 +185,10 @@ metric_from_prediction <- function(pred) {
   if (identical(task_type, "classification")) {
     pred <- factor(pred, levels = levels(Ytest))
     acc <- mean(as.character(pred) == as.character(Ytest), na.rm = TRUE)
+    secondary <- classification_secondary_metrics(Ytest, pred)
     return(list(metric_name = "accuracy", metric_value = acc, accuracy = acc,
+                balanced_accuracy = secondary$balanced_accuracy,
+                macro_f1 = secondary$macro_f1,
                 rmse = NA_real_, q2 = NA_real_, mae = NA_real_))
   }
   pred <- as.matrix(pred)
@@ -262,7 +265,7 @@ extract_prediction_generic <- function(obj, Xnew = Xtest) {
 }
 
 decode_fastpls <- function(model) {
-  pred <- predict(model, Xtest, Ytest = Ytest)$Ypred
+  pred <- predict(model, task$Xtest, Ytest = task$Ytest)$Ypred
   if (identical(task_type, "classification")) {
     if (is.data.frame(pred)) return(factor(pred[[ncol(pred)]], levels = levels(Ytest)))
     if (is.factor(pred) || is.character(pred)) return(factor(pred, levels = levels(Ytest)))
@@ -288,7 +291,8 @@ run_fastpls <- function(method_name,
   if (!is.finite(alpha) || is.na(alpha)) alpha <- 0.75
   if (!is.finite(top_m) || is.na(top_m)) top_m <- 20L
   args <- list(
-    Xtrain = Xtrain, Ytrain = Ytrain, Xtest = Xtest, Ytest = Ytest,
+    Xtrain = task$Xtrain, Ytrain = task$Ytrain,
+    Xtest = task$Xtest, Ytest = task$Ytest,
     ncomp = ncomp_requested, method = method_name, backend = backend,
     svd.method = svd_method, scaling = "centering", fit = FALSE, proj = FALSE,
     seed = 123L + replicate_id, classifier = classifier,
@@ -485,10 +489,19 @@ runner_ropls <- function(orthoI = 0L) {
     stop("package_limit: ropls PLS-DA adapter is not stable for this multiclass benchmark.")
   }
   f <- get("opls", envir = asNamespace("ropls"))
-  fit <- f(
-    x = Xtrain, y = if (identical(task_type, "classification")) Ytrain else Ytrain_dummy,
-    predI = ncomp_requested, orthoI = orthoI, crossvalI = 0, permI = 0,
-    scaleC = "center", fig.pdfC = "none", info.txtC = "none"
+  fit <- tryCatch(
+    f(
+      x = Xtrain, y = if (identical(task_type, "classification")) Ytrain else Ytrain_dummy,
+      predI = ncomp_requested, orthoI = orthoI, crossvalI = 0, permI = 0,
+      scaleC = "center", fig.pdfC = "none", info.txtC = "none"
+    ),
+    error = function(e) {
+      stop(
+        "package_limit: ropls could not complete this configured PLS/OPLS fit: ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+    }
   )
   pred <- stats::predict(fit, Xtest)
   if (identical(task_type, "classification")) {
@@ -634,6 +647,22 @@ write_row <- function(row, path) {
   utils::write.csv(row, path, row.names = FALSE, quote = TRUE, na = "")
 }
 
+requested_estimator_from_spec <- function(spec) {
+  id <- tolower(spec$id %||% "")
+  if (grepl("plssvd", id, fixed = TRUE)) return("plssvd")
+  if (grepl("kernelpls", id, fixed = TRUE)) return("kernelpls")
+  if (grepl("opls", id, fixed = TRUE)) return("opls")
+  if (grepl("simpls", id, fixed = TRUE)) return("simpls")
+  as.character(spec$algorithm %||% spec$id)
+}
+
+classifier_from_spec <- function(spec) {
+  id <- tolower(spec$id %||% "")
+  if (grepl("_lda$", id)) return("lda")
+  if (grepl("_cknn$", id)) return("cknn")
+  "argmax"
+}
+
 empty_row <- function(spec, status, msg = "") {
   data.frame(
     dataset = task$dataset,
@@ -644,6 +673,12 @@ empty_row <- function(spec, status, msg = "") {
     n_test = nrow(Xtest),
     p = ncol(Xtrain),
     n_response = ncol(Ytrain_dummy),
+    input_precision = task$precision,
+    execution_precision = if (identical(spec$package, "fastPLS")) task$precision else "float64",
+    classifier = classifier_from_spec(spec),
+    classifier_backend = if (identical(spec$package, "fastPLS")) NA_character_ else spec$package,
+    classifier_numeric_path = if (identical(spec$package, "fastPLS")) NA_character_ else "float64",
+    input_storage_mb = as.numeric(task$input_storage_mb),
     ncomp_requested = ncomp_requested,
     replicate = replicate_id,
     method_id = spec$id,
@@ -651,11 +686,21 @@ empty_row <- function(spec, status, msg = "") {
     package_version = package_version_chr(spec$package),
     function_name = spec$function_name,
     algorithm = spec$algorithm,
+    requested_estimator = requested_estimator_from_spec(spec),
+    executed_estimator = requested_estimator_from_spec(spec),
     independent_implementation = TRUE,
     total_runtime_ms = NA_real_,
-    metric_name = if (identical(task_type, "classification")) "accuracy" else "rmse",
+    metric_name = if (identical(task_type, "classification")) {
+      "accuracy"
+    } else if (ncol(Ytrain_dummy) == 1L) {
+      "q2"
+    } else {
+      "rmsd"
+    },
     metric_value = NA_real_,
     accuracy = NA_real_,
+    balanced_accuracy = NA_real_,
+    macro_f1 = NA_real_,
     rmse = NA_real_,
     q2 = NA_real_,
     mae = NA_real_,
@@ -729,11 +774,39 @@ run_one <- function(method_id) {
     row$error_message <<- conditionMessage(e)
     NULL
   })
+  if (identical(spec$package, "fastPLS") && !is.null(measured$value$fit)) {
+    internal <- attr(measured$value$fit, "fastPLS_internal", exact = TRUE)
+    row$execution_precision <- benchmark_execution_precision(measured$value$fit, row$execution_precision)
+    row$classifier_backend <- benchmark_classifier_backend(measured$value$fit, row$classifier)
+    row$classifier_numeric_path <- benchmark_classifier_numeric_path(
+      measured$value$fit, row$classifier, row$execution_precision
+    )
+    row$executed_estimator <- benchmark_executed_method(
+      measured$value$fit, row$requested_estimator
+    )
+    if (!identical(row$requested_estimator, row$executed_estimator)) {
+      reason <- as.character(internal$method_substitution_reason %||% "")
+      row$warning_message <- paste(
+        Filter(nzchar, c(
+          row$warning_message,
+          sprintf(
+            "requested_estimator=%s; executed_estimator=%s%s",
+            row$requested_estimator,
+            row$executed_estimator,
+            if (nzchar(reason)) paste0("; reason=", reason) else ""
+          )
+        )),
+        collapse = " | "
+      )
+    }
+  }
   if (!is.null(pred)) {
     met <- metric_from_prediction(pred)
     row$metric_name <- met$metric_name
     row$metric_value <- met$metric_value
     row$accuracy <- met$accuracy
+    row$balanced_accuracy <- met$balanced_accuracy %||% NA_real_
+    row$macro_f1 <- met$macro_f1 %||% NA_real_
     row$rmse <- met$rmse
     row$q2 <- met$q2
     row$mae <- met$mae
@@ -934,11 +1007,25 @@ summarize_results <- function(results_dir) {
         package = d$package[1],
         algorithm = d$algorithm[1],
         ncomp_requested = d$ncomp_requested[1],
+        input_precision = d$input_precision[1],
+        execution_precision = d$execution_precision[1],
+        classifier = d$classifier[1],
+        classifier_backend = d$classifier_backend[1],
+        classifier_numeric_path = d$classifier_numeric_path[1],
+        requested_estimator = d$requested_estimator[1],
+        executed_estimator = d$executed_estimator[1],
         reps_ok = nrow(d),
         median_time_ms = stats::median(d$total_runtime_ms, na.rm = TRUE),
+        median_peak_host_rss_mb = if ("peak_host_rss_mb" %in% names(d)) {
+          stats::median(d$peak_host_rss_mb, na.rm = TRUE)
+        } else {
+          NA_real_
+        },
         median_metric = stats::median(d$metric_value, na.rm = TRUE),
         metric_name = d$metric_name[1],
         median_accuracy = stats::median(d$accuracy, na.rm = TRUE),
+        median_balanced_accuracy = stats::median(d$balanced_accuracy, na.rm = TRUE),
+        median_macro_f1 = stats::median(d$macro_f1, na.rm = TRUE),
         median_rmse = stats::median(d$rmse, na.rm = TRUE),
         median_q2 = stats::median(d$q2, na.rm = TRUE),
         stringsAsFactors = FALSE

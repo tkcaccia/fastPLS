@@ -8,6 +8,7 @@ evaluate(
   task = c("auto", "classification", "regression"),
   ytrain = NULL,
   top_k = c(1L, 5L),
+  bycol = TRUE,
   relative_epsilon = .Machine$double.eps,
   na.rm = TRUE
 )
@@ -33,6 +34,9 @@ the observed response mean and is therefore identical to R2.}
 \item{top_k}{Integer vector of top-k classification accuracies to compute when
 \code{predicted} is a class-score matrix.}
 
+\item{bycol}{For multivariate regression, calculate and return metrics for each
+response column. The default is \code{TRUE} for direct \code{evaluate()} calls.}
+
 \item{relative_epsilon}{Values with absolute observed response below this
 threshold are ignored for relative-error metrics.}
 
@@ -49,15 +53,21 @@ and predicted values. The function accepts two vectors, two matrices, or
 classification score matrices.
 }
 \details{
-For classification, the returned metrics include accuracy, balanced accuracy,
-macro precision, macro recall, macro F1, Cohen's kappa, and a confusion matrix.
-When predicted class scores are supplied, top-k accuracy is also reported.
+For classification, the returned metrics include accuracy, the no-information
+rate, lift accuracy, balanced accuracy, macro precision, macro recall, macro
+F1, Cohen's kappa, and a confusion matrix. The no-information rate is the
+accuracy obtained by always predicting the most prevalent observed class. Lift
+accuracy is accuracy divided by this baseline; values above one indicate an
+improvement over the majority-class baseline. When predicted class scores are
+supplied, top-k accuracy is also reported.
 
 For regression, the returned metrics include R2, Q2, RMSD/RMSE, MAE, bias,
 median relative error percentage, mean absolute percentage error, ratio of
 performance to deviation, Pearson correlation, and Spearman correlation. These
 include the main spectral prediction metrics used by Vignoli et al. (2025):
 median relative error percentage, RMSE, R2, and RPD.
+Set \code{bycol = FALSE} to return only the aggregate metrics and avoid
+calculating a separate metric vector for every response column.
 }
 \examples{
 evaluate(iris$Species, iris$Species)

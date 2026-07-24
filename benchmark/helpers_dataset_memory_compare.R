@@ -26,11 +26,123 @@ arg_value <- function(args, key, default = NULL, required = FALSE) {
   val
 }
 
+`%||%` <- function(x, y) {
+  if (is.null(x) || !length(x)) y else x
+}
+
 normalize_path_if_exists <- function(path) {
   path <- trimws(path)
   if (!nzchar(path)) return(path)
   path <- path.expand(path)
   if (file.exists(path)) normalizePath(path, winslash = "/", mustWork = TRUE) else path
+}
+
+is_float32_matrix <- function(x) {
+  inherits(x, "float32")
+}
+
+as_benchmark_matrix <- function(x) {
+  if (is_float32_matrix(x)) x else as.matrix(x)
+}
+
+as_double_matrix <- function(x) {
+  if (is_float32_matrix(x)) float::dbl(x) else as.matrix(x)
+}
+
+benchmark_matrix_precision <- function(x) {
+  if (is_float32_matrix(x)) "float32" else "float64"
+}
+
+benchmark_inner_model <- function(fit) {
+  if (inherits(fit, "fastPLSOpls") || inherits(fit, "fastPLSKernel")) {
+    if (!is.null(fit$inner_model)) return(fit$inner_model)
+  }
+  fit
+}
+
+benchmark_executed_method <- function(fit, fallback) {
+  # OPLS and kernel-PLS deliberately use SIMPLS as their inner predictive
+  # engine; that implementation detail must not relabel the outer estimator.
+  if (fallback %in% c("opls", "kernelpls")) return(fallback)
+  if (inherits(fit, "fastPLSOpls")) return("opls")
+  if (inherits(fit, "fastPLSKernel")) return("kernelpls")
+  internal <- attr(fit, "fastPLS_internal", exact = TRUE)
+  as.character(internal$pls_method %||% fallback)[[1L]]
+}
+
+benchmark_execution_precision <- function(fit, fallback = "float64") {
+  internal <- attr(fit, "fastPLS_internal", exact = TRUE)
+  inner <- benchmark_inner_model(fit)
+  inner_internal <- attr(inner, "fastPLS_internal", exact = TRUE)
+  as.character(internal$precision %||% inner_internal$precision %||% fallback)[[1L]]
+}
+
+benchmark_classifier_backend <- function(fit, classifier) {
+  inner <- benchmark_inner_model(fit)
+  internal <- attr(inner, "fastPLS_internal", exact = TRUE)
+  if (identical(classifier, "lda")) {
+    return(as.character(inner$lda$train_backend %||% internal$classification_rule %||% "lda")[[1L]])
+  }
+  if (identical(classifier, "cknn")) {
+    return(as.character(internal$candidate_knn$backend %||% internal$classification_rule %||% "cknn")[[1L]])
+  }
+  as.character(internal$classification_rule %||% "argmax")[[1L]]
+}
+
+benchmark_classifier_numeric_path <- function(fit, classifier, fallback = "float64") {
+  precision <- benchmark_execution_precision(fit, fallback)
+  if (identical(classifier, "cknn") && identical(precision, "float32")) {
+    "float32_pls_with_double_cknn_scores"
+  } else {
+    precision
+  }
+}
+
+coerce_benchmark_matrix <- function(x, precision = c("native", "float32", "float64")) {
+  precision <- match.arg(precision)
+  if (identical(precision, "native")) return(as_benchmark_matrix(x))
+  if (!requireNamespace("float", quietly = TRUE)) {
+    stop("The float package is required for precision-controlled benchmarks.")
+  }
+  if (identical(precision, "float32")) {
+    if (is_float32_matrix(x)) x else float::fl(as.matrix(x))
+  } else {
+    if (is_float32_matrix(x)) float::dbl(x) else as.matrix(x)
+  }
+}
+
+coerce_task_precision <- function(task, precision = c("native", "float32", "float64")) {
+  precision <- match.arg(tolower(precision), c("native", "float32", "float64"))
+  task$Xtrain <- coerce_benchmark_matrix(task$Xtrain, precision)
+  task$Xtest <- coerce_benchmark_matrix(task$Xtest, precision)
+  if (!identical(task$task_type, "classification")) {
+    task$Ytrain <- coerce_benchmark_matrix(task$Ytrain, precision)
+    task$Ytest <- coerce_benchmark_matrix(task$Ytest, precision)
+  }
+  task$precision <- benchmark_matrix_precision(task$Xtrain)
+  task$input_storage_mb <- as.numeric(
+    object.size(task$Xtrain) + object.size(task$Xtest) +
+      object.size(task$Ytrain) + object.size(task$Ytest)
+  ) / (1024^2)
+  task
+}
+
+current_process_rss_mb <- function() {
+  if (requireNamespace("ps", quietly = TRUE)) {
+    info <- tryCatch(ps::ps_memory_info(ps::ps_handle()), error = function(e) NULL)
+    if (!is.null(info) && is.finite(info[["rss"]])) {
+      return(as.numeric(info[["rss"]]) / (1024^2))
+    }
+  }
+  status <- "/proc/self/status"
+  if (file.exists(status)) {
+    line <- grep("^VmRSS:", readLines(status, warn = FALSE), value = TRUE)
+    if (length(line)) {
+      kb <- suppressWarnings(as.numeric(gsub("[^0-9.]", "", line[[1L]])))
+      if (is.finite(kb)) return(kb / 1024)
+    }
+  }
+  NA_real_
 }
 
 dataset_filename <- function(dataset_id) {
@@ -44,7 +156,9 @@ dataset_filename <- function(dataset_id) {
     imagenet = "imagenet.RData",
     nmr = "nmr.RData",
     prism = "prism.RData",
+    retina = "Macosko2015_retina_float32.RData",
     singlecell = "singlecell.RData",
+    tabula = "TabulaMuris_float32.RData",
     tcga_brca = "tcga_brca.RData",
     tcga_hnsc_methylation = "tcga_hnsc_methylation.RData",
     tcga_pan_cancer = "tcga_pan_cancer.RData",
@@ -62,6 +176,8 @@ find_dataset_rdata <- function(dataset_id) {
     metref = c(fname, "metref_remote_task.RData"),
     gtex_v8 = c(fname, "gtex.RData"),
     nmr = c(fname, "NMR.RData"),
+    retina = c(fname, "Macosko2015_retina.RData", "retina.RData"),
+    tabula = c(fname, "TabulaMuris.RData", "tabula.RData"),
     fname
   )
   candidates <- c(
@@ -173,10 +289,44 @@ safe_factor <- function(y) {
   droplevels(factor(y))
 }
 
+load_embedded_list_task <- function(e, objs, dataset_id, split_seed) {
+  candidates <- intersect(c("dataset_float32", "dataset"), objs)
+  for (nm in candidates) {
+    obj <- get(nm, envir = e)
+    if (!is.list(obj) || !all(c("data", "labels") %in% names(obj))) next
+    X <- as_benchmark_matrix(obj$data)
+    y <- safe_factor(obj$labels)
+    set.seed(as.integer(split_seed))
+    sp <- make_stratified_split(y, train_frac = 0.5)
+    return(list(
+      dataset = dataset_id,
+      task_type = "classification",
+      dataset_path = NA_character_,
+      split_seed = as.integer(split_seed),
+      Xtrain = X[sp$train, , drop = FALSE],
+      Ytrain = droplevels(y[sp$train]),
+      Xtest = X[sp$test, , drop = FALSE],
+      Ytest = factor(y[sp$test], levels = levels(y[sp$train])),
+      n_train = length(sp$train),
+      n_test = length(sp$test),
+      p = ncol(X),
+      n_classes = nlevels(y[sp$train]),
+      source_metadata = if (!is.null(obj$metadata)) obj$metadata else NULL
+    ))
+  }
+  NULL
+}
+
 load_standard_task <- function(path, dataset_id, split_seed) {
   e <- new.env(parent = emptyenv())
   objs <- load(path, envir = e)
   set.seed(as.integer(split_seed))
+
+  embedded <- load_embedded_list_task(e, objs, dataset_id, split_seed)
+  if (!is.null(embedded)) {
+    embedded$dataset_path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+    return(embedded)
+  }
 
   if (all(c("Xtrain", "Ytrain", "Xtest", "Ytest") %in% objs)) {
     y_train <- get("Ytrain", envir = e)
@@ -195,9 +345,9 @@ load_standard_task <- function(path, dataset_id, split_seed) {
       task_type = task_type,
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
-      Xtrain = as.matrix(get("Xtrain", envir = e)),
+      Xtrain = as_benchmark_matrix(get("Xtrain", envir = e)),
       Ytrain = y_train,
-      Xtest = as.matrix(get("Xtest", envir = e)),
+      Xtest = as_benchmark_matrix(get("Xtest", envir = e)),
       Ytest = y_test,
       n_train = nrow(get("Xtrain", envir = e)),
       n_test = nrow(get("Xtest", envir = e)),
@@ -225,9 +375,9 @@ load_standard_task <- function(path, dataset_id, split_seed) {
       task_type = task_type,
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
-      Xtrain = as.matrix(obj$Xtrain),
+      Xtrain = as_benchmark_matrix(obj$Xtrain),
       Ytrain = y_train,
-      Xtest = as.matrix(obj$Xtest),
+      Xtest = as_benchmark_matrix(obj$Xtest),
       Ytest = y_test,
       n_train = nrow(obj$Xtrain),
       n_test = nrow(obj$Xtest),
@@ -268,7 +418,7 @@ load_standard_task <- function(path, dataset_id, split_seed) {
   }
 
   if (all(c("data", "labels") %in% objs)) {
-    X <- as.matrix(get("data", envir = e))
+    X <- as_benchmark_matrix(get("data", envir = e))
     y <- safe_factor(get("labels", envir = e))
     sp <- make_stratified_split(y, train_frac = 0.5)
     return(list(
@@ -292,7 +442,7 @@ load_standard_task <- function(path, dataset_id, split_seed) {
 
 as_task <- function(path, dataset_id, split_seed = 123L) {
   dataset_id <- tolower(dataset_id)
-  if (dataset_id %in% c("cifar100", "ccle", "gtex_v8", "prism", "cbmc_citeseq", "tcga_brca", "tcga_hnsc_methylation", "tcga_pan_cancer")) {
+  if (dataset_id %in% c("cifar100", "ccle", "gtex_v8", "prism", "cbmc_citeseq", "retina", "tabula", "tcga_brca", "tcga_hnsc_methylation", "tcga_pan_cancer")) {
     return(load_standard_task(path, dataset_id = dataset_id, split_seed = split_seed))
   }
 
@@ -402,10 +552,10 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
       task_type = "regression",
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
-      Xtrain = as.matrix(e$Xtrain),
-      Ytrain = as.matrix(e$Ytrain),
-      Xtest = as.matrix(e$Xtest),
-      Ytest = as.matrix(e$Ytest),
+      Xtrain = as_benchmark_matrix(e$Xtrain),
+      Ytrain = as_benchmark_matrix(e$Ytrain),
+      Xtest = as_benchmark_matrix(e$Xtest),
+      Ytest = as_benchmark_matrix(e$Ytest),
       n_train = nrow(e$Xtrain),
       n_test = nrow(e$Xtest),
       p = ncol(e$Xtrain),
@@ -416,7 +566,7 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
   if (dataset_id == "singlecell") {
     e <- new.env(parent = emptyenv())
     load(path, envir = e)
-    X <- as.matrix(e$data)
+    X <- as_benchmark_matrix(e$data)
     y <- safe_factor(e$labels)
     set.seed(as.integer(split_seed))
     sp <- make_stratified_split(y, train_frac = 0.5)
@@ -484,7 +634,7 @@ benchmark_gpu_backend <- function() {
 }
 
 benchmark_gpu_backend_label <- function(backend = benchmark_gpu_backend()) {
-  if (identical(backend, "metal")) "Metal" else "CUDA 64-bit"
+  if (identical(backend, "metal")) "Metal" else "CUDA"
 }
 
 benchmark_gpu_backend_code <- function(backend = benchmark_gpu_backend()) {
@@ -498,18 +648,18 @@ variant_specs <- function() {
   rows <- list(
     c("cpp_plssvd_cpu_rsvd", "plssvd", "CPU", "cpu_rsvd", "Cpp", "argmax", ""),
     c("cpp_plssvd_irlba", "plssvd", "CPU", "irlba", "Cpp", "argmax", ""),
-    c("gpu_plssvd_fp64", "plssvd", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
+    c("gpu_plssvd_rsvd", "plssvd", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
     c("cpp_simpls_cpu_rsvd", "simpls", "CPU", "cpu_rsvd", "Cpp", "argmax", ""),
     c("cpp_simpls_irlba", "simpls", "CPU", "irlba", "Cpp", "argmax", ""),
-    c("gpu_simpls_fp64", "simpls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
+    c("gpu_simpls_rsvd", "simpls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
     c("pls_pkg_simpls", "simpls", "CPU", "pls_pkg", "pls_pkg", "argmax", ""),
     c("cpp_kernelpls_cpu_rsvd", "kernelpls", "CPU", "cpu_rsvd", "Cpp", "argmax", ""),
     c("cpp_kernelpls_irlba", "kernelpls", "CPU", "irlba", "Cpp", "argmax", ""),
-    c("gpu_kernelpls_fp64", "kernelpls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
+    c("gpu_kernelpls_rsvd", "kernelpls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
     c("pls_pkg_kernelpls", "kernelpls", "CPU", "pls_pkg", "pls_pkg", "argmax", ""),
     c("cpp_opls_cpu_rsvd", "opls", "CPU", "cpu_rsvd", "Cpp", "argmax", ""),
     c("cpp_opls_irlba", "opls", "CPU", "irlba", "Cpp", "argmax", ""),
-    c("gpu_opls_fp64", "opls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
+    c("gpu_opls_rsvd", "opls", "GPU", gpu_code, gpu_label, "argmax", gpu_backend),
     c("pls_pkg_opls", "opls", "CPU", "pls_pkg", "pls_pkg", "argmax", "")
   )
   out <- as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE)
@@ -588,8 +738,50 @@ extract_pred_labels <- function(pred_res, levels_y = NULL) {
   stop("Unsupported prediction structure in `Ypred`")
 }
 
+classification_secondary_metrics <- function(truth, predicted) {
+  lev <- union(levels(safe_factor(truth)), levels(safe_factor(predicted)))
+  truth <- factor(as.character(truth), levels = lev)
+  predicted <- factor(as.character(predicted), levels = lev)
+  cm <- table(truth, predicted)
+  support <- rowSums(cm)
+  predicted_n <- colSums(cm)
+  tp <- diag(cm)
+  recall <- ifelse(support > 0, tp / support, NA_real_)
+  precision <- ifelse(predicted_n > 0, tp / predicted_n, NA_real_)
+  f1 <- ifelse(
+    is.finite(precision + recall) & (precision + recall) > 0,
+    2 * precision * recall / (precision + recall),
+    0
+  )
+  list(
+    balanced_accuracy = mean(recall, na.rm = TRUE),
+    macro_f1 = mean(f1[is.finite(f1)], na.rm = TRUE)
+  )
+}
+
+classification_topk_accuracy <- function(pred_obj, truth, k = 5L) {
+  top <- pred_obj$Ypred_top
+  if (is.null(top)) return(NA_real_)
+  if (is.list(top) && !is.data.frame(top)) top <- top[[length(top)]]
+  if (is.data.frame(top)) top <- as.matrix(top)
+  if (length(dim(top)) == 3L) top <- top[, , dim(top)[3L], drop = TRUE]
+  if (is.null(dim(top))) top <- matrix(top, ncol = 1L)
+  top <- as.matrix(top)
+  use_k <- min(as.integer(k)[1L], ncol(top))
+  truth <- as.character(truth)
+  mean(vapply(seq_along(truth), function(i) {
+    truth[[i]] %in% as.character(top[i, seq_len(use_k), drop = TRUE])
+  }, logical(1L)), na.rm = TRUE)
+}
+
+last_prediction_value <- function(x) {
+  if (is.list(x) && !is.data.frame(x)) return(x[[length(x)]])
+  if (length(dim(x)) == 3L) return(x[, , dim(x)[3L], drop = TRUE])
+  x
+}
+
 metric_from_pred <- function(y_true, pred_obj, y_train = NULL) {
-  yp <- pred_obj$Ypred
+  yp <- last_prediction_value(pred_obj$Ypred)
   if (is.factor(y_true)) {
     pred <- NULL
     if (is.data.frame(yp)) pred <- as.factor(yp[[1L]])
@@ -610,23 +802,48 @@ metric_from_pred <- function(y_true, pred_obj, y_train = NULL) {
     }
     if (is.null(pred)) stop("Cannot decode classification predictions")
     val <- mean(as.character(pred) == as.character(y_true), na.rm = TRUE)
-    return(list(metric_name = "accuracy", metric_value = as.numeric(val), pred = pred))
+    secondary <- classification_secondary_metrics(y_true, pred)
+    return(list(
+      metric_name = "accuracy",
+      metric_value = as.numeric(val),
+      pred = pred,
+      top5_accuracy = classification_topk_accuracy(pred_obj, y_true, 5L),
+      balanced_accuracy = as.numeric(secondary$balanced_accuracy),
+      macro_f1 = as.numeric(secondary$macro_f1)
+    ))
   }
 
-  y_num <- as.matrix(y_true)
+  if (is_float32_matrix(yp) && is_float32_matrix(y_true)) {
+    if (!identical(dim(yp), dim(y_true))) {
+      stop("Float32 prediction dimensions do not match the response dimensions")
+    }
+    residual <- yp - y_true
+    press <- as.numeric(float::dbl(sum(residual * residual)))
+    if (ncol(y_true) == 1L) {
+      train_mean <- as.numeric(float::dbl(colMeans(y_train)))[[1L]]
+      centered <- y_true - train_mean
+      tss <- as.numeric(float::dbl(sum(centered * centered)))
+      q2 <- if (is.finite(tss) && tss > 0) 1 - (press / tss) else NA_real_
+      return(list(metric_name = "q2", metric_value = as.numeric(q2), pred = yp))
+    }
+    rmsd <- sqrt(press / (nrow(y_true) * ncol(y_true)))
+    return(list(metric_name = "rmsd", metric_value = as.numeric(rmsd), pred = yp))
+  }
+
+  y_num <- as_double_matrix(y_true)
   pred_num <- NULL
   if (length(dim(yp)) == 3L) {
     pred_num <- as.matrix(yp[, , 1L, drop = TRUE])
   } else if (is.matrix(yp)) {
     pred_num <- yp
   } else {
-    pred_num <- matrix(as.numeric(yp), ncol = 1L)
+    pred_num <- as_double_matrix(yp)
   }
   if (!all(dim(pred_num) == dim(y_num))) {
     pred_num <- matrix(as.numeric(pred_num), nrow = nrow(y_num), ncol = ncol(y_num))
   }
   if (ncol(y_num) == 1L) {
-    train_mean <- suppressWarnings(mean(as.numeric(as.matrix(y_train)), na.rm = TRUE))
+    train_mean <- suppressWarnings(mean(as.numeric(as_double_matrix(y_train)), na.rm = TRUE))
     if (!is.finite(train_mean)) {
       train_mean <- mean(y_num[, 1L], na.rm = TRUE)
     }

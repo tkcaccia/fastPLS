@@ -6,6 +6,8 @@ test_that("evaluate computes classification metrics", {
 
   expect_identical(res$task, "classification")
   expect_equal(res$metrics$accuracy, 4 / 5)
+  expect_equal(res$metrics$no_information_rate, 2 / 5)
+  expect_equal(res$metrics$lift_accuracy, 2)
   expect_true("macro_f1" %in% names(res$metrics))
   expect_equal(sum(res$confusion), 5)
   expect_false("notes" %in% names(res))
@@ -42,6 +44,16 @@ test_that("evaluate computes regression and spectral metrics", {
   expect_equal(nrow(res$per_response), 2)
   expect_false(isTRUE(all.equal(res$metrics$R2, res$metrics$Q2)))
   expect_false("notes" %in% names(res))
+})
+
+test_that("evaluate can omit response-wise regression metrics", {
+  observed <- matrix(c(1, 2, 3, 2, 4, 6), nrow = 3, ncol = 2)
+  predicted <- observed + 0.1
+
+  res <- evaluate(observed, predicted, bycol = FALSE)
+
+  expect_null(res$per_response)
+  expect_true(all(c("R2", "Q2", "RMSD", "MAE") %in% names(res$metrics)))
 })
 
 test_that("evaluate only reports notes when they are informative", {

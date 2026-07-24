@@ -21,6 +21,26 @@ test_that("kernel PLS C++ wrapper predicts classification labels", {
   expect_equal(nrow(fit_cpp$Ypred), length(idx))
 })
 
+test_that("linear kernel PLS retains internal fields for later double prediction", {
+  set.seed(2205)
+  X <- matrix(rnorm(84 * 9), nrow = 84, ncol = 9)
+  y <- factor(sample(c("A", "B", "C"), 84, replace = TRUE))
+  idx <- seq_len(14)
+
+  fit <- pls(
+    X[-idx, , drop = FALSE], y[-idx], X[idx, , drop = FALSE], y[idx],
+    ncomp = 1:2, method = "kernelpls", kernel = "linear",
+    backend = "cpu", svd.method = "rsvd", seed = 2205
+  )
+
+  # Supplying Xtest at fit time and calling predict() again must both work.
+  expect_true(is.data.frame(fit$Ypred))
+  expect_equal(nrow(fit$Ypred), length(idx))
+  again <- predict(fit, X[idx, , drop = FALSE], Ytest = y[idx])
+  expect_true(is.data.frame(again$Ypred))
+  expect_equal(nrow(again$Ypred), length(idx))
+})
+
 test_that("kernelpls high-level wrapper dispatches to simpls", {
   set.seed(2203)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)
