@@ -2,11 +2,11 @@
 
 Pipeline 4 requests `fastPLS` SIMPLS with randomized SVD for ImageNet-scale
 DINOv2 feature classification. The output records both `requested_method` and
-`executed_method`. In release 0.99.5, the large-class CUDA memory guard may
-execute label-aware PLS-SVD instead of sequential SIMPLS; such rows must be
-reported as PLS-SVD and include the substitution reason. The prepared task has
-1,000,000 training samples, 281,167 test samples, 1,024 DINOv2 features, and
-1,000 classes.
+`executed_method` and rejects a row if they differ. A requested SIMPLS fit is
+never replaced by PLS-SVD. If the CUDA dense-indicator memory guard is
+exceeded, the run fails explicitly and is retained in the output as an error.
+The prepared task has 1,000,000 training samples, 281,167 test samples, 1,024
+DINOv2 features, and 1,000 classes.
 
 ## Run
 

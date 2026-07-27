@@ -145,6 +145,47 @@ current_process_rss_mb <- function() {
   NA_real_
 }
 
+current_process_gpu_memory_mb <- function() {
+  nvidia_smi <- Sys.which("nvidia-smi")
+  if (!nzchar(nvidia_smi)) return(NA_real_)
+  output <- tryCatch(
+    suppressWarnings(system2(
+      nvidia_smi,
+      c(
+        "--query-compute-apps=pid,used_gpu_memory",
+        "--format=csv,noheader,nounits"
+      ),
+      stdout = TRUE,
+      stderr = FALSE
+    )),
+    error = function(e) character()
+  )
+  if (!length(output)) return(0)
+  fields <- strsplit(output, ",", fixed = TRUE)
+  used <- vapply(fields, function(x) {
+    if (length(x) < 2L) return(NA_real_)
+    pid <- suppressWarnings(as.integer(trimws(x[[1L]])))
+    memory <- suppressWarnings(as.numeric(trimws(x[[2L]])))
+    if (isTRUE(pid == Sys.getpid()) && is.finite(memory)) memory else NA_real_
+  }, numeric(1))
+  if (!any(is.finite(used))) 0 else sum(used[is.finite(used)])
+}
+
+signal_memory_sampler <- function(fit_ready_file, sampler_ready_file) {
+  if (!nzchar(fit_ready_file)) return(invisible(NULL))
+  dir.create(dirname(fit_ready_file), recursive = TRUE, showWarnings = FALSE)
+  writeLines("ready", fit_ready_file)
+  if (!nzchar(sampler_ready_file)) return(invisible(NULL))
+  deadline <- Sys.time() + 30
+  while (!file.exists(sampler_ready_file) && Sys.time() < deadline) {
+    Sys.sleep(0.01)
+  }
+  if (!file.exists(sampler_ready_file)) {
+    warning("Memory sampler did not acknowledge the fit boundary")
+  }
+  invisible(NULL)
+}
+
 dataset_filename <- function(dataset_id) {
   switch(
     tolower(dataset_id),
@@ -547,19 +588,31 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
   if (dataset_id == "nmr") {
     e <- new.env(parent = emptyenv())
     load(path, envir = e)
+    Xtrain <- as_benchmark_matrix(e$Xtrain)
+    Xtest <- as_benchmark_matrix(e$Xtest)
+    x_axis <- suppressWarnings(as.numeric(colnames(e$Xtrain)))
+    water_columns <- which(is.finite(x_axis) & x_axis > 4.6 & x_axis < 4.8)
+    if (length(water_columns)) {
+      Xtrain[, water_columns] <- 0
+      Xtest[, water_columns] <- 0
+    }
     return(list(
       dataset = dataset_id,
       task_type = "regression",
       dataset_path = normalizePath(path, winslash = "/", mustWork = TRUE),
       split_seed = as.integer(split_seed),
-      Xtrain = as_benchmark_matrix(e$Xtrain),
+      Xtrain = Xtrain,
       Ytrain = as_benchmark_matrix(e$Ytrain),
-      Xtest = as_benchmark_matrix(e$Xtest),
+      Xtest = Xtest,
       Ytest = as_benchmark_matrix(e$Ytest),
       n_train = nrow(e$Xtrain),
       n_test = nrow(e$Xtest),
       p = ncol(e$Xtrain),
-      n_classes = ncol(e$Ytrain)
+      n_classes = ncol(e$Ytrain),
+      preprocessing = list(
+        residual_water_region_ppm = c(4.6, 4.8),
+        residual_water_columns_removed = length(water_columns)
+      )
     ))
   }
 

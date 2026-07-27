@@ -450,6 +450,8 @@ class CudaRSVDWorkspace {
     if (fit) {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
       check_cuda(cudaMemset(dYfit_, 0, bytes_for(n, m)), "cudaMemset(dYfit)");
+    } else {
+      release_pls_fitted_response_buffer();
     }
     if (form_crossprod) {
       crossprod_training_xy(n, p, m);
@@ -472,6 +474,14 @@ class CudaRSVDWorkspace {
     }
   }
 
+  void release_pls_fitted_response_buffer() {
+    if (dYfit_ != nullptr) {
+      cudaFree(dYfit_);
+      dYfit_ = nullptr;
+      bytes_Yfit_ = 0;
+    }
+  }
+
   void simpls_fast_begin_device_loop(
     int n,
     int p,
@@ -491,6 +501,8 @@ class CudaRSVDWorkspace {
     if (fit) {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
       check_cuda(cudaMemset(dYfit_, 0, bytes_for(n, m)), "cudaMemset(dYfit)");
+    } else {
+      release_pls_fitted_response_buffer();
     }
   }
 
@@ -2217,6 +2229,50 @@ class CudaLDADeviceBuffer {
   std::size_t capacity_ = 0;
 };
 
+class CudaFloatWorkspace {
+ public:
+  CudaFloatWorkspace() = default;
+  ~CudaFloatWorkspace() { reset(); }
+  CudaFloatWorkspace(const CudaFloatWorkspace&) = delete;
+  CudaFloatWorkspace& operator=(const CudaFloatWorkspace&) = delete;
+
+  void initialize() {
+    if (ready_) return;
+    check_cuda(cudaStreamCreate(&stream_), "cudaStreamCreate(float32 workspace)");
+    check_cublas(cublasCreate(&blas_), "cublasCreate(float32 workspace)");
+    check_cublas(
+      cublasSetStream(blas_, stream_),
+      "cublasSetStream(float32 workspace)"
+    );
+    ready_ = true;
+  }
+
+  void reset() {
+    a.reset();
+    b.reset();
+    c.reset();
+    z.reset();
+    if (blas_ != nullptr) cublasDestroy(blas_);
+    if (stream_ != nullptr) cudaStreamDestroy(stream_);
+    blas_ = nullptr;
+    stream_ = nullptr;
+    ready_ = false;
+  }
+
+  cudaStream_t stream() const { return stream_; }
+  cublasHandle_t blas() const { return blas_; }
+
+  CudaLDADeviceBuffer<float> a;
+  CudaLDADeviceBuffer<float> b;
+  CudaLDADeviceBuffer<float> c;
+  CudaLDADeviceBuffer<float> z;
+
+ private:
+  cudaStream_t stream_ = nullptr;
+  cublasHandle_t blas_ = nullptr;
+  bool ready_ = false;
+};
+
 class CudaLDAFloatWorkspace {
  public:
   CudaLDAFloatWorkspace() = default;
@@ -2287,6 +2343,7 @@ class CudaLDAFloatWorkspace {
 };
 
 thread_local CudaRSVDWorkspace g_workspace;
+thread_local CudaFloatWorkspace g_float_workspace;
 thread_local CudaLDAFloatWorkspace g_lda_float_workspace;
 
 } // namespace
@@ -2299,6 +2356,7 @@ bool cuda_runtime_available() {
 
 void cuda_reset_workspace() {
   g_workspace.reset();
+  g_float_workspace.reset();
   g_lda_float_workspace.reset();
 }
 
@@ -2407,62 +2465,54 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
     return arma::fmat(a_rows, b_cols, arma::fill::zeros);
   }
 
-  float* dA = nullptr;
-  float* dB = nullptr;
-  float* dC = nullptr;
-  cublasHandle_t handle = nullptr;
-  auto cleanup = [&]() {
-    if (dA) cudaFree(dA);
-    if (dB) cudaFree(dB);
-    if (dC) cudaFree(dC);
-    if (handle) cublasDestroy(handle);
-  };
+  const size_t elems_A = static_cast<size_t>(A.n_elem);
+  const size_t elems_B = static_cast<size_t>(B.n_elem);
+  const size_t elems_C = static_cast<size_t>(m) * static_cast<size_t>(n);
+  arma::fmat C(a_rows, b_cols, arma::fill::none);
+  CudaFloatWorkspace& ws = g_float_workspace;
+  ws.initialize();
+  ws.a.ensure(elems_A);
+  ws.b.ensure(elems_B);
+  ws.c.ensure(elems_C);
+  check_cuda(cudaMemcpyAsync(
+    ws.a.data(), A.memptr(), sizeof(float) * elems_A,
+    cudaMemcpyHostToDevice, ws.stream()
+  ), "cudaMemcpyAsync(cuda_matrix_multiply_float A)");
+  check_cuda(cudaMemcpyAsync(
+    ws.b.data(), B.memptr(), sizeof(float) * elems_B,
+    cudaMemcpyHostToDevice, ws.stream()
+  ), "cudaMemcpyAsync(cuda_matrix_multiply_float B)");
 
-  try {
-    const size_t bytes_A = sizeof(float) * static_cast<size_t>(A.n_elem);
-    const size_t bytes_B = sizeof(float) * static_cast<size_t>(B.n_elem);
-    const size_t bytes_C = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
-    arma::fmat C(a_rows, b_cols, arma::fill::none);
-
-    check_cublas(cublasCreate(&handle), "cublasCreate(cuda_matrix_multiply_float)");
-    check_cuda(cudaMalloc(&dA, bytes_A), "cudaMalloc(cuda_matrix_multiply_float A)");
-    check_cuda(cudaMalloc(&dB, bytes_B), "cudaMalloc(cuda_matrix_multiply_float B)");
-    check_cuda(cudaMalloc(&dC, bytes_C), "cudaMalloc(cuda_matrix_multiply_float C)");
-    check_cuda(cudaMemcpy(dA, A.memptr(), bytes_A, cudaMemcpyHostToDevice),
-               "cudaMemcpy(cuda_matrix_multiply_float A)");
-    check_cuda(cudaMemcpy(dB, B.memptr(), bytes_B, cudaMemcpyHostToDevice),
-               "cudaMemcpy(cuda_matrix_multiply_float B)");
-
-    const float one = 1.0f;
-    const float zero = 0.0f;
-    check_cublas(
-      cublasSgemm(
-        handle,
-        transpose_left ? CUBLAS_OP_T : CUBLAS_OP_N,
-        transpose_right ? CUBLAS_OP_T : CUBLAS_OP_N,
-        m,
-        n,
-        k,
-        &one,
-        dA,
-        static_cast<int>(A.n_rows),
-        dB,
-        static_cast<int>(B.n_rows),
-        &zero,
-        dC,
-        m
-      ),
-      "cublasSgemm(cuda_matrix_multiply_float)"
-    );
-    check_cuda(cudaMemcpy(C.memptr(), dC, bytes_C, cudaMemcpyDeviceToHost),
-               "cudaMemcpy(cuda_matrix_multiply_float C)");
-
-    cleanup();
-    return C;
-  } catch (...) {
-    cleanup();
-    throw;
-  }
+  const float one = 1.0f;
+  const float zero = 0.0f;
+  check_cublas(
+    cublasSgemm(
+      ws.blas(),
+      transpose_left ? CUBLAS_OP_T : CUBLAS_OP_N,
+      transpose_right ? CUBLAS_OP_T : CUBLAS_OP_N,
+      m,
+      n,
+      k,
+      &one,
+      ws.a.data(),
+      static_cast<int>(A.n_rows),
+      ws.b.data(),
+      static_cast<int>(B.n_rows),
+      &zero,
+      ws.c.data(),
+      m
+    ),
+    "cublasSgemm(cuda_matrix_multiply_float)"
+  );
+  check_cuda(cudaMemcpyAsync(
+    C.memptr(), ws.c.data(), sizeof(float) * elems_C,
+    cudaMemcpyDeviceToHost, ws.stream()
+  ), "cudaMemcpyAsync(cuda_matrix_multiply_float C)");
+  check_cuda(
+    cudaStreamSynchronize(ws.stream()),
+    "cudaStreamSynchronize(cuda_matrix_multiply_float)"
+  );
+  return C;
 }
 
 Mat cuda_candidate_knn_scores(
@@ -2981,55 +3031,59 @@ void cuda_rsvd_sample_y_float(
     throw std::runtime_error("cuda_rsvd_sample_y_float received non-positive dimensions");
   }
 
-  cublasHandle_t handle = nullptr;
-  float* dA = nullptr;
-  float* dOmega = nullptr;
-  float* dY = nullptr;
-  float* dZ = nullptr;
-  auto cleanup = [&]() {
-    if (dZ != nullptr) cudaFree(dZ);
-    if (dY != nullptr) cudaFree(dY);
-    if (dOmega != nullptr) cudaFree(dOmega);
-    if (dA != nullptr) cudaFree(dA);
-    if (handle != nullptr) cublasDestroy(handle);
-  };
+  const size_t elems_A = static_cast<size_t>(m) * static_cast<size_t>(n);
+  const size_t elems_Omega = static_cast<size_t>(n) * static_cast<size_t>(l);
+  const size_t elems_Y = static_cast<size_t>(m) * static_cast<size_t>(l);
+  const size_t elems_Z = static_cast<size_t>(n) * static_cast<size_t>(l);
+  CudaFloatWorkspace& ws = g_float_workspace;
+  ws.initialize();
+  ws.a.ensure(elems_A);
+  ws.b.ensure(elems_Omega);
+  ws.c.ensure(elems_Y);
+  ws.z.ensure(elems_Z);
+  check_cuda(cudaMemcpyAsync(
+    ws.a.data(), hA, sizeof(float) * elems_A,
+    cudaMemcpyHostToDevice, ws.stream()
+  ), "cudaMemcpyAsync(float A)");
+  check_cuda(cudaMemcpyAsync(
+    ws.b.data(), hOmega, sizeof(float) * elems_Omega,
+    cudaMemcpyHostToDevice, ws.stream()
+  ), "cudaMemcpyAsync(float Omega)");
 
-  try {
-    check_cublas(cublasCreate(&handle), "cublasCreate(float)");
-    const size_t bytes_A = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(n);
-    const size_t bytes_Omega = sizeof(float) * static_cast<size_t>(n) * static_cast<size_t>(l);
-    const size_t bytes_Y = sizeof(float) * static_cast<size_t>(m) * static_cast<size_t>(l);
-    const size_t bytes_Z = sizeof(float) * static_cast<size_t>(n) * static_cast<size_t>(l);
-    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dA), bytes_A), "cudaMalloc(float A)");
-    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dOmega), bytes_Omega), "cudaMalloc(float Omega)");
-    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dY), bytes_Y), "cudaMalloc(float Y)");
-    check_cuda(cudaMalloc(reinterpret_cast<void**>(&dZ), bytes_Z), "cudaMalloc(float Z)");
-    check_cuda(cudaMemcpy(dA, hA, bytes_A, cudaMemcpyHostToDevice), "cudaMemcpy(float A)");
-    check_cuda(cudaMemcpy(dOmega, hOmega, bytes_Omega, cudaMemcpyHostToDevice), "cudaMemcpy(float Omega)");
-
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  check_cublas(
+    cublasSgemm(
+      ws.blas(), CUBLAS_OP_N, CUBLAS_OP_N, m, l, n,
+      &alpha, ws.a.data(), m, ws.b.data(), n, &beta, ws.c.data(), m
+    ),
+    "cublasSgemm(float A*Omega)"
+  );
+  const int q = std::max(power_iters, 0);
+  for (int i = 0; i < q; ++i) {
     check_cublas(
-      cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA, m, dOmega, n, &beta, dY, m),
-      "cublasSgemm(float A*Omega)"
+      cublasSgemm(
+        ws.blas(), CUBLAS_OP_T, CUBLAS_OP_N, n, l, m,
+        &alpha, ws.a.data(), m, ws.c.data(), m, &beta, ws.z.data(), n
+      ),
+      "cublasSgemm(float A^T*Y)"
     );
-    const int q = std::max(power_iters, 0);
-    for (int i = 0; i < q; ++i) {
-      check_cublas(
-        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA, m, dY, m, &beta, dZ, n),
-        "cublasSgemm(float A^T*Y)"
-      );
-      check_cublas(
-        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, l, n, &alpha, dA, m, dZ, n, &beta, dY, m),
-        "cublasSgemm(float A*Z)"
-      );
-    }
-    check_cuda(cudaMemcpy(hY, dY, bytes_Y, cudaMemcpyDeviceToHost), "cudaMemcpy(float Y)");
-    cleanup();
-  } catch (...) {
-    cleanup();
-    throw;
+    check_cublas(
+      cublasSgemm(
+        ws.blas(), CUBLAS_OP_N, CUBLAS_OP_N, m, l, n,
+        &alpha, ws.a.data(), m, ws.z.data(), n, &beta, ws.c.data(), m
+      ),
+      "cublasSgemm(float A*Z)"
+    );
   }
+  check_cuda(cudaMemcpyAsync(
+    hY, ws.c.data(), sizeof(float) * elems_Y,
+    cudaMemcpyDeviceToHost, ws.stream()
+  ), "cudaMemcpyAsync(float Y)");
+  check_cuda(
+    cudaStreamSynchronize(ws.stream()),
+    "cudaStreamSynchronize(float rSVD)"
+  );
 }
 
 void cuda_rsvd_set_resident_matrix(
@@ -4073,7 +4127,8 @@ std::vector<LDAFloatGPUModel> cuda_lda_train_prefix_float(
 LDAFloatPrediction cuda_lda_predict_float(
   const arma::fmat& Ttest,
   const arma::fmat& linear,
-  const arma::frowvec& constants
+  const arma::frowvec& constants,
+  bool return_scores
 ) {
 #ifndef FASTPLS_HAS_CUDA_KERNELS
   (void)Ttest;
@@ -4123,15 +4178,19 @@ LDAFloatPrediction cuda_lda_predict_float(
   check_kernel_launch("fastpls_cuda_lda_score_argmax_float");
   LDAFloatPrediction out;
   out.pred.resize(static_cast<std::size_t>(n));
-  out.scores.set_size(Ttest.n_rows, linear.n_rows);
+  if (return_scores) {
+    out.scores.set_size(Ttest.n_rows, linear.n_rows);
+  }
   check_cuda(cudaMemcpyAsync(
     out.pred.data(), ws.predictions.data(), sizeof(int) * static_cast<std::size_t>(n),
     cudaMemcpyDeviceToHost, stream
   ), "cudaMemcpyAsync(float32 LDA predictions)");
-  check_cuda(cudaMemcpyAsync(
-    out.scores.memptr(), ws.test_scores.data(), sizeof(float) * out.scores.n_elem,
-    cudaMemcpyDeviceToHost, stream
-  ), "cudaMemcpyAsync(float32 LDA prediction scores)");
+  if (return_scores) {
+    check_cuda(cudaMemcpyAsync(
+      out.scores.memptr(), ws.test_scores.data(), sizeof(float) * out.scores.n_elem,
+      cudaMemcpyDeviceToHost, stream
+    ), "cudaMemcpyAsync(float32 LDA prediction scores)");
+  }
   check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize(float32 LDA prediction)");
   return out;
 #endif
@@ -4971,7 +5030,8 @@ std::vector<LDAFloatGPUModel> cuda_lda_train_prefix_float(
 LDAFloatPrediction cuda_lda_predict_float(
   const arma::fmat&,
   const arma::fmat&,
-  const arma::frowvec&
+  const arma::frowvec&,
+  bool
 ) {
   throw std::runtime_error("CUDA backend not compiled");
 }

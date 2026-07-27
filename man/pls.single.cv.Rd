@@ -20,13 +20,8 @@ pls.single.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda", "cknn"),
+  classifier = c("argmax", "lda"),
   lda_ridge = 1e-08,
-  k = 10L,
-  tau = 0.2,
-  alpha = 0.75,
-  top_m = 20L,
-  cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = TRUE,
   bycol = FALSE,
   xprod = NULL,
@@ -76,35 +71,11 @@ are always held out together and are never split across training and test.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{classifier}{Classification rule for factor responses: \code{"argmax"},
-\code{"lda"}, or the optional proof-of-concept \code{"cknn"} decoder. Multiple
-values are treated as a tuning grid; cKNN should be validated against argmax or
-LDA because it depends on sample density within each class.}
+\item{classifier}{Classification rule for factor responses: \code{"argmax"} or
+latent-space \code{"lda"}. Multiple values are treated as a tuning grid.}
 
 \item{lda_ridge}{Retained for source compatibility. LDA regularization is a
 deterministic numerical fallback and is not tuned during cross-validation.}
-
-\item{k}{Number of same-class PLS-score neighbours used by
-candidate-kNN when \code{classifier = "cknn"}.}
-
-\item{tau}{Positive temperature for smoothing the top neighbour
-similarities. Smaller values emphasize the nearest neighbour; larger values
-produce a smoother local class score.}
-
-\item{alpha}{Weight of the centroid/prototype candidate score in
-candidate-kNN. The final candidate score is local kNN evidence plus
-\code{alpha} times the centroid score, so larger values keep more of the
-global centroid ranking.}
-
-\item{top_m}{Number of centroid-ranked candidate classes passed to the
-kNN reranker.}
-
-\item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
-\code{standard} uses the historical one-pass candidate-kNN path.
-\code{blocked} predicts test samples in blocks, reducing test-side
-latent-score memory. \code{streaming} additionally builds the training
-candidate-score cache in blocks for scalar component counts. \code{auto}
-chooses a memory-aware strategy from the data size.}
 
 \item{fit}{Fit one additional model on the full dataset and return its
 fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
@@ -112,8 +83,8 @@ backward compatibility. Set to \code{FALSE} to skip this extra full-data fit;
 held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in the returned \code{metrics} list. The default \code{FALSE} returns
-only aggregate metrics.}
+metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
+aggregate metrics.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}
@@ -127,7 +98,11 @@ selection can also be controlled with \code{selection_metric = "auto"},
 scalar.}
 }
 \value{
-A list describing the cross-validation run and selected model:
+A list describing the cross-validation run and selected model.
+\code{metrics$cross_validated} contains complete \code{evaluate()} results for each
+requested component count and \code{metrics$fitted} contains the corresponding
+full-data fit results when \code{fit = TRUE}. The fold-aware \code{Q2Y} path remains a
+separate top-level output. Other fields are:
 \itemize{
 \item \code{best_ncomp}: number of components selected by the chosen metric.
 \item \code{best_index}: position of \code{best_ncomp} in the tested component grid.
@@ -150,13 +125,10 @@ not on the decoded class labels.
 \item \code{pred}: decoded cross-validated predictions when predictions are
 stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
-\item \code{metrics}: complete \code{evaluate()} results. \code{cross_validated}
-contains one result per requested component count from held-out predictions;
-\code{fitted} contains one result per component from the optional full-data
-fit. The fold-aware \code{Q2Y} path remains a separate top-level output,
-because its reference mean is determined separately within each fold. For
-multivariate regression, per-response metrics are included only when
-\code{bycol = TRUE}.
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{cross_validated} contains
+one result per requested component count from held-out predictions and
+\code{fitted} contains full-data fit results when \code{fit = TRUE}. For multivariate
+regression, response-wise metrics are included only when \code{bycol = TRUE}.
 \item \code{selection_metrics}: compact per-component metric table used for
 component selection by the CV backend.
 \item \code{best_parameters}: compact list containing only \code{ncomp} plus the
@@ -164,7 +136,7 @@ arguments that were actually optimized, for example \code{classifier} when
 \code{classifier = c("argmax", "lda")}.
 \item \code{tuning_config}: relevant selected configuration used for the run.
 Irrelevant classifier- or method-specific defaults are omitted; for
-example, cKNN controls are not shown when \code{classifier = "argmax"}.
+example, controls belonging to an unselected classifier are omitted.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
 \item The returned object can be passed as the first argument to \code{\link[=pls]{pls()}} to

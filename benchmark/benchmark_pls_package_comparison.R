@@ -66,12 +66,6 @@ classification_only_method_ids <- c(
   "fastPLS_opls_cpu_irlba_lda", "fastPLS_kernelpls_cpu_irlba_lda",
   "fastPLS_simpls_cuda_rsvd_lda", "fastPLS_plssvd_cuda_rsvd_lda",
   "fastPLS_opls_cuda_rsvd_lda", "fastPLS_kernelpls_cuda_rsvd_lda",
-  "fastPLS_simpls_cpu_rsvd_cknn", "fastPLS_plssvd_cpu_rsvd_cknn",
-  "fastPLS_opls_cpu_rsvd_cknn", "fastPLS_kernelpls_cpu_rsvd_cknn",
-  "fastPLS_simpls_cpu_irlba_cknn", "fastPLS_plssvd_cpu_irlba_cknn",
-  "fastPLS_opls_cpu_irlba_cknn", "fastPLS_kernelpls_cpu_irlba_cknn",
-  "fastPLS_simpls_cuda_rsvd_cknn", "fastPLS_plssvd_cuda_rsvd_cknn",
-  "fastPLS_opls_cuda_rsvd_cknn", "fastPLS_kernelpls_cuda_rsvd_cknn",
   "plsgenomics_pls_lda", "mixOmics_plsda", "mixOmics_splsda", "spls_splsda"
 )
 
@@ -265,7 +259,14 @@ extract_prediction_generic <- function(obj, Xnew = Xtest) {
 }
 
 decode_fastpls <- function(model) {
-  pred <- predict(model, task$Xtest, Ytest = task$Ytest)$Ypred
+  # `pls()` returns its public result as a list when Xtest is supplied.  In
+  # that case predictions are already present and the list is not an S3 model
+  # object for a second predict() call.
+  pred <- if (!is.null(model$Ypred)) {
+    model$Ypred
+  } else {
+    predict(model, task$Xtest, Ytest = task$Ytest)$Ypred
+  }
   if (identical(task_type, "classification")) {
     if (is.data.frame(pred)) return(factor(pred[[ncol(pred)]], levels = levels(Ytest)))
     if (is.factor(pred) || is.character(pred)) return(factor(pred, levels = levels(Ytest)))
@@ -278,28 +279,13 @@ decode_fastpls <- function(model) {
 run_fastpls <- function(method_name,
                         backend = "cpu",
                         svd_method = "rsvd",
-                        classifier = "argmax",
-                        k = as.integer(arg("k", "10")),
-                        tau = as.numeric(arg("tau", "0.2")),
-                        alpha = as.numeric(arg("alpha", "0.75")),
-                        top_m = as.integer(arg("top_m", "20"))) {
-  if (!identical(task_type, "classification") && !identical(classifier, "argmax")) {
-    stop("candidate-kNN fastPLS benchmark variants require classification data.")
-  }
-  if (!is.finite(k) || is.na(k)) k <- 10L
-  if (!is.finite(tau) || is.na(tau)) tau <- 0.2
-  if (!is.finite(alpha) || is.na(alpha)) alpha <- 0.75
-  if (!is.finite(top_m) || is.na(top_m)) top_m <- 20L
+                        classifier = "argmax") {
   args <- list(
     Xtrain = task$Xtrain, Ytrain = task$Ytrain,
     Xtest = task$Xtest, Ytest = task$Ytest,
     ncomp = ncomp_requested, method = method_name, backend = backend,
     svd.method = svd_method, scaling = "centering", fit = FALSE, proj = FALSE,
-    seed = 123L + replicate_id, classifier = classifier,
-    k = max(1L, k),
-    tau = tau,
-    alpha = alpha,
-    top_m = max(1L, top_m)
+    seed = 123L + replicate_id, classifier = classifier
   )
   if (identical(method_name, "opls")) args$north <- min(1L, max(0L, ncomp_requested - 1L))
   fastPLS::pls(
@@ -308,11 +294,7 @@ run_fastpls <- function(method_name,
     svd.method = args$svd.method, scaling = args$scaling, fit = args$fit,
     proj = args$proj, seed = args$seed, north = args$north %||% 1L,
     return_variance = FALSE,
-    classifier = args$classifier,
-    k = args$k,
-    tau = args$tau,
-    alpha = args$alpha,
-    top_m = args$top_m
+    classifier = args$classifier
   )
 }
 
@@ -573,9 +555,6 @@ fastpls_method_specs <- function(classification = FALSE) {
       specs[[length(specs) + 1L]] <- fastpls_spec("cpu_rsvd_lda", method_name, "cpu", "rsvd", "lda", paste0(labels[[method_name]], " + LDA"))
       specs[[length(specs) + 1L]] <- fastpls_spec("cpu_irlba_lda", method_name, "cpu", "irlba", "lda", paste0(labels[[method_name]], " + LDA"))
       specs[[length(specs) + 1L]] <- fastpls_spec("cuda_rsvd_lda", method_name, "cuda", "rsvd", "lda", paste0(labels[[method_name]], " + LDA"))
-      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_rsvd_cknn", method_name, "cpu", "rsvd", "cknn", paste0(labels[[method_name]], " + cKNN"))
-      specs[[length(specs) + 1L]] <- fastpls_spec("cpu_irlba_cknn", method_name, "cpu", "irlba", "cknn", paste0(labels[[method_name]], " + cKNN"))
-      specs[[length(specs) + 1L]] <- fastpls_spec("cuda_rsvd_cknn", method_name, "cuda", "rsvd", "cknn", paste0(labels[[method_name]], " + cKNN"))
     }
   }
   specs
@@ -659,7 +638,6 @@ requested_estimator_from_spec <- function(spec) {
 classifier_from_spec <- function(spec) {
   id <- tolower(spec$id %||% "")
   if (grepl("_lda$", id)) return("lda")
-  if (grepl("_cknn$", id)) return("cknn")
   "argmax"
 }
 
@@ -735,17 +713,6 @@ measure_once <- function(fun) {
 run_one <- function(method_id) {
   spec <- method_specs[[method_id]]
   if (is.null(spec)) {
-    if (grepl("cknn", method_id, fixed = TRUE) &&
-        !identical(task_type, "classification")) {
-      spec <- list(
-        id = method_id, package = "fastPLS", function_name = "fastPLS::pls",
-        algorithm = "cKNN"
-      )
-      return(empty_row(
-        spec, "skipped_classifier_nonclassification",
-        "cKNN is only meaningful for classification tasks."
-      ))
-    }
     spec <- list(id = method_id, package = NA_character_, function_name = NA_character_, algorithm = NA_character_)
     return(empty_row(spec, "error", paste("Unknown method_id:", method_id)))
   }
@@ -785,19 +752,13 @@ run_one <- function(method_id) {
       measured$value$fit, row$requested_estimator
     )
     if (!identical(row$requested_estimator, row$executed_estimator)) {
-      reason <- as.character(internal$method_substitution_reason %||% "")
-      row$warning_message <- paste(
-        Filter(nzchar, c(
-          row$warning_message,
-          sprintf(
-            "requested_estimator=%s; executed_estimator=%s%s",
-            row$requested_estimator,
-            row$executed_estimator,
-            if (nzchar(reason)) paste0("; reason=", reason) else ""
-          )
-        )),
-        collapse = " | "
+      row$status <- "error_estimator_mismatch"
+      row$error_message <- sprintf(
+        "requested_estimator=%s; executed_estimator=%s; benchmark row rejected",
+        row$requested_estimator,
+        row$executed_estimator
       )
+      pred <- NULL
     }
   }
   if (!is.null(pred)) {
@@ -832,7 +793,6 @@ pipeline2_short_fastpls <- function(method_id) {
   x <- gsub("_cuda_", " CUDA ", x, fixed = TRUE)
   x <- gsub("_irlba", " IRLBA", x, fixed = TRUE)
   x <- gsub("_rsvd", " rSVD", x, fixed = TRUE)
-  x <- gsub("_cknn$", " cKNN", x)
   x <- gsub("_lda$", " LDA", x)
   x <- gsub("_", " ", x, fixed = TRUE)
   paste("fastPLS", x)
@@ -996,7 +956,38 @@ summarize_results <- function(results_dir) {
   raw_path <- file.path(results_dir, "pls_package_comparison_raw.csv")
   utils::write.csv(raw, raw_path, row.names = FALSE, quote = TRUE, na = "")
 
+  # Keep completion status separate from performance medians so that a failed
+  # implementation is never hidden merely because it has no successful rows.
+  status_key <- interaction(raw$dataset, raw$method_id, drop = TRUE)
+  status_summary <- do.call(rbind, lapply(split(raw, status_key), function(d) {
+    status <- tolower(d$status)
+    data.frame(
+      dataset = d$dataset[1],
+      task_type = d$task_type[1],
+      method_id = d$method_id[1],
+      package = d$package[1],
+      algorithm = d$algorithm[1],
+      ncomp_requested = d$ncomp_requested[1],
+      input_precision = d$input_precision[1],
+      execution_precision = d$execution_precision[1],
+      requested_estimator = d$requested_estimator[1],
+      executed_estimator = d$executed_estimator[1],
+      reps_attempted = nrow(d),
+      reps_ok = sum(status == "ok"),
+      n_timeout = sum(grepl("timeout", status, fixed = TRUE)),
+      n_error = sum(status %in% c("error", "killed", "oom")),
+      n_skipped = sum(grepl("skip", status, fixed = TRUE)),
+      stringsAsFactors = FALSE
+    )
+  }))
+  status_path <- file.path(results_dir, "pls_package_comparison_status.csv")
+  utils::write.csv(status_summary, status_path, row.names = FALSE, quote = TRUE, na = "")
+
   ok <- raw[raw$status == "ok", , drop = FALSE]
+  iqr_or_na <- function(x) {
+    x <- x[is.finite(x)]
+    if (length(x) < 2L) NA_real_ else stats::IQR(x)
+  }
   if (nrow(ok)) {
     split_key <- interaction(ok$dataset, ok$method_id, drop = TRUE)
     summary <- do.call(rbind, lapply(split(ok, split_key), function(d) {
@@ -1016,12 +1007,19 @@ summarize_results <- function(results_dir) {
         executed_estimator = d$executed_estimator[1],
         reps_ok = nrow(d),
         median_time_ms = stats::median(d$total_runtime_ms, na.rm = TRUE),
+        iqr_time_ms = iqr_or_na(d$total_runtime_ms),
         median_peak_host_rss_mb = if ("peak_host_rss_mb" %in% names(d)) {
           stats::median(d$peak_host_rss_mb, na.rm = TRUE)
         } else {
           NA_real_
         },
+        iqr_peak_host_rss_mb = if ("peak_host_rss_mb" %in% names(d)) {
+          iqr_or_na(d$peak_host_rss_mb)
+        } else {
+          NA_real_
+        },
         median_metric = stats::median(d$metric_value, na.rm = TRUE),
+        iqr_metric = iqr_or_na(d$metric_value),
         metric_name = d$metric_name[1],
         median_accuracy = stats::median(d$accuracy, na.rm = TRUE),
         median_balanced_accuracy = stats::median(d$balanced_accuracy, na.rm = TRUE),
@@ -1060,8 +1058,19 @@ summarize_results <- function(results_dir) {
       ggplot2::ggsave(file.path(plot_dir, paste0(ds, "_package_speed.png")), p1, width = 10, height = 7, dpi = 160)
       ggplot2::ggsave(file.path(plot_dir, paste0(ds, "_package_prediction.png")), p2, width = 10, height = 7, dpi = 160)
     }
+    best_component_script <- file.path(repo_root, "benchmark", "plot_pipeline2_best_component_performance.R")
+    if (file.exists(best_component_script)) {
+      status <- system2(
+        file.path(R.home("bin"), "Rscript"),
+        c(best_component_script, raw_path, plot_dir)
+      )
+      if (!identical(status, 0L)) {
+        warning("Best-component cross-dataset figure generation failed.", call. = FALSE)
+      }
+    }
   }
   message("Wrote: ", raw_path)
+  message("Wrote: ", status_path)
   message("Wrote: ", summary_path)
 }
 

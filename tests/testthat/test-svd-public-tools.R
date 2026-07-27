@@ -3,13 +3,21 @@ test_that("fastsvd returns decomposition outputs from public backends", {
   A <- matrix(rnorm(120 * 20), 120, 20)
   out <- fastsvd(A, ncomp = 5, backend = "cpu")
   expect_true(is.list(out))
-  expect_true(all(c("u", "d", "v", "backend", "method", "svd.method", "elapsed") %in% names(out)))
+  expect_true(all(c(
+    "u", "d", "v", "backend", "method", "svd.method", "elapsed",
+    "diagnostics"
+  ) %in% names(out)))
   expect_identical(out$backend, "cpu")
   expect_identical(out$method, "rsvd")
   expect_identical(out$svd.method, "cpu_rsvd")
   expect_equal(ncol(out$u), 5)
   expect_equal(length(out$d), 5)
   expect_equal(ncol(out$v), 5)
+  expect_true(out$diagnostics$status %in% c(
+    "rsvd_triplet_checks_passed",
+    "warning_approximation_quality"
+  ))
+  expect_true(is.finite(out$diagnostics$max_relative_triplet_residual))
 })
 
 test_that("unsupported fastsvd method labels use standard choices error", {

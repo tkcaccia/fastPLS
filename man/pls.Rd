@@ -13,13 +13,8 @@ pls(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   svd.method = c("rsvd", "irlba"),
-  classifier = c("argmax", "lda", "cknn"),
+  classifier = c("argmax", "lda"),
   lda_ridge = 1e-08,
-  k = 10L,
-  tau = 0.2,
-  alpha = 0.75,
-  top_m = 20L,
-  cknn_memory = c("auto", "standard", "blocked", "streaming"),
   fit = FALSE,
   bycol = FALSE,
   return_variance = TRUE,
@@ -58,49 +53,16 @@ randomized SVD for the selected backend, and \code{irlba} uses the bundled
 CPU iterative backend.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
-standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
-the PLS latent scores. \code{cknn} is the compact name for an optional PLS-score
-candidate-kNN classifier: class centroids in PLS score space choose
-candidate classes, then every sample is reranked by within-candidate kNN in
-the same PLS score space. The route is selected automatically from
-\code{backend}: compiled C++ for \code{cpu}, CUDA acceleration for \code{cuda},
-and Metal projection followed by CPU neighbour scoring for \code{metal}.
-It is a proof-of-concept downstream classifier for sample-rich
-latent spaces, not the default PLS-DA decoder, and should be validated against
-\code{argmax} and \code{lda}.}
+standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
+classifier on the PLS latent scores.}
 
 \item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
 scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
 
-\item{k}{Number of same-class PLS-score neighbours used by
-the candidate-kNN classifier. Larger values use more neighbours per
-candidate class and therefore give a smoother, less local decision.}
-
-\item{tau}{Positive temperature for pooling the top neighbour similarities in
-candidate-kNN scoring. Smaller values make the score close to the best
-neighbour; larger values average the top neighbours more smoothly.}
-
-\item{alpha}{Weight of the centroid/prototype candidate score added to the
-local kNN score. The final candidate score is the smoothed same-class kNN
-evidence plus \code{alpha} times the centroid score. Higher values keep the
-decision closer to the global PLS class-centroid ranking; lower values make
-the reranking depend more strongly on local neighbours.}
-
-\item{top_m}{Number of centroid-ranked candidate classes passed to
-the kNN reranker.}
-
-\item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
-\code{standard} uses the historical one-pass candidate-kNN path.
-\code{blocked} predicts test samples in blocks, reducing test-side
-latent-score memory. \code{streaming} additionally builds the training
-candidate-score cache in blocks for scalar component counts. \code{auto}
-chooses a memory-aware strategy from the data size.}
-
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in \code{metrics}. The default \code{FALSE} returns only aggregate
-metrics.}
+metrics in \code{metrics}. The default \code{FALSE} returns only aggregate metrics.}
 
 \item{return_variance}{Compute predictor-space latent-variable variance
 explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
@@ -143,10 +105,9 @@ Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
 \value{
 A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
-summaries were requested. \code{metrics} is a list of complete
-\code{evaluate()} results, organized as \code{metrics$fitted} and
-\code{metrics$test}, with one element per requested component count. Common
-fields are:
+summaries were requested. \code{metrics} is a list of complete \code{evaluate()}
+results, organized as \code{metrics$fitted} and \code{metrics$test}, with one element
+per requested component count. Common fields are:
 \itemize{
 \item \code{P}: predictor loadings, with one column per latent component.
 \item \code{Q}: response loadings or response-side latent coefficients.
@@ -181,14 +142,11 @@ named by component count.
 \item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when
 classification predictions are available. Elements are named by component
 count.
-\item \code{metrics}: complete \code{evaluate()} outputs. \code{fitted} evaluates
-\code{Yfit} against \code{Ytrain} when \code{fit = TRUE}; \code{test} evaluates
-\code{Ypred} against \code{Ytest} when test data are supplied. Each contains
-one element per requested component count, including global metrics,
-per-class metrics, and a confusion matrix for classification. For multivariate
-regression, per-response metrics are included only when \code{bycol = TRUE}.
-When \code{perm.test = TRUE}, \code{metrics$permutation} contains the
-observed/permuted metric table and empirical p-values.
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{fitted} evaluates \code{Yfit}
+against \code{Ytrain}; \code{test} evaluates \code{Ypred} against \code{Ytest}. For
+multivariate regression, response-wise metrics are included only when
+\code{bycol = TRUE}. \code{metrics$permutation} stores permutation metrics and
+p-values when \code{perm.test = TRUE}.
 \item \code{pval}: single-split permutation-test p-values by component, returned
 when \code{perm.test = TRUE}. Each p-value is the fraction of permuted
 \code{Q2Y} values larger than the observed \code{Q2Y}.
@@ -206,6 +164,11 @@ predictor-space variance summaries.
 \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
 \item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific
 kernel settings and execution metadata.
+\item \code{diagnostics}: numerical solver diagnostics. For rSVD this records the
+structural-check status, finiteness, requested and effective component
+counts, and the randomized controls. A status of
+\code{basic_checks_passed_approximation_not_audited} means only that the fit is
+structurally valid; it is not evidence of deterministic equivalence.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
@@ -219,33 +182,45 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
-If \code{Xtrain}, \code{Xtest}, \code{Ytrain}, or \code{Ytest} are supplied as \code{float::float32}
-objects, \code{pls()} uses a float32 route instead of converting them to double.
-This route is available for \code{method = "plssvd"}, \code{"simpls"}, \code{"opls"}, and
-\code{"kernelpls"}. OPLS filtering and kernel construction/centering retain
-float32 storage and arithmetic; a linear kernel uses the direct SIMPLS path,
-whereas nonlinear kernels still require an n-by-n Gram matrix. CPU
-and Metal support \code{svd.method = "rsvd"} or \code{svd.method = "irlba"}; CUDA
-supports float32 randomized SVD. Classification with float32 input supports
-\code{classifier = "argmax"}, \code{classifier = "lda"}, and \code{classifier = "cknn"}.
-Unsupported float32 combinations stop with a clear error rather than
-silently upcasting to double.
-On Windows, where the standard R toolchain does not provide the
-single-precision BLAS/LAPACK symbols used by the compiled kernels,
-\code{backend = "cpu"} and \code{svd.method = "rsvd"} use a portable
-\code{float}-package fallback for PLS-SVD and SIMPLS with
-\code{classifier = "argmax"}. This preserves float32 matrices and results,
-but is slower than the compiled CPU route. Windows float32 OPLS, nonlinear
-kernel PLS, LDA, and accelerator backends are not currently supported.
+Supplying \code{float::float32} predictors or responses requests single-precision
+execution without silent promotion to double. Float32 is route-specific,
+however, rather than a package-wide speed or memory guarantee. Compiled CPU
+and CUDA rSVD PLS-SVD have the broadest current validation. Metal and
+float32 IRLBA routes are experimental; accelerator OPLS and nonlinear
+kernel-PLS retain host stages; and Metal LDA uses the compiled CPU float32
+discriminant solver after Metal score projection.
+
+Float64 remains the numerical reference. Raw float32 matrices require about
+half the input storage, but paired tests show route-dependent runtime,
+incremental host RSS, and device-memory behavior. \code{pls()} therefore warns
+for experimental, hybrid, or measured risk regimes, including
+precision-sensitive SIMPLS/kernel-PLS classification, nonlinear kernels,
+Metal execution, float32 IRLBA, and extreme multivariate responses. For
+numeric responses with at least 10,000 columns and at least 50 components,
+PLS-SVD warns about observed performance/memory risk and SIMPLS-derived
+routes warn that the validation regime failed numerically or
+computationally. Unsupported combinations stop before allocation.
 
 For a factor response with \eqn{C} levels, centred dummy coding has rank at
 most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
-component count at \eqn{C-1}. On very large CUDA classification problems, a
-memory guard may replace a requested SIMPLS fit with the label-aware PLS-SVD
-projection to avoid a dense indicator matrix. Such substitution emits a
-warning and records the requested method, executed method, and reason in the
-fitted object's internal metadata. The current CUDA SIMPLS-LDA path similarly
-records that its latent score model was constructed by PLS-SVD.
+component count at \eqn{C-1}. The requested PLS estimator is always
+enforced: \code{method = "simpls"} fits SIMPLS and \code{method = "plssvd"} fits
+PLS-SVD. If a large CUDA classification response would exceed the guarded
+dense-indicator path, SIMPLS stops with a clear error rather than silently
+substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
+
+Randomized SVD is an approximate solver. The returned \code{diagnostics} performs
+inexpensive structural checks for finite latent factors and the requested
+effective component count, but these checks do not establish agreement with
+a deterministic fit. IRLBA should be preferred for confirmatory inference,
+coefficient or subspace interpretation, ill-conditioned or rank-deficient
+matrices, slowly decaying singular spectra, or whenever repeated rSVD seeds
+give materially different predictions. The package validation treats an
+rSVD approximation as failed when relative prediction error exceeds 0.05,
+prediction correlation is below 0.99, a latent-subspace angle exceeds 10
+degrees, classification-label agreement is below 0.99, or the absolute
+predictive-metric difference exceeds 0.01 relative to a deterministic
+reference.
 
 For latent-space LDA, the pooled covariance is computed as
 \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating

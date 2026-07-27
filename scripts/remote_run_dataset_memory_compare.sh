@@ -49,10 +49,22 @@ if [ "${SAVE_PREDICTIONS}" = "true" ]; then
 fi
 rm -f "${RAW_CSV}"
 
-gpu_sampler() {
+memory_sampler() {
   r_pid="$1"
   log_file="$2"
+  ready_file="$3"
+  first_sample=1
   while kill -0 "${r_pid}" 2>/dev/null; do
+    rss_kb="$(awk '/^VmRSS:/ {print $2; exit}' "/proc/${r_pid}/status" 2>/dev/null || true)"
+    if [ -z "${rss_kb}" ]; then
+      rss_kb="$(ps -o rss= -p "${r_pid}" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
+    fi
+    if [ -n "${rss_kb}" ]; then
+      "${PYTHON_BIN}" - "${rss_kb}" >> "${log_file}" <<'PY'
+import sys
+print("rss,{:.6f}".format(float(sys.argv[1]) / 1024.0))
+PY
+    fi
     samples="$(nvidia-smi --query-compute-apps=pid,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null | \
       awk -F',' -v pid="${r_pid}" '($1 + 0) == pid {gsub(/ /, "", $2); print $2}')"
     if [ -n "${samples}" ]; then
@@ -60,8 +72,24 @@ gpu_sampler() {
         [ -n "${mb}" ] && printf 'pid,%s\n' "${mb}" >> "${log_file}"
       done
     fi
-    sleep 0.2
+    if [ "${first_sample}" -eq 1 ]; then
+      : > "${ready_file}"
+      first_sample=0
+    fi
+    sleep 0.02
   done
+  if [ "${first_sample}" -eq 1 ]; then
+    : > "${ready_file}"
+  fi
+}
+
+peak_host_window_from_log() {
+  log_file="$1"
+  if [ ! -s "${log_file}" ]; then
+    echo "NA"
+    return
+  fi
+  awk -F',' 'BEGIN{m=-1} /^rss,[0-9.]+$/ { if (($2 + 0) > m) m = $2 + 0 } END { if (m < 0) print "NA"; else print m }' "${log_file}"
 }
 
 peak_gpu_from_log() {
@@ -115,22 +143,57 @@ PY
 append_row() {
   raw_csv="$1"
   row_csv="$2"
-  host_rss="$3"
-  gpu_peak="$4"
+  process_peak_host="$3"
+  fit_window_peak_host="$4"
+  gpu_peak="$5"
 
-  "${PYTHON_BIN}" - "$raw_csv" "$row_csv" "$host_rss" "$gpu_peak" <<'PY'
+  "${PYTHON_BIN}" - "$raw_csv" "$row_csv" "$process_peak_host" "$fit_window_peak_host" "$gpu_peak" <<'PY'
 import csv, os, sys
 
-raw_csv, row_csv, host_rss, gpu_peak = sys.argv[1:]
+raw_csv, row_csv, process_peak_host, fit_window_peak_host, gpu_peak = sys.argv[1:]
 
 with open(row_csv, newline="") as fh:
     reader = csv.DictReader(fh)
     row = next(reader)
 
-if host_rss not in ("", "NA"):
-    row["peak_host_rss_mb"] = host_rss
+if process_peak_host not in ("", "NA"):
+    row["peak_host_rss_mb"] = process_peak_host
+if fit_window_peak_host not in ("", "NA"):
+    row["fit_window_peak_host_rss_mb"] = fit_window_peak_host
 if gpu_peak not in ("", "NA"):
     row["peak_gpu_mem_mb"] = gpu_peak
+try:
+    baseline = float(row.get("rss_before_fit_mb", ""))
+    candidates = [
+        float(row.get(key, ""))
+        for key in (
+            "fit_window_peak_host_rss_mb",
+            "rss_after_fit_mb",
+            "rss_after_predict_mb",
+        )
+        if row.get(key, "") not in ("", "NA")
+    ]
+    peak = max(candidates)
+    row["fit_window_peak_host_rss_mb"] = peak
+    row["incremental_host_rss_mb"] = max(0.0, peak - baseline)
+except (TypeError, ValueError):
+    pass
+try:
+    baseline = float(row.get("gpu_before_fit_mb", ""))
+    candidates = [
+        float(row.get(key, ""))
+        for key in (
+            "peak_gpu_mem_mb",
+            "gpu_after_fit_mb",
+            "gpu_after_predict_mb",
+        )
+        if row.get(key, "") not in ("", "NA")
+    ]
+    peak = max(candidates)
+    row["peak_gpu_mem_mb"] = peak
+    row["incremental_gpu_mem_mb"] = max(0.0, peak - baseline)
+except (TypeError, ValueError):
+    pass
 
 need_header = not os.path.exists(raw_csv) or os.path.getsize(raw_csv) == 0
 with open(raw_csv, "a", newline="") as fh:
@@ -237,9 +300,15 @@ row <- data.frame(
   prediction_file = pred_file,
   peak_host_rss_mb = host_rss,
   peak_gpu_mem_mb = gpu_peak,
+  fit_window_peak_host_rss_mb = NA_real_,
+  incremental_host_rss_mb = NA_real_,
   rss_before_fit_mb = NA_real_,
   rss_after_fit_mb = NA_real_,
   rss_after_predict_mb = NA_real_,
+  gpu_before_fit_mb = NA_real_,
+  gpu_after_fit_mb = NA_real_,
+  gpu_after_predict_mb = NA_real_,
+  incremental_gpu_mem_mb = NA_real_,
   status = status,
   msg = msg,
   dataset_path = task$dataset_path,
@@ -314,6 +383,8 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
         run_id="$(printf '%s__%s__%s__n%s__rep%s' "${dataset_id}" "${PRECISION}" "${variant_name}" "${requested_ncomp}" "${rep_id}")"
         row_csv="${RUN_ROWS_DIR}/${run_id}.csv"
         pid_file="${RUN_ROWS_DIR}/${run_id}.pid"
+        fit_ready_file="${RUN_ROWS_DIR}/${run_id}.fit_ready"
+        sampler_ready_file="${RUN_ROWS_DIR}/${run_id}.sampler_ready"
         if [ "${SAVE_PREDICTIONS}" = "true" ]; then
           pred_file="${PRED_DIR}/${run_id}.rds"
         else
@@ -324,7 +395,7 @@ for dataset_id in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
         gpu_log="${GPU_LOG_DIR}/${run_id}.txt"
         run_script="${RUN_ROWS_DIR}/${run_id}.run.sh"
 
-        rm -f "${row_csv}" "${pid_file}" "${pred_file}" "${stdout_log}" "${time_log}" "${gpu_log}" "${run_script}"
+        rm -f "${row_csv}" "${pid_file}" "${fit_ready_file}" "${sampler_ready_file}" "${pred_file}" "${stdout_log}" "${time_log}" "${gpu_log}" "${run_script}"
         cat > "${run_script}" <<EOF
 #!/bin/sh
 exec Rscript "${REPO_ROOT}/benchmark/benchmark_dataset_memory_compare.R" \
@@ -332,6 +403,8 @@ exec Rscript "${REPO_ROOT}/benchmark/benchmark_dataset_memory_compare.R" \
   --task-rds="${task_rds}" \
   --row-out="${row_csv}" \
   --pid-file="${pid_file}" \
+  --fit-ready-file="${fit_ready_file}" \
+  --sampler-ready-file="${sampler_ready_file}" \
   --pred-out="${pred_file}" \
   --variant-name="${variant_name}" \
   --lib-loc="${LIB_LOC}" \
@@ -350,8 +423,8 @@ EOF
         r_pid=""
         sampler_pid=""
         i=0
-        while [ "${i}" -lt 200 ]; do
-          if [ -s "${pid_file}" ]; then
+        while [ "${i}" -lt 600 ]; do
+          if [ -s "${pid_file}" ] && [ -s "${fit_ready_file}" ]; then
             r_pid="$(cat "${pid_file}")"
             break
           fi
@@ -363,7 +436,7 @@ EOF
         done
 
         if [ -n "${r_pid}" ]; then
-          gpu_sampler "${r_pid}" "${gpu_log}" &
+          memory_sampler "${r_pid}" "${gpu_log}" "${sampler_ready_file}" &
           sampler_pid=$!
         fi
 
@@ -373,11 +446,12 @@ EOF
         fi
 
         host_rss="$(peak_rss_from_time_log "${time_log}")"
+        fit_window_peak_host="$(peak_host_window_from_log "${gpu_log}")"
         gpu_peak="$(peak_gpu_from_log "${gpu_log}")"
         if [ ! -s "${row_csv}" ]; then
           write_missing_row "${row_csv}" "${task_rds}" "${variant_name}" "${requested_ncomp}" "${rep_id}" "${host_rss}" "${gpu_peak}" "${time_log}" "${pred_file}"
         fi
-        append_row "${RAW_CSV}" "${row_csv}" "${host_rss}" "${gpu_peak}"
+        append_row "${RAW_CSV}" "${row_csv}" "${host_rss}" "${fit_window_peak_host}" "${gpu_peak}"
         row_status="$(row_status_from_csv "${row_csv}")"
         if [ "${row_status}" = "killed_timeout" ]; then
           echo "[INFO] Timeout for ${dataset_id}/${variant_name} ncomp=${requested_ncomp} rep=${rep_id}; skipping remaining reps and higher ncomp for this variant"

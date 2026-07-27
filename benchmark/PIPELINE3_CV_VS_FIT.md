@@ -1,8 +1,18 @@
 # Pipeline 3: fit/predict versus cross-validation
 
 Pipeline 3 compares ordinary fitting plus prediction with the internal
-10-fold cross-validation workflow.  It is intended to quantify the overhead
-and speed benefit of compiled cross-validation for each PLS family.
+10-fold cross-validation workflow. It quantifies the overhead of validation
+relative to one fit; by itself, it does not demonstrate acceleration.
+
+The separate matched benchmark
+`benchmark/benchmark_cv_compiled_vs_r_loop.R` compares the compiled CV engine
+with an equivalent R-level loop that calls the same `fastPLS::pls()` estimator.
+It freezes fold groups before timing and verifies fold-partition and
+out-of-fold prediction agreement. Run it remotely with:
+
+```sh
+bash scripts/run_cv_compiled_vs_r_loop_remote.sh
+```
 
 ## Run
 

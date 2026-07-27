@@ -131,6 +131,31 @@ test_that("pls classifier='lda' with backend='cuda' preserves CUDA LDA predictio
   expect_equal(pred_cuda, pred_cpp)
 })
 
+test_that("CUDA SIMPLS-LDA retains the requested SIMPLS estimator when dense Y fits", {
+  skip_if_not(has_cuda())
+  skip_if_not(exists("lda_cuda_native_available", envir = asNamespace("fastPLS"), inherits = FALSE))
+  skip_if_not(fastPLS:::lda_cuda_native_available())
+
+  set.seed(20260725)
+  X <- matrix(rnorm(150 * 14), nrow = 150, ncol = 14)
+  y <- factor(rep(letters[1:5], each = 30))
+  idx <- sample(seq_len(nrow(X)), 30)
+
+  fit <- pls(
+    X[-idx, , drop = FALSE], y[-idx],
+    Xtest = X[idx, , drop = FALSE], Ytest = y[idx],
+    ncomp = 4, method = "simpls", backend = "cuda",
+    classifier = "lda", fit = FALSE, return_variance = FALSE, seed = 123L
+  )
+  internal <- attr(fit, "fastPLS_internal", exact = TRUE)
+
+  expect_equal(if (is.null(internal$requested_pls_method)) "simpls" else internal$requested_pls_method,
+               "simpls")
+  expect_equal(internal$pls_method, "simpls")
+  expect_null(internal$method_substitution_reason)
+  expect_true(is.finite(tail(fit$accuracy, 1L)))
+})
+
 test_that("fused native CUDA PLS+LDA preserves standard CUDA LDA predictions", {
   skip_if_not(has_cuda())
   skip_if_not(exists("lda_cuda_native_available", envir = asNamespace("fastPLS"), inherits = FALSE))
@@ -218,6 +243,6 @@ test_that("standard CUDA LDA remains the default implementation", {
     seed = 123L
   )
 
-  expect_equal(fit_default$lda$train_backend, "cuda_project")
+  expect_equal(fit_default$lda$train_backend, "cuda_stream_project")
   expect_equal(attr(fit_default, "fastPLS_internal")$predict_backend, "cuda_flash")
 })

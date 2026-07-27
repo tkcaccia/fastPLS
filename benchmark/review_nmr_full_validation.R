@@ -35,25 +35,20 @@ if (identical(backend, "cuda") && !isTRUE(has_cuda())) {
   stop("The selected fastPLS installation has no CUDA backend.", call. = FALSE)
 }
 
-data_env <- new.env(parent = emptyenv())
-load(input, envir = data_env)
-required <- c("Xtrain", "Ytrain", "Xtest", "Ytest")
-if (!all(required %in% ls(data_env))) {
-  stop("Input must contain Xtrain, Ytrain, Xtest, and Ytest.", call. = FALSE)
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- if (length(script_arg)) {
+  normalizePath(sub("^--file=", "", script_arg[[1L]]), mustWork = TRUE)
+} else {
+  normalizePath("benchmark/review_nmr_full_validation.R", mustWork = TRUE)
 }
-Xtrain <- as.matrix(get("Xtrain", envir = data_env))
-Ytrain <- as.matrix(get("Ytrain", envir = data_env))
-Xtest <- as.matrix(get("Xtest", envir = data_env))
-Ytest <- as.matrix(get("Ytest", envir = data_env))
-
-# The water window is a predictor-only spectral region.  Applying the same mask
-# to both splits prevents information leakage and preserves the test protocol.
-x_axis <- suppressWarnings(as.numeric(colnames(Xtrain)))
-water_columns <- which(is.finite(x_axis) & x_axis > 4.6 & x_axis < 4.8)
-if (length(water_columns)) {
-  Xtrain[, water_columns] <- 0
-  Xtest[, water_columns] <- 0
-}
+source(file.path(dirname(script_path), "nmr_protocol_helpers.R"))
+protocol <- fastpls_nmr_protocol(input)
+Xtrain <- protocol$Xtrain
+Ytrain <- protocol$Ytrain
+Xtest <- protocol$Xtest
+Ytest <- protocol$Ytest
+x_axis <- protocol$x_axis
+water_columns <- protocol$water_columns
 
 extract_prediction <- function(x, k) {
   key <- paste0("ncomp=", k)
@@ -86,7 +81,7 @@ run_fit_predict <- function(X_fit, Y_fit, X_eval, Y_eval, ncomp) {
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 metadata <- list(
-  input = normalizePath(input, winslash = "/", mustWork = TRUE),
+  protocol = protocol$metadata,
   seed = seed,
   backend = backend,
   water_region_ppm = c(4.6, 4.8),

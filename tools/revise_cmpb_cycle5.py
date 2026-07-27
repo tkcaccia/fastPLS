@@ -120,6 +120,11 @@ def revise_supplement():
         "Float32 NMR control.",
         "Float32 NMR control. On the fixed NMR partition, a ten-component SIMPLS screening control with q=5000 responses gave RMSD 6.4850×10−5 for float32 CPU, 6.4850×10−5 for float32 CUDA, and 6.4847×10−5 for float64 CPU. The current float32 CPU and CUDA paths were slower (60.8 and 51.8 s) than float64 CPU (7.54 s). The full q=28355 float32 path did not satisfy the predeclared runtime screen. Together with the small controlled all-family agreement screen, these results support numerical compatibility but not a universal float32 performance claim."
     )
+    replace_paragraph(
+        doc,
+        "For SIMPLS, a prediction at component count  can be evaluated",
+        "For SIMPLS, a prediction at component count k is evaluated through compact latent factors rather than a dense coefficient matrix. Large test matrices are processed in row blocks and intermediate score matrices are released after use. This limits retained prediction state to the current block and low-rank factors; it does not introduce a separate SVD solver."
+    )
 
     residency = doc.tables[0]
     rows = [
@@ -137,13 +142,18 @@ def revise_supplement():
         set_row(residency, i, values)
     compact_table(residency, size=7)
 
+    replace_paragraph(
+        doc,
+        "Table S2. Dominant computational and storage terms.",
+        "Table S2. Dominant computational and storage terms. Here, a is the requested number of PLS components and l is the randomized-SVD sketch width (requested rank plus oversampling). Exact constants depend on matrix shape, solver convergence, and backend."
+    )
     complexity = doc.tables[1]
     rows = [
         ["Path", "Dominant work", "Additional large storage", "Memory-saving mechanism"],
         ["Explicit PLS-SVD", "Form S = XᵀY: O(npq), then one truncated decomposition", "S: O(pq); latent factors O((p+q)a)", "One decomposition supplies every requested component prefix"],
         ["Implicit PLS-SVD", "For sketch width l, SΩ = Xᵀ(YΩ) and SᵀQ = Yᵀ(XQ)", "Sketches/factors O((p+q)l); no S", "Matrix-free products; label-aware class sums avoid dense indicator Y"],
         ["SIMPLS", "a sequential leading-direction solves plus score/loading products", "Explicit S: O(pq); bases O((p+q)a)", "Cached deflation products and incremental prediction path; rSVD reuse is explicitly approximate"],
-        ["OPLS", "Orthogonal-filter components plus SIMPLS predictive core", "Filter bases O(p·north) plus inner-model storage", "No dense deflated X copy; filter remains a separate stage"],
+        ["OPLS", "Explicit S = XᵀY and one-vector filter SVD, then SIMPLS predictive core", "Filter S: O(pq); bases O(p·north) plus inner-model storage", "No dense deflated X copy; the current orthogonal-filter stage remains explicit"],
         ["Nonlinear kernel PLS", "Kernel construction plus SIMPLS in sample space", "Centred Gram matrix O(n²)", "Blocked test prediction only; nonlinear kernel storage remains quadratic"],
         ["Compact prediction", "XtestR followed by latent response mapping", "Test-score block and latent factors, not all p×q coefficient prefixes", "Row-block streaming and low-rank latent mapping"],
     ]

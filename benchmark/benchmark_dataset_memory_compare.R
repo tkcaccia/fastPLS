@@ -132,6 +132,8 @@ if (!identical(mode, "run_one")) {
 task_rds <- arg_value(args, "task_rds", required = TRUE)
 row_out <- arg_value(args, "row_out", required = TRUE)
 pid_file <- arg_value(args, "pid_file", default = "")
+fit_ready_file <- arg_value(args, "fit_ready_file", default = "")
+sampler_ready_file <- arg_value(args, "sampler_ready_file", default = "")
 pred_out <- arg_value(args, "pred_out", default = "")
 variant_name <- arg_value(args, "variant_name", required = TRUE)
 lib_loc <- normalizePath(arg_value(args, "lib_loc", required = TRUE), winslash = "/", mustWork = TRUE)
@@ -161,6 +163,25 @@ row_template <- data.frame(
   replicate = as.integer(replicate_id),
   requested_ncomp = as.integer(requested_ncomp),
   effective_ncomp = NA_integer_,
+  opls_total_ncomp = if (identical(spec$method_family, "opls")) {
+    as.integer(requested_ncomp)
+  } else {
+    NA_integer_
+  },
+  opls_predictive_ncomp = if (identical(spec$method_family, "opls")) {
+    max(1L, as.integer(requested_ncomp) - min(1L, max(0L, as.integer(requested_ncomp) - 1L)))
+  } else {
+    NA_integer_
+  },
+  opls_north = if (identical(spec$method_family, "opls")) {
+    min(1L, max(0L, as.integer(requested_ncomp) - 1L))
+  } else {
+    NA_integer_
+  },
+  kernel_type = if (identical(spec$method_family, "kernelpls")) "linear" else NA_character_,
+  kernel_gamma = NA_real_,
+  kernel_degree = NA_integer_,
+  kernel_coef0 = NA_real_,
   n_train = as.integer(task$n_train),
   n_test = as.integer(task$n_test),
   p = as.integer(task$p),
@@ -188,9 +209,15 @@ row_template <- data.frame(
   prediction_file = if (nzchar(pred_out)) pred_out else NA_character_,
   peak_host_rss_mb = NA_real_,
   peak_gpu_mem_mb = NA_real_,
+  fit_window_peak_host_rss_mb = NA_real_,
+  incremental_host_rss_mb = NA_real_,
   rss_before_fit_mb = NA_real_,
   rss_after_fit_mb = NA_real_,
   rss_after_predict_mb = NA_real_,
+  gpu_before_fit_mb = NA_real_,
+  gpu_after_fit_mb = NA_real_,
+  gpu_after_predict_mb = NA_real_,
+  incremental_gpu_mem_mb = NA_real_,
   status = "error",
   msg = "",
   dataset_path = task$dataset_path,
@@ -328,9 +355,13 @@ result_row <- tryCatch({
   )
 
   if (identical(spec$backend, "pls_pkg")) {
+    invisible(gc())
     rss_before_fit <- current_process_rss_mb()
+    gpu_before_fit <- current_process_gpu_memory_mb()
+    signal_memory_sampler(fit_ready_file, sampler_ready_file)
     fit_obj <- fit_fun()
     rss_after_fit <- current_process_rss_mb()
+    gpu_after_fit <- current_process_gpu_memory_mb()
     fit_ms <- fit_obj$fit_ms
     pred_ms <- system.time({
       pred_obj <- pls_pkg_predict(
@@ -342,12 +373,17 @@ result_row <- tryCatch({
       )
     })[["elapsed"]] * 1000
     rss_after_predict <- current_process_rss_mb()
+    gpu_after_predict <- current_process_gpu_memory_mb()
   } else {
+    invisible(gc())
     rss_before_fit <- current_process_rss_mb()
+    gpu_before_fit <- current_process_gpu_memory_mb()
+    signal_memory_sampler(fit_ready_file, sampler_ready_file)
     fit_ms <- system.time({
       fit_obj <- fit_fun()
     })[["elapsed"]] * 1000
     rss_after_fit <- current_process_rss_mb()
+    gpu_after_fit <- current_process_gpu_memory_mb()
     pred_ms <- system.time({
       pred_obj <- predict(
         fit_obj, task$Xtest, Ytest = NULL, proj = FALSE,
@@ -355,6 +391,7 @@ result_row <- tryCatch({
       )
     })[["elapsed"]] * 1000
     rss_after_predict <- current_process_rss_mb()
+    gpu_after_predict <- current_process_gpu_memory_mb()
   }
 
   metric <- metric_from_pred(task$Ytest, pred_obj, y_train = task$Ytrain)
@@ -379,6 +416,25 @@ result_row <- tryCatch({
         replicate = as.integer(replicate_id),
         requested_ncomp = as.integer(requested_ncomp),
         effective_ncomp = as.integer(effective_cap),
+        opls_total_ncomp = if (identical(spec$method_family, "opls")) {
+          as.integer(opls_layout$total_ncomp)
+        } else {
+          NA_integer_
+        },
+        opls_predictive_ncomp = if (identical(spec$method_family, "opls")) {
+          as.integer(opls_layout$predictive_ncomp)
+        } else {
+          NA_integer_
+        },
+        opls_north = if (identical(spec$method_family, "opls")) {
+          as.integer(opls_layout$north)
+        } else {
+          NA_integer_
+        },
+        kernel_type = if (identical(spec$method_family, "kernelpls")) "linear" else NA_character_,
+        kernel_gamma = NA_real_,
+        kernel_degree = NA_integer_,
+        kernel_coef0 = NA_real_,
         classifier = spec$classifier,
         metric_name = metric$metric_name,
         metric_value = metric$metric_value,
@@ -393,24 +449,11 @@ result_row <- tryCatch({
   if (!identical(spec$backend, "pls_pkg")) {
     row_ok$executed_method <- executed
     if (!identical(executed, as.character(spec$method_family)[1L])) {
-      row_ok$method_family <- executed
-      row_ok$method_panel <- method_panel_label(executed)
-      row_ok$implementation_label <- sprintf(
-        "%s (executed %s; requested %s)",
-        spec$implementation_label,
-        executed,
-        spec$method_family
-      )
-      reason <- if (!is.null(internal$method_substitution_reason)) {
-        as.character(internal$method_substitution_reason)[1L]
-      } else {
-        ""
-      }
+      row_ok$status <- "error_estimator_mismatch"
       row_ok$msg <- sprintf(
-        "requested_method=%s; executed_method=%s%s",
+        "requested_method=%s; executed_method=%s; benchmark row rejected",
         spec$method_family,
-        executed,
-        if (nzchar(reason)) paste0("; reason=", reason) else ""
+        executed
       )
     }
     row_ok$execution_precision <- benchmark_execution_precision(fit_obj, task$precision %||% "float64")
@@ -424,6 +467,17 @@ result_row <- tryCatch({
     row_ok$classifier_numeric_path <- "float64"
   }
   row_ok$effective_ncomp <- as.integer(effective_cap)
+  if (identical(spec$method_family, "opls")) {
+    row_ok$opls_total_ncomp <- as.integer(opls_layout$total_ncomp)
+    row_ok$opls_predictive_ncomp <- as.integer(opls_layout$predictive_ncomp)
+    row_ok$opls_north <- as.integer(opls_layout$north)
+  }
+  if (identical(spec$method_family, "kernelpls")) {
+    row_ok$kernel_type <- "linear"
+    row_ok$kernel_gamma <- NA_real_
+    row_ok$kernel_degree <- NA_integer_
+    row_ok$kernel_coef0 <- NA_real_
+  }
   row_ok$fit_time_ms <- as.numeric(fit_ms)
   row_ok$predict_time_ms <- as.numeric(pred_ms)
   row_ok$total_time_ms <- as.numeric(fit_ms + pred_ms)
@@ -436,6 +490,9 @@ result_row <- tryCatch({
   row_ok$rss_before_fit_mb <- as.numeric(rss_before_fit)
   row_ok$rss_after_fit_mb <- as.numeric(rss_after_fit)
   row_ok$rss_after_predict_mb <- as.numeric(rss_after_predict)
+  row_ok$gpu_before_fit_mb <- as.numeric(gpu_before_fit)
+  row_ok$gpu_after_fit_mb <- as.numeric(gpu_after_fit)
+  row_ok$gpu_after_predict_mb <- as.numeric(gpu_after_predict)
     row_ok$status <- status
     row_ok
   }

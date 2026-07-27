@@ -31,7 +31,7 @@ while :; do
     export FASTPLS_PKG_COMPARE_RESULTS_DIR="${RESULTS_DIR}"
     export FASTPLS_PKG_COMPARE_DATASETS="${FASTPLS_PKG_COMPARE_DATASETS:-metref,ccle,cifar100,prism,gtex_v8,tcga_pan_cancer,singlecell,tcga_brca,tcga_hnsc_methylation,nmr,cbmc_citeseq}"
     export FASTPLS_PKG_COMPARE_REPS="${FASTPLS_PKG_COMPARE_REPS:-1}"
-    export FASTPLS_PKG_COMPARE_TIMEOUT_SEC="${FASTPLS_PKG_COMPARE_TIMEOUT_SEC:-1200}"
+    export FASTPLS_PKG_COMPARE_TIMEOUT_SEC="${FASTPLS_PKG_COMPARE_TIMEOUT_SEC:-10000}"
     bash "${REPO_ROOT}/scripts/remote_run_pls_package_comparison.sh" \
       >"${LOG_DIR}/pls_package_comparison.log" 2>&1
     status=$?

@@ -40,6 +40,8 @@ ncomp_grid <- list(
   cifar100 = c(2L, 5L, 10L, 20L, 50L, 100L, 200L),
   nmr = c(2L, 5L, 10L, 20L, 50L, 100L, 200L, 500L),
   singlecell = c(2L, 5L, 10L, 20L, 50L),
+  retina = c(2L, 5L, 10L, 20L, 50L),
+  tabula = c(2L, 5L, 10L, 20L, 50L),
   tcga_brca = c(2L, 5L, 10L, 20L, 50L),
   tcga_hnsc_methylation = c(2L, 5L, 10L, 20L, 50L),
   tcga_pan_cancer = c(2L, 5L, 10L, 20L, 50L, 100L),
@@ -50,7 +52,7 @@ ncomp_grid <- list(
 
 datasets <- split_csv(
   arg_value("datasets", Sys.getenv("FASTPLS_SINGLE_CV_DATASETS", "")),
-  paste(c("metref", "ccle", "prism", "singlecell", "tcga_hnsc_methylation"), collapse = ",")
+  paste(c("metref", "ccle", "prism", "retina", "tabula", "tcga_hnsc_methylation"), collapse = ",")
 )
 methods <- split_csv(
   arg_value("methods", Sys.getenv("FASTPLS_SINGLE_CV_METHODS", "")),
@@ -62,7 +64,7 @@ backends <- split_csv(
 )
 classifiers <- split_csv(
   arg_value("classifiers", Sys.getenv("FASTPLS_SINGLE_CV_CLASSIFIERS", "")),
-  "argmax,lda,cknn"
+  "argmax,lda"
 )
 cpu_svd_methods <- split_csv(
   arg_value("cpu-svd-methods", Sys.getenv("FASTPLS_SINGLE_CV_CPU_SVD_METHODS", "")),
@@ -117,6 +119,7 @@ run_one <- function(dataset, method, backend, svd_method, classifier) {
         svd.method = svd_method,
         classifier = classifier,
         selection_metric = selection_metric,
+        fit = FALSE,
         seed = 123
       ),
       error = function(e) e

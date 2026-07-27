@@ -37,16 +37,16 @@ lda_train_prefix_float32_cpp <- function(TtrainSEXP, y, n_classes, ncomp) {
     .Call(`_fastPLS_lda_train_prefix_float32_cpp`, TtrainSEXP, y, n_classes, ncomp)
 }
 
-lda_predict_float32_cpp <- function(TtestSEXP, lda) {
-    .Call(`_fastPLS_lda_predict_float32_cpp`, TtestSEXP, lda)
+lda_predict_float32_cpp <- function(TtestSEXP, lda, return_scores = TRUE) {
+    .Call(`_fastPLS_lda_predict_float32_cpp`, TtestSEXP, lda, return_scores)
 }
 
 lda_train_prefix_float32_cuda <- function(TtrainSEXP, y, n_classes, ncomp) {
     .Call(`_fastPLS_lda_train_prefix_float32_cuda`, TtrainSEXP, y, n_classes, ncomp)
 }
 
-lda_predict_float32_cuda <- function(TtestSEXP, lda) {
-    .Call(`_fastPLS_lda_predict_float32_cuda`, TtestSEXP, lda)
+lda_predict_float32_cuda <- function(TtestSEXP, lda, return_scores = TRUE) {
+    .Call(`_fastPLS_lda_predict_float32_cuda`, TtestSEXP, lda, return_scores)
 }
 
 cuda_float32_rsvd_sample_cpp <- function(ASEXP, l, power_iters, seed) {
@@ -71,6 +71,14 @@ fastsvd_float32_cpp <- function(ASEXP, k, backend, svd_method, rsvd_oversample, 
 
 pls_float32_cpu_cpp <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
     .Call(`_fastPLS_pls_float32_cpu_cpp`, XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed)
+}
+
+pls_float32_labels_cpp <- function(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
+    .Call(`_fastPLS_pls_float32_labels_cpp`, XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed)
+}
+
+float32_argmax_cpp <- function(scoresSEXP) {
+    .Call(`_fastPLS_float32_argmax_cpp`, scoresSEXP)
 }
 
 has_cuda <- function() {

@@ -62,7 +62,6 @@ short_fastpls <- function(method_id) {
   x <- gsub("_cuda_", " CUDA ", x, fixed = TRUE)
   x <- gsub("_irlba", " IRLBA", x, fixed = TRUE)
   x <- gsub("_rsvd", " rSVD", x, fixed = TRUE)
-  x <- gsub("_cknn$", " cKNN", x)
   x <- gsub("_lda$", " LDA", x)
   x <- gsub("_", " ", x, fixed = TRUE)
   paste("fastPLS", x)

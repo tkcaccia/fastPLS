@@ -141,14 +141,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // lda_predict_float32_cpp
-Rcpp::List lda_predict_float32_cpp(SEXP TtestSEXP, const Rcpp::List& lda);
-RcppExport SEXP _fastPLS_lda_predict_float32_cpp(SEXP TtestSEXPSEXP, SEXP ldaSEXP) {
+Rcpp::List lda_predict_float32_cpp(SEXP TtestSEXP, const Rcpp::List& lda, bool return_scores);
+RcppExport SEXP _fastPLS_lda_predict_float32_cpp(SEXP TtestSEXPSEXP, SEXP ldaSEXP, SEXP return_scoresSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type TtestSEXP(TtestSEXPSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cpp(TtestSEXP, lda));
+    Rcpp::traits::input_parameter< bool >::type return_scores(return_scoresSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cpp(TtestSEXP, lda, return_scores));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -167,14 +168,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // lda_predict_float32_cuda
-Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda);
-RcppExport SEXP _fastPLS_lda_predict_float32_cuda(SEXP TtestSEXPSEXP, SEXP ldaSEXP) {
+Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda, bool return_scores);
+RcppExport SEXP _fastPLS_lda_predict_float32_cuda(SEXP TtestSEXPSEXP, SEXP ldaSEXP, SEXP return_scoresSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type TtestSEXP(TtestSEXPSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cuda(TtestSEXP, lda));
+    Rcpp::traits::input_parameter< bool >::type return_scores(return_scoresSEXP);
+    rcpp_result_gen = Rcpp::wrap(lda_predict_float32_cuda(TtestSEXP, lda, return_scores));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -270,6 +272,39 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     rcpp_result_gen = Rcpp::wrap(pls_float32_cpu_cpp(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_float32_labels_cpp
+Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& labels, int n_classes, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
+RcppExport SEXP _fastPLS_pls_float32_labels_cpp(SEXP XtrainSEXPSEXP, SEXP labelsSEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_float32_labels_cpp(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// float32_argmax_cpp
+Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP);
+RcppExport SEXP _fastPLS_float32_argmax_cpp(SEXP scoresSEXPSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type scoresSEXP(scoresSEXPSEXP);
+    rcpp_result_gen = Rcpp::wrap(float32_argmax_cpp(scoresSEXP));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1053,15 +1088,17 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_opls_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_cpp, 9},
     {"_fastPLS_opls_apply_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp, 6},
     {"_fastPLS_lda_train_prefix_float32_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cpp, 4},
-    {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 2},
+    {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 3},
     {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
-    {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 2},
+    {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 3},
     {"_fastPLS_cuda_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_cuda_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
     {"_fastPLS_metal_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_metal_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_metal_float32_irlba_cpp", (DL_FUNC) &_fastPLS_metal_float32_irlba_cpp, 4},
     {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
     {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
+    {"_fastPLS_pls_float32_labels_cpp", (DL_FUNC) &_fastPLS_pls_float32_labels_cpp, 12},
+    {"_fastPLS_float32_argmax_cpp", (DL_FUNC) &_fastPLS_float32_argmax_cpp, 1},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},

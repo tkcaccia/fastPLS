@@ -67,9 +67,10 @@ declare -A NCOMP_GRIDS=(
   [prism]="2,5,10,20,50,100"
   [nmr]="2,5,10,20,50,100"
 )
+KERNEL_DATASETS="${FASTPLS_KERNEL_DATASETS:-metref ccle prism nmr}"
 
 log_msg "Starting supplementary kernel tuning"
-for dataset in metref ccle prism nmr; do
+for dataset in ${KERNEL_DATASETS}; do
   task_rds="${TASK_DIR}/${dataset}_task.rds"
   if [ ! -f "${task_rds}" ]; then
     log_msg "SKIP dataset=${dataset}: task file missing (${task_rds})"
@@ -92,7 +93,7 @@ done
 
 cuda_available="$(Rscript -e 'suppressPackageStartupMessages(library(fastPLS)); cat(isTRUE(has_cuda()))' 2>/dev/null || printf 'FALSE')"
 
-for dataset in metref ccle prism nmr; do
+for dataset in ${KERNEL_DATASETS}; do
   task_rds="${TASK_DIR}/${dataset}_task.rds"
   selected_csv="${TUNING_DIR}/${dataset}_kernel_selected.csv"
   if [ ! -s "${selected_csv}" ]; then

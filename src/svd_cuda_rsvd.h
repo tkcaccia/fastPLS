@@ -144,7 +144,8 @@ std::vector<LDAFloatGPUModel> cuda_lda_train_prefix_float(
 LDAFloatPrediction cuda_lda_predict_float(
   const arma::fmat& Ttest,
   const arma::fmat& linear,
-  const arma::frowvec& constants
+  const arma::frowvec& constants,
+  bool return_scores = true
 );
 bool cuda_lda_native_available();
 bool cuda_runtime_available();

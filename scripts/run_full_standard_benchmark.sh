@@ -8,6 +8,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${FASTPLS_FULL_STANDARD_RUN_ROOT:-${REPO_ROOT}/benchmark_results_full_standard_${STAMP}}"
 BENCH_PRECISION="${FASTPLS_BENCH_PRECISION:-float32}"
+SOURCE_COMMIT="${FASTPLS_SOURCE_COMMIT:-$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unavailable)}"
 
 mkdir -p "${RUN_ROOT}/logs"
 
@@ -59,7 +60,7 @@ export FASTPLS_SYNTH_VAR_FAMILIES="${FASTPLS_SYNTH_VAR_FAMILIES:-reg_n,reg_p,reg
 
 {
   echo "timestamp=${STAMP}"
-  echo "git_commit=$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unavailable)"
+  echo "source_commit=${SOURCE_COMMIT}"
   echo "precision=${BENCH_PRECISION}"
   echo "datasets=${FASTPLS_DATASETS}"
   echo "real_reps=${FASTPLS_COMPARE_REPS}"

@@ -1,6 +1,8 @@
 ---
 title: "fastPLS Public API and Implementation"
 output: BiocStyle::html_document
+header-includes:
+  - \usepackage{array}
 vignette: >
   %\VignetteIndexEntry{fastPLS Public API and Implementation}
   %\VignetteEngine{knitr::rmarkdown}
@@ -22,7 +24,7 @@ selected through the user-facing functions below.
 | `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
 | `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
 | `plot()` | Plot PLS or PCA score maps, with optional confidence or Hotelling T2 ellipses. |
-| `plot.permutation()` | Plot R2/Q2 permutation-test diagnostics from `pls(..., perm.test = TRUE)`. |
+| `plot.permutation()` | Plot R2/Q2 diagnostics from a PLS permutation test. |
 | `pls.single.cv()` | Run grouped cross-validation and choose the best component count. |
 | `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
 | `evaluate()` | Compute classification and regression performance metrics from predictions. |
@@ -37,13 +39,13 @@ A practical starting point is:
 
 | Goal | Suggested call |
 |---|---|
-| General regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Fast exploratory regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Confirmatory or exactly reproducible CPU analysis | `svd.method = "irlba"` |
 | Direct cross-covariance PLS-SVD | `method = "plssvd"` |
 | Remove response-unrelated structured variation | `method = "opls"` |
 | Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
 | Classification: argmax PLS-DA decoding | `classifier = "argmax"` |
 | Classification: latent-space discriminant analysis | `classifier = "lda"` |
-| Classification: candidate-neighbour classification | `classifier = "cknn"` |
 | Small or moderate data | `backend = "cpu"` |
 | Large dense matrices or many classes/responses | `backend = "cuda"` when available |
 | Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
@@ -73,6 +75,27 @@ be supplied through `...` in `pls()` or directly in `fastsvd()`. The IRLBA
 backend is also used in a matrix-free form for selected `xprod` paths, where
 the algorithm receives functions that compute products with the cross-product
 operator rather than a precomputed dense matrix.
+
+The two solvers have different numerical roles. IRLBA is deterministic for
+fixed data and numerical controls and should be preferred for confirmatory
+analysis, coefficient or latent-subspace interpretation, ill-conditioned or
+rank-deficient matrices, slowly decaying singular spectra, and any analysis in
+which different rSVD seeds give materially different predictions. rSVD is an
+approximation intended primarily for speed and accelerator execution. A
+completed randomized fit is not automatically a reliable approximation.
+`pls()` therefore returns `diagnostics`, which checks finiteness and whether all
+requested latent components were obtained. These inexpensive structural checks
+cannot prove agreement with a deterministic fit. For important analyses, repeat
+the rSVD fit with at least three seeds and compare predictions and the selected
+metric, or confirm the final model with CPU IRLBA.
+
+The package validation classifies an rSVD result as unreliable if any of the
+following occurs relative to the deterministic reference: relative prediction
+error above 0.05, prediction correlation below 0.99, a score, projection, or
+loading subspace angle above 10 degrees, classification-label agreement below
+0.99, or an absolute predictive-metric difference above 0.01. Increasing
+`power` or `oversample` can improve a borderline rSVD approximation, but IRLBA
+is the recommended fallback when any criterion remains unsatisfied.
 
 For large predictor-response cross-products, `fastPLS` can avoid forming
 `S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD
@@ -125,16 +148,11 @@ SIMPLS, OPLS, and kernel PLS while sharing the accelerated low-rank machinery.
 
 ### Classifiers
 
-Classification is handled as PLS-DA followed by one of three decoding heads.
+Classification is handled as PLS-DA followed by one of two decoding heads.
 `classifier = "argmax"` uses the largest predicted dummy-response score and is
 the standard PLS-DA decoding rule. `classifier = "lda"` fits a regularized
 linear discriminant analysis model in the PLS score space following Fisher's
-discriminant principle (Fisher, 1936). `classifier = "cknn"` optionally reranks
-centroid-selected candidate classes by nearest-neighbour evidence in the
-supervised latent space, following the nearest-neighbour principle of Cover and
-Hart (1967). cKNN is included as a proof of concept for sample-rich PLS score
-spaces; it is not the default PLS-DA decoder and should be compared with argmax
-or LDA on the data being analysed.
+discriminant principle (Fisher, 1936).
 
 ### Backends
 
@@ -146,7 +164,7 @@ datasets, low-dimensional problems, and machines without GPU support.
 `backend = "cuda"` uses CUDA-native routines when the package is compiled with
 CUDA and a compatible NVIDIA runtime is available. CUDA paths perform the main
 PLSSVD and SIMPLS randomized-SVD matrix products, selected `xprod` products,
-low-rank prediction, LDA scoring, and candidate-kNN scoring on the GPU. CUDA is
+low-rank prediction and LDA scoring on the GPU. CUDA is
 most useful for large dense matrices, high component counts, many classes, or
 many response variables, where GPU matrix multiplication offsets transfer and
 kernel-launch overhead.
@@ -165,7 +183,7 @@ most robust fallback for small examples.
 For classification, responses are supplied as factors. `fastPLS` handles the
 PLS-DA response encoding internally and returns predicted class labels.
 The `classifier` argument is used only for this type of task and selects the
-classification head: `argmax`, `lda`, or `cknn`. These options are not
+classification head: `argmax` or `lda`. These options are not
 regression models and are not used for numeric responses. The examples in this
 section use the `iris` data for compact classification examples and the bundled
 `colon` and `breast` omics datasets for score plots.
@@ -288,8 +306,8 @@ evaluate(
 
 ### Classification Heads
 
-The same `pls()` interface exposes three classification-specific heads for
-factor responses: argmax PLS-DA, latent-space LDA, and candidate-kNN. They are
+The same `pls()` interface exposes two classification-specific heads for
+factor responses: argmax PLS-DA and latent-space LDA. They are
 decoders applied after the PLS model has produced class-response scores or
 latent scores. For regression, leave `classifier` at its default; numeric
 responses are predicted directly as continuous values.
@@ -345,40 +363,6 @@ fit_cls_lda_cpu <- pls(
 )
 
 head(fit_cls_lda_cpu$Ypred)
-```
-
-The candidate-kNN head is selected with `classifier = "cknn"`. It is intended
-as an optional case study for sample-rich multiclass data. Local-neighbour
-evidence can be unstable when few training samples are available per class, so
-its performance should be validated against argmax and LDA rather than assumed
-to improve every dataset. The same syntax works on smaller examples:
-The main tuning parameters control how strongly the local neighbourhood can
-modify the global PLS class ranking. `k` is the number of same-class neighbours
-used for each candidate class. `tau` is a positive temperature: small values make
-the local score behave almost like the single best neighbour, whereas larger
-values smooth the evidence over the top neighbours. `alpha` weights the
-centroid/prototype score that is added to the local kNN score. Larger `alpha`
-keeps predictions closer to the global class-centroid ranking; smaller `alpha`
-lets local neighbours dominate the reranking. `top_m` controls how many
-centroid-ranked classes are passed to this reranker.
-
-```{r chunk-011}
-fit_cls_cknn <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  classifier = "cknn",
-  k = 5,
-  top_m = 3,
-  seed = 100
-)
-
-evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls_cknn$Ypred[["ncomp=2"]]
-)$confusion
 ```
 
 ### Kernel PLS For Classification
@@ -487,8 +471,8 @@ par(old_par)
 
 For regression, responses are supplied as numeric vectors or matrices. The
 examples in this section use `mtcars` to demonstrate univariate regression and
-OPLS. Regression does not use `classifier = "argmax"`, `classifier = "lda"`, or
-`classifier = "cknn"`: those are classification heads for factor responses.
+OPLS. Regression does not use `classifier = "argmax"` or `classifier = "lda"`:
+those are classification heads for factor responses.
 For numeric responses, `pls()` returns continuous predictions and regression
 metrics such as `R2Y`, `Q2Y`, and `RMSD`.
 
@@ -527,19 +511,26 @@ fit_reg$Q2Y
 ### Float32 Input
 
 `pls()` also accepts predictor and response matrices from the `float` package.
-When a `float::float32` object is supplied, the float32 route keeps centering,
-scaling, cross-products, low-rank SVD steps, latent scores, and predictions in
-32-bit arithmetic. This applies to PLSSVD, SIMPLS, OPLS, and kernel-PLS. OPLS
-stores and reapplies its orthogonal filter in float32. Kernel-PLS constructs and
-centers nonlinear kernel matrices in float32, while its linear kernel uses the
-direct SIMPLS path to avoid an unnecessary Gram matrix. CPU and Metal support
-`svd.method = "rsvd"` or `svd.method = "irlba"`, while CUDA supports float32
-randomized SVD. For classification, float32 models support
-`classifier = "argmax"`, `classifier = "lda"`, and `classifier = "cknn"`.
-Unsupported combinations stop with an error rather than silently converting
-the data to double. Nonlinear kernel-PLS still stores an (n \times n) training
-kernel, so float32 reduces its storage but does not remove its quadratic memory
-scaling.
+Supplying a `float::float32` object requests single-precision execution; it
+does not imply that every model/backend combination is equally validated or
+fully device-resident. Compiled CPU and CUDA rSVD PLS-SVD have the broadest
+current validation. Other routes are explicitly classified as experimental or
+hybrid. Accelerator OPLS retains host orchestration, nonlinear kernel-PLS
+materializes and centers an \(n \times n\) Gram matrix, and Metal LDA uses the
+compiled CPU float32 discriminant solver after Metal score projection. Metal
+routes and float32 IRLBA have more limited validation than CPU/CUDA rSVD.
+
+Float64 remains the numerical reference. Float32 approximately halves raw
+matrix storage, but paired tests show that runtime, incremental host RSS, and
+device memory may increase or decrease depending on the route. The package
+therefore warns once for experimental, hybrid, or measured risk regimes. This
+includes precision-sensitive SIMPLS and linear kernel-PLS classification,
+nonlinear kernels, Metal execution, float32 IRLBA, and multivariate regression
+with at least 10,000 response columns and 50 components. In that last regime,
+PLS-SVD completed with similar error but poor time/memory behavior, whereas
+SIMPLS-derived routes failed the numerical/performance validation. Unsupported
+combinations stop before allocation and are never silently promoted to
+float64.
 
 On Windows, the standard R toolchain does not expose the single-precision
 BLAS/LAPACK symbols needed by the compiled float32 kernels. For this platform,
@@ -662,13 +653,6 @@ should be selected from a grid. Use `pls.double.cv()` for nested validation,
 where an inner CV chooses the number of components and an outer CV estimates
 predictive performance. Both helpers support regression and classification and
 dispatch to the same compiled CPU/CUDA core when available.
-
-The cKNN memory strategy can also be used during cross-validation. For example,
-`pls.single.cv(..., classifier = "cknn", cknn_memory = "blocked")` evaluates
-the same candidate-kNN classifier while reducing fold-level prediction memory.
-For very large scalar-component cKNN validations, `cknn_memory = "streaming"`
-can further reduce peak RAM by constructing the training score cache in blocks
-inside each fold.
 
 ### Ordinary k-fold CV
 
@@ -1229,9 +1213,10 @@ the optimized PLS core to the filtered matrix. The number of orthogonal
 components is controlled by `north`. The filtering step estimates orthogonal
 scores and loadings, subtracts the corresponding variation from `X`, and stores
 the orthogonal filter so the same transformation is applied at prediction time.
-With float32 input, preprocessing, response cross-products, orthogonal scores,
-loadings, deflation, and prediction filtering remain in float32 for CPU, CUDA,
-and Metal execution.
+With float32 input, stored OPLS matrices use single precision, but accelerator
+routes remain hybrid because orthogonal-filter orchestration and reduced
+operations include host stages. These routes warn rather than presenting
+themselves as fully device-resident.
 Users select OPLS with `method = "opls"`; the lower-level implementation details
 are handled internally.
 
@@ -1242,10 +1227,10 @@ are handled internally.
 inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
 For nonlinear kernels, the training kernel matrix is centered and the PLS model
 is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
-kernel materialization and uses the ordinary linear PLS path. Float32 input
-keeps kernel products, distances, centering statistics, the centered kernel,
-and subsequent PLS calculations in float32. The CUDA and Metal paths execute
-the dominant kernel matrix multiplication on the selected device.
+kernel materialization and uses the ordinary linear PLS path. Float32 nonlinear
+kernel routes remain experimental on CPU and hybrid on CUDA or Metal because
+the explicit Gram matrix and host orchestration remain; they warn before
+fitting and do not constitute a general low-memory route.
 
 ### Classification heads
 
@@ -1275,39 +1260,6 @@ factorization, coefficients, and prediction buffers in float32 on the native
 CPU and CUDA paths. CUDA reuses a persistent device workspace across component
 prefixes and predictions; Metal score projection is followed by the native
 float32 CPU LDA solve.
-
-The cKNN head, `classifier = "cknn"`, is the short public name for the
-candidate-kNN classifier used in large multiclass PLS-DA.
-It first scores classes by centroids in supervised PLS score space, keeps the
-top `top_m` candidate classes, and then reranks only those candidates by
-same-class nearest neighbours in the PLS score space, using the nearest-neighbour
-classification principle of Cover and Hart (1967) after a supervised PLS
-compression step. For each candidate class, the neighbour similarities are
-combined with a temperature-smoothed top-`k` score. The `tau` parameter controls
-this smoothing: lower values emphasize the strongest neighbour, while higher
-values make the local evidence closer to an average of the top neighbours. The
-final candidate score is the smoothed local kNN evidence plus `alpha` times the
-centroid score, so `alpha` controls the balance between local correction and the
-global PLS class-centroid ranking. The `top_m` parameter is internal to the cKNN
-decision rule: it controls how many centroid-ranked classes are passed to the
-kNN reranker. This is different from the prediction argument `top`, which only
-controls how many ranked output labels are returned to the user. The default
-tuning parameters are
-`k = 10`, `tau = 0.2`, `alpha = 0.75`, and
-`top_m = 20`. `predict()` can also return ranked predictions by using
-`top` or `top5 = TRUE`.
-
-For large multiclass data, cKNN can be memory-intensive because it uses PLS
-scores for both training and test samples. The `cknn_memory` argument controls
-how these score matrices are materialized. `cknn_memory = "standard"` uses the
-historical one-pass path. `cknn_memory = "blocked"` keeps the same classifier
-but predicts test samples in blocks, avoiding a full test-score matrix in
-memory. `cknn_memory = "streaming"` additionally builds the training
-candidate-score cache in row blocks for scalar `ncomp`, which is useful for
-ImageNet-scale feature matrices. The default, `cknn_memory = "auto"`, selects a
-memory-aware strategy from the size of the latent-score cache. These modes do
-not change the cKNN scoring rule; they only change when intermediate matrices
-are created.
 
 
 ## Method References

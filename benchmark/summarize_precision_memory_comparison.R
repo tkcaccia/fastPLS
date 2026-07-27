@@ -16,10 +16,11 @@ read_results <- function(path, precision) {
   x
 }
 
-raw <- rbind(
+raw_all <- rbind(
   read_results(float32_file, "float32"),
   read_results(float64_file, "float64")
 )
+raw <- raw_all
 raw <- raw[raw$status %in% c("ok", "capped") &
              raw$classifier %in% c("argmax", "lda") &
              raw$backend != "pls_pkg" &
@@ -78,16 +79,62 @@ group_fields <- intersect(
   ),
   names(raw)
 )
+
+# Keep failed, skipped, and timed-out runs visible beside the successful-run
+# summaries. This prevents a median from concealing an incomplete comparison.
+status_raw <- raw_all[
+    raw_all$classifier %in% c("argmax", "lda") &
+    raw_all$backend != "pls_pkg" &
+    (is.na(raw_all$execution_precision) |
+       !nzchar(raw_all$execution_precision) |
+       raw_all$execution_precision == raw_all$comparison_precision),
+  , drop = FALSE
+]
+status_group_fields <- intersect(group_fields, names(status_raw))
+status_keys <- interaction(status_raw[status_group_fields], drop = TRUE, lex.order = TRUE)
+status_groups <- split(seq_len(nrow(status_raw)), status_keys)
+status_summary <- do.call(rbind, lapply(status_groups, function(idx) {
+  row <- status_raw[idx[[1L]], status_group_fields, drop = FALSE]
+  status <- tolower(status_raw$status[idx])
+  row$n_attempted <- length(idx)
+  row$n_successful <- sum(status %in% c("ok", "capped"))
+  row$n_timeout <- sum(grepl("timeout", status, fixed = TRUE))
+  row$n_error <- sum(status %in% c("error", "killed", "oom"))
+  row$n_skipped <- sum(grepl("skip", status, fixed = TRUE))
+  row
+}))
+rownames(status_summary) <- NULL
+write.csv(
+  status_summary,
+  file.path(out_dir, "precision_memory_status_counts.csv"),
+  row.names = FALSE,
+  na = ""
+)
+
 median_na <- function(x) if (all(is.na(x))) NA_real_ else median(x, na.rm = TRUE)
+iqr_na <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) < 2L) NA_real_ else IQR(x)
+}
 keys <- interaction(raw[group_fields], drop = TRUE, lex.order = TRUE)
 groups <- split(seq_len(nrow(raw)), keys)
 summary <- do.call(rbind, lapply(groups, function(idx) {
   row <- raw[idx[[1L]], group_fields, drop = FALSE]
-  for (field in numeric_fields) row[[field]] <- median_na(raw[[field]][idx])
+  for (field in numeric_fields) {
+    row[[field]] <- median_na(raw[[field]][idx])
+    row[[paste0(field, "_iqr")]] <- iqr_na(raw[[field]][idx])
+  }
   row$n_replicates <- length(idx)
   row
 }))
 rownames(summary) <- NULL
+summary <- merge(
+  summary,
+  status_summary,
+  by = status_group_fields,
+  all.x = TRUE,
+  sort = FALSE
+)
 write.csv(summary, file.path(out_dir, "precision_memory_summary_long.csv"), row.names = FALSE, na = "")
 
 identity_fields <- setdiff(
@@ -145,7 +192,16 @@ publication_fields <- intersect(
     "gpu_mem_reduction_pct", "total_time_ms_float32", "total_time_ms_float64",
     "float32_speedup", "metric_value_float32", "metric_value_float64",
     "prediction_metric_delta_float32_minus_float64", "top5_accuracy_float32",
-    "top5_accuracy_float64", "top5_delta_float32_minus_float64"
+    "top5_accuracy_float64", "top5_delta_float32_minus_float64",
+    "n_attempted_float32", "n_attempted_float64",
+    "n_successful_float32", "n_successful_float64",
+    "n_timeout_float32", "n_timeout_float64",
+    "n_error_float32", "n_error_float64",
+    "n_skipped_float32", "n_skipped_float64",
+    "total_time_ms_iqr_float32", "total_time_ms_iqr_float64",
+    "metric_value_iqr_float32", "metric_value_iqr_float64",
+    "peak_host_rss_mb_iqr_float32", "peak_host_rss_mb_iqr_float64",
+    "peak_gpu_mem_mb_iqr_float32", "peak_gpu_mem_mb_iqr_float64"
   ),
   names(paired)
 )

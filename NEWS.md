@@ -1,5 +1,10 @@
 # fastPLS 0.99.6
 
+* Float32 capability reporting now distinguishes validated, experimental,
+  hybrid, unavailable, and measured failed routes. The public `pls()` interface
+  emits route-specific warnings or errors before allocation, and benchmark
+  summaries separate input storage, baseline and incremental host RSS, sampled
+  GPU use, runtime, and predictive differences from float64.
 * Added public PLS, PCA, SVD, prediction, evaluation and cross-validation
   interfaces for CPU, optional CUDA and optional Apple Metal backends.
 * Added optional classification heads for PLS-DA, including argmax, latent-space
@@ -11,3 +16,6 @@
   recurrence. LDA reuses these scores instead of centering, scaling and
   projecting the full training matrix a second time, reducing peak memory and
   runtime without changing predictions.
+* Float32 fitting now reports shape-based warnings for precision-sensitive
+  classification, extreme multivariate responses, and nonlinear kernel routes.
+  Float64 remains the numerical reference.

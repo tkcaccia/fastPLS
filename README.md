@@ -49,35 +49,13 @@ fallback. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
-For PLS-DA latent-score prediction, `classifier = "cknn"` uses cKNN, the short
-public name for the optional PLS-score candidate-kNN classifier.
-The model first ranks classes by centroids in the supervised PLS score space and
-then reranks every sample by same-class kNN among the top candidate classes. The
-defaults are `k = 10`, `tau = 0.2`, and `alpha = 0.75`; `top_m` controls the
-number of candidate classes. cKNN is a proof-of-concept downstream classifier
-for sample-rich PLS score spaces, not the default PLS-DA decoder; compare it
-with argmax or LDA for the dataset being analysed. `predict()` also supports `top` and
-`top5 = TRUE` to return ranked class labels and scores for ImageNet-style top-5
-evaluation.
-
 For large classification problems, such as ImageNet-scale DINOv2 feature
 matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
 label-aware PLSSVD route when the dense one-hot response would exceed the memory
 threshold. This route streams class-wise cross-products from the label vector,
 never materializes the dense `n x classes` response matrix, stores only compact
-low-rank prediction factors, and can train the candidate-kNN classifier from
-compact latent scores.
-The default threshold is controlled by `FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`
-and the candidate-kNN cache is stored in compact latent-score form.
-
-For the ImageNet/DINOv2 experiments, the latent-score candidate-kNN case study
-uses PLS scores to build CUDA prototype scores and reranks each sample by CUDA
-candidate kNN within the PLS score space. The obsolete gated/calibrated
-class-bias variants have been removed; tune only `k`, `tau`, `alpha`, and
-`top_m`. The generic `pls()` API exposes the same decision rule through
-`classifier = "cknn"` and chooses the backend-specific route. CPU uses compiled
-C++, CUDA accelerates supported scoring operations, and Metal projects scores
-on Metal before CPU neighbour scoring.
+low-rank prediction factors. The default threshold is controlled by
+`FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`.
 
 ## Backends
 
@@ -86,6 +64,18 @@ CPU backends:
 - `irlba`: bundled internal IRLBA wrapper.
 - `rsvd`: randomized SVD with Gaussian sketching and optional power
   iterations.
+
+`rsvd` is a stochastic approximation, not a deterministic replacement for
+IRLBA. Every `pls()` fit reports `diagnostics`; the status
+`basic_checks_passed_approximation_not_audited` confirms only finite factors
+and the requested effective rank. For confirmatory coefficient or subspace
+interpretation, ill-conditioned or rank-deficient problems, slowly decaying
+singular spectra, or unstable predictions across random seeds, use
+`svd.method = "irlba"` on the CPU. The validation suite classifies an rSVD fit
+as unreliable relative to a deterministic reference if prediction relative
+error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
+angle exceeds 10 degrees, classification-label agreement is below 0.99, or
+the predictive metric differs by more than 0.01.
 Very small SVD inputs automatically fall back to a full dense decomposition
 inside the compiled backends when the truncated route is not meaningful, but
 `exact` is no longer exposed as a user-selectable PLS benchmark option.

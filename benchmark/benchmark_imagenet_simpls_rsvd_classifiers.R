@@ -161,7 +161,16 @@ tryCatch({
 
   internal <- attr(model, "fastPLS_internal", exact = TRUE)
   row$executed_method <- as.character(internal$pls_method %||% "simpls")[[1L]]
-  row$method_note <- as.character(internal$method_substitution_reason %||% "")[[1L]]
+  if (!identical(row$executed_method, "simpls")) {
+    stop(
+      sprintf(
+        "Estimator mismatch: requested simpls but executed %s",
+        row$executed_method
+      ),
+      call. = FALSE
+    )
+  }
+  row$method_note <- ""
   row$effective_ncomp <- max(as.integer(model$ncomp %||% ncomp))
   if (identical(classifier, "argmax")) {
     row$classifier_backend <- paste0("float32_", backend, "_argmax")

@@ -51,26 +51,6 @@
   list(ncomp = ncomp, max_rank = max_plssvd_rank, capped = isTRUE(over))
 }
 
-.record_pls_method_substitution <- function(model, requested, executed, reason,
-                                            warn = TRUE) {
-  requested <- as.character(requested)[1L]
-  executed <- as.character(executed)[1L]
-  reason <- as.character(reason)[1L]
-  if (isTRUE(warn)) {
-    warning(
-      sprintf(
-        "method='%s' requested, but method='%s' was executed: %s",
-        requested, executed, reason
-      ),
-      call. = FALSE
-    )
-  }
-  model$requested_pls_method <- requested
-  model$pls_method <- executed
-  model$method_substitution_reason <- reason
-  model
-}
-
 .restore_env_scalar <- function(name, value) {
   stopifnot(length(name) == 1L, nzchar(name))
   if (length(value) != 1L || is.na(value)) {
@@ -98,6 +78,7 @@
   FASTPLS_FAST_INC_ITERS = "2",
   FASTPLS_FAST_DEFLCACHE = "1",
   FASTPLS_FAST_OPTIMIZED = "1",
+  FASTPLS_INCREMENTAL_COEFFICIENTS = "1",
   FASTPLS_FAST_RSVD_TOP1 = "0",
   FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE = "10",
   FASTPLS_FAST_RSVD_TOP1_POWER = "1",
@@ -153,6 +134,7 @@
   FASTPLS_FAST_INC_ITERS = "simpls",
   FASTPLS_FAST_DEFLCACHE = "simpls",
   FASTPLS_FAST_OPTIMIZED = "simpls",
+  FASTPLS_INCREMENTAL_COEFFICIENTS = "simpls",
   FASTPLS_FAST_RSVD_TOP1 = "simpls",
   FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE = "simpls",
   FASTPLS_FAST_RSVD_TOP1_POWER = "simpls",
@@ -255,6 +237,9 @@
 
 .with_fastpls_fast_options <- function(expr,
                                        return_ttrain = FALSE) {
+  if (identical(Sys.getenv("FASTPLS_ABLATION_MODE", "0"), "1")) {
+    return(force(expr))
+  }
   .with_backend_env(expr, c(
     FASTPLS_FAST_CENTER_T = "0",
     FASTPLS_FAST_REORTH_V = "0",
@@ -477,11 +462,10 @@
   model
 }
 
-.classifier_public_choices <- c("argmax", "lda", "cknn")
+.classifier_public_choices <- c("argmax", "lda")
 .classifier_internal_choices <- c(
   "argmax",
-  "lda_cpp", "lda_cuda", "lda_metal",
-  "candidate_knn_cpp", "candidate_knn_cuda", "candidate_knn_metal"
+  "lda_cpp", "lda_cuda", "lda_metal"
 )
 
 .normalize_classifier_public <- function(classifier) {
@@ -489,9 +473,6 @@
     classifier <- classifier[1L]
   }
   classifier <- as.character(classifier)
-  if (identical(classifier, "candidate_knn")) {
-    classifier <- "cknn"
-  }
   match.arg(classifier, .classifier_public_choices)
 }
 
@@ -500,15 +481,11 @@
     classifier <- classifier[1L]
   }
   classifier <- as.character(classifier)
-  if (identical(classifier, "candidate_knn")) {
-    classifier <- "cknn"
-  }
   if (classifier %in% .classifier_public_choices) {
     classifier <- switch(
       classifier,
       argmax = "argmax",
-      lda = "lda_cpp",
-      cknn = "candidate_knn_cpp"
+      lda = "lda_cpp"
     )
   }
   match.arg(classifier, .classifier_internal_choices)
@@ -527,13 +504,7 @@
   switch(
     classifier,
     argmax = "argmax",
-    lda = switch(backend, cpu = "lda_cpp", cuda = "lda_cuda", metal = "lda_metal"),
-    cknn = switch(
-      backend,
-      cpu = "candidate_knn_cpp",
-      cuda = "candidate_knn_cuda",
-      metal = "candidate_knn_metal"
-    )
+    lda = switch(backend, cpu = "lda_cpp", cuda = "lda_cuda", metal = "lda_metal")
   )
 }
 
@@ -547,37 +518,6 @@
 
 .class_bias_backend <- function(classifier) {
   "cpp"
-}
-
-.is_candidate_knn_classifier <- function(classifier) {
-  !is.null(classifier) &&
-    classifier %in% c("candidate_knn_cpp", "candidate_knn_cuda", "candidate_knn_metal")
-}
-
-.candidate_knn_backend <- function(classifier) {
-  if (identical(classifier, "candidate_knn_cuda")) {
-    "cuda"
-  } else if (identical(classifier, "candidate_knn_metal")) {
-    "metal"
-  } else {
-    "cpp"
-  }
-}
-
-.normalize_cknn_memory <- function(cknn_memory = c("auto", "standard", "blocked", "streaming")) {
-  cknn_memory <- as.character(cknn_memory)
-  if (!length(cknn_memory) || is.na(cknn_memory[[1L]])) {
-    cknn_memory <- "auto"
-  }
-  match.arg(cknn_memory[[1L]], c("auto", "standard", "blocked", "streaming"))
-}
-
-.cknn_prediction_block_size <- function() {
-  as.integer(getOption("fastPLS.cknn_block_size", 2000L))[[1L]]
-}
-
-.cknn_train_block_size <- function() {
-  as.integer(getOption("fastPLS.cknn_train_block_size", 10000L))[[1L]]
 }
 
 .resolve_top_k <- function(top = 1L, top5 = FALSE) {
@@ -718,11 +658,27 @@
   value
 }
 
-.should_use_label_aware_plssvd <- function(n, q) {
+.dense_indicator_exceeds_cuda_guard <- function(n, q) {
   dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
   threshold <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", "512"))[1L])
   if (!is.finite(threshold) || threshold < 0) threshold <- 512
   isTRUE(dense_y_mb >= threshold)
+}
+
+.stop_unsafe_cuda_simpls_response <- function(n, q) {
+  dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
+  stop(
+    sprintf(
+      paste(
+        "CUDA SIMPLS would require an approximately %.1f MB dense indicator",
+        "response. fastPLS does not replace a requested SIMPLS estimator with",
+        "PLS-SVD. Request method = 'plssvd' explicitly or use a smaller",
+        "response representation."
+      ),
+      dense_y_mb
+    ),
+    call. = FALSE
+  )
 }
 
 .rowsum_compact_codes <- function(x, codes, n_groups) {
@@ -916,435 +872,6 @@
   )
   class(model) <- "fastPLS"
   .attach_backend_control(model)
-}
-
-.candidate_row_l2 <- function(X) {
-  X <- as.matrix(X)
-  nr <- sqrt(rowSums(X * X))
-  nr[!is.finite(nr) | nr == 0] <- 1
-  sweep(X, 1L, nr, "/", check.margin = FALSE)
-}
-
-.candidate_top_indices <- function(scores, top_m) {
-  top_m <- min(max(1L, as.integer(top_m)[1L]), ncol(scores))
-  if (top_m == 1L) {
-    return(matrix(max.col(scores, ties.method = "first"), ncol = 1L))
-  }
-  t(apply(scores, 1L, function(z) order(z, decreasing = TRUE)[seq_len(top_m)]))
-}
-
-.candidate_temp_knn_score <- function(sim, knn_k, tau) {
-  if (!length(sim)) {
-    return(-Inf)
-  }
-  kk <- min(max(1L, as.integer(knn_k)[1L]), length(sim))
-  vals <- head(sort(sim, decreasing = TRUE), kk)
-  tau <- as.numeric(tau)[1L]
-  if (!is.finite(tau) || tau <= 0) {
-    return(mean(vals))
-  }
-  mx <- max(vals)
-  mx + tau * log(mean(exp((vals - mx) / tau)))
-}
-
-.candidate_centroids <- function(Ttrain_norm, y_codes, n_classes) {
-  sums <- rowsum(Ttrain_norm, group = y_codes, reorder = FALSE)
-  if (nrow(sums) < n_classes) {
-    full <- matrix(0, nrow = n_classes, ncol = ncol(Ttrain_norm))
-    present <- as.integer(rownames(sums))
-    full[present, ] <- sums
-    sums <- full
-  }
-  counts <- tabulate(y_codes, nbins = n_classes)
-  counts[counts == 0L] <- 1L
-  centroids <- sweep(sums, 1L, counts, "/", check.margin = FALSE)
-  .candidate_row_l2(centroids)
-}
-
-.candidate_score_space <- function(model, scores, ncomp) {
-  T_scores <- as.matrix(scores)
-  kk <- min(as.integer(ncomp)[1L], ncol(T_scores))
-  if (!is.finite(kk) || is.na(kk) || kk < 1L) {
-    stop("candidate-kNN requires at least one latent component", call. = FALSE)
-  }
-  T_scores <- T_scores[, seq_len(kk), drop = FALSE]
-
-  if (!identical(model$pls_method, "plssvd") ||
-      is.null(model$C_latent) ||
-      length(model$C_latent) == 0L) {
-    return(T_scores)
-  }
-
-  cd <- dim(model$C_latent)
-  if (length(cd) != 3L || cd[1L] < kk || cd[2L] < kk || cd[3L] < 1L) {
-    return(T_scores)
-  }
-  model_ncomp <- as.integer(model$ncomp)
-  slice <- match(kk, model_ncomp)
-  if (is.na(slice)) {
-    ge <- which(model_ncomp >= kk)
-    slice <- if (length(ge)) ge[[1L]] else length(model_ncomp)
-  }
-  slice <- min(max(1L, as.integer(slice)[1L]), cd[3L])
-  Ck <- model$C_latent[seq_len(kk), seq_len(kk), slice, drop = FALSE][, , 1L]
-  if (!all(is.finite(Ck))) {
-    return(T_scores)
-  }
-  T_scores %*% Ck
-}
-
-.candidate_knn_predict_core <- function(Ttest_norm,
-                                        Ttrain_norm,
-                                        y_codes,
-                                        centroids,
-                                        lev,
-                                        knn_k = 3L,
-                                        tau = 0.2,
-                                        alpha = 0.5,
-                                        top_m = 20L,
-                                        candidate_bias = NULL,
-                                        top = 1L,
-                                        backend = c("cpp", "cuda", "metal")) {
-  ntest <- nrow(Ttest_norm)
-  n_classes <- length(lev)
-  top <- min(max(1L, as.integer(top)[1L]), n_classes)
-  top_m <- min(max(top, as.integer(top_m)[1L]), n_classes)
-  backend <- match.arg(backend)
-  if (is.null(candidate_bias)) {
-    candidate_bias <- numeric(n_classes)
-  }
-  candidate_bias <- as.numeric(candidate_bias)
-  if (length(candidate_bias) != n_classes) {
-    stop("candidate_bias must have one value per class", call. = FALSE)
-  }
-
-  scorer_backend <- if (identical(backend, "metal")) "cpp" else backend
-  scorer <- if (identical(scorer_backend, "cuda") && .cuda_matmul_available()) {
-    candidate_knn_predict_cuda
-  } else {
-    candidate_knn_predict_cpp
-  }
-  native <- scorer(
-    as.matrix(Ttest_norm),
-    as.matrix(Ttrain_norm),
-    as.integer(y_codes),
-    as.matrix(centroids),
-    candidate_bias,
-    top,
-    top_m,
-    as.integer(knn_k)[1L],
-    as.numeric(tau)[1L],
-    as.numeric(alpha)[1L]
-  )
-  top_index <- as.matrix(native$top_index)
-  top_score <- as.matrix(native$top_score)
-  pred_index <- top_index[, 1L]
-
-  list(
-    Ypred = factor(lev[pred_index], levels = lev),
-    Ypred_index = pred_index,
-    Ypred_top = if (top > 1L) matrix(lev[top_index], nrow = ntest, ncol = top) else NULL,
-    Ypred_top_score = if (top > 1L) top_score else NULL,
-    top_index = top_index,
-    top_score = top_score,
-    predict_backend = if (identical(backend, "metal")) {
-      "metal_candidate_knn_cpp"
-    } else {
-      native$predict_backend
-    },
-    n_reranked = native$n_reranked
-  )
-}
-
-.fit_candidate_knn <- function(model,
-                               Xtrain,
-                               y_train,
-                               backend = c("cpp", "cuda", "metal"),
-                               knn_k = 3L,
-                               tau = 0.2,
-                               alpha = 0.5,
-                               top_m = 20L,
-                               cknn_memory = c("auto", "standard", "blocked", "streaming")) {
-  backend <- match.arg(backend)
-  cknn_memory <- .normalize_cknn_memory(cknn_memory)
-  if (identical(backend, "cuda") && !.cuda_matmul_available()) {
-    warning("classifier='cknn' with backend='cuda' requested but CUDA projection is unavailable; using CPU cKNN.", call. = FALSE)
-    backend <- "cpp"
-  }
-  if (!is.factor(y_train)) {
-    stop("candidate-kNN classification requires factor Ytrain", call. = FALSE)
-  }
-  knn_k <- max(1L, as.integer(knn_k)[1L])
-  tau <- as.numeric(tau)[1L]
-  alpha <- as.numeric(alpha)[1L]
-  top_m <- max(1L, as.integer(top_m)[1L])
-  if (!is.finite(tau) || tau <= 0) stop("tau must be positive", call. = FALSE)
-  if (!is.finite(alpha)) stop("alpha must be finite", call. = FALSE)
-
-  model <- .attach_latent_projection_cache(model)
-  score_backend <- if (identical(backend, "cuda")) {
-    "cuda"
-  } else if (identical(backend, "metal") && isTRUE(has_metal())) {
-    "metal"
-  } else {
-    "cpu"
-  }
-  y_codes <- as.integer(factor(y_train, levels = model$lev))
-  if (anyNA(y_codes)) {
-    stop("candidate-kNN received labels outside the training levels", call. = FALSE)
-  }
-
-  max_requested <- max(as.integer(model$ncomp))
-  ncomp_eff <- pmin(as.integer(model$ncomp), max_requested)
-  ncomp_eff <- pmax(ncomp_eff, 1L)
-  unique_ncomp <- sort(unique(ncomp_eff))
-  if (identical(cknn_memory, "auto")) {
-    score_mb <- as.double(nrow(Xtrain)) * as.double(max(unique_ncomp)) * 8 / 1024^2
-    cknn_memory <- if (score_mb >= 512 && length(unique_ncomp) == 1L) "streaming" else if (score_mb >= 128) "blocked" else "standard"
-  }
-  if (identical(cknn_memory, "streaming") && length(unique_ncomp) > 1L) {
-    warning(
-      "cknn_memory = 'streaming' currently streams the training-score cache only for scalar ncomp; using blocked prediction for this component grid.",
-      call. = FALSE
-    )
-    cknn_memory <- "blocked"
-  }
-
-  if (identical(cknn_memory, "streaming") && length(unique_ncomp) == 1L) {
-    kk <- unique_ncomp[[1L]]
-    block_size <- max(1L, .cknn_train_block_size())
-    n <- nrow(Xtrain)
-    Ttrain_norm <- matrix(NA_real_, nrow = n, ncol = kk)
-    for (start in seq.int(1L, n, by = block_size)) {
-      stop <- min(n, start + block_size - 1L)
-      idx <- start:stop
-      Tb <- .fastpls_latent_scores(
-        model,
-        Xtrain[idx, , drop = FALSE],
-        ncomp = kk,
-        backend = score_backend
-      )
-      Ttrain_norm[idx, ] <- .candidate_row_l2(.candidate_score_space(model, Tb, kk))
-    }
-    cent <- .candidate_centroids(Ttrain_norm, y_codes, length(model$lev))
-    models <- list(list(ncomp = kk, centroids = cent))
-    names(models) <- as.character(kk)
-    model$candidate_knn <- list(
-      ncomp = unique_ncomp,
-      models = models,
-      Ttrain = Ttrain_norm,
-      y_codes = y_codes,
-      backend = backend,
-      score_space = "precomputed_norm",
-      memory = cknn_memory,
-      parameters = list(
-        knn_k = knn_k,
-        tau = tau,
-        alpha = alpha,
-        top_m = top_m
-      )
-    )
-    return(model)
-  }
-
-  if (is.null(model$Ttrain) ||
-      length(model$Ttrain) == 0L ||
-      !all(dim(model$Ttrain) > 0L) ||
-      ncol(as.matrix(model$Ttrain)) < max_requested) {
-    model$Ttrain <- .fastpls_latent_scores(
-      model,
-      Xtrain,
-      ncomp = max_requested,
-      backend = score_backend
-    )
-  }
-  Ttrain <- as.matrix(model$Ttrain)
-  ncomp_eff <- pmin(as.integer(model$ncomp), ncol(Ttrain))
-  ncomp_eff <- pmax(ncomp_eff, 1L)
-  unique_ncomp <- sort(unique(ncomp_eff))
-
-  models <- vector("list", length(unique_ncomp))
-  names(models) <- as.character(unique_ncomp)
-  for (kk in unique_ncomp) {
-    Tn <- .candidate_row_l2(.candidate_score_space(model, Ttrain, kk))
-    cent <- .candidate_centroids(Tn, y_codes, length(model$lev))
-    models[[as.character(kk)]] <- list(
-      ncomp = kk,
-      centroids = cent
-    )
-  }
-
-  model$candidate_knn <- list(
-    ncomp = unique_ncomp,
-    models = models,
-    Ttrain = Ttrain[, seq_len(max(unique_ncomp)), drop = FALSE],
-    y_codes = y_codes,
-    backend = backend,
-    score_space = if (identical(model$pls_method, "plssvd")) "plssvd_prediction_latent" else "latent",
-    memory = cknn_memory,
-    parameters = list(
-      knn_k = knn_k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m
-    )
-  )
-  model
-}
-
-.candidate_knn_predictions <- function(object, Xtest, top = 1L, keep_ttest = FALSE) {
-  if (is.null(object$candidate_knn) || is.null(object$candidate_knn$models)) {
-    stop("This fastPLS object does not contain fitted candidate-kNN parameters", call. = FALSE)
-  }
-  par <- object$candidate_knn$parameters
-  ncomp_eff <- pmin(as.integer(object$ncomp), max(as.integer(object$candidate_knn$ncomp)))
-  ncomp_eff <- pmax(ncomp_eff, 1L)
-  backend <- object$candidate_knn$backend %||% "cpp"
-  use_cuda <- identical(backend, "cuda") && .cuda_matmul_available()
-  use_metal <- identical(backend, "metal") && isTRUE(has_metal())
-  memory <- .normalize_cknn_memory(object$candidate_knn$memory %||% "standard")
-  block_size <- max(1L, .cknn_prediction_block_size())
-  if (memory %in% c("blocked", "streaming") && nrow(Xtest) > block_size) {
-    Xtest <- as.matrix(Xtest)
-    Ttrain <- as.matrix(object$candidate_knn$Ttrain)
-    y_codes <- as.integer(object$candidate_knn$y_codes)
-    ntest <- nrow(Xtest)
-    Ypredlab <- as.data.frame(matrix(nrow = ntest, ncol = length(object$ncomp)))
-    colnames(Ypredlab) <- paste("ncomp=", object$ncomp, sep = "")
-    Ypred_index <- matrix(NA_integer_, nrow = ntest, ncol = length(object$ncomp))
-    colnames(Ypred_index) <- colnames(Ypredlab)
-    top <- min(max(1L, as.integer(top)[1L]), length(object$lev))
-    top_list <- score_list <- vector("list", length(object$ncomp))
-    names(top_list) <- names(score_list) <- colnames(Ypredlab)
-    if (top > 1L) {
-      for (i in seq_along(object$ncomp)) {
-        top_list[[i]] <- matrix(NA_character_, nrow = ntest, ncol = top)
-        score_list[[i]] <- matrix(NA_real_, nrow = ntest, ncol = top)
-      }
-    }
-    predict_backend <- character(length(object$ncomp))
-    train_score_cache <- new.env(parent = emptyenv())
-    for (start in seq.int(1L, ntest, by = block_size)) {
-      stop <- min(ntest, start + block_size - 1L)
-      idx <- start:stop
-      Ttest_block <- .fastpls_latent_scores(
-        object,
-        Xtest[idx, , drop = FALSE],
-        ncomp = max(ncomp_eff),
-        backend = if (use_cuda) "cuda" else if (use_metal) "metal" else "cpu"
-      )
-      for (i in seq_along(object$ncomp)) {
-        kk <- ncomp_eff[[i]]
-        cm <- object$candidate_knn$models[[as.character(kk)]]
-        if (is.null(cm)) {
-          stop(sprintf("No fitted candidate-kNN classifier for ncomp=%s", kk), call. = FALSE)
-        }
-        cache_key <- as.character(kk)
-        if (!exists(cache_key, envir = train_score_cache, inherits = FALSE)) {
-          train_kk <- if (identical(object$candidate_knn$score_space, "precomputed_norm")) {
-            Ttrain
-          } else {
-            .candidate_row_l2(.candidate_score_space(object, Ttrain, kk))
-          }
-          assign(cache_key, train_kk, envir = train_score_cache)
-        }
-        Ttest_kk <- .candidate_row_l2(.candidate_score_space(object, Ttest_block, kk))
-        pred <- .candidate_knn_predict_core(
-          Ttest_norm = Ttest_kk,
-          Ttrain_norm = get(cache_key, envir = train_score_cache, inherits = FALSE),
-          y_codes = y_codes,
-          centroids = cm$centroids,
-          lev = object$lev,
-          knn_k = par$knn_k,
-          tau = par$tau,
-          alpha = par$alpha,
-          top_m = par$top_m,
-          candidate_bias = numeric(length(object$lev)),
-          top = top,
-          backend = backend
-        )
-        Ypredlab[idx, i] <- as.character(pred$Ypred)
-        Ypred_index[idx, i] <- as.integer(pred$Ypred_index)
-        predict_backend[[i]] <- pred$predict_backend %||% paste0(backend, "_candidate_knn")
-        if (top > 1L) {
-          top_list[[i]][idx, ] <- pred$Ypred_top
-          score_list[[i]][idx, ] <- pred$Ypred_top_score
-        }
-      }
-    }
-    out <- list(Ypred = Ypredlab, Ypred_index = Ypred_index)
-    out$predict_backend <- unique(predict_backend[nzchar(predict_backend)])
-    if (top > 1L) {
-      out$Ypred_top <- top_list
-      out$Ypred_top_score <- score_list
-    }
-    return(out)
-  }
-  Ttest <- .fastpls_latent_scores(
-    object,
-    Xtest,
-    ncomp = max(ncomp_eff),
-    backend = if (use_cuda) "cuda" else if (use_metal) "metal" else "cpu"
-  )
-  Ttrain <- as.matrix(object$candidate_knn$Ttrain)
-  y_codes <- as.integer(object$candidate_knn$y_codes)
-  Ypredlab <- as.data.frame(matrix(nrow = nrow(Ttest), ncol = length(object$ncomp)))
-  colnames(Ypredlab) <- paste("ncomp=", object$ncomp, sep = "")
-  Ypred_index <- matrix(NA_integer_, nrow = nrow(Ttest), ncol = length(object$ncomp))
-  colnames(Ypred_index) <- colnames(Ypredlab)
-  top <- min(max(1L, as.integer(top)[1L]), length(object$lev))
-  top_list <- score_list <- vector("list", length(object$ncomp))
-  names(top_list) <- names(score_list) <- colnames(Ypredlab)
-  predict_backend <- character(length(object$ncomp))
-  train_score_cache <- new.env(parent = emptyenv())
-  test_score_cache <- new.env(parent = emptyenv())
-
-  for (i in seq_along(object$ncomp)) {
-    kk <- ncomp_eff[[i]]
-    cm <- object$candidate_knn$models[[as.character(kk)]]
-    if (is.null(cm)) {
-      stop(sprintf("No fitted candidate-kNN classifier for ncomp=%s", kk), call. = FALSE)
-    }
-    cache_key <- as.character(kk)
-    if (!exists(cache_key, envir = train_score_cache, inherits = FALSE)) {
-      assign(cache_key, .candidate_score_space(object, Ttrain, kk), envir = train_score_cache)
-      assign(cache_key, .candidate_score_space(object, Ttest, kk), envir = test_score_cache)
-    }
-    Ttrain_kk <- get(cache_key, envir = train_score_cache, inherits = FALSE)
-    Ttest_kk <- get(cache_key, envir = test_score_cache, inherits = FALSE)
-    pred <- .candidate_knn_predict_core(
-      Ttest_norm = .candidate_row_l2(Ttest_kk),
-      Ttrain_norm = .candidate_row_l2(Ttrain_kk),
-      y_codes = y_codes,
-      centroids = cm$centroids,
-      lev = object$lev,
-      knn_k = par$knn_k,
-      tau = par$tau,
-      alpha = par$alpha,
-      top_m = par$top_m,
-      candidate_bias = numeric(length(object$lev)),
-      top = top,
-      backend = backend
-    )
-    Ypredlab[[i]] <- pred$Ypred
-    Ypred_index[, i] <- pred$Ypred_index
-    predict_backend[[i]] <- pred$predict_backend %||% paste0(backend, "_candidate_knn")
-    if (top > 1L) {
-      top_list[[i]] <- pred$Ypred_top
-      score_list[[i]] <- pred$Ypred_top_score
-    }
-  }
-
-  out <- list(Ypred = Ypredlab, Ypred_index = Ypred_index)
-  out$predict_backend <- unique(predict_backend[nzchar(predict_backend)])
-  if (top > 1L) {
-    out$Ypred_top <- top_list
-    out$Ypred_top_score <- score_list
-  }
-  if (isTRUE(keep_ttest)) {
-    out$Ttest <- Ttest
-  }
-  out
 }
 
 .fastpls_scaled_by_model <- function(object, X) {
@@ -1578,12 +1105,7 @@
                                    Xtrain,
                                    Ytrain,
                                    classifier = "argmax",
-                                   lda_ridge = 1e-8,
-                                   k = getOption("fastPLS.k", 10L),
-                                   tau = getOption("fastPLS.tau", 0.2),
-                                   alpha = getOption("fastPLS.alpha", 0.75),
-                                   top_m = getOption("fastPLS.top_m", 20L),
-                                   cknn_memory = getOption("fastPLS.cknn_memory", "auto")) {
+                                   lda_ridge = 1e-8) {
   classifier <- .resolve_classifier_for_backend(classifier, "cpu")
   model$classification_rule <- classifier
   model$lda_backend <- classifier
@@ -1592,32 +1114,6 @@
   }
   if (!is.factor(Ytrain)) {
     stop("Classification head requires factor Ytrain", call. = FALSE)
-  }
-  if (.is_candidate_knn_classifier(classifier)) {
-    backend <- .candidate_knn_backend(classifier)
-    if (identical(backend, "cuda") && !.cuda_matmul_available()) {
-      warning("classifier='cknn' with backend='cuda' requested but CUDA projection is unavailable; using CPU cKNN.", call. = FALSE)
-      backend <- "cpp"
-      model$classification_rule <- "candidate_knn_cpp"
-      model$lda_backend <- "candidate_knn_cpp"
-    } else if (identical(backend, "metal") && !isTRUE(has_metal())) {
-      warning("classifier='cknn' with backend='metal' requested but Metal is unavailable; using CPU cKNN.", call. = FALSE)
-      backend <- "cpp"
-      model$classification_rule <- "candidate_knn_cpp"
-      model$lda_backend <- "candidate_knn_cpp"
-    }
-    model <- .fit_candidate_knn(
-      model,
-      Xtrain,
-      Ytrain,
-      backend = backend,
-      knn_k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m,
-      cknn_memory = cknn_memory
-    )
-    return(model)
   }
   if (identical(classifier, "lda_cuda") && !.cuda_matmul_available()) {
     warning("classifier='lda' with backend='cuda' requested but CUDA matrix multiply is unavailable; using CPU LDA.", call. = FALSE)
@@ -2057,7 +1553,6 @@
   "classification",
   "classification_rule",
   "lda_backend",
-  "candidate_knn",
   "R_predict",
   "R_offset",
   "precision"
@@ -2107,6 +1602,107 @@ print.fastPLS <- function(x, ...) {
   .fastpls_hide_internal_output_fields(x)
 }
 
+.fastpls_attach_solver_diagnostics <- function(model,
+                                               svd.method,
+                                               oversample,
+                                               power,
+                                               seed) {
+  solver <- .normalize_svd_method(svd.method)
+  randomized <- solver %in% c("cpu_rsvd", "cuda_rsvd", "metal_rsvd")
+  latent_model <- if (is.list(model$inner_model)) model$inner_model else model
+  requested <- suppressWarnings(max(as.integer(latent_model$ncomp), na.rm = TRUE))
+  if (!is.finite(requested)) requested <- NA_integer_
+
+  factors <- Filter(
+    Negate(is.null),
+    list(R = latent_model$R, Q = latent_model$Q)
+  )
+  finite_factors <- if (length(factors)) {
+    all(vapply(factors, function(value) {
+      isTRUE(tryCatch(all(is.finite(value)), error = function(e) FALSE))
+    }, logical(1)))
+  } else {
+    NA
+  }
+
+  effective <- NA_integer_
+  if (!is.null(latent_model$R) && length(dim(latent_model$R)) == 2L) {
+    norms <- tryCatch(
+      as.numeric(sqrt(colSums(latent_model$R * latent_model$R))),
+      error = function(e) numeric(0)
+    )
+    if (length(norms)) {
+      effective <- sum(is.finite(norms) & norms > sqrt(.Machine$double.eps))
+    }
+  }
+
+  structural_failure <- isFALSE(finite_factors) ||
+    (is.finite(requested) && is.finite(effective) && effective < requested)
+  status <- if (structural_failure) {
+    "failed_structural_check"
+  } else if (randomized) {
+    "basic_checks_passed_approximation_not_audited"
+  } else {
+    "deterministic_solver_basic_checks_passed"
+  }
+
+  model$diagnostics <- list(
+    solver = if (randomized) "rsvd" else "irlba",
+    stochastic = randomized,
+    status = status,
+    finite_latent_factors = finite_factors,
+    requested_components = requested,
+    effective_components = effective,
+    approximation_audited = !randomized,
+    guidance = if (randomized) {
+      paste(
+        "Structural checks do not establish rSVD agreement with a deterministic fit.",
+        "For confirmatory analysis, compare multiple seeds or refit with",
+        "svd.method = 'irlba' on the CPU."
+      )
+    } else {
+      "IRLBA is deterministic for fixed data and numerical controls."
+    }
+  )
+  if (randomized) {
+    model$diagnostics$rsvd <- list(
+      oversample = as.integer(oversample)[1L],
+      power = as.integer(power)[1L],
+      seed = as.integer(seed)[1L],
+      validation_failure_criteria = list(
+        prediction_relative_error_above = 0.05,
+        prediction_correlation_below = 0.99,
+        latent_subspace_angle_degrees_above = 10,
+        classification_label_agreement_below = 0.99,
+        predictive_metric_absolute_difference_above = 0.01
+      ),
+      setting_guidance = if (as.integer(power)[1L] < 2L) {
+        paste(
+          "One power iteration is the faster exploratory setting.",
+          "The formal SIMPLS validation required two power iterations for all",
+          "prespecified CPU comparisons to pass. Difficult CUDA cases also",
+          "benefited from a wider sketch. Confirm important results with",
+          "power = 2, increased oversampling, multiple seeds, or CPU IRLBA."
+        )
+      } else {
+        paste(
+          "Two or more power iterations improve approximation stability but",
+          "do not make rSVD deterministic; confirm inferential or",
+          "coefficient-level conclusions with CPU IRLBA."
+        )
+      }
+    )
+  }
+
+  if (structural_failure) {
+    stop(
+      "PLS fit failed numerical structural checks: non-finite latent factors or fewer effective components than requested.",
+      call. = FALSE
+    )
+  }
+  model
+}
+
 .fastpls_public_predict_output <- function(x, ncomp = NULL) {
   if (!is.null(ncomp)) {
     x <- .fastpls_name_pls_metric_paths(x, ncomp)
@@ -2147,7 +1743,11 @@ print.fastPLS <- function(x, ...) {
         if (is.null(lda_model)) {
           stop(sprintf("No fitted float32 LDA classifier for ncomp=%s", k), call. = FALSE)
         }
-        pred <- predict_fun(Ttest32[, seq_len(k), drop = FALSE], lda_model)
+        pred <- predict_fun(
+          Ttest32[, seq_len(k), drop = FALSE],
+          lda_model,
+          !is.null(score_cube)
+        )
         labels <- as.integer(pred$pred)
         Ypred[[i]] <- factor(object$lev[labels], levels = object$lev)
         if (!is.null(score_cube)) {
@@ -2164,59 +1764,6 @@ print.fastPLS <- function(x, ...) {
         res$Ypred_index <- top_res$Ypred_index
         res$Ypred_top <- top_res$Ypred_top
         res$Ypred_top_score <- top_res$Ypred_top_score
-      }
-      if (!is.null(Ytest)) {
-        res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
-        res$Q2Y <- rep(NA_real_, length(ncomp))
-      }
-      if (isTRUE(proj)) {
-        res$Ttest <- Ttest32
-      }
-      return(.fastpls_name_pls_metric_paths(res, ncomp))
-    }
-
-    if (!is.null(object$classification_rule) &&
-        .is_candidate_knn_classifier(object$classification_rule)) {
-      Ypred <- as.data.frame(matrix(nrow = nrow(Xtest), ncol = length(ncomp)))
-      colnames(Ypred) <- .fastpls_ncomp_names(ncomp)
-      top_list <- vector("list", length(ncomp))
-      score_list <- vector("list", length(ncomp))
-      names(top_list) <- names(score_list) <- .fastpls_ncomp_names(ncomp)
-      max_k <- max(ncomp)
-      Ttest32 <- Xtest %*% object$R[, seq_len(max_k), drop = FALSE]
-      Ttest <- .float32_to_numeric_matrix(Ttest32)
-      par <- object$candidate_knn$parameters
-      for (i in seq_along(ncomp)) {
-        k <- ncomp[[i]]
-        cm <- object$candidate_knn$models[[as.character(k)]]
-        if (is.null(cm)) {
-          stop(sprintf("No fitted float32 cKNN classifier for ncomp=%s", k), call. = FALSE)
-        }
-        Ttest_norm <- .candidate_row_l2(Ttest[, seq_len(k), drop = FALSE])
-        Ttrain_norm <- .candidate_row_l2(object$candidate_knn$Ttrain[, seq_len(k), drop = FALSE])
-        pred <- .candidate_knn_predict_core(
-          Ttest_norm = Ttest_norm,
-          Ttrain_norm = Ttrain_norm,
-          y_codes = object$candidate_knn$y_codes,
-          centroids = cm$centroids,
-          lev = object$lev,
-          knn_k = par$knn_k,
-          tau = par$tau,
-          alpha = par$alpha,
-          top_m = par$top_m,
-          top = top,
-          backend = object$candidate_knn$backend %||% "cpp"
-        )
-        Ypred[[i]] <- pred$Ypred
-        if (top > 1L) {
-          top_list[[i]] <- pred$Ypred_top
-          score_list[[i]] <- pred$Ypred_top_score
-        }
-      }
-      res <- list(Ypred = Ypred, Q2Y = NULL)
-      if (top > 1L) {
-        res$Ypred_top <- top_list
-        res$Ypred_top_score <- score_list
       }
       if (!is.null(Ytest)) {
         res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, res$Ypred)
@@ -2245,8 +1792,13 @@ print.fastPLS <- function(x, ...) {
         Ttest %*% t(object$Q[, seq_len(k), drop = FALSE])
       }
       Yhat <- .float32_sweep_cols(Yhat, object$mY, "+")
-      scores <- .float32_to_numeric_matrix(Yhat)
-      idx <- max.col(scores, ties.method = "first")
+      scores <- NULL
+      if (is.null(score_cube)) {
+        idx <- float32_argmax_cpp(Yhat)
+      } else {
+        scores <- .float32_to_numeric_matrix(Yhat)
+        idx <- max.col(scores, ties.method = "first")
+      }
       Ypred[[i]] <- factor(object$lev[idx], levels = object$lev)
       if (!is.null(score_cube)) {
         score_cube[, , i] <- scores
@@ -2389,7 +1941,6 @@ print.fastPLS <- function(x, ...) {
   if (is.null(model)) {
     return(NULL)
   }
-  cuda_reset_workspace()
   model$classification <- TRUE
   model$lev <- lev
   model$pls_method <- method_name
@@ -2921,6 +2472,16 @@ print.fastPLS <- function(x, ...) {
   isTRUE(s_mb > 32) && isTRUE(n >= 10000) && isTRUE(min(p, q) >= 1000)
 }
 
+.ablation_xprod_override <- function(value) {
+  if (!identical(Sys.getenv("FASTPLS_ABLATION_MODE", "0"), "1")) {
+    return(value)
+  }
+  override <- Sys.getenv("FASTPLS_ABLATION_XPROD", "auto")
+  if (override %in% c("1", "true", "TRUE")) return(TRUE)
+  if (override %in% c("0", "false", "FALSE")) return(FALSE)
+  value
+}
+
 .should_store_coefficients <- function(p, q, nslices = 1L, compact_prediction_available = TRUE) {
   mode <- tolower(Sys.getenv("FASTPLS_STORE_B", unset = "auto"))
   if (mode %in% c("always", "1", "true", "yes")) {
@@ -2992,6 +2553,250 @@ print.fastPLS <- function(x, ...) {
 
 .has_float32_input <- function(...) {
   any(vapply(list(...), .is_float32, logical(1)))
+}
+
+.float32_response_shape <- function(Ytrain) {
+  classification <- is.factor(Ytrain) || is.character(Ytrain)
+  q <- if (classification) {
+    length(unique(as.character(Ytrain)))
+  } else if (length(dim(Ytrain)) == 2L) {
+    ncol(Ytrain)
+  } else {
+    1L
+  }
+  list(classification = classification, q = as.integer(q))
+}
+
+.float32_capability_assessment <- function(method,
+                                           backend,
+                                           svd_method,
+                                           q,
+                                           ncomp,
+                                           classification = FALSE,
+                                           kernel = "linear",
+                                           classifier = "argmax",
+                                           os_type = .Platform$OS.type) {
+  method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
+  backend <- match.arg(backend, c("cpu", "cuda", "metal"))
+  classifier <- .normalize_classifier(classifier)
+  classifier <- if (.is_lda_classifier(classifier)) "lda" else "argmax"
+  svd_method <- if (svd_method %in% c("rsvd", "cpu_rsvd")) "rsvd" else svd_method
+  k <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
+  if (!is.finite(k)) k <- 0L
+  q <- suppressWarnings(as.integer(q)[1L])
+  if (!is.finite(q) || is.na(q)) q <- 1L
+
+  warnings <- character()
+  errors <- character()
+  status <- "validated"
+  execution <- switch(
+    backend,
+    cpu = "compiled_cpu",
+    cuda = "device_accelerated",
+    metal = "device_accelerated"
+  )
+
+  if (identical(os_type, "windows")) {
+    if (!identical(backend, "cpu")) {
+      status <- "unavailable"
+      errors <- c(errors, "float32 on Windows supports backend = 'cpu' only.")
+    } else if (!identical(svd_method, "rsvd")) {
+      status <- "unavailable"
+      errors <- c(errors, "float32 on Windows supports svd.method = 'rsvd' only.")
+    } else if (identical(method, "opls")) {
+      status <- "unavailable"
+      errors <- c(errors, "float32 OPLS is unavailable on Windows.")
+    } else if (identical(method, "kernelpls") && !identical(kernel, "linear")) {
+      status <- "unavailable"
+      errors <- c(errors, "float32 nonlinear kernel PLS is unavailable on Windows.")
+    } else if (identical(classifier, "lda")) {
+      status <- "unavailable"
+      errors <- c(errors, "float32 LDA is unavailable on Windows.")
+    } else {
+      status <- "experimental"
+      execution <- "portable_cpu"
+      warnings <- c(
+        warnings,
+        paste(
+          "float32 on Windows uses the portable float-package rSVD route.",
+          "It preserves single-precision storage but is not the compiled",
+          "single-precision CPU implementation validated on Unix-like systems."
+        )
+      )
+    }
+  }
+
+  if (identical(backend, "cuda") && identical(svd_method, "irlba")) {
+    status <- "unavailable"
+    errors <- c(errors, "float32 CUDA supports svd.method = 'rsvd' only.")
+  }
+
+  if (!length(errors) && identical(backend, "metal")) {
+    status <- "experimental"
+    warnings <- c(
+      warnings,
+      paste(
+        "float32 Metal is an experimental portability route: validation is",
+        "limited and some large classification settings showed material",
+        "float64/float32 disagreement. Verify held-out predictions against",
+        "the float64 CPU reference."
+      )
+    )
+  }
+
+  if (!length(errors) &&
+      identical(backend, "metal") &&
+      identical(classifier, "lda")) {
+    status <- "hybrid"
+    execution <- "hybrid_device_cpu_lda"
+    warnings <- c(
+      warnings,
+      paste(
+        "float32 Metal LDA is hybrid: PLS score extraction may use Metal,",
+        "but LDA fitting and prediction use the compiled CPU float32 solver."
+      )
+    )
+  }
+
+  if (!length(errors) &&
+      backend %in% c("cuda", "metal") &&
+      (identical(method, "opls") ||
+       (identical(method, "kernelpls") && !identical(kernel, "linear")))) {
+    status <- "hybrid"
+    execution <- "hybrid_host_device"
+    warnings <- c(
+      warnings,
+      sprintf(
+        paste(
+          "float32 %s/%s is a hybrid route with host-resident orchestration",
+          "or preprocessing stages; it is not fully device-resident."
+        ),
+        method, backend
+      )
+    )
+  }
+
+  # This guard is based on the full-response NMR validation regime, not on a
+  # dataset name. It catches response-heavy fits before large workspaces exist.
+  if (!length(errors) && !classification && q >= 10000L && k >= 50L) {
+    if (identical(method, "plssvd")) {
+      status <- "experimental"
+      warnings <- c(
+        warnings,
+        sprintf(
+          paste(
+            "float32 %s/%s with q=%d and ncomp=%d is an extreme-response",
+            "performance-risk route. Full-scale validation found similar",
+            "PLS-SVD prediction error but severe runtime and device-memory",
+            "penalties. Prefer ordinary double input unless reduced input",
+            "storage is essential."
+          ),
+          method, backend, q, k
+        )
+      )
+    } else {
+      status <- "failed"
+      warnings <- c(
+        warnings,
+        sprintf(
+          paste(
+            "float32 %s/%s with q=%d and ncomp=%d is an extreme-response",
+            "numerical-risk route. Full-scale validation found material RMSD",
+            "degradation and severe runtime penalties. Use ordinary double",
+            "input for confirmatory analysis and compare held-out predictions",
+            "before accepting this fit."
+          ),
+          method, backend, q, k
+        )
+      )
+    }
+  }
+
+  if (!length(errors) &&
+      classification &&
+      method %in% c("simpls", "kernelpls")) {
+    if (identical(status, "validated")) status <- "experimental"
+    warnings <- c(
+      warnings,
+      sprintf(
+        paste(
+          "float32 %s classification is supported but precision-sensitive:",
+          "matched real-data validation observed backend-dependent accuracy",
+          "differences of up to five percentage points. Confirm agreement",
+          "against ordinary double input on the intended split."
+        ),
+        method
+      )
+    )
+  }
+
+  if (!length(errors) &&
+      identical(method, "kernelpls") &&
+      !identical(kernel, "linear")) {
+    if (identical(status, "validated")) status <- "experimental"
+    warnings <- c(
+      warnings,
+      paste(
+        "float32 nonlinear kernel PLS has limited cross-backend validation and",
+        "still materializes an n-by-n Gram matrix. Compare predictions with",
+        "ordinary double input and verify memory feasibility."
+      )
+    )
+  }
+
+  if (!length(errors) && identical(svd_method, "irlba")) {
+    if (identical(status, "validated")) status <- "experimental"
+    warnings <- c(
+      warnings,
+      paste(
+        "float32 IRLBA has only limited route-level validation.",
+        "Use float64 IRLBA for deterministic confirmatory analysis."
+      )
+    )
+  }
+
+  list(
+    status = status,
+    execution = execution,
+    action = if (length(errors)) "error" else if (length(warnings)) "warn" else "allow",
+    warnings = unique(warnings),
+    errors = unique(errors)
+  )
+}
+
+.float32_warning_state <- new.env(parent = emptyenv())
+
+.warn_float32_capability <- function(method,
+                                     backend,
+                                     svd_method,
+                                     Ytrain,
+                                     ncomp,
+                                     kernel = "linear",
+                                     classifier = "argmax",
+                                     os_type = .Platform$OS.type) {
+  response <- .float32_response_shape(Ytrain)
+  assessment <- .float32_capability_assessment(
+    method = method,
+    backend = backend,
+    svd_method = svd_method,
+    q = response$q,
+    ncomp = ncomp,
+    classification = response$classification,
+    kernel = kernel,
+    classifier = classifier,
+    os_type = os_type
+  )
+  if (length(assessment$errors)) {
+    stop(paste(assessment$errors, collapse = " "), call. = FALSE)
+  }
+  for (message in assessment$warnings) {
+    key <- message
+    if (!isTRUE(.float32_warning_state[[key]])) {
+      .float32_warning_state[[key]] <- TRUE
+      warning(message, call. = FALSE)
+    }
+  }
+  invisible(assessment)
 }
 
 .require_float_package <- function() {
@@ -3099,11 +2904,7 @@ print.fastPLS <- function(x, ...) {
                                        Xtrain,
                                        Ytrain_original,
                                        classifier,
-                                       lda_ridge = 1e-8,
-                                       k = 3L,
-                                       tau = 0.2,
-                                       alpha = 0.75,
-                                       top_m = 20L) {
+                                       lda_ridge = 1e-8) {
   model$classification_rule <- classifier
   model$lda_backend <- classifier
   if (!isTRUE(model$classification) || identical(classifier, "argmax")) {
@@ -3142,40 +2943,6 @@ print.fastPLS <- function(x, ...) {
     return(model)
   }
 
-  if (.is_candidate_knn_classifier(classifier)) {
-    Ttrain <- .float32_to_numeric_matrix(Ttrain32)
-    k <- max(1L, as.integer(k)[1L])
-    tau <- as.numeric(tau)[1L]
-    alpha <- as.numeric(alpha)[1L]
-    top_m <- max(1L, as.integer(top_m)[1L])
-    if (!is.finite(tau) || tau <= 0) stop("tau must be positive", call. = FALSE)
-    if (!is.finite(alpha)) stop("alpha must be finite", call. = FALSE)
-    models <- vector("list", length(unique_ncomp))
-    names(models) <- as.character(unique_ncomp)
-    for (kk in unique_ncomp) {
-      Tn <- .candidate_row_l2(Ttrain[, seq_len(kk), drop = FALSE])
-      models[[as.character(kk)]] <- list(
-        ncomp = kk,
-        centroids = .candidate_centroids(Tn, y_codes, length(model$lev))
-      )
-    }
-    model$candidate_knn <- list(
-      ncomp = unique_ncomp,
-      models = models,
-      Ttrain = Ttrain[, seq_len(max(unique_ncomp)), drop = FALSE],
-      y_codes = y_codes,
-      backend = if (identical(classifier, "candidate_knn_metal")) "metal" else "cpp",
-      score_space = "float32_latent",
-      memory = "standard",
-      parameters = list(
-        knn_k = k,
-        tau = tau,
-        alpha = alpha,
-        top_m = top_m
-      )
-    )
-    return(model)
-  }
   model
 }
 
@@ -3254,15 +3021,27 @@ print.fastPLS <- function(x, ...) {
   )
 }
 
-.float32_prepare_response <- function(Ytrain) {
+.float32_prepare_response <- function(Ytrain, materialize_labels = TRUE) {
   classification <- is.factor(Ytrain)
   lev <- if (classification) levels(Ytrain) else NULL
-  Y <- if (classification) {
-    float::fl(transformy(Ytrain))
-  } else {
-    .as_float32_matrix(Ytrain, "Ytrain")
+  labels <- if (classification) as.integer(Ytrain) else NULL
+  if (classification && anyNA(labels)) {
+    stop("Ytrain contains missing or invalid class labels.", call. = FALSE)
   }
-  list(Ytrain = Y, classification = classification, lev = lev)
+  Y <- if (classification && isTRUE(materialize_labels)) {
+    float::fl(transformy(Ytrain))
+  } else if (!classification) {
+    .as_float32_matrix(Ytrain, "Ytrain")
+  } else {
+    NULL
+  }
+  list(
+    Ytrain = Y,
+    labels = labels,
+    n_classes = if (classification) length(lev) else ncol(Y),
+    classification = classification,
+    lev = lev
+  )
 }
 
 .float32_fit_plssvd <- function(Xtrain, Ytrain, ncomp, scaling, fit,
@@ -3338,7 +3117,11 @@ print.fastPLS <- function(x, ...) {
   RR <- .float32_zeros(ncol(Xc), max_ncomp)
   QQ <- .float32_zeros(ncol(Yc), max_ncomp)
   VV <- .float32_zeros(ncol(Xc), max_ncomp)
-  Yfit_cur <- .float32_zeros(nrow(Xc), ncol(Yc))
+  Yfit_cur <- if (isTRUE(fit)) {
+    .float32_zeros(nrow(Xc), ncol(Yc))
+  } else {
+    NULL
+  }
   Yfit <- vector("list", length(ncomp))
   R2Y <- rep(NA_real_, length(ncomp))
   out_idx <- 1L
@@ -3434,13 +3217,18 @@ print.fastPLS <- function(x, ...) {
 
 .fit_float32_pls <- function(Xtrain, Ytrain, ncomp, scaling, method,
                              backend, svd.method, rsvd_oversample, rsvd_power, seed, fit) {
-  yprep <- .float32_prepare_response(Ytrain)
+  use_label_products <- is.factor(Ytrain) &&
+    !identical(.Platform$OS.type, "windows")
+  yprep <- .float32_prepare_response(
+    Ytrain,
+    materialize_labels = !use_label_products
+  )
   if (identical(method, "plssvd") && isTRUE(yprep$classification)) {
     cap <- .cap_plssvd_ncomp(
       ncomp,
       nrow(Xtrain),
       ncol(Xtrain),
-      ncol(yprep$Ytrain),
+      yprep$n_classes,
       factor_response = TRUE,
       warn = TRUE
     )
@@ -3455,9 +3243,9 @@ print.fastPLS <- function(x, ...) {
       rsvd_oversample, rsvd_power, seed, fit
     ))
   }
-  model <- .wrap_float32_cpp_model(pls_float32_cpu_cpp(
+  fit_args <- list(
     .as_float32_matrix(Xtrain, "Xtrain"),
-    yprep$Ytrain,
+    if (use_label_products) yprep$labels else yprep$Ytrain,
     as.integer(ncomp),
     as.integer(scaling),
     isTRUE(fit),
@@ -3467,7 +3255,20 @@ print.fastPLS <- function(x, ...) {
     as.integer(rsvd_oversample),
     as.integer(rsvd_power),
     as.integer(seed)
-  ))
+  )
+  raw_model <- if (use_label_products) {
+    do.call(
+      pls_float32_labels_cpp,
+      append(
+        fit_args,
+        yprep$n_classes,
+        after = 2L
+      )
+    )
+  } else {
+    do.call(pls_float32_cpu_cpp, fit_args)
+  }
+  model <- .wrap_float32_cpp_model(raw_model)
   model$classification <- yprep$classification
   model$lev <- yprep$lev
   if (identical(backend, "metal")) {
@@ -3514,11 +3315,7 @@ print.fastPLS <- function(x, ...) {
                               seed,
                               fit,
                               classifier,
-                              lda_ridge,
-                              k,
-                              tau,
-                              alpha,
-                              top_m) {
+                              lda_ridge) {
   yprep <- .float32_prepare_response(Ytrain)
   filt_raw <- opls_filter_float32_cpp(
     .as_float32_matrix(Xtrain, "Xtrain"),
@@ -3551,11 +3348,7 @@ print.fastPLS <- function(x, ...) {
     Xtrain = filt$X,
     Ytrain_original = Ytrain,
     classifier = classifier,
-    lda_ridge = lda_ridge,
-    k = k,
-    tau = tau,
-    alpha = alpha,
-    top_m = top_m
+    lda_ridge = lda_ridge
   )
   out <- c(
     list(
@@ -3588,20 +3381,14 @@ print.fastPLS <- function(x, ...) {
                                    seed,
                                    fit,
                                    classifier,
-                                   lda_ridge,
-                                   k,
-                                   tau,
-                                   alpha,
-                                   top_m) {
+                                   lda_ridge) {
   kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
   if (identical(kernel, "linear")) {
     inner <- .fit_float32_pls(
       Xtrain, Ytrain, ncomp, scaling, "simpls", backend, svd.method,
       rsvd_oversample, rsvd_power, seed, fit
     )
-    inner <- .attach_float32_classifier(
-      inner, Xtrain, Ytrain, classifier, lda_ridge, k, tau, alpha, top_m
-    )
+    inner <- .attach_float32_classifier(inner, Xtrain, Ytrain, classifier, lda_ridge)
     inner$kernel <- "linear"
     inner$kernel_engine <- paste0("float32_", backend, "_direct")
     inner$kernel_linear_direct <- TRUE
@@ -3646,11 +3433,7 @@ print.fastPLS <- function(x, ...) {
     Xtrain = kc$K,
     Ytrain_original = Ytrain,
     classifier = classifier,
-    lda_ridge = lda_ridge,
-    k = k,
-    tau = tau,
-    alpha = alpha,
-    top_m = top_m
+    lda_ridge = lda_ridge
   )
   out <- c(
     list(
@@ -4185,22 +3968,6 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 		    return(.fastpls_public_predict_output(res, object$ncomp))
 		  }
 	  if (isTRUE(object$classification) &&
-	      !is.null(object$classification_rule) &&
-	      .is_candidate_knn_classifier(object$classification_rule)) {
-	    cand_res <- .candidate_knn_predictions(
-	      object,
-	      Xtest,
-	      top = top,
-	      keep_ttest = isTRUE(proj)
-	    )
-	    cand_res$Q2Y <- NULL
-	    if (!is.null(Ytest)) {
-	      cand_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, cand_res$Ypred)
-	      cand_res$Q2Y <- rep(NA_real_, length(object$ncomp))
-	    }
-	    return(.fastpls_public_predict_output(cand_res, object$ncomp))
-	  }
-	  if (isTRUE(object$classification) &&
 	      is.null(Ytest) &&
 	      !isTRUE(raw_scores) &&
 	      !isTRUE(use_metal) &&
@@ -4509,7 +4276,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            irlba_eps = 1e-9,
                            irlba_svtol = 1e-5,
                            seed = 1L,
-		                  classifier = c("argmax", "lda", "cknn"),
+		                  classifier = c("argmax", "lda"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
                            return_variance = TRUE,
@@ -4554,7 +4321,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                             svds_tol = 0,
                             svd.method = "cuda_rsvd",
                             seed = 1L,
-		                   classifier = c("argmax", "lda", "cknn"),
+		                   classifier = c("argmax", "lda"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
                             return_variance = TRUE,
@@ -4706,7 +4473,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                      irlba_eps = 1e-9,
                      irlba_svtol = 1e-5,
                      seed = 1L,
-			                  classifier = c("argmax", "lda", "cknn"),
+			                  classifier = c("argmax", "lda"),
                      lda_ridge = 1e-8,
                      fit = FALSE,
                      return_variance = TRUE,
@@ -4748,7 +4515,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                       svds_tol = 0,
                       svd.method = "cuda_rsvd",
                       seed = 1L,
-			                      classifier = c("argmax", "lda", "cknn"),
+			                      classifier = c("argmax", "lda"),
 	                  lda_ridge = 1e-8,
 	                  fit = FALSE,
                       return_variance = TRUE,
@@ -4860,13 +4627,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       gpu_qr = TRUE,
                       gpu_eig = TRUE,
                       gpu_finalize_threshold = 32L,
-			                      classifier = c("argmax", "lda", "cknn"),
+			                      classifier = c("argmax", "lda"),
 	                      lda_ridge = 1e-8,
                           return_variance = TRUE) {
   if (!has_cuda()) {
     stop("simpls_gpu requires a CUDA-enabled fastPLS build")
   }
-	  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
   classifier <- .resolve_classifier_for_backend(classifier, "cuda")
   svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
 
@@ -4874,76 +4640,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 	  Xtrain <- as.matrix(Xtrain)
 	  if (is.factor(Ytrain) &&
 	      identical(svd.method, "cuda_rsvd") &&
-	      !isTRUE(fit) &&
-	      classifier %in% c("argmax", "candidate_knn_cpp", "candidate_knn_cuda") &&
-	      .should_use_label_aware_plssvd(nrow(Xtrain), nlevels(Ytrain))) {
-	    model <- .plssvd_label_aware_stream_model(
-	      Xtrain,
-	      Ytrain,
-	      ncomp = as.integer(ncomp),
-	      scaling = scal,
-	      backend = "cuda"
-	    )
-	    model <- .record_pls_method_substitution(
-	      model,
-	      requested = "simpls",
-	      executed = "plssvd",
-	      reason = paste(
-	        "the label-aware large-class memory path avoids materializing",
-	        "the dense indicator response"
-	      )
-	    )
-	    model <- .attach_lda_classifier(
-	      model,
-	      Xtrain,
-	      Ytrain,
-	      classifier,
-	      lda_ridge
-	    )
-	    model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
-	    return(model)
+	      .dense_indicator_exceeds_cuda_guard(nrow(Xtrain), nlevels(Ytrain))) {
+	    .stop_unsafe_cuda_simpls_response(nrow(Xtrain), nlevels(Ytrain))
 	  }
 	  Ytrain_original <- Ytrain
-  if (is.factor(Ytrain_original) &&
-      identical(svd.method, "cuda_rsvd") &&
-      !isTRUE(fit) &&
-      identical(classifier, "lda_cuda")) {
-    lev <- levels(Ytrain_original)
-    model <- .plssvd_label_aware_scores_fast_model(
-      Xtrain,
-      Ytrain_original,
-      ncomp = as.integer(ncomp),
-      scaling = scal
-    )
-    model <- .record_pls_method_substitution(
-      model,
-      requested = "simpls",
-      executed = "plssvd",
-      reason = paste(
-        "the large-class CUDA LDA path uses label-aware PLS-SVD scores",
-        "to avoid materializing the dense indicator response"
-      )
-    )
-    cuda_reset_workspace()
-    model$classification <- TRUE
-    model$lev <- lev
-    model$predict_latent_ok <- TRUE
-    model <- .enable_flash_prediction(model, "cuda")
-    model <- .attach_lda_classifier(
-      model,
-      Xtrain,
-      Ytrain_original,
-      classifier,
-      lda_ridge
-    )
-    model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
-    if (!is.null(Xtest)) {
-      Xtest <- as.matrix(Xtest)
-      res <- predict.fastPLS(model, Xtest, Ytest = Ytest, proj = proj)
-      model <- c(model, res)
-    }
-    return(model)
-  }
   yprep <- .prepare_response(Ytrain)
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
@@ -5014,7 +4714,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     gpu_eig = gpu_eig,
     gpu_finalize_threshold = gpu_finalize_threshold
   )
-  cuda_reset_workspace()
   model$classification <- classification
   model$lev <- lev
   model$pls_method <- "simpls"
@@ -5091,13 +4790,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       gpu_qr = TRUE,
                       gpu_eig = TRUE,
                       gpu_finalize_threshold = 32L,
-	                      classifier = c("argmax", "lda", "cknn"),
+	                      classifier = c("argmax", "lda"),
 	                      lda_ridge = 1e-8,
                           return_variance = TRUE) {
   if (!has_cuda()) {
     stop("plssvd_gpu requires a CUDA-enabled fastPLS build")
   }
-	  on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
 				  classifier <- .resolve_classifier_for_backend(classifier, "cuda")
   svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
 
@@ -5175,7 +4873,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     gpu_eig = gpu_eig,
     gpu_finalize_threshold = gpu_finalize_threshold
   )
-  cuda_reset_workspace()
   model$classification <- classification
   model$lev <- lev
   model$pls_method <- "plssvd"
@@ -5469,8 +5166,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       degree = degree,
       coef0 = coef0
     )
+    r2 <- fit$R2Y
+    if (is.null(r2) || !length(r2)) {
+      r2 <- rep(NA_real_, length(ncomp))
+    }
     list(
-      R2Y = .fastpls_name_metric_path(fit$R2Y, ncomp),
+      R2Y = .fastpls_name_metric_path(r2, ncomp),
       Yfit = fit$Yfit
     )
   }, error = function(e) {
@@ -5479,7 +5180,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       Yfit = NULL
     )
   })
-  if (length(out$R2Y) != length(ncomp)) {
+  if (is.null(out$R2Y) || !length(out$R2Y)) {
+    out$R2Y <- rep(NA_real_, length(ncomp))
+  } else if (length(out$R2Y) != length(ncomp)) {
     out$R2Y <- rep_len(out$R2Y, length(ncomp))
   }
   out$R2Y <- .fastpls_name_metric_path(out$R2Y, ncomp)
@@ -5541,11 +5244,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       svd.method = params$svd.method %||% "irlba",
       classifier = params$classifier %||% "argmax",
       lda_ridge = params$lda_ridge %||% 1e-8,
-      k = params$k %||% 10L,
-      tau = params$tau %||% 0.2,
-      alpha = params$alpha %||% 0.75,
-      top_m = params$top_m %||% 20L,
-      cknn_memory = params$cknn_memory %||% "auto",
       fit = fit,
       bycol = bycol,
       return_variance = return_variance,
@@ -5709,12 +5407,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                              north = 1L,
                              return_scores = FALSE,
                              kodama_class_codes = NULL,
-                             classifier = c("argmax", "lda", "cknn"),
+                             classifier = c("argmax", "lda"),
                              lda_ridge = 1e-8,
-                             k = 10L,
-                            tau = 0.2,
-                            alpha = 0.75,
-                            top_m = 20L,
                             gpu_qr = TRUE,
                             gpu_eig = TRUE,
                              gpu_finalize_threshold = 32L,
@@ -5723,17 +5417,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   method <- match.arg(method)
   backend <- match.arg(backend)
   classifier <- .normalize_classifier_public(classifier)
-  classifier_id <- switch(classifier, argmax = 0L, lda = 1L, cknn = 2L)
-  k <- max(1L, as.integer(k)[1L])
-  top_m <- max(1L, as.integer(top_m)[1L])
-  tau <- as.numeric(tau)[1L]
-  alpha <- as.numeric(alpha)[1L]
-  if (!is.finite(tau) || tau <= 0) {
-    stop("tau must be a finite positive number", call. = FALSE)
-  }
-  if (!is.finite(alpha)) {
-    stop("alpha must be finite", call. = FALSE)
-  }
+  classifier_id <- switch(classifier, argmax = 0L, lda = 1L)
   scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   Xdata <- as.matrix(Xdata)
   if (is.null(constrain)) constrain <- seq_len(nrow(Xdata))
@@ -5844,10 +5528,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       class_codes = class_codes,
       classifier = classifier_id,
       lda_ridge = lda_ridge,
-      k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m,
+      k = 1L,
+      tau = 1,
+      alpha = 0,
+      top_m = 1L,
       store_predictions = isTRUE(store_predictions),
       metric_id = .cv_metric_id(selection_metric, classification)
     )
@@ -5862,7 +5546,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }
 
   if (identical(backend, "cuda")) {
-    on.exit(try(cuda_reset_workspace(), silent = TRUE), add = TRUE)
     cuda_simpls_family <- method %in% c("simpls", "opls", "kernelpls")
     if (cuda_simpls_family && isTRUE(xprod)) {
       res <- .with_simpls_gpu_xprod(
@@ -5883,7 +5566,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
         gpu_finalize_threshold = gpu_finalize_threshold
       )
     }
-    cuda_reset_workspace()
   } else if (identical(backend, "cpp")) {
     res <- .with_irlba_options(
       run_cv_profiled(),
@@ -6050,13 +5732,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                             gamma = NULL,
                             degree = 3L,
                             coef0 = 1,
-                            classifier = c("argmax", "lda", "cknn"),
-                            lda_ridge = 1e-8,
-                            k = 10L,
-                            tau = 0.2,
-                            alpha = 0.75,
-                            top_m = 20L,
-                            cknn_memory = c("auto", "standard", "blocked", "streaming"),
+		                 classifier = c("argmax", "lda"),
+		                 lda_ridge = 1e-8,
                             return_scores = TRUE,
                             store_predictions = TRUE,
                             selection_metric = "auto",
@@ -6065,17 +5742,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   backend <- match.arg(backend)
   scaling <- match.arg(scaling)
   classifier <- .resolve_classifier_for_backend(classifier, backend)
-  k <- max(1L, as.integer(k)[1L])
-  tau <- as.numeric(tau)[1L]
-  alpha <- as.numeric(alpha)[1L]
-  top_m <- max(1L, as.integer(top_m)[1L])
-  cknn_memory <- .normalize_cknn_memory(cknn_memory)
-  if (!is.finite(tau) || tau <= 0) {
-    stop("tau must be a finite positive number", call. = FALSE)
-  }
-  if (!is.finite(alpha)) {
-    stop("alpha must be finite", call. = FALSE)
-  }
   dots <- .svd_control_from_dots(list(...))
   svd_ctl <- .resolve_svd_control(
     svd.method = if (missing(svd.method)) NULL else svd.method,
@@ -6206,12 +5872,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       degree = degree,
       coef0 = coef0,
       classifier = classifier,
-      lda_ridge = lda_ridge,
-      k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m,
-      cknn_memory = cknn_memory
+      lda_ridge = lda_ridge
     )
 
     if (classification) {
@@ -6768,6 +6429,89 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   )
 }
 
+.fastsvd_numerical_diagnostics <- function(x, decomposition, randomized) {
+  u <- decomposition$U
+  vt <- decomposition$Vt
+  values <- as.numeric(decomposition$s)
+  returned_rank <- length(values)
+  finite <- returned_rank > 0L &&
+    all(is.finite(values)) &&
+    !is.null(u) && all(is.finite(u)) &&
+    !is.null(vt) && length(vt) > 0L && all(is.finite(vt))
+
+  out <- list(
+    status = if (finite) "basic_checks_passed" else "failed_nonfinite_or_empty",
+    returned_rank = returned_rank,
+    finite = finite,
+    residual_failure_threshold = 0.1,
+    residual_warning_threshold = 0.01,
+    orthogonality_warning_threshold = 1e-5
+  )
+  if (!finite) return(out)
+
+  if (.is_float32(x)) {
+    out$status <- "basic_checks_passed_residual_not_computed_float32"
+    out$note <- paste(
+      "The float32 path checks rank and finiteness without converting the",
+      "input to double solely for diagnostics."
+    )
+    return(out)
+  }
+
+  x <- as.matrix(x)
+  v <- t(vt)
+  diagnostic_index <- unique(c(1L, ceiling(returned_rank / 2), returned_rank))
+  diagnostic_index <- diagnostic_index[
+    diagnostic_index <= ncol(u) & diagnostic_index <= ncol(v)
+  ]
+  if (!length(diagnostic_index)) {
+    out$status <- "failed_missing_singular_vectors"
+    return(out)
+  }
+
+  ud <- u[, diagnostic_index, drop = FALSE]
+  vd <- v[, diagnostic_index, drop = FALSE]
+  sd <- values[diagnostic_index]
+  av <- x %*% vd
+  atu <- crossprod(x, ud)
+  scaled_u <- sweep(ud, 2L, sd, "*")
+  scaled_v <- sweep(vd, 2L, sd, "*")
+  left_denom <- pmax(
+    sqrt(colSums(av * av)),
+    abs(sd),
+    .Machine$double.eps
+  )
+  right_denom <- pmax(
+    sqrt(colSums(atu * atu)),
+    abs(sd),
+    .Machine$double.eps
+  )
+  left_residual <- sqrt(colSums((av - scaled_u)^2)) / left_denom
+  right_residual <- sqrt(colSums((atu - scaled_v)^2)) / right_denom
+  max_residual <- max(c(left_residual, right_residual))
+  u_orthogonality <- norm(crossprod(ud) - diag(ncol(ud)), type = "F")
+  v_orthogonality <- norm(crossprod(vd) - diag(ncol(vd)), type = "F")
+
+  out$checked_components <- diagnostic_index
+  out$max_relative_triplet_residual <- max_residual
+  out$left_orthogonality_error <- u_orthogonality
+  out$right_orthogonality_error <- v_orthogonality
+  if (max_residual > out$residual_failure_threshold) {
+    out$status <- "failed_large_triplet_residual"
+  } else if (max_residual > out$residual_warning_threshold ||
+             max(u_orthogonality, v_orthogonality) >
+               out$orthogonality_warning_threshold) {
+    out$status <- "warning_approximation_quality"
+  } else {
+    out$status <- if (randomized) {
+      "rsvd_triplet_checks_passed"
+    } else {
+      "deterministic_triplet_checks_passed"
+    }
+  }
+  out
+}
+
 #' Singular value decomposition through fastPLS backends
 #'
 #' Computes a truncated singular value decomposition of a dense numeric matrix
@@ -6817,7 +6561,11 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #'   sketch. It affects \code{rsvd} results and is ignored by deterministic
 #'   backends.
 #' @return A list compatible with `base::svd()` containing `d`, `u`, and `v`,
-#'   plus backend metadata.
+#'   plus backend metadata and numerical `diagnostics`. Diagnostics include
+#'   rank and finiteness checks and, for double-precision input, normalized
+#'   singular-triplet residuals for the first, middle, and last returned
+#'   components. A residual above 0.01 produces a warning status and a residual
+#'   above 0.1 is classified as a numerical failure.
 #' @examples
 #' set.seed(1)
 #' x <- matrix(rnorm(12 * 5), 12, 5)
@@ -6912,7 +6660,12 @@ fastsvd <- function(x,
   v <- if (is.null(out$Vt) || length(out$Vt) == 0L) NULL else t(out$Vt)
   if (!is.null(u) && ncol(u) > nu) u <- u[, seq_len(nu), drop = FALSE]
   if (!is.null(v) && ncol(v) > nv) v <- v[, seq_len(nv), drop = FALSE]
-  list(
+  diagnostics <- .fastsvd_numerical_diagnostics(
+    x_for_dim,
+    out,
+    randomized = identical(method, "rsvd")
+  )
+  result <- list(
     d = out$s,
     u = u,
     v = v,
@@ -6921,8 +6674,16 @@ fastsvd <- function(x,
     svd.method = svd.method,
     elapsed = out$elapsed,
     ncomp = k,
-    precision = out$precision %||% "double"
+    precision = out$precision %||% "double",
+    diagnostics = diagnostics
   )
+  if (startsWith(diagnostics$status, "failed_")) {
+    warning(
+      sprintf("fastsvd numerical diagnostics: %s", diagnostics$status),
+      call. = FALSE
+    )
+  }
+  result
 }
 
 #' Principal component analysis through fastPLS SVD backends
@@ -7987,7 +7748,7 @@ plot.permutation <- function(x,
                        rsvd_oversample = 10L,
                        rsvd_power = 1L,
                        seed = 1L,
-                       classifier = c("argmax", "lda", "cknn"),
+                       classifier = c("argmax", "lda"),
                        lda_ridge = 1e-8,
                        fit = FALSE,
                        return_variance = TRUE,
@@ -8125,26 +7886,45 @@ plot.permutation <- function(x,
 #' model can include predictions for held-out samples, latent scores, fitted
 #' values, variance summaries, and optional classification heads.
 #'
-#' If `Xtrain`, `Xtest`, `Ytrain`, or `Ytest` are supplied as `float::float32`
-#' objects, `pls()` uses a float32 route instead of converting them to double.
-#' This route is available for `method = "plssvd"`, `"simpls"`, `"opls"`, and
-#' `"kernelpls"`. OPLS filtering and kernel construction/centering retain
-#' float32 storage and arithmetic; a linear kernel uses the direct SIMPLS path,
-#' whereas nonlinear kernels still require an n-by-n Gram matrix. CPU
-#' and Metal support `svd.method = "rsvd"` or `svd.method = "irlba"`; CUDA
-#' supports float32 randomized SVD. Classification with float32 input supports
-#' `classifier = "argmax"`, `classifier = "lda"`, and `classifier = "cknn"`.
-#' Unsupported float32 combinations stop with a clear error rather than
-#' silently upcasting to double.
+#' Supplying `float::float32` predictors or responses requests single-precision
+#' execution without silent promotion to double. Float32 is route-specific,
+#' however, rather than a package-wide speed or memory guarantee. Compiled CPU
+#' and CUDA rSVD PLS-SVD have the broadest current validation. Metal and
+#' float32 IRLBA routes are experimental; accelerator OPLS and nonlinear
+#' kernel-PLS retain host stages; and Metal LDA uses the compiled CPU float32
+#' discriminant solver after Metal score projection.
+#'
+#' Float64 remains the numerical reference. Raw float32 matrices require about
+#' half the input storage, but paired tests show route-dependent runtime,
+#' incremental host RSS, and device-memory behavior. `pls()` therefore warns
+#' for experimental, hybrid, or measured risk regimes, including
+#' precision-sensitive SIMPLS/kernel-PLS classification, nonlinear kernels,
+#' Metal execution, float32 IRLBA, and extreme multivariate responses. For
+#' numeric responses with at least 10,000 columns and at least 50 components,
+#' PLS-SVD warns about observed performance/memory risk and SIMPLS-derived
+#' routes warn that the validation regime failed numerically or
+#' computationally. Unsupported combinations stop before allocation.
 #'
 #' For a factor response with \eqn{C} levels, centred dummy coding has rank at
 #' most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
-#' component count at \eqn{C-1}. On very large CUDA classification problems, a
-#' memory guard may replace a requested SIMPLS fit with the label-aware PLS-SVD
-#' projection to avoid a dense indicator matrix. Such substitution emits a
-#' warning and records the requested method, executed method, and reason in the
-#' fitted object's internal metadata. The current CUDA SIMPLS-LDA path similarly
-#' records that its latent score model was constructed by PLS-SVD.
+#' component count at \eqn{C-1}. The requested PLS estimator is always
+#' enforced: `method = "simpls"` fits SIMPLS and `method = "plssvd"` fits
+#' PLS-SVD. If a large CUDA classification response would exceed the guarded
+#' dense-indicator path, SIMPLS stops with a clear error rather than silently
+#' substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
+#'
+#' Randomized SVD is an approximate solver. The returned `diagnostics` performs
+#' inexpensive structural checks for finite latent factors and the requested
+#' effective component count, but these checks do not establish agreement with
+#' a deterministic fit. IRLBA should be preferred for confirmatory inference,
+#' coefficient or subspace interpretation, ill-conditioned or rank-deficient
+#' matrices, slowly decaying singular spectra, or whenever repeated rSVD seeds
+#' give materially different predictions. The package validation treats an
+#' rSVD approximation as failed when relative prediction error exceeds 0.05,
+#' prediction correlation is below 0.99, a latent-subspace angle exceeds 10
+#' degrees, classification-label agreement is below 0.99, or the absolute
+#' predictive-metric difference exceeds 0.01 relative to a deterministic
+#' reference.
 #'
 #' @details For latent-space LDA, the pooled covariance is computed as
 #'   \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
@@ -8171,36 +7951,8 @@ plot.permutation <- function(x,
 #'   randomized SVD for the selected backend, and \code{irlba} uses the bundled
 #'   CPU iterative backend.
 #' @param classifier Classification decision rule. \code{argmax} keeps the
-#'   standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
-#'   the PLS latent scores. \code{cknn} is the compact name for an optional
-#'   PLS-score
-#'   candidate-kNN classifier: class centroids in PLS score space choose
-#'   candidate classes, then every sample is reranked by within-candidate kNN in
-#'   the same PLS score space. The route is selected automatically from
-#'   `backend`: compiled C++ for \code{cpu}, CUDA acceleration for \code{cuda},
-#'   and Metal projection followed by CPU neighbour scoring for \code{metal}.
-#'   It is a proof-of-concept downstream classifier for
-#'   sample-rich latent spaces, not the default PLS-DA decoder, and should be
-#'   validated against \code{argmax} and \code{lda}.
-#' @param k Number of same-class PLS-score neighbours used by
-#'   the candidate-kNN classifier. Larger values use more neighbours per
-#'   candidate class and therefore give a smoother, less local decision.
-#' @param tau Positive temperature for pooling the top neighbour similarities in
-#'   candidate-kNN scoring. Smaller values make the score close to the best
-#'   neighbour; larger values average the top neighbours more smoothly.
-#' @param alpha Weight of the centroid/prototype candidate score added to the
-#'   local kNN score. The final candidate score is the smoothed same-class kNN
-#'   evidence plus \code{alpha} times the centroid score. Higher values keep the
-#'   decision closer to the global PLS class-centroid ranking; lower values make
-#'   the reranking depend more strongly on local neighbours.
-#' @param top_m Number of centroid-ranked candidate classes passed to
-#'   the kNN reranker.
-#' @param cknn_memory Memory strategy for \code{classifier = "cknn"}.
-#'   \code{standard} uses the historical one-pass candidate-kNN path.
-#'   \code{blocked} predicts test samples in blocks, reducing test-side
-#'   latent-score memory. \code{streaming} additionally builds the training
-#'   candidate-score cache in blocks for scalar component counts. \code{auto}
-#'   chooses a memory-aware strategy from the data size.
+#'   standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
+#'   classifier on the PLS latent scores.
 #' @param lda_ridge Retained for source compatibility. PLS-LDA uses a fixed,
 #'   scale-normalized Cholesky fallback sequence rather than a tuned ridge.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
@@ -8293,6 +8045,11 @@ plot.permutation <- function(x,
 #'     `gpu_resident`: OPLS-specific orthogonal-component and backend metadata.
 #'   * `kernel`, `kernel_engine`, `kernel_linear_direct`: kernelPLS-specific
 #'     kernel settings and execution metadata.
+#'   * `diagnostics`: numerical solver diagnostics. For rSVD this records the
+#'     structural-check status, finiteness, requested and effective component
+#'     counts, and the randomized controls. A status of
+#'     `basic_checks_passed_approximation_not_audited` means only that the fit is
+#'     structurally valid; it is not evidence of deterministic equivalence.
 #'
 #'   Function settings and backend bookkeeping, such as the component grid and
 #'   resolved classifier backend, are retained internally for prediction and
@@ -8318,13 +8075,8 @@ pls =  function (Xtrain,
                  scaling = c("centering", "autoscaling","none"),
                  method = c("simpls", "plssvd", "opls", "kernelpls"),
                  svd.method = c("rsvd", "irlba"),
-		                 classifier = c("argmax", "lda", "cknn"),
+		                 classifier = c("argmax", "lda"),
 		                 lda_ridge = 1e-8,
-			                 k = 10L,
-			                 tau = 0.2,
-			                 alpha = 0.75,
-			                 top_m = 20L,
-                         cknn_memory = c("auto", "standard", "blocked", "streaming"),
 	                 fit = FALSE,
                  bycol = FALSE,
                  return_variance = TRUE,
@@ -8386,26 +8138,7 @@ pls =  function (Xtrain,
   if (!isTRUE(.has_float32_input(Xtrain, Ytrain, Xtest, Ytest))) {
     svd.method <- .backend_svd_method(svd.method, backend)
   }
-			  classifier <- .resolve_classifier_for_backend(classifier, backend)
-		  k <- max(1L, as.integer(k)[1L])
-		  tau <- as.numeric(tau)[1L]
-		  alpha <- as.numeric(alpha)[1L]
-		  top_m <- max(1L, as.integer(top_m)[1L])
-      cknn_memory <- .normalize_cknn_memory(cknn_memory)
-		  if (!is.finite(tau) || tau <= 0) {
-		    stop("tau must be a finite positive number", call. = FALSE)
-		  }
-		  if (!is.finite(alpha)) {
-		    stop("alpha must be finite", call. = FALSE)
-		  }
-		  old_class_bias_options <- options(
-		    fastPLS.k = k,
-		    fastPLS.tau = tau,
-		    fastPLS.alpha = alpha,
-		    fastPLS.top_m = top_m,
-        fastPLS.cknn_memory = cknn_memory
-	  )
-	  on.exit(options(old_class_bias_options), add = TRUE)
+		  classifier <- .resolve_classifier_for_backend(classifier, backend)
 
   backend_control <- NULL
 
@@ -8444,17 +8177,25 @@ pls =  function (Xtrain,
     if (isTRUE(perm.test)) {
       stop("perm.test = TRUE is not yet available for float32 input.", call. = FALSE)
     }
+    .warn_float32_capability(
+      method = requested_method,
+      backend = backend,
+      svd_method = svd.method,
+      Ytrain = Ytrain,
+      ncomp = ncomp,
+      kernel = kernel,
+      classifier = classifier
+    )
     model <- if (identical(requested_method, "opls")) {
       .fit_float32_opls(
         Xtrain, Ytrain, ncomp, scal, north, backend, svd.method,
-        rsvd_oversample, rsvd_power, seed, fit, classifier, lda_ridge,
-        k, tau, alpha, top_m
+        rsvd_oversample, rsvd_power, seed, fit, classifier, lda_ridge
       )
     } else if (identical(requested_method, "kernelpls")) {
       .fit_float32_kernelpls(
         Xtrain, Ytrain, ncomp, scal, kernel, gamma, degree, coef0,
         backend, svd.method, rsvd_oversample, rsvd_power, seed, fit,
-        classifier, lda_ridge, k, tau, alpha, top_m
+        classifier, lda_ridge
       )
     } else {
       fitted <- .fit_float32_pls(
@@ -8475,11 +8216,7 @@ pls =  function (Xtrain,
         Xtrain = Xtrain,
         Ytrain_original = Ytrain,
         classifier = classifier,
-        lda_ridge = lda_ridge,
-        k = k,
-        tau = tau,
-        alpha = alpha,
-        top_m = top_m
+        lda_ridge = lda_ridge
       )
     }
     if (!isTRUE(fit) && !is.null(model$R2Y)) {
@@ -8492,6 +8229,9 @@ pls =  function (Xtrain,
       class(model) <- model_class
     }
     model <- .attach_backend_control(model, backend_control)
+    model <- .fastpls_attach_solver_diagnostics(
+      model, svd.method, rsvd_oversample, rsvd_power, seed
+    )
     model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
@@ -8521,6 +8261,9 @@ pls =  function (Xtrain,
     )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     model <- .attach_backend_control(model, backend_control)
+    model <- .fastpls_attach_solver_diagnostics(
+      model, svd.method, rsvd_oversample, rsvd_power, seed
+    )
     model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
@@ -8548,6 +8291,9 @@ pls =  function (Xtrain,
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     model <- .attach_backend_control(model, backend_control)
+    model <- .fastpls_attach_solver_diagnostics(
+      model, svd.method, rsvd_oversample, rsvd_power, seed
+    )
     model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
@@ -8576,6 +8322,9 @@ pls =  function (Xtrain,
     model <- do.call(fit_fun, args)
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     model <- .attach_backend_control(model, backend_control)
+    model <- .fastpls_attach_solver_diagnostics(
+      model, svd.method, rsvd_oversample, rsvd_power, seed
+    )
     model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
@@ -8602,6 +8351,9 @@ pls =  function (Xtrain,
 	      )
       model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
       model <- .attach_backend_control(model, backend_control)
+      model <- .fastpls_attach_solver_diagnostics(
+        model, svd.method, rsvd_oversample, rsvd_power, seed
+      )
       model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
       return(.fastpls_public_pls_output(model, model$ncomp))
     }
@@ -8625,6 +8377,9 @@ pls =  function (Xtrain,
 	    )
     model <- .maybe_attach_x_loadings(model, Xtrain, return_loadings)
     model <- .attach_backend_control(model, backend_control)
+    model <- .fastpls_attach_solver_diagnostics(
+      model, svd.method, rsvd_oversample, rsvd_power, seed
+    )
     model <- .fastpls_attach_pls_metrics(model, Ytrain, Ytest, bycol)
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
@@ -8658,6 +8413,7 @@ pls =  function (Xtrain,
       (identical(svd.method, "irlba") &&
          .should_use_xprod_irlba_default(nrow(Xtrain), ncol(Xtrain), ncol(Ytrain), ncomp))
   )
+  use_xprod_default <- .ablation_xprod_override(use_xprod_default)
   xprod_precision_default <- if (identical(svd.method, "irlba")) "implicit_irlba" else "implicit64"
 
   if(meth==1){
@@ -8914,6 +8670,9 @@ pls =  function (Xtrain,
 
   class(model)="fastPLS"
   model <- .attach_backend_control(model, backend_control)
+  model <- .fastpls_attach_solver_diagnostics(
+    model, svd.method, rsvd_oversample, rsvd_power, seed
+  )
   model <- .fastpls_attach_pls_metrics(model, Ytrain_original, Ytest, bycol)
   .fastpls_public_pls_output(model, model$ncomp)
 }
@@ -9100,13 +8859,6 @@ pls =  function (Xtrain,
   if (!identical(cfg$method, "opls")) {
     cfg$north <- 1L
   }
-  if (!identical(cfg$classifier, "cknn")) {
-    cfg$k <- 10L
-    cfg$tau <- 0.2
-    cfg$alpha <- 0.75
-    cfg$top_m <- 20L
-    cfg$cknn_memory <- "auto"
-  }
   cfg$lda_ridge <- 1e-8
   cfg
 }
@@ -9127,19 +8879,11 @@ pls =  function (Xtrain,
                                      coef0,
                                      classifier, classifier_missing,
                                      lda_ridge,
-                                     k,
-                                     tau,
-                                     alpha,
-                                     top_m,
-                                     cknn_memory,
-                                     cknn_memory_missing,
                                      xprod,
                                      dots = list(),
                                      context = "cross-validation") {
   classifier_normalizer <- function(x) {
-    x <- as.character(x)
-    if (identical(x, "candidate_knn")) x <- "cknn"
-    x
+    as.character(x)
   }
   svd_normalizer <- function(x) {
     x <- as.character(x)
@@ -9199,17 +8943,6 @@ pls =  function (Xtrain,
         normalizer = classifier_normalizer
       ),
       lda_ridge = 1e-8,
-      k = .cv_grid_scalar_values(k, name = "k", cast = as.integer, allow_null = FALSE),
-      tau = .cv_grid_scalar_values(tau, name = "tau", cast = as.numeric, allow_null = FALSE),
-      alpha = .cv_grid_scalar_values(alpha, name = "alpha", cast = as.numeric, allow_null = FALSE),
-      top_m = .cv_grid_scalar_values(top_m, name = "top_m", cast = as.integer, allow_null = FALSE),
-      cknn_memory = .cv_grid_choice_values(
-        cknn_memory, cknn_memory_missing,
-        choices = c("auto", "standard", "blocked", "streaming"),
-        default = "auto",
-        name = "cknn_memory",
-        normalizer = .normalize_cknn_memory
-      ),
       xprod = .cv_grid_scalar_values(xprod, name = "xprod")
     ),
     dot_params
@@ -9260,9 +8993,6 @@ pls =  function (Xtrain,
     } else if (identical(cfg$kernel, "poly")) {
       keep <- c(keep, "gamma", "degree", "coef0")
     }
-  }
-  if (identical(cfg$classifier, "cknn")) {
-    keep <- c(keep, "k", "tau", "alpha", "top_m", "cknn_memory")
   }
   keep <- intersect(unique(keep), names(cfg))
   out <- cfg[keep]
@@ -9389,23 +9119,10 @@ pls =  function (Xtrain,
 #' @param seed Random seed used for fold assignment and randomized SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
-#' @param classifier Classification rule for factor responses: `"argmax"`,
-#'   `"lda"`, or the optional proof-of-concept `"cknn"` decoder. Multiple
-#'   values are treated as a tuning grid; cKNN should be validated against
-#'   argmax or LDA because it depends on sample density within each class.
+#' @param classifier Classification rule for factor responses: `"argmax"` or
+#'   latent-space `"lda"`. Multiple values are treated as a tuning grid.
 #' @param lda_ridge Retained for source compatibility. LDA regularization is a
 #'   deterministic numerical fallback and is not tuned during cross-validation.
-#' @param k Number of same-class PLS-score neighbours used by
-#'   candidate-kNN when `classifier = "cknn"`.
-#' @param tau Positive temperature for smoothing the top neighbour
-#'   similarities. Smaller values emphasize the nearest neighbour; larger values
-#'   produce a smoother local class score.
-#' @param alpha Weight of the centroid/prototype candidate score in
-#'   candidate-kNN. The final candidate score is local kNN evidence plus
-#'   \code{alpha} times the centroid score, so larger values keep more of the
-#'   global centroid ranking.
-#' @param top_m Number of centroid-ranked candidate classes passed to the
-#'   kNN reranker.
 #' @param fit Fit one additional model on the full dataset and return its
 #'   fitted values (`Yfit`) and training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra full-data fit;
@@ -9460,7 +9177,7 @@ pls =  function (Xtrain,
 #'   `classifier = c("argmax", "lda")`.
 #'   \item `tuning_config`: relevant selected configuration used for the run.
 #'   Irrelevant classifier- or method-specific defaults are omitted; for
-#'   example, cKNN controls are not shown when `classifier = "argmax"`.
+#'   example, controls belonging to an unselected classifier are omitted.
 #'   \item `tuning_summary` and `tuning_metrics`: tables for all tested
 #'   configurations when more than one predictive configuration is supplied.
 #'   \item The returned object can be passed as the first argument to [pls()] to
@@ -9495,13 +9212,8 @@ pls.single.cv =  function (Xdata,
                           gamma = NULL,
                           degree = 3L,
                           coef0 = 1,
-                          classifier = c("argmax", "lda", "cknn"),
+                          classifier = c("argmax", "lda"),
                           lda_ridge = 1e-8,
-                          k = 10L,
-                          tau = 0.2,
-                          alpha = 0.75,
-                          top_m = 20L,
-                          cknn_memory = c("auto", "standard", "blocked", "streaming"),
                           fit = TRUE,
                           bycol = FALSE,
                           xprod = NULL,
@@ -9529,12 +9241,6 @@ pls.single.cv =  function (Xdata,
     classifier = classifier,
     classifier_missing = missing(classifier),
     lda_ridge = lda_ridge,
-    k = k,
-    tau = tau,
-    alpha = alpha,
-    top_m = top_m,
-    cknn_memory = cknn_memory,
-    cknn_memory_missing = missing(cknn_memory),
     xprod = xprod,
     dots = selection_ctl$dots,
     context = "pls.single.cv()"
@@ -9565,11 +9271,6 @@ pls.single.cv =  function (Xdata,
           coef0 = cfg$coef0,
           classifier = cfg$classifier,
           lda_ridge = cfg$lda_ridge,
-          k = cfg$k,
-          tau = cfg$tau,
-          alpha = cfg$alpha,
-          top_m = cfg$top_m,
-          cknn_memory = cfg$cknn_memory,
           fit = fit,
           bycol = bycol,
           xprod = cfg$xprod,
@@ -9645,11 +9346,6 @@ pls.single.cv =  function (Xdata,
   coef0 <- cfg$coef0
   classifier <- cfg$classifier
   lda_ridge <- cfg$lda_ridge
-  k <- cfg$k
-  tau <- cfg$tau
-  alpha <- cfg$alpha
-  top_m <- cfg$top_m
-  cknn_memory <- cfg$cknn_memory
   xprod <- cfg$xprod
   backend <- .normalize_public_backend(backend)
   backend_compiled <- .compiled_backend(backend)
@@ -9674,9 +9370,7 @@ pls.single.cv =  function (Xdata,
   if (is.null(constrain)) constrain <- seq_len(nrow(Xdata))
   classification <- is.factor(Ydata)
 
-  res <- if (isTRUE(float32_input) ||
-             (identical(classifier, "cknn") && !identical(cknn_memory, "standard")) ||
-             !identical(kernel, "linear")) {
+  res <- if (isTRUE(float32_input) || !identical(kernel, "linear")) {
     .pls_cv_via_pls(
       Xdata = Xdata,
       Ydata = Ydata,
@@ -9703,11 +9397,6 @@ pls.single.cv =  function (Xdata,
       coef0 = coef0,
       classifier = classifier,
       lda_ridge = lda_ridge,
-      k = k,
-      tau = tau,
-      alpha = alpha,
-      top_m = top_m,
-      cknn_memory = cknn_memory,
       return_scores = TRUE,
       store_predictions = !classification ||
         classification ||
@@ -9739,10 +9428,6 @@ pls.single.cv =  function (Xdata,
     return_scores = TRUE,
     classifier = classifier,
     lda_ridge = lda_ridge,
-    k = k,
-    tau = tau,
-    alpha = alpha,
-    top_m = top_m,
     store_predictions = !classification ||
       classification ||
       (classification && !identical(classifier, "argmax")),
@@ -9972,13 +9657,8 @@ pls.double.cv = function(Xdata,
                          gamma = NULL,
                          degree = 3L,
                          coef0 = 1,
-                         classifier = c("argmax", "lda", "cknn"),
+                         classifier = c("argmax", "lda"),
                          lda_ridge = 1e-8,
-                         k = 10L,
-                         tau = 0.2,
-                         alpha = 0.75,
-                         top_m = 20L,
-                         cknn_memory = c("auto", "standard", "blocked", "streaming"),
                          bycol = FALSE,
                          xprod = NULL,
                          ...){
@@ -10005,12 +9685,6 @@ pls.double.cv = function(Xdata,
     classifier = classifier,
     classifier_missing = missing(classifier),
     lda_ridge = lda_ridge,
-    k = k,
-    tau = tau,
-    alpha = alpha,
-    top_m = top_m,
-    cknn_memory = cknn_memory,
-    cknn_memory_missing = missing(cknn_memory),
     xprod = xprod,
     dots = selection_ctl$dots,
     context = "pls.double.cv()"
@@ -10027,11 +9701,6 @@ pls.double.cv = function(Xdata,
   coef0_grid <- .cv_grid_arg_values(tuning_grid, "coef0")
   classifier_grid <- .cv_grid_arg_values(tuning_grid, "classifier")
   lda_ridge_grid <- .cv_grid_arg_values(tuning_grid, "lda_ridge")
-  k_grid <- .cv_grid_arg_values(tuning_grid, "k")
-  tau_grid <- .cv_grid_arg_values(tuning_grid, "tau")
-  alpha_grid <- .cv_grid_arg_values(tuning_grid, "alpha")
-  top_m_grid <- .cv_grid_arg_values(tuning_grid, "top_m")
-  cknn_memory_grid <- .cv_grid_arg_values(tuning_grid, "cknn_memory")
   xprod_grid <- .cv_grid_arg_values(tuning_grid, "xprod")
   svd_dot_names <- unique(unlist(lapply(tuning_grid, function(cfg) names(cfg$svd_dots)), use.names = FALSE))
   svd_dot_args <- lapply(svd_dot_names, function(nm) .cv_grid_dot_values(tuning_grid, nm))
@@ -10048,11 +9717,6 @@ pls.double.cv = function(Xdata,
   classifier_public <- base_cfg$classifier
   classifier <- .resolve_classifier_for_backend(classifier_public, backend)
   lda_ridge <- base_cfg$lda_ridge
-  k <- base_cfg$k
-  tau <- base_cfg$tau
-  alpha <- base_cfg$alpha
-  top_m <- base_cfg$top_m
-  cknn_memory <- base_cfg$cknn_memory
   xprod <- base_cfg$xprod
 
   dots <- .svd_control_from_dots(base_cfg$svd_dots)
@@ -10154,11 +9818,6 @@ pls.double.cv = function(Xdata,
           coef0 = coef0_grid,
           classifier = classifier_grid,
           lda_ridge = lda_ridge_grid,
-          k = k_grid,
-          tau = tau_grid,
-          alpha = alpha_grid,
-          top_m = top_m_grid,
-          cknn_memory = cknn_memory_grid,
           bycol = bycol,
           xprod = xprod_grid,
           selection_metric = selection_ctl$metric
@@ -10182,11 +9841,6 @@ pls.double.cv = function(Xdata,
       fit_classifier_public <- .cv_value_or_default(selected, "classifier", classifier_public)
       fit_classifier <- .resolve_classifier_for_backend(fit_classifier_public, fit_backend)
       fit_lda_ridge <- .cv_value_or_default(selected, "lda_ridge", lda_ridge)
-      fit_k <- .cv_value_or_default(selected, "k", k)
-      fit_tau <- .cv_value_or_default(selected, "tau", tau)
-      fit_alpha <- .cv_value_or_default(selected, "alpha", alpha)
-      fit_top_m <- .cv_value_or_default(selected, "top_m", top_m)
-      fit_cknn_memory <- .cv_value_or_default(selected, "cknn_memory", cknn_memory)
       fit_rsvd_oversample <- .cv_value_or_default(selected, "rsvd_oversample", rsvd_oversample)
       fit_rsvd_power <- .cv_value_or_default(selected, "rsvd_power", rsvd_power)
       fit_svds_tol <- .cv_value_or_default(selected, "svds_tol", svds_tol)
@@ -10223,12 +9877,7 @@ pls.double.cv = function(Xdata,
         degree = fit_degree,
         coef0 = fit_coef0,
         classifier = fit_classifier,
-        lda_ridge = fit_lda_ridge,
-        k = fit_k,
-        tau = fit_tau,
-        alpha = fit_alpha,
-        top_m = fit_top_m,
-        cknn_memory = fit_cknn_memory
+        lda_ridge = fit_lda_ridge
       )
 
       if (classification) {
@@ -10399,11 +10048,6 @@ pls.double.cv = function(Xdata,
         coef0 = coef0,
         classifier = classifier,
         lda_ridge = lda_ridge,
-        k = k,
-        tau = tau,
-        alpha = alpha,
-        top_m = top_m,
-        cknn_memory = cknn_memory,
         bycol = bycol,
         xprod = xprod,
         selection_metric = selection_ctl$metric

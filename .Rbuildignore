@@ -36,3 +36,10 @@
 ^Library$
 ^Outputs$
 ^output(/|$)
+^artifacts(/|$)
+^tmp(/|$)
+^[.]-00build[.]log$
+^fastPLS[.]Rcheck.*$
+^tools/__pycache__(/|$)
+^fastPLS_reference_manual_.*[.]pdf$
+^fastPLS_vignette_.*[.]html$

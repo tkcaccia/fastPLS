@@ -258,6 +258,12 @@ test_that("simpls path uses the SVD backend selector", {
   expect_equal(rsvd$B, exact$B, tolerance = 7e-2)
   expect_true(all(is.finite(rsvd$R)))
   expect_true(all(is.finite(rsvd$Q)))
+  expect_identical(
+    rsvd$diagnostics$status,
+    "basic_checks_passed_approximation_not_audited"
+  )
+  expect_true(isTRUE(rsvd$diagnostics$stochastic))
+  expect_equal(rsvd$diagnostics$effective_components, 5L)
 
   expect_error(
     pls(
@@ -272,6 +278,34 @@ test_that("simpls path uses the SVD backend selector", {
       seed = 99L
     ),
     "should be one of"
+  )
+})
+
+test_that("SIMPLS rSVD uses oversampled updates and improves with power iterations", {
+  set.seed(204)
+  n <- 180
+  latent <- matrix(rnorm(n * 12), n, 12)
+  X <- latent %*% matrix(rnorm(12 * 60), 12, 60) +
+    matrix(rnorm(n * 60, sd = 0.1), n, 60)
+  Y <- latent %*% matrix(rnorm(12 * 20), 12, 20) +
+    matrix(rnorm(n * 20, sd = 0.1), n, 20)
+
+  reference <- pls(
+    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
+    svd.method = "irlba", fit = TRUE, return_variance = FALSE
+  )
+  approximate <- pls(
+    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
+    svd.method = "rsvd", oversample = 10L, power = 4L, seed = 204L,
+    fit = TRUE, return_variance = FALSE
+  )
+
+  relative_error <- sqrt(sum((approximate$B - reference$B)^2)) /
+    max(sqrt(sum(reference$B^2)), .Machine$double.eps)
+  expect_lt(relative_error, 0.02)
+  expect_identical(
+    approximate$diagnostics$status,
+    "basic_checks_passed_approximation_not_audited"
   )
 })
 
@@ -333,20 +367,20 @@ test_that("centered factor-response PLSSVD respects the C minus 1 rank bound", {
   expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), 2L)
 })
 
-test_that("estimator substitutions are warned and retained as internal metadata", {
-  model <- structure(list(pls_method = "plssvd"), class = "fastPLS")
-  expect_warning(
-    model <- fastPLS:::.record_pls_method_substitution(
-      model,
-      requested = "simpls",
-      executed = "plssvd",
-      reason = "test memory path"
-    ),
-    "method='simpls' requested, but method='plssvd' was executed"
+test_that("CUDA SIMPLS memory guard refuses estimator substitution", {
+  old <- Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", unset = NA_character_)
+  on.exit({
+    if (is.na(old)) {
+      Sys.unsetenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB")
+    } else {
+      Sys.setenv(FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = old)
+    }
+  }, add = TRUE)
+  Sys.setenv(FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = "0")
+
+  expect_true(fastPLS:::.dense_indicator_exceeds_cuda_guard(20, 3))
+  expect_error(
+    fastPLS:::.stop_unsafe_cuda_simpls_response(20, 3),
+    "does not replace a requested SIMPLS estimator with PLS-SVD"
   )
-  public <- fastPLS:::.fastpls_public_pls_output(model)
-  internal <- attr(public, "fastPLS_internal")
-  expect_equal(internal$requested_pls_method, "simpls")
-  expect_equal(internal$pls_method, "plssvd")
-  expect_equal(internal$method_substitution_reason, "test memory path")
 })

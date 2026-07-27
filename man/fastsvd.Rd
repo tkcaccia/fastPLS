@@ -80,13 +80,26 @@ backends.}
 \value{
 A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{v}, plus backend metadata \code{backend}, \code{method},
-\code{svd.method}, \code{elapsed}, and \code{ncomp}.
+\code{svd.method}, \code{elapsed}, and \code{ncomp}. The
+\code{diagnostics} element reports rank and finiteness checks. For
+double-precision input it also reports sampled singular-triplet residuals and
+left/right orthogonality errors. A residual above 0.01 produces a warning
+status and a residual above 0.1 produces a failure status.
 }
 \description{
 Computes a truncated singular value decomposition of a dense numeric matrix
 with a selected CPU, CUDA, or Metal backend. The result contains singular
 values, requested singular vectors, decomposition rank, elapsed time, and
 backend metadata.
+}
+\details{
+Randomized SVD is stochastic. Passing the returned singular-triplet checks
+does not prove that the selected dominant subspace agrees with a deterministic
+IRLBA fit, particularly when singular values decay slowly. Increase
+\code{power} or \code{oversample} and compare multiple seeds when approximation
+stability matters. Prefer CPU IRLBA for confirmatory coefficient or subspace
+interpretation, ill-conditioned or rank-deficient matrices, or unstable rSVD
+results.
 }
 \examples{
 set.seed(1)

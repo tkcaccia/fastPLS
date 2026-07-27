@@ -23,62 +23,6 @@ test_that("top-k classification prediction preserves argmax by default", {
   expect_equal(dim(top5$Ypred_top_score[[1]]), c(length(idx), 5L))
 })
 
-test_that("candidate-kNN classifier is fitted and can be used for top-k prediction", {
-  set.seed(20260512)
-  X <- matrix(rnorm(90 * 9), nrow = 90, ncol = 9)
-  y <- factor(sample(c("A", "B", "C"), 90, replace = TRUE))
-  idx <- sample(seq_len(90), 20)
-
-  fit <- pls(
-    X[-idx, , drop = FALSE],
-    y[-idx],
-    ncomp = 1:2,
-    method = "simpls",
-    svd.method = "cpu_rsvd",
-    classifier = "cknn",
-    k = 10L,
-    tau = 0.2,
-    alpha = 0.75,
-    seed = 123L
-  )
-
-  internal <- attr(fit, "fastPLS_internal")
-  expect_equal(internal$classification_rule, "candidate_knn_cpp")
-  expect_true(is.list(internal$candidate_knn))
-  expect_equal(internal$candidate_knn$parameters$knn_k, 10L)
-  expect_equal(internal$candidate_knn$parameters$tau, 0.2)
-  expect_equal(internal$candidate_knn$parameters$alpha, 0.75)
-  expect_null(internal$candidate_knn$parameters$bias_method)
-
-  pred <- predict(fit, X[idx, , drop = FALSE], top = 3L)
-  expect_true(is.data.frame(pred$Ypred))
-  expect_equal(dim(pred$Ypred_top[[1]]), c(length(idx), 3L))
-})
-
-test_that("candidate-kNN stores no class-bias offsets", {
-  set.seed(20260513)
-  X <- matrix(rnorm(72 * 8), nrow = 72, ncol = 8)
-  y <- factor(sample(c("A", "B", "C", "D"), 72, replace = TRUE))
-
-  fit <- pls(
-    X,
-    y,
-    ncomp = 2,
-    method = "plssvd",
-    svd.method = "cpu_rsvd",
-    classifier = "cknn",
-    return_variance = FALSE,
-    seed = 321L
-  )
-
-  expect_true(is.null(fit$class_bias))
-  expect_true(is.null(fit$class_bias_parameters))
-  internal <- attr(fit, "fastPLS_internal")
-  expect_true(all(vapply(internal$candidate_knn$models, function(x) is.null(x$bias), logical(1))))
-  pred <- predict(fit, X, top5 = TRUE)
-  expect_equal(dim(pred$Ypred_top[[1]]), c(nrow(X), 4L))
-})
-
 test_that("label-aware PLSSVD model avoids dense response storage", {
   set.seed(20260514)
   X <- matrix(rnorm(80 * 12), nrow = 80, ncol = 12)

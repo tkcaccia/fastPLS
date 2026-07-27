@@ -166,6 +166,60 @@ test_that("pls accepts float32 classification input with argmax", {
   expect_named(fit$accuracy, "ncomp=2")
 })
 
+test_that("float32 label-aware products match dense one-hot fitting", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(151)
+  n <- 180L
+  X <- float::fl(matrix(rnorm(n * 24L), n, 24L))
+  y <- factor(sample(letters[1:5], n, replace = TRUE))
+  dense_y <- float::fl(fastPLS:::transformy(as.integer(y)))
+
+  for (method in c(plssvd = 1L, simpls = 3L)) {
+    compact <- fastPLS:::pls_float32_labels_cpp(
+      X, as.integer(y), nlevels(y), c(2L, 4L), 1L, TRUE,
+      method, 0L, 3L, 8L, 2L, 151L
+    )
+    dense <- fastPLS:::pls_float32_cpu_cpp(
+      X, dense_y, c(2L, 4L), 1L, TRUE,
+      method, 0L, 3L, 8L, 2L, 151L
+    )
+    compact_r <- float::dbl(fastPLS:::.float32_from_bits(compact$R))
+    dense_r <- float::dbl(fastPLS:::.float32_from_bits(dense$R))
+
+    expect_equal(abs(compact_r), abs(dense_r), tolerance = 2e-3)
+    expect_equal(compact$R2Y, dense$R2Y, tolerance = 2e-3)
+    expect_identical(compact$xprod_mode, "float32_label_class_sums")
+  }
+})
+
+test_that("float32 classification avoids fitted and double-score work by default", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(152)
+  X <- float::fl(matrix(rnorm(150L * 18L), 150L, 18L))
+  y <- factor(rep(letters[1:5], each = 30L))
+  fit <- suppressWarnings(pls(
+    X, y,
+    ncomp = c(2L, 4L),
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = FALSE,
+    return_variance = FALSE,
+    power = 2L,
+    seed = 152L
+  ))
+
+  expect_null(fit$Yfit)
+  expect_identical(fit$xprod_mode, "float32_label_class_sums")
+  pred <- predict(fit, X)
+  expect_true(is.factor(pred$Ypred[["ncomp=4"]]))
+
+  scores <- float::fl(matrix(c(1, 3, 2, 4, 2, 0), nrow = 2L))
+  expect_identical(fastPLS:::float32_argmax_cpp(scores), c(2L, 2L))
+})
+
 test_that("float32 input refuses unsupported non-float routes", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()

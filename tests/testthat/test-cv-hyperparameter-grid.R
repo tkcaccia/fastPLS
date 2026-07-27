@@ -97,17 +97,6 @@ test_that("pls.single.cv tuning_config omits irrelevant classifier controls", {
     seed = 2
   )
   expect_false(any(c("lda_ridge", "k", "tau", "alpha", "top_m", "cknn_memory") %in% names(lda$tuning_config)))
-
-  cknn <- pls.single.cv(
-    X,
-    y,
-    ncomp = 2,
-    kfold = 3,
-    classifier = "cknn",
-    seed = 2
-  )
-  expect_true(all(c("k", "tau", "alpha", "top_m", "cknn_memory") %in% names(cknn$tuning_config)))
-  expect_false("lda_ridge" %in% names(cknn$tuning_config))
 })
 
 test_that("pls refits and predicts from a pls.single.cv result", {
@@ -174,4 +163,28 @@ test_that("pls refits regression models selected by pls.single.cv", {
   expect_equal(dim(fit$Ypred)[1], length(test_idx))
   expect_true(any(is.finite(fit$Ypred)))
   expect_true(any(is.finite(fit$Q2Y)))
+})
+
+test_that("OPLS component selection tolerates unavailable fitted R2 output", {
+  idx <- c(1:12, 51:62, 101:112)
+  X <- as.matrix(iris[idx, 1:4])
+  y <- factor(iris[idx, 5])
+
+  fit <- pls.single.cv(
+    X,
+    y,
+    ncomp = 1:2,
+    kfold = 3,
+    method = "opls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    fit = TRUE,
+    seed = 7
+  )
+
+  expect_true(fit$best_ncomp %in% 1:2)
+  expect_length(fit$R2Y, 2L)
+  expect_true(all(is.na(fit$R2Y)))
+  expect_true(all(is.finite(fit$accuracy)))
 })

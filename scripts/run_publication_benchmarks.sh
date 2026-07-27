@@ -11,6 +11,13 @@ PIPELINE1_ROOT="${RUN_ROOT}/pipeline1"
 BENCH_LIB="${PIPELINE1_ROOT}/Rlib"
 IMAGENET_SOURCE="${FASTPLS_IMAGENET_FLOAT32_RDATA:-$HOME/Documents/fastpls/data/imagenet_float32.RData}"
 IMAGENET_TASK="${FASTPLS_IMAGENET_FLOAT32_TASK:-$HOME/Documents/fastpls/data/imagenet_float32_seed123_train1000000_task.rds}"
+SOURCE_COMMIT="${FASTPLS_SOURCE_COMMIT:-$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unavailable)}"
+SOURCE_TREE="$(git -C "${REPO_ROOT}" rev-parse HEAD^{tree} 2>/dev/null || echo unavailable)"
+SOURCE_TAG="$(git -C "${REPO_ROOT}" describe --tags --exact-match HEAD 2>/dev/null || echo untagged)"
+WORKTREE_STATE="clean"
+if ! git -C "${REPO_ROOT}" diff --quiet || ! git -C "${REPO_ROOT}" diff --cached --quiet; then
+  WORKTREE_STATE="modified"
+fi
 
 mkdir -p "${RUN_ROOT}" "${LOG_DIR}"
 
@@ -34,7 +41,11 @@ run_stage() {
   echo "started=$(date --iso-8601=seconds 2>/dev/null || date)"
   echo "repo_root=${REPO_ROOT}"
   echo "run_root=${RUN_ROOT}"
-  echo "commit=$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unavailable)"
+  echo "source_commit=${SOURCE_COMMIT}"
+  echo "working_tree_changes=$(git -C "${REPO_ROOT}" status --porcelain | wc -l | tr -d ' ')"
+  echo "source_tree=${SOURCE_TREE}"
+  echo "source_tag=${SOURCE_TAG}"
+  echo "worktree_state=${WORKTREE_STATE}"
   echo "working_tree_changes=$(git -C "${REPO_ROOT}" status --porcelain | wc -l | tr -d ' ')"
   echo "hostname=$(hostname)"
   uname -a
@@ -106,7 +117,7 @@ run_stage pipeline2 env \
   FASTPLS_BENCH_LIB="${BENCH_LIB}" \
   FASTPLS_BENCH_PRECISION=float64 \
   FASTPLS_PKG_COMPARE_REPS=3 \
-  FASTPLS_PKG_COMPARE_TIMEOUT_SEC=3600 \
+  FASTPLS_PKG_COMPARE_TIMEOUT_SEC=10000 \
   bash "${REPO_ROOT}/benchmark/run_pipeline2_package_comparison.sh"
 
 # Pipeline 3 uses the compiled native CV engines. The paired precision benchmark
@@ -139,7 +150,7 @@ if [ -f "${IMAGENET_TASK}" ]; then
     TASK_RDS="${IMAGENET_TASK}" \
     NCOMP_GRID="100 200 300 400 500 600 700 800 900 1000" \
     BACKENDS="cpu cuda" \
-    CLASSIFIERS="argmax lda cknn" \
+    CLASSIFIERS="argmax lda" \
     REPS=1 \
     TIMEOUT_SEC=10000 \
     bash "${REPO_ROOT}/benchmark/run_pipeline4_imagenet_simpls_rsvd.sh"

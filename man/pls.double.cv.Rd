@@ -24,13 +24,8 @@ pls.double.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda", "cknn"),
+  classifier = c("argmax", "lda"),
   lda_ridge = 1e-08,
-  k = 10L,
-  tau = 0.2,
-  alpha = 0.75,
-  top_m = 20L,
-  cknn_memory = c("auto", "standard", "blocked", "streaming"),
   bycol = FALSE,
   xprod = NULL,
   ...
@@ -96,47 +91,15 @@ sharing the same constraint value are never split across training and test.}
 \item{coef0}{Polynomial kernel offset.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
-standard PLS-DA response-score argmax. \code{lda} fits an LDA classifier on
-the PLS latent scores. \code{cknn} is the compact name for an optional PLS-score
-candidate-kNN classifier: class centroids in PLS score space choose
-candidate classes, then every sample is reranked by within-candidate kNN in
-the same PLS score space. The route is selected automatically from
-\code{backend}: compiled C++ for \code{cpu}, CUDA acceleration for \code{cuda},
-and Metal projection followed by CPU neighbour scoring for \code{metal}.
-It is a proof-of-concept downstream classifier for sample-rich
-latent spaces, not the default PLS-DA decoder, and should be validated against
-\code{argmax} and \code{lda}.}
+standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
+classifier on the PLS latent scores.}
 
 \item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
 scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
 
-\item{k}{Number of same-class PLS-score neighbours used by
-the candidate-kNN classifier. Larger values use more neighbours per
-candidate class and therefore give a smoother, less local decision.}
-
-\item{tau}{Positive temperature for pooling the top neighbour similarities in
-candidate-kNN scoring. Smaller values make the score close to the best
-neighbour; larger values average the top neighbours more smoothly.}
-
-\item{alpha}{Weight of the centroid/prototype candidate score added to the
-local kNN score. The final candidate score is the smoothed same-class kNN
-evidence plus \code{alpha} times the centroid score. Higher values keep the
-decision closer to the global PLS class-centroid ranking; lower values make
-the reranking depend more strongly on local neighbours.}
-
-\item{top_m}{Number of centroid-ranked candidate classes passed to
-the kNN reranker.}
-
-\item{cknn_memory}{Memory strategy for \code{classifier = "cknn"}.
-\code{standard} uses the historical one-pass candidate-kNN path.
-\code{blocked} predicts test samples in blocks, reducing test-side
-latent-score memory. \code{streaming} additionally builds the training
-candidate-score cache in blocks for scalar component counts. \code{auto}
-chooses a memory-aware strategy from the data size.}
-
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in the returned \code{metrics} list. The default \code{FALSE} returns
-only aggregate metrics.}
+metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
+aggregate metrics.}
 
 \item{xprod}{Use the matrix-free cross-product route where available for
 inner component optimization. \code{NULL} applies fastPLS defaults.}
@@ -149,7 +112,10 @@ also be controlled with \code{selection_metric = "auto"}, \code{"accuracy"}, \co
 \code{"q2"}, or \code{"rmsd"}; the selection metric itself is scalar.}
 }
 \value{
-A list with the following elements:
+A list with the following elements. \code{metrics$cross_validated}
+contains one complete \code{evaluate()} result per repeated outer-CV run, and
+\code{metrics$aggregate} evaluates the final vote-aggregated or averaged
+prediction. Fold-aware \code{Q2Y} values remain separate top-level outputs.
 \itemize{
 \item \code{results}: list with one element per repeated run. Each run stores
 \code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
@@ -180,15 +146,6 @@ column percentages.
 sample and one column per class.
 \item \code{accuracy}: classification-only decoded-label accuracy, one value per
 repeated run.
-\item \code{metrics}: complete \code{evaluate()} results. \code{cross_validated}
-contains one result for each repeated outer-CV run, while \code{aggregate}
-evaluates the final vote-aggregated classification prediction or averaged
-regression prediction. Fold-aware \code{Q2Y} remains a separate top-level
-output because each outer fold has its own training reference mean. For
-multivariate regression, per-response metrics are included only when
-\code{bycol = TRUE}. When \code{perm.test = TRUE},
-\code{metrics$permutation} contains the observed Q2Y values, permuted values,
-and empirical p-value.
 \item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y}, \code{medianRMSD},
 \code{CI95RMSD}: repeated-run summaries returned only when \code{runn > 1}.
 \item \code{Q2Ysampled}: permutation median-Q2 values returned when
