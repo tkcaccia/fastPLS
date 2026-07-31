@@ -89,20 +89,30 @@ if [ "${have_cuda}" = "1" ]; then
   pkg_cxxflags="${cuda_flags}"
   pkg_libs="-L${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
 else
-  echo "fastPLS configure: CUDA Toolkit not found; building CPU-only package"
+  echo "fastPLS configure: CUDA Toolkit not found; building without CUDA"
 fi
 
 have_metal=0
 if [ "$(uname -s)" = "Darwin" ]; then
   metal_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
-  if [ "${use_metal}" = "1" ]; then
+  system_metal_framework="/System/Library/Frameworks/Metal.framework"
+  if [ "${use_metal}" = "0" ] || [ "${use_metal}" = "false" ] || [ "${use_metal}" = "FALSE" ]; then
+    have_metal=0
+  elif [ "${use_metal}" = "1" ]; then
     have_metal=1
-  elif [ "${use_metal}" = "auto" ] && [ -n "${metal_sdk}" ] && [ -d "${metal_sdk}/System/Library/Frameworks/Metal.framework" ]; then
+  elif [ "${use_metal}" = "auto" ] &&
+       { [ -d "${system_metal_framework}" ] ||
+         { [ -n "${metal_sdk}" ] && [ -d "${metal_sdk}/System/Library/Frameworks/Metal.framework" ]; }; }; then
     have_metal=1
   fi
 fi
 
 if [ "${have_metal}" = "1" ]; then
+  if [ -n "${metal_sdk}" ]; then
+    echo "fastPLS configure: Apple Metal backend enabled (SDK: ${metal_sdk})"
+  else
+    echo "fastPLS configure: Apple Metal backend enabled using system frameworks"
+  fi
   cp src/svd_metal_backend.mm.in src/svd_metal_backend.mm
   metal_objects=" svd_metal_backend.o"
   metal_flags="-DFASTPLS_HAS_METAL"
@@ -116,6 +126,12 @@ if [ "${have_metal}" = "1" ]; then
   metal_mm_rule='
 %.o: %.mm
 	$(CXX17) -std=gnu++17 $(ALL_CPPFLAGS) $(PKG_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) $(PKG_CXXFLAGS) -x objective-c++ -fobjc-arc -c $< -o $@'
+elif [ "$(uname -s)" = "Darwin" ]; then
+  if [ "${use_metal}" = "0" ] || [ "${use_metal}" = "false" ] || [ "${use_metal}" = "FALSE" ]; then
+    echo "fastPLS configure: Apple Metal backend disabled by FASTPLS_USE_METAL=${use_metal}"
+  else
+    echo "fastPLS configure: Apple Metal frameworks not found; building without Metal"
+  fi
 fi
 
 sed \

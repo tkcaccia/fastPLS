@@ -1,9 +1,9 @@
 fastPLS system requirements
 ===========================
 
-fastPLS builds and runs in CPU-only mode by default. CUDA and Apple Metal
-support are optional acceleration backends and are not required to install the
-package.
+fastPLS always builds the CPU backend. CUDA and Apple Metal are optional
+acceleration backends and are not required to install the package. On macOS,
+Metal is enabled automatically when the system frameworks are available.
 
 CPU-only installation
 ---------------------
@@ -33,10 +33,14 @@ CUDA toolkit should be treated as an installation error.
 Apple Metal installation
 ------------------------
 
-Metal support is available only on macOS with Apple's developer tools. To
-request a Metal build from source, set:
+Metal support is available only on macOS. It is detected automatically from the
+macOS SDK or system frameworks. To require a Metal build explicitly, set:
 
   FASTPLS_USE_METAL=1
+
+After installation, run `fastPLS::has_metal()`. It returns TRUE only when the
+package was compiled with Metal and the current R process can access a Metal
+device. Set FASTPLS_USE_METAL=0 only to disable Metal deliberately.
 
 Bioconductor GPU builds
 -----------------------

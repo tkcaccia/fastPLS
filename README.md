@@ -128,6 +128,24 @@ remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
 After installation, `has_cuda()` reports whether the package was compiled with
 CUDA support and can see a CUDA device at runtime.
 
+On macOS, the Metal backend is compiled automatically when the macOS SDK or
+system Metal frameworks are available. The CUDA message "building without
+CUDA" does not mean that Metal was disabled. A successful configuration prints
+`Apple Metal backend enabled`. After restarting R, verify both compilation and
+runtime device access with:
+
+```r
+library(fastPLS)
+has_metal()
+```
+
+To require Metal explicitly during a GitHub installation, use:
+
+```r
+Sys.setenv(FASTPLS_USE_METAL = "1")
+remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
+```
+
 For automated CUDA build tests, set `FASTPLS_REQUIRE_CUDA = "1"` in addition to
 `FASTPLS_USE_CUDA = "1"` if installation should fail when the CUDA Toolkit is
 not found.
@@ -156,6 +174,7 @@ Prediction and utilities:
 - `ViP()`
 - `fastcor()`
 - `has_cuda()`
+- `has_metal()`
 - `fastsvd()`
 - `pca()`
 - `plot()` for `fastPLS` and `fastPLSPCA` score plots with optional confidence

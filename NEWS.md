@@ -1,5 +1,8 @@
 # fastPLS 0.99.6
 
+* macOS installation now detects the system Metal frameworks even when
+  `xcrun --show-sdk-path` is unavailable, and configure output reports CUDA and
+  Metal status independently.
 * Float32 capability reporting now distinguishes validated, experimental,
   hybrid, unavailable, and measured failed routes. The public `pls()` interface
   emits route-specific warnings or errors before allocation, and benchmark

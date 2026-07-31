@@ -175,7 +175,10 @@
 )
 
 .backend_control_package_version <- function() {
-  desc <- utils::packageDescription("fastPLS", fields = "Version")
+  desc <- tryCatch(
+    utils::packageDescription("fastPLS", fields = "Version"),
+    error = function(e) NA_character_
+  )
   if (length(desc) == 1L && !is.na(desc)) {
     as.character(desc)
   } else {
