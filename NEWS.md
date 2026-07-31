@@ -1,4 +1,4 @@
-# fastPLS 0.99.6
+# fastPLS 0.99.7
 
 * macOS installation now detects the system Metal frameworks even when
   `xcrun --show-sdk-path` is unavailable, and configure output reports CUDA and
