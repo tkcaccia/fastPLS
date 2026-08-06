@@ -28,6 +28,7 @@ pls.double.cv(
   lda_ridge = 1e-08,
   bycol = FALSE,
   xprod = NULL,
+  selection_metric = "auto",
   ...
 )
 }
@@ -60,13 +61,14 @@ CPU iterative backend.}
 SVD steps.}
 
 \item{perm.test}{Run a nested-CV permutation test. For each permutation, the
-rows of \code{Xdata} are shuffled, the complete double cross-validation is
-repeated, and the median permuted \code{Q2Y} is compared with the observed
-median \code{Q2Y}.}
+rows of \code{Xdata} are shuffled and the complete double cross-validation is
+repeated. The statistic is the median outer-CV value of the same metric
+used for inner model selection. Thus \code{selection_metric = "balanced_accuracy"} tunes and tests balanced accuracy rather than Q2Y.}
 
 \item{times}{Number of permutations. For predictive metrics where larger is
-better, such as \code{Q2Y}, the empirical p-value is
-\code{mean(Q2Y_permuted >= Q2Y_observed)}. For loss metrics where smaller is
+better, such as balanced accuracy or Q2Y, the empirical p-value is the
+proportion of permuted values at least as large as the observed value.
+For loss metrics where smaller is
 better, such as RMSD, it is \code{mean(loss_permuted <= loss_observed)}. No +1
 correction is applied.}
 
@@ -104,12 +106,15 @@ aggregate metrics.}
 \item{xprod}{Use the matrix-free cross-product route where available for
 inner component optimization. \code{NULL} applies fastPLS defaults.}
 
+\item{selection_metric}{Metric used by inner CV and by the permutation test.
+Use \code{"auto"} (accuracy for classification and RMSD for regression),
+\code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}.
+Balanced accuracy gives each observed class equal weight.}
+
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
 \code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
-and \code{svtol}. Vector values are tuned in the inner loop. Inner selection can
-also be controlled with \code{selection_metric = "auto"}, \code{"accuracy"}, \code{"r2"},
-\code{"q2"}, or \code{"rmsd"}; the selection metric itself is scalar.}
+and \code{svtol}. Vector values are tuned in the inner loop.}
 }
 \value{
 A list with the following elements. \code{metrics$cross_validated}
@@ -146,10 +151,14 @@ column percentages.
 sample and one column per class.
 \item \code{accuracy}: classification-only decoded-label accuracy, one value per
 repeated run.
+\item \code{balanced_accuracy}: classification-only unweighted mean of class recalls,
+one value per repeated run.
 \item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y}, \code{medianRMSD},
 \code{CI95RMSD}: repeated-run summaries returned only when \code{runn > 1}.
-\item \code{Q2Ysampled}: permutation median-Q2 values returned when
-\code{perm.test = TRUE}.
+\item \code{permutation_metric}, \code{permutation_observed}, and \code{permutation_sampled}:
+metric name, observed median, and permuted medians returned when
+\code{perm.test = TRUE}. \code{Q2Ysampled} is retained only when Q2 is the selected
+permutation metric.
 \item \code{p.value}: permutation-test p-value returned when \code{perm.test = TRUE}.
 }
 }

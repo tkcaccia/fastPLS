@@ -1526,7 +1526,14 @@
       "therefore its cross_validated Q2 is an R2-style aggregate."
     )
   }
-  if (!is.null(res$Q2Ysampled)) {
+  if (!is.null(res$permutation_sampled)) {
+    res$metrics$permutation <- list(
+      metric = res$permutation_metric,
+      observed = res$permutation_observed,
+      permuted = res$permutation_sampled,
+      p_value = res$p.value
+    )
+  } else if (!is.null(res$Q2Ysampled)) {
     res$metrics$permutation <- list(
       metric = "Q2Y",
       observed = res$Q2Y,
@@ -5036,6 +5043,11 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     acc = "accuracy",
     cv_accuracy = "accuracy",
     accuracy = "accuracy",
+    balanced = "balanced_accuracy",
+    balanced_acc = "balanced_accuracy",
+    balancedaccuracy = "balanced_accuracy",
+    bacc = "balanced_accuracy",
+    balanced_accuracy = "balanced_accuracy",
     r2 = "r2",
     r_squared = "r2",
     rsquared = "r2",
@@ -5047,13 +5059,31 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   if (metric %in% names(aliases)) {
     metric <- unname(aliases[[metric]])
   }
-  if (!metric %in% c("auto", "accuracy", "r2", "q2", "rmsd")) {
+  if (!metric %in% c("auto", "accuracy", "balanced_accuracy", "r2", "q2", "rmsd")) {
     stop(
-      "selection_metric must be one of 'auto', 'accuracy', 'r2', 'q2', or 'rmsd'.",
+      paste0(
+        "selection_metric must be one of 'auto', 'accuracy', ",
+        "'balanced_accuracy', 'r2', 'q2', or 'rmsd'."
+      ),
       call. = FALSE
     )
   }
   metric
+}
+
+.cv_balanced_accuracy <- function(observed, predicted, levels = NULL) {
+  if (is.null(levels)) {
+    levels <- unique(c(as.character(observed), as.character(predicted)))
+    levels <- levels[!is.na(levels)]
+  }
+  observed <- factor(observed, levels = levels)
+  predicted <- factor(predicted, levels = levels)
+  tab <- table(observed, predicted)
+  denominators <- rowSums(tab)
+  recalls <- rep(NA_real_, length(levels))
+  present <- denominators > 0
+  recalls[present] <- diag(tab)[present] / denominators[present]
+  if (any(is.finite(recalls))) mean(recalls, na.rm = TRUE) else NA_real_
 }
 
 .cv_selection_metric_from_dots <- function(dots) {
@@ -5079,8 +5109,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   if (identical(metric, "auto")) {
     metric <- if (ncol(Ytrue) == 1L) "q2" else "rmsd"
   }
-  if (identical(metric, "accuracy")) {
-    stop("Accuracy selection is only available for factor responses.", call. = FALSE)
+  if (metric %in% c("accuracy", "balanced_accuracy")) {
+    stop("Classification metrics are only available for factor responses.", call. = FALSE)
   }
   if (identical(metric, "rmsd")) {
     return(list(metric_name = "rmsd", metric_value = sqrt(mean((Ypred - Ytrue)^2, na.rm = TRUE))))
@@ -5280,6 +5310,27 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     if (identical(selection_metric, "accuracy")) {
       return(cv_res$metrics)
     }
+    if (identical(selection_metric, "balanced_accuracy")) {
+      predictions <- cv_res$pred
+      if (is.null(predictions)) {
+        stop(
+          "Stored class predictions are required to optimize selection_metric = 'balanced_accuracy'.",
+          call. = FALSE
+        )
+      }
+      if (!is.list(predictions)) {
+        predictions <- list(predictions)
+      }
+      values <- vapply(predictions, function(predicted) {
+        .cv_balanced_accuracy(Ydata, predicted, levels = cv_res$levels)
+      }, numeric(1L))
+      return(data.frame(
+        ncomp_index = seq_along(values),
+        metric_name = rep("balanced_accuracy", length(values)),
+        metric_value = values,
+        stringsAsFactors = FALSE
+      ))
+    }
     if (identical(selection_metric, "q2")) {
       if (is.null(cv_res$Ypred)) {
         stop("Stored classification score predictions are required to optimize selection_metric = 'q2'.", call. = FALSE)
@@ -5294,7 +5345,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     }
     if (!identical(selection_metric, "r2")) {
       stop(
-        "Classification CV can optimize selection_metric = 'accuracy' or 'q2'.",
+        paste0(
+          "Classification CV can optimize selection_metric = 'accuracy', ",
+          "'balanced_accuracy', or 'q2'."
+        ),
         call. = FALSE
       )
     }
@@ -5303,7 +5357,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   if (identical(selection_metric, "auto")) {
     selection_metric <- "rmsd"
   }
-  if (identical(selection_metric, "accuracy")) {
+  if (selection_metric %in% c("accuracy", "balanced_accuracy")) {
     stop(
       "Regression CV can only optimize selection_metric = 'r2', 'q2', or 'rmsd'.",
       call. = FALSE
@@ -8692,6 +8746,7 @@ pls =  function (Xtrain,
     target_names <- switch(
       selection_metric,
       accuracy = "accuracy",
+      balanced_accuracy = "balanced_accuracy",
       r2 = c("r2", "q2"),
       q2 = c("q2", "r2"),
       rmsd = c("rmsd", "rmse"),
@@ -9101,7 +9156,7 @@ pls =  function (Xtrain,
 #' Performs grouped k-fold or leave-one-out cross-validation over candidate
 #' component counts and, when vector-valued predictive arguments are supplied,
 #' over a compact hyperparameter grid. The selection can be based on
-#' cross-validated accuracy, R2, Q2, or RMSD.
+#' cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
 #'
 #' @inheritParams pls
 #' @param Xdata Predictor matrix.
@@ -9133,15 +9188,17 @@ pls =  function (Xtrain,
 #' @param bycol For matrix-valued regression responses, calculate response-wise
 #'   metrics in the returned `metrics` list. The default `FALSE` returns only
 #'   aggregate metrics.
+#' @param selection_metric Metric used to select predictive settings from
+#'   held-out folds. Use `"auto"` (accuracy for classification and RMSD for
+#'   regression), `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or
+#'   `"rmsd"`. Balanced accuracy is the unweighted mean of class-specific
+#'   recalls and is appropriate when class frequencies are unequal.
 #' @param xprod Use the matrix-free cross-product route where available.
 #'   `NULL` applies fastPLS defaults.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample`, `power`, `svds_tol`, `work`, `maxit`, `tol`, `eps`,
-#'   and `svtol`. Vector values are included in the tuning grid. Component
-#'   selection can also be controlled with `selection_metric = "auto"`,
-#'   `"accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`; the selection metric itself is
-#'   scalar.
+#'   and `svtol`. Vector values are included in the tuning grid.
 #' @return A list describing the cross-validation run and selected model.
 #'   `metrics$cross_validated` contains complete `evaluate()` results for each
 #'   requested component count and `metrics$fitted` contains the corresponding
@@ -9158,6 +9215,7 @@ pls =  function (Xtrain,
 #'   \item `Q2Y`: held-out cross-validated Q2. For factor responses, Q2 is
 #'   calculated on the dummy-coded PLS-DA response scores.
 #'   \item `accuracy`: held-out decoded-label accuracy for factor responses.
+#'   \item `balanced_accuracy`: held-out mean class recall for factor responses.
 #'   \item `RMSD`: held-out root mean squared deviation for regression. It is
 #'   `NA` for classification.
 #'   \item `Yfit`: fitted values from the full-data model when `fit = TRUE`.
@@ -9220,12 +9278,21 @@ pls.single.cv =  function (Xdata,
                           fit = TRUE,
                           bycol = FALSE,
                           xprod = NULL,
+                          selection_metric = "auto",
                           ...)
 {
   if (sum(is.na(Xdata)) > 0) {
     stop("Missing values are present")
   }
-  selection_ctl <- .cv_selection_metric_from_dots(list(...))
+  selection_from_dots <- .cv_selection_metric_from_dots(list(...))
+  selection_ctl <- if (missing(selection_metric)) {
+    selection_from_dots
+  } else {
+    list(
+      metric = .cv_normalize_selection_metric(selection_metric),
+      dots = selection_from_dots$dots
+    )
+  }
   tuning_grid <- .cv_make_prediction_grid(
     scaling = scaling,
     scaling_missing = missing(scaling),
@@ -9491,6 +9558,14 @@ pls.single.cv =  function (Xdata,
   res$best_metric_value <- selection_values[[best_idx]]
   if (classification) {
     res$accuracy <- accuracy_values
+    if (identical(selection_ctl$metric, "balanced_accuracy")) {
+      res$balanced_accuracy <- selection_values
+    } else if (!is.null(res$pred)) {
+      predictions <- if (is.list(res$pred)) res$pred else list(res$pred)
+      res$balanced_accuracy <- vapply(predictions, function(predicted) {
+        .cv_balanced_accuracy(Ydata, predicted, levels = res$levels)
+      }, numeric(1L))
+    }
   }
   res$Q2Y <- as.numeric(q2_values)
   res$RMSD <- if (classification) rep(NA_real_, length(values)) else as.numeric(rmsd_values)
@@ -9578,21 +9653,25 @@ pls.single.cv =  function (Xdata,
 #' @param bycol For matrix-valued regression responses, calculate response-wise
 #'   metrics in the returned `metrics` list. The default `FALSE` returns only
 #'   aggregate metrics.
+#' @param selection_metric Metric used by inner CV and by the permutation test.
+#'   Use `"auto"` (accuracy for classification and RMSD for regression),
+#'   `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`.
+#'   Balanced accuracy gives each observed class equal weight.
 #' @param perm.test Run a nested-CV permutation test. For each permutation, the
-#'   rows of `Xdata` are shuffled, the complete double cross-validation is
-#'   repeated, and the median permuted `Q2Y` is compared with the observed
-#'   median `Q2Y`.
+#'   rows of `Xdata` are shuffled and the complete double cross-validation is
+#'   repeated. The statistic is the median outer-CV value of the same metric
+#'   used for inner model selection. Thus `selection_metric =
+#'   "balanced_accuracy"` tunes and tests balanced accuracy rather than Q2Y.
 #' @param times Number of permutations. For predictive metrics where larger is
-#'   better, such as `Q2Y`, the empirical p-value is
-#'   `mean(Q2Y_permuted >= Q2Y_observed)`. For loss metrics where smaller is
+#'   better, such as balanced accuracy or Q2Y, the empirical p-value is the
+#'   proportion of permuted values at least as large as the observed value.
+#'   For loss metrics where smaller is
 #'   better, such as RMSD, it is `mean(loss_permuted <= loss_observed)`. No +1
 #'   correction is applied.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample`, `power`, `svds_tol`, `work`, `maxit`, `tol`, `eps`,
-#'   and `svtol`. Vector values are tuned in the inner loop. Inner selection can
-#'   also be controlled with `selection_metric = "auto"`, `"accuracy"`, `"r2"`,
-#'   `"q2"`, or `"rmsd"`; the selection metric itself is scalar.
+#'   and `svtol`. Vector values are tuned in the inner loop.
 #' @return A list with the following elements. `metrics$cross_validated`
 #'   contains one complete `evaluate()` result per repeated outer-CV run, and
 #'   `metrics$aggregate` evaluates the final vote-aggregated or averaged
@@ -9627,10 +9706,14 @@ pls.single.cv =  function (Xdata,
 #'     sample and one column per class.
 #'   * `accuracy`: classification-only decoded-label accuracy, one value per
 #'     repeated run.
+#'   * `balanced_accuracy`: classification-only unweighted mean of class recalls,
+#'     one value per repeated run.
 #'   * `medianR2Y`, `CI95R2Y`, `medianQ2Y`, `CI95Q2Y`, `medianRMSD`,
 #'     `CI95RMSD`: repeated-run summaries returned only when `runn > 1`.
-#'   * `Q2Ysampled`: permutation median-Q2 values returned when
-#'     `perm.test = TRUE`.
+#'   * `permutation_metric`, `permutation_observed`, and `permutation_sampled`:
+#'     metric name, observed median, and permuted medians returned when
+#'     `perm.test = TRUE`. `Q2Ysampled` is retained only when Q2 is the selected
+#'     permutation metric.
 #'   * `p.value`: permutation-test p-value returned when `perm.test = TRUE`.
 #' @examples
 #' idx <- c(1:10, 51:60, 101:110)
@@ -9664,12 +9747,21 @@ pls.double.cv = function(Xdata,
                          lda_ridge = 1e-8,
                          bycol = FALSE,
                          xprod = NULL,
+                         selection_metric = "auto",
                          ...){
 
   if(sum(is.na(Xdata))>0) {
     stop("Missing values are present")
   }
-  selection_ctl <- .cv_selection_metric_from_dots(list(...))
+  selection_from_dots <- .cv_selection_metric_from_dots(list(...))
+  selection_ctl <- if (missing(selection_metric)) {
+    selection_from_dots
+  } else {
+    list(
+      metric = .cv_normalize_selection_metric(selection_metric),
+      dots = selection_from_dots$dots
+    )
+  }
   tuning_grid <- .cv_make_prediction_grid(
     scaling = scaling,
     scaling_missing = missing(scaling),
@@ -9918,6 +10010,9 @@ pls.double.cv = function(Xdata,
         vote_tot[cbind(which(ok), idx[ok])] <- vote_tot[cbind(which(ok), idx[ok])] + 1
       }
       accuracy_j <- mean(as.character(pred_factor) == as.character(Ydata_original), na.rm = TRUE)
+      balanced_accuracy_j <- .cv_balanced_accuracy(
+        Ydata_original, pred_factor, levels = lev
+      )
       if (!any(is.finite(outer_accuracy))) {
         outer_accuracy[] <- accuracy_j
       }
@@ -9931,7 +10026,17 @@ pls.double.cv = function(Xdata,
       } else {
         NA_real_
       }
-      metric_name[j] <- "accuracy"
+      run_metric_name <- if (identical(selection_ctl$metric, "balanced_accuracy")) {
+        "balanced_accuracy"
+      } else {
+        "accuracy"
+      }
+      run_metric_value <- if (identical(run_metric_name, "balanced_accuracy")) {
+        balanced_accuracy_j
+      } else {
+        accuracy_j
+      }
+      metric_name[j] <- run_metric_name
       res$results[[j]] <- list(
         Ypred = pred_factor,
         pred = pred_factor,
@@ -9939,9 +10044,10 @@ pls.double.cv = function(Xdata,
         best_ncomp = best_comp,
         best_parameters = best_parameters,
         inner = inner_results,
-        metric_name = "accuracy",
-        metric_value = accuracy_j,
+        metric_name = run_metric_name,
+        metric_value = run_metric_value,
         accuracy = accuracy_j,
+        balanced_accuracy = balanced_accuracy_j,
         backend = backend,
         method = method
       )
@@ -9997,6 +10103,10 @@ pls.double.cv = function(Xdata,
       val <- x$accuracy
       if (is.null(val) || !length(val)) NA_real_ else as.numeric(val[[1L]])
     }, numeric(1))
+    res$balanced_accuracy <- vapply(res$results, function(x) {
+      val <- x$balanced_accuracy
+      if (is.null(val) || !length(val)) NA_real_ else as.numeric(val[[1L]])
+    }, numeric(1))
   } else {
     res$Ypred <- Ypred_tot / as.integer(runn)
   }
@@ -10019,10 +10129,32 @@ pls.double.cv = function(Xdata,
   res$selection_metric <- selection_ctl$metric
 
   if (perm.test) {
+    permutation_metric <- selection_ctl$metric
+    if (identical(permutation_metric, "auto")) {
+      permutation_metric <- if (classification) "accuracy" else "rmsd"
+    }
+    extract_permutation_metric <- function(object, metric) {
+      values <- switch(
+        metric,
+        accuracy = object$accuracy,
+        balanced_accuracy = object$balanced_accuracy,
+        r2 = object$R2Y,
+        q2 = object$Q2Y,
+        rmsd = object$RMSD,
+        NULL
+      )
+      if (is.null(values) || !length(values)) {
+        stop(
+          sprintf("Permutation metric '%s' is unavailable in the nested-CV result.", metric),
+          call. = FALSE
+        )
+      }
+      as.numeric(values)
+    }
     sampled <- numeric(as.integer(times))
     for (i in seq_len(as.integer(times))) {
       ss <- sample(seq_len(nrow(Xdata)))
-      sampled[i] <- median(pls.double.cv(
+      permuted_result <- pls.double.cv(
         Xdata = Xdata[ss, , drop = FALSE],
         Ydata = Ydata_original,
         ncomp = ncomp,
@@ -10054,11 +10186,23 @@ pls.double.cv = function(Xdata,
         bycol = bycol,
         xprod = xprod,
         selection_metric = selection_ctl$metric
-      )$Q2Y, na.rm = TRUE)
+      )
+      sampled[i] <- median(
+        extract_permutation_metric(permuted_result, permutation_metric),
+        na.rm = TRUE
+      )
     }
-    loss_metric <- any(tolower(metric_name) %in% c("rmsd", "rmse", "mae", "mse"))
-    observed <- median(Q2Y, na.rm = TRUE)
-    res$Q2Ysampled <- sampled
+    loss_metric <- permutation_metric %in% c("rmsd", "rmse", "mae", "mse")
+    observed <- median(
+      extract_permutation_metric(res, permutation_metric),
+      na.rm = TRUE
+    )
+    res$permutation_metric <- permutation_metric
+    res$permutation_observed <- observed
+    res$permutation_sampled <- sampled
+    if (identical(permutation_metric, "q2")) {
+      res$Q2Ysampled <- sampled
+    }
     res$p.value <- if (loss_metric) {
       mean(sampled <= observed, na.rm = TRUE)
     } else {

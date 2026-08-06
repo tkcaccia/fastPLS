@@ -78,6 +78,57 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
   }, logical(1))))
 })
 
+test_that("balanced accuracy drives both classification selection and permutation", {
+  set.seed(21021)
+  y <- factor(c(rep("major", 30), rep("minor_a", 9), rep("minor_b", 6)))
+  X <- matrix(rnorm(length(y) * 6), nrow = length(y), ncol = 6)
+  X[, 1] <- X[, 1] + ifelse(y == "minor_a", 1.5, 0)
+  X[, 2] <- X[, 2] + ifelse(y == "minor_b", 2, 0)
+
+  single <- pls.single.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    kfold = 3,
+    method = "plssvd",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 121,
+    selection_metric = "bacc",
+    fit = FALSE
+  )
+  expect_identical(single$selection_metric, "balanced_accuracy")
+  expect_identical(single$best_metric_name, "balanced_accuracy")
+  expect_true(all(single$selection_metrics$metric_name == "balanced_accuracy"))
+  expect_equal(single$balanced_accuracy, single$selection_values)
+
+  nested <- pls.double.cv(
+    Xdata = X,
+    Ydata = y,
+    ncomp = 1:2,
+    runn = 1,
+    kfold_inner = 2,
+    kfold_outer = 2,
+    method = "plssvd",
+    backend = "cpu",
+    svd.method = "rsvd",
+    seed = 122,
+    selection_metric = "balanced_accuracy",
+    perm.test = TRUE,
+    times = 2
+  )
+  expect_identical(nested$selection_metric, "balanced_accuracy")
+  expect_identical(nested$permutation_metric, "balanced_accuracy")
+  expect_length(nested$balanced_accuracy, 1L)
+  expect_length(nested$permutation_sampled, 2L)
+  expect_equal(
+    nested$permutation_observed,
+    median(nested$balanced_accuracy, na.rm = TRUE)
+  )
+  expect_identical(nested$metrics$permutation$metric, "balanced_accuracy")
+  expect_null(nested$Q2Ysampled)
+})
+
 test_that("SIMPLS CV always stores prediction scores", {
   set.seed(2103)
   X <- matrix(rnorm(60 * 8), nrow = 60, ncol = 8)

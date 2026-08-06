@@ -1,5 +1,9 @@
-# fastPLS 0.99.7
+# fastPLS 0.99.8
 
+* `pls.single.cv()` and `pls.double.cv()` can now select classification models
+  with `selection_metric = "balanced_accuracy"`. Nested permutation tests use
+  the same selected endpoint, preventing classification analyses tuned and
+  reported by balanced accuracy from being tested against dummy-response Q2.
 * macOS installation now detects the system Metal frameworks even when
   `xcrun --show-sdk-path` is unavailable, and configure output reports CUDA and
   Metal status independently.

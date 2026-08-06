@@ -804,11 +804,14 @@ plot.permutation(perm_fit, ncomp = 2)
 ```
 
 In `pls.double.cv()`, the permutation test repeats the complete nested
-cross-validation workflow after shuffling the rows of `Xdata`. The observed
-statistic is the median outer-CV `Q2Y`, and `Q2Ysampled` stores the permuted
-median values. For metrics where larger is better, the p-value is
-`mean(Q2Y_permuted >= Q2Y_observed)`; for loss metrics where smaller is better,
-it is `mean(loss_permuted <= loss_observed)`.
+cross-validation workflow after shuffling the rows of `Xdata`. Model selection
+and permutation inference use the same `selection_metric`. For imbalanced
+classification, `selection_metric = "balanced_accuracy"` therefore selects the
+model by mean class-specific recall and tests that statistic against its
+permutation distribution; it does not substitute dummy-response Q2. The output
+records the statistic in `permutation_metric`, `permutation_observed`, and
+`permutation_sampled`. Larger predictive metrics use the upper permutation tail,
+whereas losses such as RMSD use the lower tail.
 
 ```{r chunk-029}
 dcv_perm <- pls.double.cv(
@@ -823,9 +826,28 @@ dcv_perm <- pls.double.cv(
 )
 
 data.frame(
-  observed_median_Q2Y = median(dcv_perm$Q2Y, na.rm = TRUE),
+  permutation_metric = dcv_perm$permutation_metric,
+  observed = dcv_perm$permutation_observed,
   p_value = dcv_perm$p.value
 )
+```
+
+For an imbalanced classification analysis, the corresponding call is:
+
+```{r balanced-permutation-example, eval=FALSE}
+dcv_balanced <- pls.double.cv(
+  Xdata = Xtrain_cls,
+  Ydata = Ytrain_cls,
+  ncomp = 1:5,
+  kfold_inner = 5,
+  kfold_outer = 5,
+  selection_metric = "balanced_accuracy",
+  perm.test = TRUE,
+  times = 100,
+  seed = 109
+)
+dcv_balanced$balanced_accuracy
+dcv_balanced$metrics$permutation
 ```
 
 The selected CV object can then be passed directly to `pls()`. The final model
@@ -994,7 +1016,9 @@ Important elements returned by `pls.double.cv()` are:
   fold-level values are stored in `results[[run]]$best_parameters`.
 - `selection_metric`: the criterion used by the inner CV loop. The default
   `"auto"` means accuracy for classification and RMSD-style prediction error for
-  multivariate regression.
+  multivariate regression. Use `"balanced_accuracy"` when each class should
+  contribute equally despite unequal class frequencies; nested permutation
+  testing then uses balanced accuracy as well.
 
 ## PCA and SVD Utilities
 

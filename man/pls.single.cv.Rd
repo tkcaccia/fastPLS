@@ -25,6 +25,7 @@ pls.single.cv(
   fit = TRUE,
   bycol = FALSE,
   xprod = NULL,
+  selection_metric = "auto",
   ...
 )
 }
@@ -89,13 +90,16 @@ aggregate metrics.}
 \item{xprod}{Use the matrix-free cross-product route where available.
 \code{NULL} applies fastPLS defaults.}
 
+\item{selection_metric}{Metric used to select predictive settings from
+held-out folds. Use \code{"auto"} (accuracy for classification and RMSD for
+regression), \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or
+\code{"rmsd"}. Balanced accuracy is the unweighted mean of class-specific
+recalls and is appropriate when class frequencies are unequal.}
+
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
 \code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
-and \code{svtol}. Vector values are included in the tuning grid. Component
-selection can also be controlled with \code{selection_metric = "auto"},
-\code{"accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}; the selection metric itself is
-scalar.}
+and \code{svtol}. Vector values are included in the tuning grid.}
 }
 \value{
 A list describing the cross-validation run and selected model.
@@ -114,6 +118,7 @@ metric at the selected component count.
 \item \code{Q2Y}: held-out cross-validated Q2. For factor responses, Q2 is
 calculated on the dummy-coded PLS-DA response scores.
 \item \code{accuracy}: held-out decoded-label accuracy for factor responses.
+\item \code{balanced_accuracy}: held-out mean class recall for factor responses.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
 \code{NA} for classification.
 \item \code{Yfit}: fitted values from the full-data model when \code{fit = TRUE}.
@@ -147,7 +152,7 @@ refit the selected model on the full training data and predict new samples.
 Performs grouped k-fold or leave-one-out cross-validation over candidate
 component counts and, when vector-valued predictive arguments are supplied,
 over a compact hyperparameter grid. The selection can be based on
-cross-validated accuracy, R2, Q2, or RMSD.
+cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
 }
 \examples{
 idx <- c(1:12, 51:62, 101:112)
