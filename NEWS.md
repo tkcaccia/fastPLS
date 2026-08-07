@@ -1,4 +1,8 @@
-# fastPLS 0.99.8
+# fastPLS 0.99.9
+
+* Fixed compilation of CPU-only Windows builds. The unavailable native-float32
+  argmax fallback now raises the documented platform error through a
+  type-correct integer-vector entry point instead of returning a list.
 
 * `pls.single.cv()` and `pls.double.cv()` can now select classification models
   with `selection_metric = "balanced_accuracy"`. Nested permutation tests use

@@ -13,6 +13,16 @@ expected_float32_cpu_backend <- function() {
   }
 }
 
+test_that("native Windows float32 entry points fail with a platform message", {
+  skip_if_not_installed("float")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  scores <- float::fl(matrix(c(1, 3, 2, 4), nrow = 2L))
+  expect_error(
+    fastPLS:::float32_argmax_cpp(scores),
+    "not available on Windows"
+  )
+})
+
 test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
   skip_if_not_installed("float")
   skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")

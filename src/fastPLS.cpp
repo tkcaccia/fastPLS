@@ -3453,7 +3453,8 @@ Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& la
 }
 
 Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP) {
-  return windows_float32_unavailable();
+  windows_float32_unavailable();
+  return Rcpp::IntegerVector();
 }
 
 Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend) {
