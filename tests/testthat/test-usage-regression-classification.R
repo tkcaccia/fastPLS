@@ -242,15 +242,7 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_equal(ncol(sr$u), 4L)
   expect_equal(length(sr$d), 4L)
 
-  pc <- pca(A, ncomp = 3, backend = "cpu", method = "rsvd")
-  expect_s3_class(pc, "fastPLSPCA")
-  expect_equal(ncol(pc$scores), 3L)
   y <- factor(sample(c("a", "b", "c"), nrow(A), replace = TRUE))
-  png_file <- tempfile(fileext = ".png")
-  grDevices::png(png_file)
-  expect_silent(plot(pc, groups = y, ellipse = TRUE, main = "custom PCA title"))
-  grDevices::dev.off()
-  unlink(png_file)
 
   cls_model <- pls(A, y, ncomp = 1:2, method = "plssvd", svd.method = "cpu_rsvd")
   cls_pred <- predict(cls_model, A[1:5, , drop = FALSE])

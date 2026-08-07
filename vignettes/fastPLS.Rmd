@@ -29,7 +29,6 @@ selected through the user-facing functions below.
 | `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
 | `evaluate()` | Compute classification and regression performance metrics from predictions. |
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
-| `pca()` | Compute PCA using the same SVD backend selector. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
@@ -1020,46 +1019,17 @@ Important elements returned by `pls.double.cv()` are:
   contribute equally despite unequal class frequencies; nested permutation
   testing then uses balanced accuracy as well.
 
-## PCA and SVD Utilities
+## SVD Utility
 
 `fastsvd()` provides direct access to the same SVD backends used by PLS. It
 returns the left singular vectors (`u`), singular values (`d`), and right
 singular vectors (`v`) for users who want a truncated decomposition outside a
-PLS model. `pca()` builds PCA scores and loadings from those backends, following
-the classical principal-component construction of Pearson (1901). The fitted
-PCA object stores the training centering, scaling, and loading matrix, so the
-same projection can be applied to independent data either during fitting with
-`xtest` or later with `predict()`.
+PLS model.
 
 ```{r chunk-034}
 s <- fastsvd(Xtrain, ncomp = 3, seed = 104)
 names(s)
 s$d
-```
-
-```{r chunk-035, fig.width = 5, fig.height = 4}
-pc <- pca(Xtrain, ncomp = 3, xtest = Xtest, seed = 105)
-plot(pc, groups = Ytrain_cls, ellipse = TRUE)
-```
-
-```{r chunk-036}
-head(pc$scores_test)
-head(predict(pc, Xtest, ncomp = 2))
-```
-
-The same workflow can be used with the bundled breast cancer example. Here PCA
-is fitted only on the training matrix, the training scores are plotted first,
-and the independent test samples are projected with the stored training
-centering, scaling, and loadings before being overlaid on the same score map.
-
-```{r chunk-037, fig.width = 5, fig.height = 4}
-data(breast)
-
-pp <- pca(breast$X_train)
-plot(pp, bg = breast$y_train)
-
-qq <- predict(pp, breast$X_test)
-points(qq, bg = breast$y_test)
 ```
 
 ## CUDA and Metal Availability
@@ -1106,11 +1076,6 @@ if (has_metal()) {
     ncomp = 1:2,
     backend = "metal"
   )
-
-  pca_metal <- pca(
-    Xtrain,
-    backend = "metal"
-  )
 }
 ```
 
@@ -1154,8 +1119,7 @@ directly through `...`; in stand-alone SVD calls they are supplied directly to
 `fastsvd()`.
 
 On Apple Silicon builds where `has_metal()` returns `TRUE`,
-`fastsvd(backend = "metal", method = "rsvd")` and
-`pca(backend = "metal", method = "rsvd")` can use the Metal backend. This
+`fastsvd(backend = "metal", method = "rsvd")` can use the Metal backend. This
 backend keeps the same randomized SVD mathematics as the CPU backend, but sends
 the large sketching matrix
 multiplications to Apple Metal Performance Shaders. The QR decomposition and

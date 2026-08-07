@@ -5,13 +5,11 @@ importFrom("stats", "median", "pnorm", "predict", "quantile", "rnorm", "sd", "va
 importFrom("methods", "is")
 import(Matrix)
 
-export(evaluate,fastcor,fastsvd,has_cuda,has_metal,pca,pls,pls.double.cv,pls.single.cv,plot.permutation,ViP)
+export(evaluate,fastcor,fastsvd,has_cuda,has_metal,pls,pls.double.cv,pls.single.cv,plot.permutation,ViP)
 
 
 S3method(predict,fastPLS)
 S3method(predict,fastPLSKernel)
 S3method(predict,fastPLSOpls)
-S3method(predict,fastPLSPCA)
 S3method(plot,fastPLS)
-S3method(plot,fastPLSPCA)
 S3method(print,fastPLS)

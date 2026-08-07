@@ -26,7 +26,7 @@ device, allocate GPU memory, or run a test computation.
 
 \value{A length-1 logical.}
 
-\seealso{\code{\link{has_cuda}}, \code{\link{fastsvd}}, \code{\link{pca}}, \code{\link{pls}}}
+\seealso{\code{\link{has_cuda}}, \code{\link{fastsvd}}, \code{\link{pls}}}
 
 \examples{
 has_metal()

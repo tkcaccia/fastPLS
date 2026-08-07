@@ -3,8 +3,8 @@
 `fastPLS` provides compiled C++ and CUDA implementations of partial least squares
 models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
-through `pls()`, `pls.single.cv()`, `pls.double.cv()`,
-`fastsvd()`, and `pca()` instead of through low-level implementation wrappers.
+through `pls()`, `pls.single.cv()`, `pls.double.cv()`, and
+`fastsvd()` instead of through low-level implementation wrappers.
 The current standard pipeline compares four model families:
 
 - `plssvd`
@@ -157,10 +157,9 @@ multiplying by the full coefficient matrix. This primarily reduces prediction
 time and RAM pressure during prediction; fit memory is still governed by the
 fitting backend.
 
-Use `backend = "cuda"` for GPU-native PLS runs, or
-`fastsvd(..., backend = "cuda", method = "rsvd")` /
-`pca(..., backend = "cuda", method = "rsvd")` for stand-alone GPU SVD/PCA when CUDA is
-available.
+Use `backend = "cuda"` for supported CUDA PLS runs, or
+`fastsvd(..., backend = "cuda", method = "rsvd")` for stand-alone GPU rSVD
+when CUDA is available.
 
 ## Current API
 
@@ -176,8 +175,7 @@ Prediction and utilities:
 - `has_cuda()`
 - `has_metal()`
 - `fastsvd()`
-- `pca()`
-- `plot()` for `fastPLS` and `fastPLSPCA` score plots with optional confidence
+- `plot()` for `fastPLS` score plots with optional confidence
   or Hotelling's T2 ellipses
 
 Cross-validation:

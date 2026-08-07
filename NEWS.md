@@ -1,8 +1,16 @@
-# fastPLS 0.99.9
+# fastPLS 0.99.10
 
 * Fixed compilation of CPU-only Windows builds. The unavailable native-float32
   argmax fallback now raises the documented platform error through a
   type-correct integer-vector entry point instead of returning a list.
+
+* Removed the public PCA API and its S3 methods. Principal component analysis
+  remains available through dedicated R packages; `fastsvd()` remains the
+  package's public standalone decomposition interface.
+
+* Synchronized the public API and documentation around the two supported
+  classification heads, argmax and latent-space LDA. Historical candidate-kNN
+  wording was removed.
 
 * `pls.single.cv()` and `pls.double.cv()` can now select classification models
   with `selection_metric = "balanced_accuracy"`. Nested permutation tests use
@@ -16,10 +24,10 @@
   emits route-specific warnings or errors before allocation, and benchmark
   summaries separate input storage, baseline and incremental host RSS, sampled
   GPU use, runtime, and predictive differences from float64.
-* Added public PLS, PCA, SVD, prediction, evaluation and cross-validation
+* Added public PLS, SVD, prediction, evaluation and cross-validation
   interfaces for CPU, optional CUDA and optional Apple Metal backends.
-* Added optional classification heads for PLS-DA, including argmax, latent-space
-  LDA and candidate-kNN.
+* Added optional classification heads for PLS-DA using argmax decoding or
+  latent-space LDA.
 * Added package datasets, examples, benchmark scripts and a single user
   vignette.
 * CUDA and Metal builds are optional; CPU-only installation remains the default.

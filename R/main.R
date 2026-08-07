@@ -6743,241 +6743,6 @@ fastsvd <- function(x,
   result
 }
 
-#' Principal component analysis through fastPLS SVD backends
-#'
-#' Computes PCA from the selected SVD backend and returns scores/loadings in a
-#' compact object with a base-graphics plot method.
-#'
-#' @param x Numeric matrix with samples in rows and variables in columns.
-#' @param ncomp Number of principal components.
-#' @param xtest Optional independent matrix to project using the PCA loadings
-#'   learned from `x`. The same centering and scaling estimated from `x` are
-#'   applied to `xtest`.
-#' @param center Logical; center columns before SVD.
-#' @param scale Logical; scale columns before SVD.
-#' @param backend Compute backend. \code{cpu} runs on the host CPU. \code{cuda} and
-#'   \code{metal} use the corresponding native randomized-SVD backend when
-#'   available.
-#' @param method SVD algorithm family. \code{irlba} is available only with
-#'   \code{backend = cpu}. \code{rsvd} uses native fastPLS randomized SVD on the
-#'   selected backend.
-#' @param ... Additional arguments passed to [fastsvd()].
-#' @return A `fastPLSPCA` object with training `scores`, optional
-#'   `scores_test`, loadings, preprocessing values, and per-component
-#'   `variance_explained` plus cumulative variance explained.
-#' @examples
-#' pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
-#'           method = "rsvd", seed = 1)
-#' head(pc$scores)
-#' pc$variance_explained
-#' head(predict(pc, as.matrix(iris[1:5, 1:4])))
-#' @export
-pca <- function(x,
-                ncomp = 2L,
-                xtest = NULL,
-                center = TRUE,
-                scale = FALSE,
-                backend = c("cpu", "cuda", "metal"),
-                    method = c("rsvd", "irlba"),
-                ...) {
-  if (.is_float32(x)) {
-    x32 <- .as_float32_matrix(x, "x")
-    ncomp <- max(1L, min(as.integer(ncomp)[1L], nrow(x32), ncol(x32)))
-    scaling <- if (isTRUE(center) && isTRUE(scale)) {
-      2L
-    } else if (isTRUE(center)) {
-      1L
-    } else if (isTRUE(scale)) {
-      2L
-    } else {
-      3L
-    }
-    scaled <- .float32_center_scale(x32, scaling)
-    x_scaled <- scaled$X
-    decomp <- fastsvd(
-      x_scaled,
-      nu = ncomp,
-      nv = ncomp,
-      ncomp = ncomp,
-      backend = backend,
-      method = method,
-      ...
-    )
-    loadings <- decomp$v[, seq_len(ncomp), drop = FALSE]
-    scores <- x_scaled %*% loadings
-    colnames(scores) <- paste0("PC", seq_len(ncomp))
-    colnames(loadings) <- colnames(scores)
-    sdev <- decomp$d[seq_len(ncomp)] / sqrt(max(1, nrow(x_scaled) - 1L))
-    x_scaled_numeric <- .float32_to_numeric_matrix(x_scaled)
-    variance <- .fastpls_named_components(sdev^2, "PC")
-    total_variance <- sum(x_scaled_numeric^2 / max(1, nrow(x_scaled_numeric) - 1L))
-    variance_explained <- if (is.finite(total_variance) && total_variance > 0) {
-      variance / total_variance
-    } else {
-      rep(NA_real_, length(variance))
-    }
-    variance_explained <- .fastpls_named_components(as.numeric(variance_explained), "PC")
-    out <- list(
-      scores = scores,
-      loadings = loadings,
-      sdev = sdev,
-      variance = variance,
-      variance_explained = variance_explained,
-      cumulative_variance_explained = .fastpls_named_components(cumsum(variance_explained), "PC"),
-      variance_total = total_variance,
-      variance_basis = "X",
-      center = scaled$mX,
-      scale = scaled$vX,
-      svd = decomp,
-      svd.method = decomp$svd.method %||% decomp$method,
-      ncomp = ncomp,
-      precision = "float32"
-    )
-    class(out) <- "fastPLSPCA"
-    if (!is.null(xtest)) {
-      out$scores_test <- predict(out, xtest)
-    }
-    return(out)
-  }
-  x <- as.matrix(x)
-  ncomp <- max(1L, min(as.integer(ncomp)[1L], nrow(x), ncol(x)))
-  scaled <- base::scale(x, center = center, scale = scale)
-  x_center <- attr(scaled, "scaled:center")
-  x_scale <- attr(scaled, "scaled:scale")
-  if (is.null(x_center)) x_center <- rep(0, ncol(x))
-  if (is.null(x_scale)) x_scale <- rep(1, ncol(x))
-  x_scaled <- as.matrix(scaled)
-
-  resolved <- .resolve_fastsvd_backend_method(backend, method)
-  decomp <- do.call(
-    fastsvd,
-    c(
-      list(
-        x = x_scaled,
-        nu = ncomp,
-        nv = ncomp,
-        ncomp = ncomp,
-        backend = resolved$backend,
-        method = resolved$method
-      ),
-      list(...)
-    )
-  )
-  scores <- x_scaled %*% decomp$v[, seq_len(ncomp), drop = FALSE]
-  colnames(scores) <- paste0("PC", seq_len(ncomp))
-  loadings <- decomp$v[, seq_len(ncomp), drop = FALSE]
-  rownames(loadings) <- colnames(x)
-  colnames(loadings) <- colnames(scores)
-  sdev <- decomp$d[seq_len(ncomp)] / sqrt(max(1, nrow(x_scaled) - 1L))
-  variance <- .fastpls_named_components(sdev^2, "PC")
-  total_variance <- sum(x_scaled^2 / max(1, nrow(x_scaled) - 1L))
-  variance_explained <- if (is.finite(total_variance) && total_variance > 0) {
-    variance / total_variance
-  } else {
-    rep(NA_real_, length(variance))
-  }
-  variance_explained <- .fastpls_named_components(as.numeric(variance_explained), "PC")
-  out <- list(
-    scores = scores,
-    loadings = loadings,
-    sdev = sdev,
-    variance = variance,
-    variance_explained = variance_explained,
-    cumulative_variance_explained = .fastpls_named_components(cumsum(variance_explained), "PC"),
-    variance_total = total_variance,
-    variance_basis = "X",
-    center = x_center,
-    scale = x_scale,
-    svd = decomp,
-    svd.method = decomp$svd.method %||% decomp$method,
-    ncomp = ncomp
-  )
-  class(out) <- "fastPLSPCA"
-  if (!is.null(xtest)) {
-    out$scores_test <- predict(out, xtest)
-  }
-  out
-}
-
-.predict_fastplspca_scores <- function(object, newdata, ncomp = NULL) {
-  if (!inherits(object, "fastPLSPCA")) {
-    stop("object must be a fastPLSPCA object.", call. = FALSE)
-  }
-  if (missing(newdata) || is.null(newdata)) {
-    stop("newdata must be supplied.", call. = FALSE)
-  }
-  if (identical(object$precision, "float32")) {
-    newdata32 <- .as_float32_matrix(newdata, "newdata")
-    loadings32 <- object$loadings
-    if (ncol(newdata32) != nrow(loadings32)) {
-      stop(
-        "newdata must have the same number of columns used to fit the PCA object.",
-        call. = FALSE
-      )
-    }
-    k <- if (is.null(ncomp)) {
-      ncol(loadings32)
-    } else {
-      max(1L, min(as.integer(ncomp)[1L], ncol(loadings32)))
-    }
-    projected <- .float32_sweep_cols(newdata32, object$center, "-")
-    projected <- .float32_sweep_cols(projected, object$scale, "/")
-    scores <- projected %*% loadings32[, seq_len(k), drop = FALSE]
-    colnames(scores) <- paste0("PC", seq_len(k))
-    return(scores)
-  }
-  newdata <- as.matrix(newdata)
-  loadings <- as.matrix(object$loadings)
-  if (ncol(newdata) != nrow(loadings)) {
-    stop(
-      "newdata must have the same number of columns used to fit the PCA object.",
-      call. = FALSE
-    )
-  }
-  if (!is.null(colnames(newdata)) && !is.null(rownames(loadings)) &&
-      !identical(colnames(newdata), rownames(loadings))) {
-    warning(
-      "newdata column names differ from the PCA loading names; projection uses column order.",
-      call. = FALSE
-    )
-  }
-  k <- if (is.null(ncomp)) {
-    ncol(loadings)
-  } else {
-    max(1L, min(as.integer(ncomp)[1L], ncol(loadings)))
-  }
-  center <- object$center %||% rep(0, nrow(loadings))
-  scale <- object$scale %||% rep(1, nrow(loadings))
-  scale[!is.finite(scale) | scale == 0] <- 1
-  projected <- sweep(newdata, 2L, center, "-")
-  projected <- sweep(projected, 2L, scale, "/")
-  scores <- projected %*% loadings[, seq_len(k), drop = FALSE]
-  colnames(scores) <- paste0("PC", seq_len(k))
-  rownames(scores) <- rownames(newdata)
-  scores
-}
-
-#' Project new data with a fitted fastPLS PCA model
-#'
-#' Applies the centering, scaling, and loading matrix stored in a
-#' `fastPLSPCA` object to an independent dataset.
-#'
-#' @param object A `fastPLSPCA` object returned by [pca()].
-#' @param newdata Numeric matrix with the same columns, in the same order, as
-#'   the matrix used to fit `object`.
-#' @param ncomp Optional number of principal components to return. By default
-#'   all components stored in `object` are returned.
-#' @param ... Ignored.
-#' @return Matrix of projected PCA scores for `newdata`.
-#' @examples
-#' pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
-#'           method = "rsvd", seed = 1)
-#' predict(pc, as.matrix(iris[1:3, 1:4]))
-#' @export
-predict.fastPLSPCA <- function(object, newdata, ncomp = NULL, ...) {
-  .predict_fastplspca_scores(object, newdata, ncomp = ncomp)
-}
-
 .fastpls_ellipse <- function(scores, conf = 0.95, type = c("confidence", "hotelling"), npoints = 100L) {
   type <- match.arg(type)
   scores <- as.matrix(scores)
@@ -7080,74 +6845,6 @@ predict.fastPLSPCA <- function(object, newdata, ncomp = NULL, ...) {
   invisible(xy)
 }
 
-#' Plot PCA or PLS scores
-#'
-#' Draws a two-component score plot for `fastPLSPCA` and `fastPLS` objects.
-#' Optional ellipses are computed either as a data confidence ellipse or a
-#' Hotelling T2 score ellipse.
-#' By default, grouped points use filled symbols with the group color in `bg`
-#' and a black contour in `col`; PCA plots use `pch = 22` unless another
-#' plotting character is supplied through `...`.
-#' Axis labels include the predictor-space variance explained by each plotted
-#' PCA component or PLS latent variable when available.
-#'
-#' @param x A `fastPLSPCA` object.
-#' @param comps Two component indices.
-#' @param groups Optional grouping vector for color and grouped ellipses.
-#' @param score.set For PLS objects, plot \code{train} scores, \code{test} scores,
-#'   or \code{auto} to use training scores when available.
-#' @param ellipse Logical; draw confidence ellipses when `TRUE`.
-#' @param ellipse.type \code{confidence} or \code{hotelling}.
-#' @param conf Confidence level.
-#' @param ... Additional arguments passed to `plot()`.
-#' @return Invisibly returns the plotted score matrix.
-#' @examples
-#' pc <- pca(as.matrix(iris[, 1:4]), ncomp = 2, backend = "cpu",
-#'           method = "rsvd", seed = 1)
-#' plot(pc, groups = iris$Species, ellipse = TRUE)
-#' @export
-plot.fastPLSPCA <- function(x,
-                            comps = c(1L, 2L),
-                            groups = NULL,
-                            ellipse = FALSE,
-                            ellipse.type = c("confidence", "hotelling"),
-                            conf = 0.95,
-                            ...) {
-  dots <- list(...)
-  main <- if (is.null(dots$main)) "fastPLS PCA scores" else dots$main
-  xlab <- if (is.null(dots$xlab)) {
-    sprintf("PC%d (%.1f%%)", comps[1L], 100 * x$variance_explained[comps[1L]])
-  } else {
-    dots$xlab
-  }
-  ylab <- if (is.null(dots$ylab)) {
-    sprintf("PC%d (%.1f%%)", comps[2L], 100 * x$variance_explained[comps[2L]])
-  } else {
-    dots$ylab
-  }
-  dots$main <- NULL
-  dots$xlab <- NULL
-  dots$ylab <- NULL
-  if (is.null(dots$pch)) dots$pch <- 22
-  do.call(
-    .fastpls_plot_scores,
-    c(
-      list(
-        scores = x$scores,
-        comps = comps,
-        groups = groups,
-        ellipse = ellipse,
-        ellipse.type = match.arg(ellipse.type),
-        conf = conf,
-        main = main,
-        xlab = xlab,
-        ylab = ylab
-      ),
-      dots
-    )
-  )
-}
-
 .fastpls_score_matrix <- function(x, slot) {
   scores <- x[[slot]]
   if (!is.null(scores) && length(scores) > 0L && all(dim(scores) > 0L)) {
@@ -7204,7 +6901,29 @@ plot.fastPLSPCA <- function(x,
   NULL
 }
 
-#' @rdname plot.fastPLSPCA
+#' Plot PLS latent scores
+#'
+#' Draws a two-component score plot for a fitted `fastPLS` object. Optional
+#' ellipses are computed either as data confidence ellipses or Hotelling T2
+#' score ellipses. Axis labels include predictor-space variance explained when
+#' it was requested during model fitting.
+#'
+#' @param x A fitted `fastPLS` object.
+#' @param comps Two component indices.
+#' @param groups Optional grouping vector used for point fills and grouped
+#'   ellipses.
+#' @param score.set Plot `train` scores, `test` scores, or use `auto` to select
+#'   stored training scores before test scores.
+#' @param ellipse Draw confidence ellipses when `TRUE`.
+#' @param ellipse.type Use `confidence` or `hotelling` ellipses.
+#' @param conf Confidence level.
+#' @param ... Additional arguments passed to `plot()`.
+#' @return Invisibly returns the plotted score matrix.
+#' @examples
+#' X <- as.matrix(iris[, 1:4])
+#' fit <- pls(X, iris$Species, ncomp = 2, fit = TRUE,
+#'            return_variance = TRUE, seed = 1)
+#' plot(fit, groups = iris$Species, ellipse = TRUE)
 #' @export
 plot.fastPLS <- function(x,
                          comps = c(1L, 2L),

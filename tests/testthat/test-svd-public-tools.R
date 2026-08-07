@@ -68,28 +68,6 @@ test_that("small SVD inputs use exact fallback for iterative public backends", {
   }
 })
 
-test_that("pca uses public SVD backends and returns plottable scores", {
-  set.seed(9)
-  X <- matrix(rnorm(60 * 8), 60, 8)
-  Xtest <- matrix(rnorm(10 * 8), 10, 8)
-  colnames(X) <- colnames(Xtest) <- paste0("v", seq_len(ncol(X)))
-  fit <- pca(X, ncomp = 3, xtest = Xtest, center = TRUE, scale = TRUE,
-             backend = "cpu", seed = 12)
-  expect_s3_class(fit, "fastPLSPCA")
-  expect_identical(fit$svd.method, "cpu_rsvd")
-  expect_equal(dim(fit$scores), c(60L, 3L))
-  expect_equal(dim(fit$scores_test), c(10L, 3L))
-  expect_equal(dim(fit$loadings), c(8L, 3L))
-  expect_equal(fit$scores_test, predict(fit, Xtest), tolerance = 1e-12)
-  expect_equal(dim(predict(fit, Xtest, ncomp = 2)), c(10L, 2L))
-  expect_error(predict(fit, Xtest[, -1, drop = FALSE]), "same number of columns")
-  expect_true(all(is.finite(fit$variance_explained)))
-  expect_equal(length(fit$cumulative_variance_explained), 3L)
-  expect_true(all(diff(fit$cumulative_variance_explained) >= -1e-12))
-  expect_error(pca(X, ncomp = 3, backend = "cuda", method = "irlba"), "only available with backend='cpu'")
-  expect_error(pca(X, ncomp = 3, backend = "metal", method = "irlba"), "only available with backend='cpu'")
-})
-
 test_that("fastPLS does not mask base svd", {
   expect_identical(svd, base::svd)
 })
