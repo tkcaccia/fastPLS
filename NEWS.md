@@ -1,3 +1,8 @@
+# fastPLS 0.99.16
+
+* Corrected CUDA cross-validation smoke tests to request the supported rSVD
+  backend explicitly instead of inheriting an incompatible IRLBA setting.
+
 # fastPLS 0.99.15
 
 * Corrected portable Windows float32 classification prediction so argmax

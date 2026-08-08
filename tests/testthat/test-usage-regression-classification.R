@@ -211,6 +211,7 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cuda",
+    svd.method = "rsvd",
     seed = 123L
   )
   expect_identical(cuda_cv$backend, "cuda")
@@ -223,6 +224,7 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cuda",
+    svd.method = "rsvd",
     seed = 123L
   )
   expect_identical(cuda_opt$backend, "cuda")
