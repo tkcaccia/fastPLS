@@ -1,3 +1,10 @@
+# fastPLS 0.99.13
+
+* Made the randomized-SVD diagnostic test architecture-independent. The test
+  now accepts and verifies the documented large-residual failure state instead
+  of assuming that a stochastic approximation must meet the quality threshold
+  on every BLAS and CPU architecture. Runtime diagnostics remain unchanged.
+
 # fastPLS 0.99.12
 
 * Corrected Windows test scoping for native CPU float32 LDA. Tests that require
