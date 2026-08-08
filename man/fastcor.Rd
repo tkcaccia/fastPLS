@@ -27,8 +27,7 @@ correlation.
 \seealso{\code{\link{pls.single.cv}}, \code{\link{pls.double.cv}}}
 \examples{
 data(iris)
-x <- as.matrix(iris[, -5])
+x <- as.matrix(iris[1:10, -5])
 fastcor(x)
-fastcor(x[1:10, ], x[11:20, ])
 }
 

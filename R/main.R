@@ -1753,7 +1753,14 @@ print.fastPLS <- function(x, ...) {
       Yhat <- .float32_sweep_cols(Yhat, object$mY, "+")
       scores <- NULL
       if (is.null(score_cube)) {
-        idx <- float32_argmax_cpp(Yhat)
+        if (identical(.Platform$OS.type, "windows")) {
+          # R for Windows lacks the single-precision symbols used by the
+          # native decoder, so decode the small class-score output portably.
+          scores <- .float32_to_numeric_matrix(Yhat)
+          idx <- max.col(scores, ties.method = "first")
+        } else {
+          idx <- float32_argmax_cpp(Yhat)
+        }
       } else {
         scores <- .float32_to_numeric_matrix(Yhat)
         idx <- max.col(scores, ties.method = "first")

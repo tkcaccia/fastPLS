@@ -5,7 +5,8 @@ test_that("float32 capability assessment is shape based", {
     svd_method = "cpu_rsvd",
     q = 22L,
     ncomp = 20L,
-    classification = TRUE
+    classification = TRUE,
+    os_type = "unix"
   )
   expect_identical(safe$status, "validated")
   expect_identical(safe$action, "allow")
@@ -17,7 +18,8 @@ test_that("float32 capability assessment is shape based", {
     svd_method = "cpu_rsvd",
     q = 28355L,
     ncomp = 100L,
-    classification = FALSE
+    classification = FALSE,
+    os_type = "unix"
   )
   expect_identical(risky$status, "failed")
   expect_identical(risky$action, "warn")
@@ -29,7 +31,8 @@ test_that("float32 capability assessment is shape based", {
     svd_method = "cpu_rsvd",
     q = 28355L,
     ncomp = 100L,
-    classification = FALSE
+    classification = FALSE,
+    os_type = "unix"
   )
   expect_identical(plssvd$status, "experimental")
   expect_match(plssvd$warnings, "performance-risk")
@@ -42,7 +45,8 @@ test_that("float32 classification and nonlinear kernels are flagged", {
     svd_method = "cpu_rsvd",
     q = 100L,
     ncomp = 50L,
-    classification = TRUE
+    classification = TRUE,
+    os_type = "unix"
   )
   expect_identical(classification$status, "experimental")
   expect_match(classification$warnings, "five percentage points")
@@ -54,7 +58,8 @@ test_that("float32 classification and nonlinear kernels are flagged", {
     q = 1L,
     ncomp = 5L,
     classification = FALSE,
-    kernel = "rbf"
+    kernel = "rbf",
+    os_type = "unix"
   )
   expect_identical(nonlinear$status, "hybrid")
   expect_identical(nonlinear$execution, "hybrid_host_device")
@@ -68,7 +73,8 @@ test_that("float32 unavailable and hybrid routes are explicit", {
     svd_method = "irlba",
     q = 3L,
     ncomp = 2L,
-    classification = TRUE
+    classification = TRUE,
+    os_type = "unix"
   )
   expect_identical(cuda_irlba$status, "unavailable")
   expect_identical(cuda_irlba$action, "error")
@@ -81,7 +87,8 @@ test_that("float32 unavailable and hybrid routes are explicit", {
     q = 3L,
     ncomp = 2L,
     classification = TRUE,
-    classifier = "lda"
+    classifier = "lda",
+    os_type = "unix"
   )
   expect_identical(metal_lda$status, "hybrid")
   expect_identical(metal_lda$execution, "hybrid_device_cpu_lda")
@@ -112,7 +119,8 @@ test_that("float32 risk warnings are emitted once per route", {
       backend = "cuda",
       svd_method = "cpu_rsvd",
       Ytrain = Y,
-      ncomp = 50L
+      ncomp = 50L,
+      os_type = "unix"
     ),
     "numerical-risk"
   )
@@ -122,7 +130,8 @@ test_that("float32 risk warnings are emitted once per route", {
       backend = "cuda",
       svd_method = "cpu_rsvd",
       Ytrain = Y,
-      ncomp = 50L
+      ncomp = 50L,
+      os_type = "unix"
     )
   )
 })

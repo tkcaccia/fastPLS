@@ -1,3 +1,13 @@
+# fastPLS 0.99.15
+
+* Corrected portable Windows float32 classification prediction so argmax
+  decoding no longer calls an unavailable native single-precision kernel.
+
+* Made float32 capability-policy tests platform-independent by explicitly
+  testing Unix accelerator policies separately from Windows availability.
+
+* Simplified the `fastcor()` example to use ten numeric rows from `iris`.
+
 # fastPLS 0.99.14
 
 * Incremented the Bioconductor development version to trigger refreshed
