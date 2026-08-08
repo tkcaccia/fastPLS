@@ -1,3 +1,9 @@
+# fastPLS 0.99.14
+
+* Incremented the Bioconductor development version to trigger refreshed
+  multi-platform validation of the architecture-independent randomized-SVD
+  diagnostic test.
+
 # fastPLS 0.99.13
 
 * Made the randomized-SVD diagnostic test architecture-independent. The test
