@@ -53,15 +53,6 @@ results_dir <- arg("results_dir", getwd())
 status_override <- arg("status", "")
 message_override <- arg("message", "")
 
-cknn_k <- suppressWarnings(as.integer(arg("k", Sys.getenv("FASTPLS_PIPELINE3_CKNN_K", "10"))))
-cknn_tau <- suppressWarnings(as.numeric(arg("tau", Sys.getenv("FASTPLS_PIPELINE3_CKNN_TAU", "0.2"))))
-cknn_alpha <- suppressWarnings(as.numeric(arg("alpha", Sys.getenv("FASTPLS_PIPELINE3_CKNN_ALPHA", "0.75"))))
-cknn_top_m <- suppressWarnings(as.integer(arg("top_m", Sys.getenv("FASTPLS_PIPELINE3_CKNN_TOP_M", "20"))))
-if (!is.finite(cknn_k) || is.na(cknn_k) || cknn_k < 1L) cknn_k <- 10L
-if (!is.finite(cknn_tau) || is.na(cknn_tau) || cknn_tau <= 0) cknn_tau <- 0.2
-if (!is.finite(cknn_alpha) || is.na(cknn_alpha)) cknn_alpha <- 0.75
-if (!is.finite(cknn_top_m) || is.na(cknn_top_m) || cknn_top_m < 1L) cknn_top_m <- 20L
-
 classification_dataset_ids <- c(
   "ccle", "cifar100", "gtex_v8", "imagenet", "metref",
   "retina", "singlecell", "tabula", "tcga_brca", "tcga_hnsc_methylation",
@@ -81,13 +72,13 @@ fastpls_method_ids <- function(dataset_id) {
       base <- paste("fastPLS", method, "cpu", svd_method, sep = "_")
       ids <- c(ids, base)
       if (is_classification) {
-        ids <- c(ids, paste0(base, "_lda"), paste0(base, "_cknn"))
+        ids <- c(ids, paste0(base, "_lda"))
       }
     }
     base_gpu <- paste("fastPLS", method, gpu_backend, "rsvd", sep = "_")
     ids <- c(ids, base_gpu)
     if (is_classification) {
-      ids <- c(ids, paste0(base_gpu, "_lda"), paste0(base_gpu, "_cknn"))
+      ids <- c(ids, paste0(base_gpu, "_lda"))
     }
   }
   ids
@@ -105,9 +96,6 @@ parse_method_id <- function(method_id) {
   if (grepl("_lda$", x)) {
     classifier <- "lda"
     x <- sub("_lda$", "", x)
-  } else if (grepl("_cknn$", x)) {
-    classifier <- "cknn"
-    x <- sub("_cknn$", "", x)
   }
   parts <- strsplit(x, "_", fixed = TRUE)[[1L]]
   if (length(parts) != 3L) stop("Unsupported fastPLS method_id: ", method_id)
@@ -358,10 +346,6 @@ run_fit_predict <- function(task, spec, effective_ncomp) {
     svd.method = spec$svd_method,
     scaling = "centering",
     classifier = spec$classifier,
-    k = cknn_k,
-    tau = cknn_tau,
-    alpha = cknn_alpha,
-    top_m = cknn_top_m,
     north = if (identical(spec$method, "opls")) 1L else 1L,
     fit = FALSE,
     proj = FALSE,
@@ -413,10 +397,6 @@ run_cv10 <- function(task, spec, effective_ncomp) {
     svd.method = spec$svd_method,
     scaling = "centering",
     classifier = spec$classifier,
-    k = cknn_k,
-    tau = cknn_tau,
-    alpha = cknn_alpha,
-    top_m = cknn_top_m,
     north = if (identical(spec$method, "opls")) 1L else 1L,
     fit = FALSE,
     seed = 123L + replicate_id,
@@ -511,7 +491,7 @@ if (inherits(task, "error")) {
 
 effective_ncomp <- safe_effective_ncomp(task, ncomp_requested, method_family = spec$method)
 if (!identical(task$task_type, "classification") && !identical(spec$classifier, "argmax")) {
-  write_row(empty_row("skipped_classifier_regression", "lda/cknn classifiers require classification data", task, spec))
+  write_row(empty_row("skipped_classifier_regression", "LDA requires classification data", task, spec))
   quit(save = "no", status = 0)
 }
 

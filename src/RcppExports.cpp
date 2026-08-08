@@ -349,46 +349,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// candidate_knn_predict_cpp
-Rcpp::List candidate_knn_predict_cpp(const arma::mat& Ttest_norm, const arma::mat& Ttrain_norm, const arma::ivec& y_codes, const arma::mat& centroids, const arma::vec& candidate_bias, int top_k, int top_m, int knn_k, double tau, double alpha);
-RcppExport SEXP _fastPLS_candidate_knn_predict_cpp(SEXP Ttest_normSEXP, SEXP Ttrain_normSEXP, SEXP y_codesSEXP, SEXP centroidsSEXP, SEXP candidate_biasSEXP, SEXP top_kSEXP, SEXP top_mSEXP, SEXP knn_kSEXP, SEXP tauSEXP, SEXP alphaSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest_norm(Ttest_normSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain_norm(Ttrain_normSEXP);
-    Rcpp::traits::input_parameter< const arma::ivec& >::type y_codes(y_codesSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type centroids(centroidsSEXP);
-    Rcpp::traits::input_parameter< const arma::vec& >::type candidate_bias(candidate_biasSEXP);
-    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
-    Rcpp::traits::input_parameter< int >::type top_m(top_mSEXP);
-    Rcpp::traits::input_parameter< int >::type knn_k(knn_kSEXP);
-    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
-    rcpp_result_gen = Rcpp::wrap(candidate_knn_predict_cpp(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha));
-    return rcpp_result_gen;
-END_RCPP
-}
-// candidate_knn_predict_cuda
-Rcpp::List candidate_knn_predict_cuda(const arma::mat& Ttest_norm, const arma::mat& Ttrain_norm, const arma::ivec& y_codes, const arma::mat& centroids, const arma::vec& candidate_bias, int top_k, int top_m, int knn_k, double tau, double alpha);
-RcppExport SEXP _fastPLS_candidate_knn_predict_cuda(SEXP Ttest_normSEXP, SEXP Ttrain_normSEXP, SEXP y_codesSEXP, SEXP centroidsSEXP, SEXP candidate_biasSEXP, SEXP top_kSEXP, SEXP top_mSEXP, SEXP knn_kSEXP, SEXP tauSEXP, SEXP alphaSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest_norm(Ttest_normSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain_norm(Ttrain_normSEXP);
-    Rcpp::traits::input_parameter< const arma::ivec& >::type y_codes(y_codesSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type centroids(centroidsSEXP);
-    Rcpp::traits::input_parameter< const arma::vec& >::type candidate_bias(candidate_biasSEXP);
-    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
-    Rcpp::traits::input_parameter< int >::type top_m(top_mSEXP);
-    Rcpp::traits::input_parameter< int >::type knn_k(knn_kSEXP);
-    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
-    rcpp_result_gen = Rcpp::wrap(candidate_knn_predict_cuda(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha));
-    return rcpp_result_gen;
-END_RCPP
-}
 // cuda_thin_qr
 arma::mat cuda_thin_qr(const arma::mat& A);
 RcppExport SEXP _fastPLS_cuda_thin_qr(SEXP ASEXP) {
@@ -696,33 +656,31 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_class_predict_topk_cpp
-List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj, int block_size);
-RcppExport SEXP _fastPLS_pls_class_predict_topk_cpp(SEXP modelSEXP, SEXP XtestSEXP, SEXP class_biasSEXP, SEXP top_kSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
+List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, int top_k, bool proj, int block_size);
+RcppExport SEXP _fastPLS_pls_class_predict_topk_cpp(SEXP modelSEXP, SEXP XtestSEXP, SEXP top_kSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
     Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type class_bias(class_biasSEXP);
     Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
     Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
     Rcpp::traits::input_parameter< int >::type block_size(block_sizeSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, block_size));
+    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cpp(model, Xtest, top_k, proj, block_size));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_class_predict_topk_cuda
-List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj);
-RcppExport SEXP _fastPLS_pls_class_predict_topk_cuda(SEXP modelSEXP, SEXP XtestSEXP, SEXP class_biasSEXP, SEXP top_kSEXP, SEXP projSEXP) {
+List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, int top_k, bool proj);
+RcppExport SEXP _fastPLS_pls_class_predict_topk_cuda(SEXP modelSEXP, SEXP XtestSEXP, SEXP top_kSEXP, SEXP projSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
     Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type class_bias(class_biasSEXP);
     Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
     Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cuda(model, Xtest, class_bias, top_k, proj));
+    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cuda(model, Xtest, top_k, proj));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -942,8 +900,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_cv_predict_compiled
-List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes, int classifier, double lda_ridge, int k, double tau, double alpha, int top_m, bool store_predictions, int metric_id);
-RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP n_responseSEXP, SEXP xprodSEXP, SEXP opls_northSEXP, SEXP return_scoresSEXP, SEXP class_codesSEXP, SEXP classifierSEXP, SEXP lda_ridgeSEXP, SEXP kSEXP, SEXP tauSEXP, SEXP alphaSEXP, SEXP top_mSEXP, SEXP store_predictionsSEXP, SEXP metric_idSEXP) {
+List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes, int classifier, double lda_ridge, bool store_predictions, int metric_id);
+RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP n_responseSEXP, SEXP xprodSEXP, SEXP opls_northSEXP, SEXP return_scoresSEXP, SEXP class_codesSEXP, SEXP classifierSEXP, SEXP lda_ridgeSEXP, SEXP store_predictionsSEXP, SEXP metric_idSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -968,13 +926,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< arma::mat >::type class_codes(class_codesSEXP);
     Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
     Rcpp::traits::input_parameter< double >::type lda_ridge(lda_ridgeSEXP);
-    Rcpp::traits::input_parameter< int >::type k(kSEXP);
-    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
-    Rcpp::traits::input_parameter< int >::type top_m(top_mSEXP);
     Rcpp::traits::input_parameter< bool >::type store_predictions(store_predictionsSEXP);
     Rcpp::traits::input_parameter< int >::type metric_id(metric_idSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_cv_predict_compiled(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, k, tau, alpha, top_m, store_predictions, metric_id));
+    rcpp_result_gen = Rcpp::wrap(pls_cv_predict_compiled(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, store_predictions, metric_id));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1103,8 +1057,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
     {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
-    {"_fastPLS_candidate_knn_predict_cpp", (DL_FUNC) &_fastPLS_candidate_knn_predict_cpp, 10},
-    {"_fastPLS_candidate_knn_predict_cuda", (DL_FUNC) &_fastPLS_candidate_knn_predict_cuda, 10},
     {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
     {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},
     {"_fastPLS_lda_train_moments_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp, 5},
@@ -1125,8 +1077,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
     {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},
-    {"_fastPLS_pls_class_predict_topk_cpp", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cpp, 6},
-    {"_fastPLS_pls_class_predict_topk_cuda", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cuda, 5},
+    {"_fastPLS_pls_class_predict_topk_cpp", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cpp, 5},
+    {"_fastPLS_pls_class_predict_topk_cuda", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cuda, 4},
     {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
     {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
     {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},
@@ -1139,7 +1091,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model1_gpu", (DL_FUNC) &_fastPLS_pls_model1_gpu, 10},
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
     {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
-    {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 27},
+    {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 23},
     {"_fastPLS_fastpls_cpp_core_rsvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_rsvd, 6},
     {"_fastPLS_fastpls_cpp_core_plssvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_plssvd, 7},
     {"_fastPLS_fastpls_cpp_core_simpls", (DL_FUNC) &_fastPLS_fastpls_cpp_core_simpls, 7},

@@ -1,3 +1,16 @@
+# fastPLS 0.99.11
+
+* Removed the retired candidate-kNN and class-bias native ABI completely,
+  including CPU and CUDA kernels, generated Rcpp wrappers, registrations, and
+  unreachable compiled cross-validation branches. Classification remains
+  limited to the documented argmax and latent-space LDA heads.
+
+* Preserved compact top-k argmax prediction through a bias-free CPU/CUDA
+  implementation, including optional top-5 output.
+
+* Removed retired classifier variants and tuning controls from active benchmark
+  generators. Archived benchmark results remain unchanged for provenance.
+
 # fastPLS 0.99.10
 
 * Fixed compilation of CPU-only Windows builds. The unavailable native-float32

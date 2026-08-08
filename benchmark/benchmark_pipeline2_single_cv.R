@@ -174,26 +174,18 @@ methods <- split_csv(arg_value(args, "methods", default = Sys.getenv("PIPELINE2_
                      "plssvd,simpls,opls,kernelpls")
 backends <- split_csv(arg_value(args, "backends", default = Sys.getenv("PIPELINE2_BACKENDS", "")), "cpu,gpu")
 cpu_svd_methods <- split_csv(arg_value(args, "cpu_svd_methods", default = Sys.getenv("PIPELINE2_CPU_SVD_METHODS", "")), "rsvd,irlba")
-classifiers <- split_csv(arg_value(args, "classifiers", default = Sys.getenv("PIPELINE2_CLASSIFIERS", "")), "argmax,lda,cknn")
+classifiers <- split_csv(arg_value(args, "classifiers", default = Sys.getenv("PIPELINE2_CLASSIFIERS", "")), "argmax,lda")
 split_seed <- suppressWarnings(as.integer(arg_value(args, "split_seed", default = Sys.getenv("PIPELINE2_SPLIT_SEED", "123"))))
 kfold <- arg_value(args, "kfold", default = Sys.getenv("PIPELINE2_KFOLD", "5"))
 timeout_sec <- suppressWarnings(as.numeric(arg_value(args, "timeout_sec", default = Sys.getenv("PIPELINE2_TIMEOUT_SEC", "3600"))))
 best_source <- arg_value(args, "best_source", default = Sys.getenv("PIPELINE2_BEST_SOURCE", ""))
 task_dir <- arg_value(args, "task_dir", default = Sys.getenv("PIPELINE2_TASK_DIR", ""))
 lib_loc <- arg_value(args, "lib_loc", default = Sys.getenv("PIPELINE2_LIB_LOC", ""))
-k_cknn <- suppressWarnings(as.integer(arg_value(args, "k", default = Sys.getenv("PIPELINE2_CKNN_K", "10"))))
-tau_cknn <- suppressWarnings(as.numeric(arg_value(args, "tau", default = Sys.getenv("PIPELINE2_CKNN_TAU", "0.2"))))
-alpha_cknn <- suppressWarnings(as.numeric(arg_value(args, "alpha", default = Sys.getenv("PIPELINE2_CKNN_ALPHA", "0.75"))))
-top_m_cknn <- suppressWarnings(as.integer(arg_value(args, "top_m", default = Sys.getenv("PIPELINE2_CKNN_TOP_M", "20"))))
 gpu_backend <- benchmark_gpu_backend()
 if (!nzchar(lib_loc)) lib_loc <- .libPaths()[[1L]]
 
 if (!is.finite(split_seed) || is.na(split_seed)) split_seed <- 123L
 if (!is.finite(timeout_sec) || is.na(timeout_sec) || timeout_sec <= 0) timeout_sec <- 3600
-if (!is.finite(k_cknn) || is.na(k_cknn) || k_cknn < 1L) k_cknn <- 10L
-if (!is.finite(tau_cknn) || is.na(tau_cknn) || tau_cknn <= 0) tau_cknn <- 0.2
-if (!is.finite(alpha_cknn) || is.na(alpha_cknn)) alpha_cknn <- 0.75
-if (!is.finite(top_m_cknn) || is.na(top_m_cknn) || top_m_cknn < 1L) top_m_cknn <- 20L
 kfold_arg <- if (tolower(kfold) %in% c("loocv", "loo")) "loocv" else suppressWarnings(as.integer(kfold))
 if (length(kfold_arg) != 1L || (is.numeric(kfold_arg) && (!is.finite(kfold_arg) || is.na(kfold_arg) || kfold_arg < 2L))) {
   kfold_arg <- 5L
@@ -213,10 +205,6 @@ writeLines(c(
   paste("cpu_svd_methods:", paste(cpu_svd_methods, collapse = ",")),
   paste("classifiers:", paste(classifiers, collapse = ",")),
   paste("kfold:", as.character(kfold_arg)),
-  paste("cknn_k:", k_cknn),
-  paste("cknn_tau:", tau_cknn),
-  paste("cknn_alpha:", alpha_cknn),
-  paste("cknn_top_m:", top_m_cknn),
   paste("timeout_sec:", timeout_sec),
   paste("best_source:", if (nzchar(best_source)) best_source else "embedded defaults"),
   paste("task_dir:", if (nzchar(task_dir)) task_dir else "auto"),
@@ -303,10 +291,6 @@ for (dataset_id in datasets) {
           backend = spec$backend,
           svd.method = spec$svd.method,
           classifier = spec$classifier,
-          k = k_cknn,
-          tau = tau_cknn,
-          alpha = alpha_cknn,
-          top_m = top_m_cknn,
           scaling = "centering",
           seed = 123L,
           xprod = NULL

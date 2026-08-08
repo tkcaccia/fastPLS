@@ -160,7 +160,6 @@ for (method in methods) {
 for (method in methods) {
   for (svd_method in svd_methods) {
     append_row("classification", method, svd_method, "cpp", "lda", FALSE)
-    append_row("classification", method, svd_method, "cpp", "cknn", FALSE)
   }
 }
 
@@ -174,13 +173,6 @@ if (isTRUE(fastPLS::has_metal())) {
   for (method in methods) {
     append_row("classification", method, "cpu_rsvd", "metal", "argmax", FALSE)
     append_row("classification", method, "cpu_rsvd", "metal", "lda", FALSE)
-    append_row("classification", method, "cpu_rsvd", "metal", "cknn", FALSE)
-  }
-}
-
-if (isTRUE(fastPLS::has_cuda())) {
-  for (method in methods) {
-    append_row("classification", method, "cpu_rsvd", "cuda", "cknn", FALSE)
   }
 }
 

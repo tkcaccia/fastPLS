@@ -78,32 +78,6 @@ arma::fmat cuda_matrix_multiply_float(
   bool transpose_left = false,
   bool transpose_right = false
 );
-Mat cuda_candidate_knn_scores(
-  const Mat& Ttest,
-  const Mat& Ttrain,
-  const arma::ivec& y,
-  const arma::imat& candidates,
-  const Mat& candidate_base,
-  const Vec& bias,
-  int knn_k,
-  double tau,
-  double alpha
-);
-Mat cuda_candidate_knn_scores_prefix(
-  const Mat& Ttest,
-  const Mat& Ttrain,
-  const arma::ivec& y,
-  const arma::imat& candidates,
-  const Mat& candidate_base,
-  const Vec& bias,
-  const arma::ivec& ncomp,
-  const Mat& test_norm2,
-  const Mat& train_norm2,
-  int top_m,
-  int knn_k,
-  double tau,
-  double alpha
-);
 Mat cuda_thin_qr(const Mat& A);
 std::vector<LDAGPUModel> cuda_lda_train_prefix(
   const Mat& Ttrain,

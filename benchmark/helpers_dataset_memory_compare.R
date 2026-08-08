@@ -83,19 +83,12 @@ benchmark_classifier_backend <- function(fit, classifier) {
   if (identical(classifier, "lda")) {
     return(as.character(inner$lda$train_backend %||% internal$classification_rule %||% "lda")[[1L]])
   }
-  if (identical(classifier, "cknn")) {
-    return(as.character(internal$candidate_knn$backend %||% internal$classification_rule %||% "cknn")[[1L]])
-  }
   as.character(internal$classification_rule %||% "argmax")[[1L]]
 }
 
 benchmark_classifier_numeric_path <- function(fit, classifier, fallback = "float64") {
   precision <- benchmark_execution_precision(fit, fallback)
-  if (identical(classifier, "cknn") && identical(precision, "float32")) {
-    "float32_pls_with_double_cknn_scores"
-  } else {
-    precision
-  }
+  precision
 }
 
 coerce_benchmark_matrix <- function(x, precision = c("native", "float32", "float64")) {
@@ -720,10 +713,7 @@ variant_specs <- function() {
   lda_rows <- out[out$implementation_label %in% c("Cpp", gpu_label), , drop = FALSE]
   lda_rows$variant_name <- paste0(lda_rows$variant_name, "_lda")
   lda_rows$classifier <- "lda"
-  candidate_rows <- out[out$implementation_label %in% c("Cpp", gpu_label), , drop = FALSE]
-  candidate_rows$variant_name <- paste0(candidate_rows$variant_name, "_cknn")
-  candidate_rows$classifier <- "cknn"
-  out <- rbind(out, lda_rows, candidate_rows)
+  out <- rbind(out, lda_rows)
   out
 }
 

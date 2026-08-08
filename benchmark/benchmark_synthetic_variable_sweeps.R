@@ -16,21 +16,6 @@ suppressPackageStartupMessages({
   library(fastPLS)
 })
 
-k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
-tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
-alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
-top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
-if (!is.finite(k_default) || is.na(k_default) || k_default < 1L) k_default <- 10L
-if (!is.finite(tau_default) || is.na(tau_default) || tau_default <= 0) tau_default <- 0.2
-if (!is.finite(alpha_default) || is.na(alpha_default)) alpha_default <- 0.75
-if (!is.finite(top_m_default) || is.na(top_m_default) || top_m_default < 1L) top_m_default <- 20L
-options(
-  fastPLS.k = k_default,
-  fastPLS.tau = tau_default,
-  fastPLS.alpha = alpha_default,
-  fastPLS.top_m = top_m_default
-)
-
 `%||%` <- function(x, y) {
   if (is.null(x) || length(x) == 0L) return(y)
   if (length(x) == 1L && is.na(x)) return(y)
@@ -568,12 +553,6 @@ variant_specs <- function(task) {
       lda_specs[, variant_name := paste0(variant_name, "_lda")]
       lda_specs[, classifier := "lda"]
       specs <- rbind(specs, lda_specs, fill = TRUE)
-    }
-    candidate_specs <- copy(specs[implementation %in% c("cpp", gpu_backend) & classifier == "argmax"])
-    if (nrow(candidate_specs)) {
-      candidate_specs[, variant_name := paste0(variant_name, "_cknn")]
-      candidate_specs[, classifier := "cknn"]
-      specs <- rbind(specs, candidate_specs, fill = TRUE)
     }
   }
   specs[]

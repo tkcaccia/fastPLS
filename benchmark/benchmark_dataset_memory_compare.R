@@ -8,21 +8,6 @@ source(file.path(script_dir, "helpers_dataset_memory_compare.R"))
 args <- parse_kv_args()
 mode <- arg_value(args, "mode", required = TRUE)
 
-k_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_KNN_K", "10")))
-tau_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_TAU", "0.2")))
-alpha_default <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_CANDIDATE_ALPHA", "0.75")))
-top_m_default <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_CANDIDATE_TOP_M", "20")))
-if (!is.finite(k_default) || is.na(k_default) || k_default < 1L) k_default <- 10L
-if (!is.finite(tau_default) || is.na(tau_default) || tau_default <= 0) tau_default <- 0.2
-if (!is.finite(alpha_default) || is.na(alpha_default)) alpha_default <- 0.75
-if (!is.finite(top_m_default) || is.na(top_m_default) || top_m_default < 1L) top_m_default <- 20L
-options(
-  fastPLS.k = k_default,
-  fastPLS.tau = tau_default,
-  fastPLS.alpha = alpha_default,
-  fastPLS.top_m = top_m_default
-)
-
 pls_pkg_fit <- function(task, effective_ncomp, fit_method = c("simpls", "kernelpls", "opls")) {
   fit_method <- match.arg(fit_method)
   if (!requireNamespace("pls", quietly = TRUE)) {
@@ -319,7 +304,7 @@ result_row <- tryCatch({
     )
   }
 
-    base_variant_name <- sub("_(lda|cknn|candidate_knn)$", "", variant_name)
+    base_variant_name <- sub("_lda$", "", variant_name)
   fit_fun <- switch(
     base_variant_name,
     cpp_plssvd_cpu_rsvd = function() fastpls_fit("plssvd", "rsvd"),

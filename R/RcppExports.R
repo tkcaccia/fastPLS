@@ -97,14 +97,6 @@ cuda_matrix_multiply <- function(A, B) {
     .Call(`_fastPLS_cuda_matrix_multiply`, A, B)
 }
 
-candidate_knn_predict_cpp <- function(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha) {
-    .Call(`_fastPLS_candidate_knn_predict_cpp`, Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha)
-}
-
-candidate_knn_predict_cuda <- function(Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha) {
-    .Call(`_fastPLS_candidate_knn_predict_cuda`, Ttest_norm, Ttrain_norm, y_codes, centroids, candidate_bias, top_k, top_m, knn_k, tau, alpha)
-}
-
 cuda_thin_qr <- function(A) {
     .Call(`_fastPLS_cuda_thin_qr`, A)
 }
@@ -185,12 +177,12 @@ pls_predict_flash_cpu <- function(model, Xtest, proj, block_size) {
     .Call(`_fastPLS_pls_predict_flash_cpu`, model, Xtest, proj, block_size)
 }
 
-pls_class_predict_topk_cpp <- function(model, Xtest, class_bias, top_k, proj, block_size) {
-    .Call(`_fastPLS_pls_class_predict_topk_cpp`, model, Xtest, class_bias, top_k, proj, block_size)
+pls_class_predict_topk_cpp <- function(model, Xtest, top_k, proj, block_size) {
+    .Call(`_fastPLS_pls_class_predict_topk_cpp`, model, Xtest, top_k, proj, block_size)
 }
 
-pls_class_predict_topk_cuda <- function(model, Xtest, class_bias, top_k, proj) {
-    .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, class_bias, top_k, proj)
+pls_class_predict_topk_cuda <- function(model, Xtest, top_k, proj) {
+    .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, top_k, proj)
 }
 
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
@@ -241,8 +233,8 @@ pls_lda_gpu_native <- function(Xtrain, Ytrain, y, Xtest, ncomp, n_classes, metho
     .Call(`_fastPLS_pls_lda_gpu_native`, Xtrain, Ytrain, y, Xtest, ncomp, n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge)
 }
 
-pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, k, tau, alpha, top_m, store_predictions, metric_id) {
-    .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, k, tau, alpha, top_m, store_predictions, metric_id)
+pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, store_predictions, metric_id) {
+    .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed, classification, n_response, xprod, opls_north, return_scores, class_codes, classifier, lda_ridge, store_predictions, metric_id)
 }
 
 fastpls_cpp_core_rsvd <- function(A, k, oversample = 10L, power = 1L, seed = 1L, use_float = FALSE) {

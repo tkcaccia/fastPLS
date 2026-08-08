@@ -1253,226 +1253,6 @@ struct AdaptiveRefreshPolicy {
   }
 };
 
-void candidate_insert_top(
-  std::vector<double>& scores,
-  std::vector<int>& index,
-  const double value,
-  const int cls
-) {
-  const int k = static_cast<int>(scores.size());
-  for (int j = 0; j < k; ++j) {
-    if (value > scores[static_cast<std::size_t>(j)]) {
-      for (int h = k - 1; h > j; --h) {
-        scores[static_cast<std::size_t>(h)] = scores[static_cast<std::size_t>(h - 1)];
-        index[static_cast<std::size_t>(h)] = index[static_cast<std::size_t>(h - 1)];
-      }
-      scores[static_cast<std::size_t>(j)] = value;
-      index[static_cast<std::size_t>(j)] = cls;
-      return;
-    }
-  }
-}
-
-double candidate_row_dot(
-  const arma::mat& A,
-  const arma::uword ia,
-  const arma::mat& B,
-  const arma::uword ib
-) {
-  double out = 0.0;
-  const arma::uword n_dim = A.n_cols;
-  const arma::uword n_a = A.n_rows;
-  const arma::uword n_b = B.n_rows;
-  const double* Ap = A.memptr();
-  const double* Bp = B.memptr();
-  for (arma::uword j = 0; j < n_dim; ++j) {
-    out += Ap[ia + j * n_a] * Bp[ib + j * n_b];
-  }
-  return out;
-}
-
-double candidate_smoothed_class_knn(
-  const arma::mat& Ttest_norm,
-  const arma::uword test_row,
-  const arma::mat& Ttrain_norm,
-  const std::vector<arma::uword>& rows,
-  const int knn_k,
-  const double tau
-) {
-  if (rows.empty()) {
-    return -std::numeric_limits<double>::infinity();
-  }
-
-  const int use_k = std::max(1, std::min(knn_k, static_cast<int>(rows.size())));
-  std::vector<double> top_vals(static_cast<std::size_t>(use_k), -std::numeric_limits<double>::infinity());
-  std::vector<int> top_dummy(static_cast<std::size_t>(use_k), -1);
-  for (std::size_t r = 0; r < rows.size(); ++r) {
-    const double sim = candidate_row_dot(Ttest_norm, test_row, Ttrain_norm, rows[r]);
-    candidate_insert_top(top_vals, top_dummy, sim, 0);
-  }
-
-  if (!std::isfinite(tau) || tau <= 0.0) {
-    double total = 0.0;
-    for (int j = 0; j < use_k; ++j) total += top_vals[static_cast<std::size_t>(j)];
-    return total / static_cast<double>(use_k);
-  }
-
-  const double mx = top_vals[0];
-  if (!std::isfinite(mx)) return mx;
-  double acc = 0.0;
-  for (int j = 0; j < use_k; ++j) {
-    acc += std::exp((top_vals[static_cast<std::size_t>(j)] - mx) / tau);
-  }
-  return mx + tau * std::log(acc / static_cast<double>(use_k));
-}
-
-Rcpp::List candidate_knn_predict_native_impl(
-  const arma::mat& Ttest_norm,
-  const arma::mat& Ttrain_norm,
-  const arma::ivec& y_codes,
-  const arma::mat& centroids,
-  const arma::vec& candidate_bias_in,
-  const int top_k_in,
-  const int top_m_in,
-  const int knn_k_in,
-  const double tau_in,
-  const double alpha_in,
-  const arma::mat* base_scores_override,
-  const bool use_cuda_candidate_scores,
-  const std::string& backend_name
-) {
-  if (Ttest_norm.n_cols != Ttrain_norm.n_cols || Ttest_norm.n_cols != centroids.n_cols) {
-    Rcpp::stop("candidate-kNN score dimensions do not match");
-  }
-  if (Ttrain_norm.n_rows != y_codes.n_elem) {
-    Rcpp::stop("candidate-kNN y_codes length must match Ttrain rows");
-  }
-  const int n_classes = static_cast<int>(centroids.n_rows);
-  if (n_classes < 1) {
-    Rcpp::stop("candidate-kNN requires at least one class");
-  }
-
-  const arma::uword ntest = Ttest_norm.n_rows;
-  const int top_k = std::max(1, std::min(top_k_in, n_classes));
-  const int top_m = std::max(top_k, std::min(std::max(1, top_m_in), n_classes));
-  const int knn_k = std::max(1, knn_k_in);
-  const double tau = (std::isfinite(tau_in) && tau_in > 0.0) ? tau_in : 0.2;
-  const double alpha = std::isfinite(alpha_in) ? alpha_in : 0.5;
-
-  arma::vec candidate_bias = candidate_bias_in;
-  if (candidate_bias.n_elem == 0) {
-    candidate_bias.zeros(static_cast<arma::uword>(n_classes));
-  }
-  if (candidate_bias.n_elem != static_cast<arma::uword>(n_classes)) {
-    Rcpp::stop("candidate_bias must have one value per class");
-  }
-
-  arma::mat base_scores;
-  if (base_scores_override != nullptr) {
-    if (base_scores_override->n_rows != ntest ||
-        base_scores_override->n_cols != static_cast<arma::uword>(n_classes)) {
-      Rcpp::stop("candidate-kNN CUDA base-score matrix has incompatible dimensions");
-    }
-    base_scores = *base_scores_override;
-  } else {
-    base_scores = Ttest_norm * centroids.t();
-  }
-
-  std::vector<std::vector<arma::uword> > class_rows(static_cast<std::size_t>(n_classes));
-  for (arma::uword i = 0; i < y_codes.n_elem; ++i) {
-    const int cls = y_codes(i);
-    if (cls >= 1 && cls <= n_classes) {
-      class_rows[static_cast<std::size_t>(cls - 1)].push_back(i);
-    }
-  }
-
-  arma::imat top_index(ntest, static_cast<arma::uword>(top_k), arma::fill::zeros);
-  arma::mat top_score(ntest, static_cast<arma::uword>(top_k), arma::fill::value(-std::numeric_limits<double>::infinity()));
-  arma::imat candidates(ntest, static_cast<arma::uword>(top_m), arma::fill::zeros);
-  arma::mat candidate_base(ntest, static_cast<arma::uword>(top_m), arma::fill::value(-std::numeric_limits<double>::infinity()));
-
-  std::vector<double> row_scores(static_cast<std::size_t>(top_m), -std::numeric_limits<double>::infinity());
-  std::vector<int> row_index(static_cast<std::size_t>(top_m), -1);
-  for (arma::uword i = 0; i < ntest; ++i) {
-    std::fill(row_scores.begin(), row_scores.end(), -std::numeric_limits<double>::infinity());
-    std::fill(row_index.begin(), row_index.end(), -1);
-    for (int cls = 0; cls < n_classes; ++cls) {
-      candidate_insert_top(row_scores, row_index, base_scores(i, static_cast<arma::uword>(cls)), cls + 1);
-    }
-    for (int j = 0; j < top_m; ++j) {
-      candidates(i, static_cast<arma::uword>(j)) = row_index[static_cast<std::size_t>(j)];
-      candidate_base(i, static_cast<arma::uword>(j)) = row_scores[static_cast<std::size_t>(j)];
-      if (j < top_k) {
-        top_index(i, static_cast<arma::uword>(j)) = row_index[static_cast<std::size_t>(j)];
-        top_score(i, static_cast<arma::uword>(j)) = row_scores[static_cast<std::size_t>(j)];
-      }
-    }
-  }
-
-  arma::mat cuda_candidate_scores;
-  bool used_cuda_candidate_scores = false;
-  if (use_cuda_candidate_scores) {
-    try {
-      cuda_candidate_scores = fastpls_svd::cuda_candidate_knn_scores(
-        Ttest_norm,
-        Ttrain_norm,
-        y_codes,
-        candidates,
-        candidate_base,
-        candidate_bias,
-        knn_k,
-        tau,
-        alpha
-      );
-      used_cuda_candidate_scores =
-        cuda_candidate_scores.n_rows == ntest &&
-        cuda_candidate_scores.n_cols == static_cast<arma::uword>(top_m);
-    } catch (...) {
-      used_cuda_candidate_scores = false;
-    }
-  }
-
-  std::vector<double> rerank_scores(static_cast<std::size_t>(top_m), -std::numeric_limits<double>::infinity());
-  std::vector<int> rerank_index(static_cast<std::size_t>(top_m), -1);
-  for (arma::uword i = 0; i < ntest; ++i) {
-    std::fill(rerank_scores.begin(), rerank_scores.end(), -std::numeric_limits<double>::infinity());
-    std::fill(rerank_index.begin(), rerank_index.end(), -1);
-    for (int j = 0; j < top_m; ++j) {
-      const int cls = candidates(i, static_cast<arma::uword>(j));
-      if (cls < 1 || cls > n_classes) continue;
-      double score;
-      if (used_cuda_candidate_scores) {
-        score = cuda_candidate_scores(i, static_cast<arma::uword>(j));
-      } else {
-        const double local = candidate_smoothed_class_knn(
-          Ttest_norm,
-          i,
-          Ttrain_norm,
-          class_rows[static_cast<std::size_t>(cls - 1)],
-          knn_k,
-          tau
-        );
-        score = local +
-          alpha * candidate_base(i, static_cast<arma::uword>(j)) +
-          candidate_bias(static_cast<arma::uword>(cls - 1));
-      }
-      candidate_insert_top(rerank_scores, rerank_index, score, cls);
-    }
-    for (int j = 0; j < top_k; ++j) {
-      top_index(i, static_cast<arma::uword>(j)) = rerank_index[static_cast<std::size_t>(j)];
-      top_score(i, static_cast<arma::uword>(j)) = rerank_scores[static_cast<std::size_t>(j)];
-    }
-  }
-
-  return Rcpp::List::create(
-    Rcpp::Named("top_index") = top_index,
-    Rcpp::Named("top_score") = top_score,
-    Rcpp::Named("predict_backend") = backend_name,
-    Rcpp::Named("candidate_score_backend") = used_cuda_candidate_scores ? "cuda" : "cpp",
-    Rcpp::Named("n_reranked") = static_cast<int>(ntest)
-  );
-}
-
 } // namespace
 
 // [[Rcpp::export]]
@@ -3519,93 +3299,6 @@ void cuda_reset_workspace() {
 // [[Rcpp::export]]
 arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B) {
   return fastpls_svd::cuda_matrix_multiply(A, B);
-}
-
-// [[Rcpp::export]]
-Rcpp::List candidate_knn_predict_cpp(const arma::mat& Ttest_norm,
-                                     const arma::mat& Ttrain_norm,
-                                     const arma::ivec& y_codes,
-                                     const arma::mat& centroids,
-                                     const arma::vec& candidate_bias,
-                                     int top_k,
-                                     int top_m,
-                                     int knn_k,
-                                     double tau,
-                                     double alpha) {
-  return candidate_knn_predict_native_impl(
-    Ttest_norm,
-    Ttrain_norm,
-    y_codes,
-    centroids,
-    candidate_bias,
-    top_k,
-    top_m,
-    knn_k,
-    tau,
-    alpha,
-    nullptr,
-    false,
-    "cpp_candidate_knn"
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List candidate_knn_predict_cuda(const arma::mat& Ttest_norm,
-                                      const arma::mat& Ttrain_norm,
-                                      const arma::ivec& y_codes,
-                                      const arma::mat& centroids,
-                                      const arma::vec& candidate_bias,
-                                      int top_k,
-                                      int top_m,
-                                      int knn_k,
-                                      double tau,
-                                      double alpha) {
-  if (!fastpls_svd::has_cuda_backend()) {
-    return candidate_knn_predict_cpp(
-      Ttest_norm,
-      Ttrain_norm,
-      y_codes,
-      centroids,
-      candidate_bias,
-      top_k,
-      top_m,
-      knn_k,
-      tau,
-      alpha
-    );
-  }
-
-  try {
-    arma::mat base_scores = fastpls_svd::cuda_matrix_multiply(Ttest_norm, centroids.t());
-    return candidate_knn_predict_native_impl(
-      Ttest_norm,
-      Ttrain_norm,
-      y_codes,
-      centroids,
-      candidate_bias,
-      top_k,
-      top_m,
-      knn_k,
-      tau,
-      alpha,
-      &base_scores,
-      true,
-      "cuda_candidate_knn"
-    );
-  } catch (...) {
-    return candidate_knn_predict_cpp(
-      Ttest_norm,
-      Ttrain_norm,
-      y_codes,
-      centroids,
-      candidate_bias,
-      top_k,
-      top_m,
-      knn_k,
-      tau,
-      alpha
-    );
-  }
 }
 
 // [[Rcpp::export]]
@@ -5878,29 +5571,14 @@ arma::cube compact_prediction_weights(List& model, const int m, const arma::ivec
   Rcpp::stop("Compact class prediction requires compact low-rank factors");
 }
 
-arma::mat class_bias_offsets(List& model, const arma::mat& class_bias, const int m, const arma::uword length_ncomp) {
+arma::mat class_prediction_offsets(List& model, const int m, const arma::uword length_ncomp) {
   Rcpp::NumericVector mY_vec = model["mY"];
   arma::rowvec mY(mY_vec.begin(), mY_vec.size(), false, true);
   arma::mat offsets(static_cast<arma::uword>(m), length_ncomp, arma::fill::zeros);
   for (arma::uword a = 0; a < length_ncomp; ++a) {
     offsets.col(a) = mY.t();
   }
-
-  if (class_bias.n_elem == 0) {
-    return offsets;
-  }
-  if (static_cast<int>(class_bias.n_rows) != m) {
-    Rcpp::stop("class_bias must have one row per class");
-  }
-  if (class_bias.n_cols == 1) {
-    offsets.each_col() += class_bias.col(0);
-    return offsets;
-  }
-  if (class_bias.n_cols == length_ncomp) {
-    offsets += class_bias;
-    return offsets;
-  }
-  Rcpp::stop("class_bias must have one column or one column per ncomp");
+  return offsets;
 }
 
 void fill_topk_from_yblock(
@@ -5948,9 +5626,8 @@ void fill_topk_from_yblock(
   }
 }
 
-List class_bias_topk_from_cube(
+List class_topk_from_cube(
   const arma::cube& Ypred,
-  const arma::mat& class_bias,
   List& model,
   const int top_k
 ) {
@@ -5959,20 +5636,7 @@ List class_bias_topk_from_cube(
   const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
   const arma::uword ntest = Ypred.n_rows;
   const int use_top_k = std::max(1, std::min(top_k, m));
-  arma::mat bias_only = class_bias;
-  if (bias_only.n_elem == 0) {
-    bias_only.set_size(static_cast<arma::uword>(m), length_ncomp);
-    bias_only.zeros();
-  }
-  if (static_cast<int>(bias_only.n_rows) != m) {
-    Rcpp::stop("class_bias must have one row per class");
-  }
-  if (bias_only.n_cols == 1 && length_ncomp > 1) {
-    bias_only = arma::repmat(bias_only, 1, length_ncomp);
-  }
-  if (bias_only.n_cols != length_ncomp) {
-    Rcpp::stop("class_bias must have one column or one column per ncomp");
-  }
+  arma::vec zero_offset(static_cast<arma::uword>(m), arma::fill::zeros);
 
   Rcpp::IntegerVector top_index(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
   top_index.attr("dim") = Rcpp::IntegerVector::create(
@@ -5984,7 +5648,7 @@ List class_bias_topk_from_cube(
   top_score.attr("dim") = top_index.attr("dim");
 
   for (arma::uword a = 0; a < length_ncomp; ++a) {
-    fill_topk_from_yblock(Ypred.slice(a), bias_only.col(a), ntest, 0, a, use_top_k, top_index, top_score);
+    fill_topk_from_yblock(Ypred.slice(a), zero_offset, ntest, 0, a, use_top_k, top_index, top_score);
   }
 
   return List::create(
@@ -5994,7 +5658,7 @@ List class_bias_topk_from_cube(
 }
 
 // [[Rcpp::export]]
-List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj, int block_size) {
+List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, int top_k, bool proj, int block_size) {
   const int m = Rcpp::as<int>(model["m"]);
   arma::ivec ncomp = Rcpp::as<arma::ivec>(model["ncomp"]);
   const arma::uword length_ncomp = static_cast<arma::uword>(ncomp.n_elem);
@@ -6008,7 +5672,7 @@ List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bi
   Xtest.each_row() /= vX;
 
   const arma::uword ntest = Xtest.n_rows;
-  arma::mat offsets = class_bias_offsets(model, class_bias, m, length_ncomp);
+  arma::mat offsets = class_prediction_offsets(model, m, length_ncomp);
 
   Rcpp::IntegerVector top_index(ntest * static_cast<arma::uword>(use_top_k) * length_ncomp);
   top_index.attr("dim") = Rcpp::IntegerVector::create(
@@ -6042,7 +5706,7 @@ List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bi
         for (arma::uword a = 0; a < length_ncomp; ++a) {
           const int mc = ncomp(a);
           if (mc < 1 || mc > kmax) {
-            Rcpp::stop("ncomp exceeds latent rank for class-bias prediction");
+            Rcpp::stop("ncomp exceeds latent rank for compact class prediction");
           }
           arma::mat yblock =
             scores.cols(0, static_cast<arma::uword>(mc - 1)) *
@@ -6058,13 +5722,13 @@ List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bi
 
   if (!used_compact) {
     if (!model.containsElementNamed("B")) {
-      Rcpp::stop("Class-bias prediction requires compact factors or stored B");
+      Rcpp::stop("Compact class prediction requires compact factors or stored B");
     }
     Rcpp::NumericVector B_vec = model["B"];
     Rcpp::IntegerVector B_dim = B_vec.attr("dim");
     if (B_dim.size() != 3L || B_dim[0] != Xtest.n_cols || B_dim[1] != m ||
         B_dim[2] < static_cast<int>(length_ncomp)) {
-      Rcpp::stop("Model coefficient array `B` is not compatible with class-bias prediction");
+      Rcpp::stop("Model coefficient array `B` is not compatible with compact class prediction");
     }
     const arma::cube B(
       B_vec.begin(),
@@ -6106,14 +5770,14 @@ List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, arma::mat class_bi
     Named("top_index") = top_index,
     Named("top_score") = top_score,
     Named("Ttest") = T_Xtest,
-    Named("predict_backend") = "cpp_class_bias"
+    Named("predict_backend") = "cpp_topk"
   );
 }
 
 // [[Rcpp::export]]
-List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_bias, int top_k, bool proj) {
+List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, int top_k, bool proj) {
   if (!fastpls_svd::has_cuda_backend()) {
-    return pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, 4096);
+    return pls_class_predict_topk_cpp(model, Xtest, top_k, proj, 4096);
   }
 
   try {
@@ -6131,7 +5795,7 @@ List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_b
     Rcpp::NumericVector R_vec = model["R"];
     Rcpp::IntegerVector R_dim = R_vec.attr("dim");
     if (R_dim.size() != 2L || R_dim[0] != Xtest.n_cols || R_dim[1] < 1) {
-      Rcpp::stop("Model `R` is not compatible with CUDA class-bias prediction");
+      Rcpp::stop("Model `R` is not compatible with CUDA top-k prediction");
     }
     const arma::mat RR(
       R_vec.begin(),
@@ -6142,16 +5806,16 @@ List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, arma::mat class_b
     );
     arma::cube Wflash = compact_prediction_weights(model, m, ncomp);
     arma::cube Ypred = fastpls_svd::cuda_flash_lowrank_predict(Xtest, RR, Wflash, mY, ncomp);
-    Rcpp::List out = class_bias_topk_from_cube(Ypred, class_bias, model, top_k);
+    Rcpp::List out = class_topk_from_cube(Ypred, model, top_k);
     arma::mat T_Xtest;
     if (proj) {
       T_Xtest = Xtest * RR;
     }
     out["Ttest"] = T_Xtest;
-    out["predict_backend"] = "cuda_class_bias";
+    out["predict_backend"] = "cuda_topk";
     return out;
   } catch (...) {
-    return pls_class_predict_topk_cpp(model, Xtest, class_bias, top_k, proj, 4096);
+    return pls_class_predict_topk_cpp(model, Xtest, top_k, proj, 4096);
   }
 }
 
@@ -8589,37 +8253,6 @@ arma::cube pls_predict_scores_b_metal_cv(List& model, arma::mat Xtest) {
   stop("Metal CV model does not contain usable prediction factors");
 }
 
-static arma::mat cv_row_l2_normalize(arma::mat X) {
-  for (arma::uword i = 0; i < X.n_rows; ++i) {
-    const double nrm = std::sqrt(arma::accu(arma::square(X.row(i))));
-    if (std::isfinite(nrm) && nrm > 0.0) {
-      X.row(i) /= nrm;
-    }
-  }
-  return X;
-}
-
-static arma::mat cv_candidate_centroids(const arma::mat& Ttrain_norm,
-                                        const arma::ivec& y_codes,
-                                        const int n_classes) {
-  arma::mat sums(static_cast<arma::uword>(n_classes), Ttrain_norm.n_cols, arma::fill::zeros);
-  arma::vec counts(static_cast<arma::uword>(n_classes), arma::fill::zeros);
-  for (arma::uword i = 0; i < Ttrain_norm.n_rows; ++i) {
-    const int cls = y_codes(i);
-    if (cls >= 1 && cls <= n_classes) {
-      sums.row(static_cast<arma::uword>(cls - 1)) += Ttrain_norm.row(i);
-      counts(static_cast<arma::uword>(cls - 1)) += 1.0;
-    }
-  }
-  for (int cls = 0; cls < n_classes; ++cls) {
-    const arma::uword c = static_cast<arma::uword>(cls);
-    if (counts(c) > 0.0) {
-      sums.row(c) /= counts(c);
-    }
-  }
-  return cv_row_l2_normalize(std::move(sums));
-}
-
 static arma::mat cv_projection_matrix(List& model, const int kmax, const arma::uword p) {
   Rcpp::NumericVector R_vec = model["R"];
   Rcpp::IntegerVector R_dim = R_vec.attr("dim");
@@ -8675,45 +8308,6 @@ static arma::mat cv_latent_scores(List& model,
   return T;
 }
 
-static arma::mat cv_candidate_score_space(List& model,
-                                          const arma::mat& T,
-                                          const int kk,
-                                          const int ncomp_slice_index) {
-  arma::mat out = T.cols(0, static_cast<arma::uword>(kk) - 1);
-  std::string pls_method;
-  if (model.containsElementNamed("pls_method")) {
-    pls_method = Rcpp::as<std::string>(model["pls_method"]);
-  }
-  if (pls_method != "plssvd" || !model.containsElementNamed("C_latent")) {
-    return out;
-  }
-  Rcpp::NumericVector C_vec = model["C_latent"];
-  Rcpp::IntegerVector C_dim = C_vec.attr("dim");
-  if (C_dim.size() != 3L ||
-      C_dim[0] < kk ||
-      C_dim[1] < kk ||
-      C_dim[2] <= ncomp_slice_index) {
-    return out;
-  }
-  const arma::cube C(
-    C_vec.begin(),
-    static_cast<arma::uword>(C_dim[0]),
-    static_cast<arma::uword>(C_dim[1]),
-    static_cast<arma::uword>(C_dim[2]),
-    false,
-    true
-  );
-  arma::mat Ck = C.slice(static_cast<arma::uword>(ncomp_slice_index)).submat(
-    0, 0,
-    static_cast<arma::uword>(kk) - 1,
-    static_cast<arma::uword>(kk) - 1
-  );
-  if (!Ck.is_finite()) {
-    return out;
-  }
-  return out * Ck;
-}
-
 static arma::imat cv_lda_predict_prefix_labels_cpp(const arma::mat& Ttest,
                                                    const Rcpp::List& lda_models,
                                                    const arma::ivec& ncomp) {
@@ -8734,215 +8328,6 @@ static arma::imat cv_lda_predict_prefix_labels_cpp(const arma::mat& Ttest,
     Rcpp::IntegerVector pred = lda_labels_from_scores(scores, constants);
     for (R_xlen_t ii = 0; ii < pred.size(); ++ii) {
       out(static_cast<arma::uword>(ii), static_cast<arma::uword>(s)) = pred[ii];
-    }
-  }
-  return out;
-}
-
-static double cv_prefix_row_norm(const arma::mat& cumulative_norm2,
-                                 const arma::uword row,
-                                 const int kk) {
-  if (kk < 1 || row >= cumulative_norm2.n_rows ||
-      static_cast<arma::uword>(kk - 1) >= cumulative_norm2.n_cols) {
-    return 0.0;
-  }
-  const double n2 = cumulative_norm2(row, static_cast<arma::uword>(kk - 1));
-  return (std::isfinite(n2) && n2 > 0.0) ? std::sqrt(n2) : 0.0;
-}
-
-static arma::mat cv_candidate_prefix_centroids(const arma::mat& Ttrain,
-                                               const arma::mat& train_norm2,
-                                               const arma::ivec& y_codes,
-                                               const int n_classes,
-                                               const int kk) {
-  arma::mat centroids(static_cast<arma::uword>(n_classes), static_cast<arma::uword>(kk), arma::fill::zeros);
-  arma::vec counts(static_cast<arma::uword>(n_classes), arma::fill::zeros);
-  for (arma::uword i = 0; i < Ttrain.n_rows; ++i) {
-    const int cls = y_codes(i);
-    if (cls < 1 || cls > n_classes) continue;
-    const double nrm = cv_prefix_row_norm(train_norm2, i, kk);
-    if (nrm <= 0.0) continue;
-    arma::uword c = static_cast<arma::uword>(cls - 1);
-    for (int d = 0; d < kk; ++d) {
-      centroids(c, static_cast<arma::uword>(d)) += Ttrain(i, static_cast<arma::uword>(d)) / nrm;
-    }
-    counts(c) += 1.0;
-  }
-  for (int cls = 0; cls < n_classes; ++cls) {
-    const arma::uword c = static_cast<arma::uword>(cls);
-    if (counts(c) > 0.0) {
-      centroids.row(c) /= counts(c);
-    }
-    const double nrm = std::sqrt(arma::accu(arma::square(centroids.row(c))));
-    if (std::isfinite(nrm) && nrm > 0.0) {
-      centroids.row(c) /= nrm;
-    }
-  }
-  return centroids;
-}
-
-static void cv_candidate_prefix_base_grid(const arma::mat& Ttrain,
-                                          const arma::mat& Ttest,
-                                          const arma::ivec& y_codes,
-                                          const int n_classes,
-                                          const arma::ivec& ncomp,
-                                          const int top_m,
-                                          const arma::mat& train_norm2,
-                                          const arma::mat& test_norm2,
-                                          arma::imat& candidates,
-                                          arma::mat& candidate_base) {
-  const int nslice = static_cast<int>(ncomp.n_elem);
-  candidates.set_size(Ttest.n_rows, static_cast<arma::uword>(top_m * nslice));
-  candidate_base.set_size(Ttest.n_rows, static_cast<arma::uword>(top_m * nslice));
-  candidates.zeros();
-  candidate_base.fill(-std::numeric_limits<double>::infinity());
-  std::vector<double> row_scores(static_cast<std::size_t>(top_m), -std::numeric_limits<double>::infinity());
-  std::vector<int> row_index(static_cast<std::size_t>(top_m), -1);
-
-  for (int s = 0; s < nslice; ++s) {
-    const int kk = ncomp(static_cast<arma::uword>(s));
-    if (kk < 1 || kk > static_cast<int>(Ttrain.n_cols)) {
-      Rcpp::stop("CV candidate-kNN component count is out of range");
-    }
-    arma::mat centroids = cv_candidate_prefix_centroids(Ttrain, train_norm2, y_codes, n_classes, kk);
-    for (arma::uword i = 0; i < Ttest.n_rows; ++i) {
-      std::fill(row_scores.begin(), row_scores.end(), -std::numeric_limits<double>::infinity());
-      std::fill(row_index.begin(), row_index.end(), -1);
-      const double test_norm = cv_prefix_row_norm(test_norm2, i, kk);
-      for (int cls = 0; cls < n_classes; ++cls) {
-        double base = 0.0;
-        if (test_norm > 0.0) {
-          for (int d = 0; d < kk; ++d) {
-            base += Ttest(i, static_cast<arma::uword>(d)) *
-              centroids(static_cast<arma::uword>(cls), static_cast<arma::uword>(d));
-          }
-          base /= test_norm;
-        }
-        candidate_insert_top(row_scores, row_index, base, cls + 1);
-      }
-      for (int slot = 0; slot < top_m; ++slot) {
-        const arma::uword col = static_cast<arma::uword>(slot + s * top_m);
-        candidates(i, col) = row_index[static_cast<std::size_t>(slot)];
-        candidate_base(i, col) = row_scores[static_cast<std::size_t>(slot)];
-      }
-    }
-  }
-}
-
-static arma::imat cv_candidate_predict_prefix_cpp(const arma::mat& Ttrain,
-                                                  const arma::mat& Ttest,
-                                                  const arma::ivec& y_codes,
-                                                  const int n_classes,
-                                                  const arma::ivec& ncomp,
-                                                  const int top_m_in,
-                                                  const int knn_k_in,
-                                                  const double tau_in,
-                                                  const double alpha_in) {
-  if (Ttrain.n_cols != Ttest.n_cols || Ttrain.n_rows != y_codes.n_elem) {
-    Rcpp::stop("CV candidate-kNN prefix score dimensions are not compatible");
-  }
-  const int nslice = static_cast<int>(ncomp.n_elem);
-  arma::imat out(Ttest.n_rows, static_cast<arma::uword>(nslice), arma::fill::zeros);
-  const int top_m = std::max(1, std::min(top_m_in, n_classes));
-  const int knn_k = std::max(1, knn_k_in);
-  const double tau = (std::isfinite(tau_in) && tau_in > 0.0) ? tau_in : 0.2;
-  const double alpha = std::isfinite(alpha_in) ? alpha_in : 0.5;
-  arma::mat train_norm2 = arma::cumsum(arma::square(Ttrain), 1);
-  arma::mat test_norm2 = arma::cumsum(arma::square(Ttest), 1);
-  std::vector<std::vector<arma::uword> > class_rows(static_cast<std::size_t>(n_classes));
-  for (arma::uword i = 0; i < y_codes.n_elem; ++i) {
-    const int cls = y_codes(i);
-    if (cls >= 1 && cls <= n_classes) {
-      class_rows[static_cast<std::size_t>(cls - 1)].push_back(i);
-    }
-  }
-
-  std::vector<double> row_scores(static_cast<std::size_t>(top_m), -std::numeric_limits<double>::infinity());
-  std::vector<int> row_index(static_cast<std::size_t>(top_m), -1);
-  std::vector<double> rerank_scores(static_cast<std::size_t>(top_m), -std::numeric_limits<double>::infinity());
-  std::vector<int> rerank_index(static_cast<std::size_t>(top_m), -1);
-
-  arma::vec order_key = arma::conv_to<arma::vec>::from(ncomp);
-  arma::uvec order = arma::sort_index(order_key);
-  std::vector<arma::mat> centroids_by_slice(static_cast<std::size_t>(nslice));
-  for (arma::uword ord_i = 0; ord_i < order.n_elem; ++ord_i) {
-    const int s = static_cast<int>(order(ord_i));
-    const int kk = ncomp(static_cast<arma::uword>(s));
-    if (kk < 1 || kk > static_cast<int>(Ttrain.n_cols)) {
-      Rcpp::stop("CV candidate-kNN component count is out of range");
-    }
-    centroids_by_slice[static_cast<std::size_t>(s)] =
-      cv_candidate_prefix_centroids(Ttrain, train_norm2, y_codes, n_classes, kk);
-  }
-
-  for (arma::uword i = 0; i < Ttest.n_rows; ++i) {
-    arma::vec train_dot(Ttrain.n_rows, arma::fill::zeros);
-    int previous_components = 0;
-    for (arma::uword ord_i = 0; ord_i < order.n_elem; ++ord_i) {
-      const int s = static_cast<int>(order(ord_i));
-      const int kk = ncomp(static_cast<arma::uword>(s));
-      if (kk > previous_components) {
-        const arma::uword first = static_cast<arma::uword>(previous_components);
-        const arma::uword last = static_cast<arma::uword>(kk - 1);
-        arma::vec delta = Ttest.submat(i, first, i, last).t();
-        train_dot += Ttrain.cols(first, last) * delta;
-        previous_components = kk;
-      }
-      const arma::mat& centroids = centroids_by_slice[static_cast<std::size_t>(s)];
-      std::fill(row_scores.begin(), row_scores.end(), -std::numeric_limits<double>::infinity());
-      std::fill(row_index.begin(), row_index.end(), -1);
-      const double test_norm = cv_prefix_row_norm(test_norm2, i, kk);
-      for (int cls = 0; cls < n_classes; ++cls) {
-        double base = 0.0;
-        if (test_norm > 0.0) {
-          for (int d = 0; d < kk; ++d) {
-            base += Ttest(i, static_cast<arma::uword>(d)) *
-              centroids(static_cast<arma::uword>(cls), static_cast<arma::uword>(d));
-          }
-          base /= test_norm;
-        }
-        candidate_insert_top(row_scores, row_index, base, cls + 1);
-      }
-
-      std::fill(rerank_scores.begin(), rerank_scores.end(), -std::numeric_limits<double>::infinity());
-      std::fill(rerank_index.begin(), rerank_index.end(), -1);
-      for (int j = 0; j < top_m; ++j) {
-        const int cls = row_index[static_cast<std::size_t>(j)];
-        if (cls < 1 || cls > n_classes) continue;
-        const std::vector<arma::uword>& rows = class_rows[static_cast<std::size_t>(cls - 1)];
-        double local = -std::numeric_limits<double>::infinity();
-        if (!rows.empty()) {
-          const int use_k = std::max(1, std::min(knn_k, static_cast<int>(rows.size())));
-          std::vector<double> top_vals(static_cast<std::size_t>(use_k), -std::numeric_limits<double>::infinity());
-          std::vector<int> top_dummy(static_cast<std::size_t>(use_k), -1);
-          for (std::size_t r = 0; r < rows.size(); ++r) {
-            const arma::uword train_row = rows[r];
-            const double train_norm = cv_prefix_row_norm(train_norm2, train_row, kk);
-            const double sim = (test_norm > 0.0 && train_norm > 0.0) ?
-              (train_dot(train_row) / (test_norm * train_norm)) :
-              0.0;
-            candidate_insert_top(top_vals, top_dummy, sim, 0);
-          }
-          if (!std::isfinite(tau) || tau <= 0.0) {
-            local = 0.0;
-            for (int h = 0; h < use_k; ++h) local += top_vals[static_cast<std::size_t>(h)];
-            local /= static_cast<double>(use_k);
-          } else {
-            const double mx = top_vals[0];
-            if (std::isfinite(mx)) {
-              double acc = 0.0;
-              for (int h = 0; h < use_k; ++h) {
-                acc += std::exp((top_vals[static_cast<std::size_t>(h)] - mx) / tau);
-              }
-              local = mx + tau * std::log(acc / static_cast<double>(use_k));
-            }
-          }
-        }
-        const double score = local + alpha * row_scores[static_cast<std::size_t>(j)];
-        candidate_insert_top(rerank_scores, rerank_index, score, cls);
-      }
-      out(i, static_cast<arma::uword>(s)) =
-        (rerank_index[0] > 0) ? rerank_index[0] : row_index[0];
     }
   }
   return out;
@@ -8971,10 +8356,6 @@ List pls_cv_predict_compiled(
   arma::mat class_codes,
   int classifier,
   double lda_ridge,
-  int k,
-  double tau,
-  double alpha,
-  int top_m,
   bool store_predictions,
   int metric_id
 ) {
@@ -9009,10 +8390,10 @@ List pls_cv_predict_compiled(
     stop("method must be 1=plssvd, 2=simpls, 3=simpls_fast, 4=opls, or 5=kernelpls");
   }
   if (backend < 0 || backend > 2) stop("backend must be 0=cpp, 1=cuda, or 2=metal");
-  if (classifier < 0 || classifier > 2) classifier = 0;
+  if (classifier < 0 || classifier > 1) classifier = 0;
   if (!classification) classifier = 0;
   if (use_class_codes && classifier != 0) {
-    stop("LDA and candidate-kNN CV are not available with Gaussian/code response compression");
+    stop("LDA CV is not available with Gaussian/code response compression");
   }
   if (backend == 1 && method == 2) {
     stop("CUDA classic SIMPLS is not implemented; use simpls_fast CUDA instead");
@@ -9373,117 +8754,6 @@ List pls_cv_predict_compiled(
         } else {
           fold_class_pred = cv_lda_predict_prefix_labels_cpp(Ttest, lda_models, ncomp);
         }
-      } else if (classifier == 2) {
-        int kmax = 0;
-        for (arma::uword a = 0; a < ncomp.n_elem; ++a) {
-          if (ncomp(a) > kmax) kmax = ncomp(a);
-        }
-        arma::mat Ttrain = cv_latent_scores(model, Xtrain, kmax, true);
-        arma::mat Ttest = cv_latent_scores(model, Xtest, kmax, false);
-        arma::ivec y_train_codes(train_idx.n_elem);
-        for (arma::uword ii = 0; ii < train_idx.n_elem; ++ii) {
-          y_train_codes(ii) = class_label_at_sample(train_idx(ii));
-        }
-        fold_class_pred.set_size(test_idx.n_elem, length_ncomp);
-        arma::vec zero_bias(static_cast<arma::uword>(n_classes), arma::fill::zeros);
-        if (backend == 1 && fit_method != 1) {
-          const int use_top_m = std::max(1, std::min(top_m, n_classes));
-          arma::mat train_norm2 = arma::cumsum(arma::square(Ttrain), 1);
-          arma::mat test_norm2 = arma::cumsum(arma::square(Ttest), 1);
-          arma::imat candidates;
-          arma::mat candidate_base;
-          cv_candidate_prefix_base_grid(
-            Ttrain,
-            Ttest,
-            y_train_codes,
-            n_classes,
-            ncomp,
-            use_top_m,
-            train_norm2,
-            test_norm2,
-            candidates,
-            candidate_base
-          );
-          arma::mat prefix_scores = fastpls_svd::cuda_candidate_knn_scores_prefix(
-            Ttest,
-            Ttrain,
-            y_train_codes,
-            candidates,
-            candidate_base,
-            zero_bias,
-            ncomp,
-            test_norm2,
-            train_norm2,
-            use_top_m,
-            k,
-            tau,
-            alpha
-          );
-          for (int s = 0; s < length_ncomp; ++s) {
-            for (arma::uword ii = 0; ii < test_idx.n_elem; ++ii) {
-              int best_class = candidates(ii, static_cast<arma::uword>(s * use_top_m));
-              double best_score = prefix_scores(ii, static_cast<arma::uword>(s * use_top_m));
-              for (int slot = 1; slot < use_top_m; ++slot) {
-                const arma::uword col = static_cast<arma::uword>(slot + s * use_top_m);
-                if (prefix_scores(ii, col) > best_score) {
-                  best_score = prefix_scores(ii, col);
-                  best_class = candidates(ii, col);
-                }
-              }
-              fold_class_pred(ii, static_cast<arma::uword>(s)) = best_class;
-            }
-          }
-        } else if (backend != 1 && fit_method != 1) {
-          fold_class_pred = cv_candidate_predict_prefix_cpp(
-            Ttrain,
-            Ttest,
-            y_train_codes,
-            n_classes,
-            ncomp,
-            top_m,
-            k,
-            tau,
-            alpha
-          );
-        } else {
-          for (int s = 0; s < length_ncomp; ++s) {
-            const int kk = ncomp(static_cast<arma::uword>(s));
-            arma::mat Ttrain_k = cv_row_l2_normalize(
-              cv_candidate_score_space(model, Ttrain, kk, s)
-            );
-            arma::mat Ttest_k = cv_row_l2_normalize(
-              cv_candidate_score_space(model, Ttest, kk, s)
-            );
-            arma::mat centroids = cv_candidate_centroids(Ttrain_k, y_train_codes, n_classes);
-            Rcpp::List pred = (backend == 1) ?
-              candidate_knn_predict_cuda(
-                Ttest_k,
-                Ttrain_k,
-                y_train_codes,
-                centroids,
-                zero_bias,
-                1,
-                top_m,
-                k,
-                tau,
-                alpha
-              ) :
-              candidate_knn_predict_cpp(
-                Ttest_k,
-                Ttrain_k,
-                y_train_codes,
-                centroids,
-                zero_bias,
-                1,
-                top_m,
-                k,
-                tau,
-                alpha
-              );
-            arma::imat top_index = Rcpp::as<arma::imat>(pred["top_index"]);
-            fold_class_pred.col(static_cast<arma::uword>(s)) = top_index.col(0);
-          }
-        }
       } else if (backend == 2) {
         arma::cube fold_scores = pls_predict_scores_b_metal_cv(model, std::move(Xtest));
         fold_class_pred.set_size(fold_scores.n_rows, fold_scores.n_slices);
@@ -9633,13 +8903,11 @@ List pls_cv_predict_compiled(
     status(f) = 1; // ok
   }
 
-  const char* classifier_name = (classifier == 1) ? "lda" : ((classifier == 2) ? "cknn" : "argmax");
+  const char* classifier_name = (classifier == 1) ? "lda" : "argmax";
   const char* prediction_backend =
     (classifier == 1 && backend == 1) ? "cuda_lda_cv" :
     (classifier == 1 ? "cpp_lda_cv" :
-    (classifier == 2 && backend == 1) ? "cuda_candidate_knn_cv" :
-    (classifier == 2 ? "cpp_candidate_knn_cv" :
-    (backend == 1 ? "cuda_flash" : (backend == 2 ? "metal" : "cpu"))));
+    (backend == 1 ? "cuda_flash" : (backend == 2 ? "metal" : "cpu")));
 
   List out = List::create(
     Named("fold") = fold + 1,

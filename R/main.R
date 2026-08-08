@@ -515,14 +515,6 @@
   !is.null(classifier) && classifier %in% c("lda_cpp", "lda_cuda", "lda_metal")
 }
 
-.is_class_bias_classifier <- function(classifier) {
-  FALSE
-}
-
-.class_bias_backend <- function(classifier) {
-  "cpp"
-}
-
 .resolve_top_k <- function(top = 1L, top5 = FALSE) {
   top <- as.integer(top)[1L]
   if (!is.finite(top) || is.na(top) || top < 1L) {
@@ -530,47 +522,6 @@
   }
   if (isTRUE(top5)) top <- max(top, 5L)
   top
-}
-
-.class_bias_matrix <- function(class_bias, lev, ncomp) {
-  nclass <- length(lev)
-  nslice <- length(ncomp)
-  if (is.null(class_bias)) {
-    out <- matrix(0, nrow = nclass, ncol = nslice)
-    rownames(out) <- lev
-    return(out)
-  }
-  if (is.vector(class_bias) || is.factor(class_bias)) {
-    nm <- names(class_bias)
-    class_bias <- as.numeric(class_bias)
-    if (!is.null(nm) && any(nzchar(nm))) {
-      class_bias <- class_bias[match(lev, nm)]
-    }
-    if (length(class_bias) != nclass || anyNA(class_bias)) {
-      stop("class_bias must have one numeric value per class", call. = FALSE)
-    }
-    out <- matrix(class_bias, nrow = nclass, ncol = nslice)
-    rownames(out) <- lev
-    return(out)
-  }
-  class_bias <- as.matrix(class_bias)
-  if (nrow(class_bias) != nclass && ncol(class_bias) == nclass) {
-    class_bias <- t(class_bias)
-  }
-  if (!is.null(rownames(class_bias))) {
-    class_bias <- class_bias[match(lev, rownames(class_bias)), , drop = FALSE]
-  }
-  if (nrow(class_bias) != nclass || anyNA(class_bias)) {
-    stop("class_bias must have one row per class", call. = FALSE)
-  }
-  if (ncol(class_bias) == 1L && nslice > 1L) {
-    class_bias <- matrix(class_bias[, 1L], nrow = nclass, ncol = nslice)
-  }
-  if (ncol(class_bias) != nslice) {
-    stop("class_bias must have one column or one column per ncomp", call. = FALSE)
-  }
-  rownames(class_bias) <- lev
-  class_bias
 }
 
 .class_topk_to_labels <- function(top_index, top_score, lev, ncomp) {
@@ -608,14 +559,13 @@
   out
 }
 
-.class_topk_from_score_cube <- function(score_cube, lev, ncomp, class_bias = NULL, top = 1L) {
+.class_topk_from_score_cube <- function(score_cube, lev, ncomp, top = 1L) {
   dims <- dim(score_cube)
   top <- min(as.integer(top)[1L], dims[2L])
-  bias <- .class_bias_matrix(class_bias, lev, ncomp)
   top_index <- array(NA_integer_, dim = c(dims[1L], top, dims[3L]))
   top_score <- array(NA_real_, dim = c(dims[1L], top, dims[3L]))
   for (a in seq_len(dims[3L])) {
-    score <- sweep(score_cube[, , a, drop = FALSE][, , 1L], 2L, bias[, a], "+", check.margin = FALSE)
+    score <- score_cube[, , a, drop = FALSE][, , 1L]
     if (top == 1L) {
       idx <- max.col(score, ties.method = "first")
       top_index[, 1L, a] <- idx
@@ -631,17 +581,16 @@
   .class_topk_to_labels(top_index, top_score, lev, ncomp)
 }
 
-.class_bias_predict <- function(model, Xtest, class_bias = NULL, top = 1L, proj = FALSE, backend = c("cpp", "cuda")) {
+.class_topk_predict <- function(model, Xtest, top = 1L, proj = FALSE, backend = c("cpp", "cuda")) {
   backend <- match.arg(backend)
-  bias <- .class_bias_matrix(class_bias, model$lev, model$ncomp)
   block_size <- model$flash_block_size
   if (is.null(block_size) || !length(block_size) || is.na(block_size)) {
     block_size <- 4096L
   }
   out <- if (identical(backend, "cuda") && isTRUE(has_cuda())) {
-    pls_class_predict_topk_cuda(model, as.matrix(Xtest), bias, as.integer(top), isTRUE(proj))
+    pls_class_predict_topk_cuda(model, as.matrix(Xtest), as.integer(top), isTRUE(proj))
   } else {
-    pls_class_predict_topk_cpp(model, as.matrix(Xtest), bias, as.integer(top), isTRUE(proj), as.integer(block_size))
+    pls_class_predict_topk_cpp(model, as.matrix(Xtest), as.integer(top), isTRUE(proj), as.integer(block_size))
   }
   res <- .class_topk_to_labels(out$top_index, out$top_score, model$lev, model$ncomp)
   if (isTRUE(proj)) res$Ttest <- out$Ttest
@@ -3988,20 +3937,19 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
 	    } else {
 	      "cpp"
     }
-    bias_res <- .class_bias_predict(
+    topk_res <- .class_topk_predict(
 	      object,
 	      Xtest,
-	      class_bias = NULL,
 	      top = top,
       proj = proj,
       backend = pred_backend
     )
-    bias_res$Q2Y <- NULL
+    topk_res$Q2Y <- NULL
     if (!is.null(Ytest)) {
-      bias_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, bias_res$Ypred)
-      bias_res$Q2Y <- rep(NA_real_, length(object$ncomp))
+      topk_res$accuracy <- .fastpls_accuracy_from_class_labels(object$lev, Ytest, topk_res$Ypred)
+      topk_res$Q2Y <- rep(NA_real_, length(object$ncomp))
     }
-    return(.fastpls_public_predict_output(bias_res, object$ncomp))
+    return(.fastpls_public_predict_output(topk_res, object$ncomp))
   }
 	  res <- if (isTRUE(use_metal)) {
     .pls_predict_metal(object, Xtest, proj)
@@ -4077,7 +4025,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       }
     } else {
 	      score_cube <- res$Ypred
-	      top_res <- .class_topk_from_score_cube(score_cube, object$lev, object$ncomp, class_bias = NULL, top = top)
+	      top_res <- .class_topk_from_score_cube(score_cube, object$lev, object$ncomp, top = top)
       if (isTRUE(raw_scores)) {
         res$Yscore <- score_cube
       }
@@ -5585,10 +5533,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       class_codes = class_codes,
       classifier = classifier_id,
       lda_ridge = lda_ridge,
-      k = 1L,
-      tau = 1,
-      alpha = 0,
-      top_m = 1L,
       store_predictions = isTRUE(store_predictions),
       metric_id = .cv_metric_id(selection_metric, classification)
     )
