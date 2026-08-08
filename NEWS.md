@@ -1,3 +1,10 @@
+# fastPLS 0.99.12
+
+* Corrected Windows test scoping for native CPU float32 LDA. Tests that require
+  unavailable single-precision BLAS/LAPACK kernels are now skipped on Windows;
+  the documented runtime error and portable supported float32 routes are
+  unchanged.
+
 # fastPLS 0.99.11
 
 * Removed the retired candidate-kNN and class-bias native ABI completely,

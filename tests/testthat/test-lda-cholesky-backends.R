@@ -116,6 +116,7 @@ test_that("streamed projected LDA preserves compact class order", {
 
 test_that("float32 CPU PLS-LDA agrees with the double path", {
   skip_if_not_installed("float")
+  skip_on_os("windows")
   set.seed(124)
   scores <- matrix(rnorm(240), nrow = 60, ncol = 4)
   labels <- rep(1:3, each = 20)
@@ -141,6 +142,7 @@ test_that("float32 CPU PLS-LDA agrees with the double path", {
 
 test_that("float32 CPU PLS-LDA regularizes singular and near-singular covariance", {
   skip_if_not_installed("float")
+  skip_on_os("windows")
   base <- rep(c(-1, 0, 1), each = 8)
   scores <- cbind(base, base, base + rep(c(0, 1e-7), 12), 1)
   labels <- rep(1:3, each = 8)
@@ -161,6 +163,7 @@ test_that("float32 CPU PLS-LDA regularizes singular and near-singular covariance
 
 test_that("float32 CUDA and CPU PLS-LDA agree when CUDA is available", {
   skip_if_not_installed("float")
+  skip_on_os("windows")
   skip_if_not(fastPLS::has_cuda())
   set.seed(125)
   scores <- float::fl(matrix(rnorm(360), nrow = 90, ncol = 4))
