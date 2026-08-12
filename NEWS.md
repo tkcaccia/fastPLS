@@ -1,3 +1,8 @@
+# fastPLS 0.99.19
+
+* Incremented the Bioconductor development version after synchronizing the
+  package-specific backend configuration across both GitHub repositories.
+
 # fastPLS 0.99.18
 
 * Standardized backend selection on the package-specific API used across the
