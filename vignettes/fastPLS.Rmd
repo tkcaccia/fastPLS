@@ -19,6 +19,23 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 C++, CUDA, or benchmarking helpers directly; all model families and backends are
 selected through the user-facing functions below.
 
+## Select a default execution backend
+
+CPU is the default. Set one backend for the R session when several fastPLS
+calls should use the same accelerator:
+
+```r
+options(fastPLS.backend = "cuda")
+# Equivalent: fastPLS_backend("cuda")
+
+fit <- pls(X, y, method = "simpls")    # CUDA
+fit.cpu <- pls(X, y, backend = "cpu")  # explicit override
+```
+
+Batch jobs may use `FASTPLS_BACKEND=cpu|cuda|metal`. Precedence is explicit
+argument, R option, environment variable, then CPU. An explicitly requested
+`backend = "auto"` in prediction retains model-aware prediction dispatch.
+
 | Function | Purpose |
 |---|---|
 | `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |

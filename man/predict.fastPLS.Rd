@@ -11,7 +11,7 @@
   newdata,
   Ytest = NULL,
   proj = FALSE,
-  backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
+  backend = NULL,
   flash.block_size = NULL,
   top = 1L,
   top5 = FALSE,

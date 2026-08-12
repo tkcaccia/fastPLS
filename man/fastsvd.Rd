@@ -7,7 +7,7 @@ fastsvd(
   nu = NULL,
   nv = NULL,
   ncomp = NULL,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   method = c("rsvd", "irlba"),
   oversample = 10L,
   power = 1L,

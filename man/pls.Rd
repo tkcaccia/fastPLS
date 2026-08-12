@@ -22,7 +22,7 @@ pls(
   proj = FALSE,
   perm.test = FALSE,
   times = 100,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   north = 1L,
   kernel = c("linear", "rbf", "poly"),
   gamma = NULL,

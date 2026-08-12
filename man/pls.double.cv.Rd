@@ -11,7 +11,7 @@ pls.double.cv(
   constrain = 1:nrow(Xdata),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   svd.method = c("irlba", "rsvd"),
   seed = 1L,
   perm.test = FALSE,

@@ -2244,6 +2244,11 @@ print.fastPLS <- function(x, ...) {
 }
 
 .normalize_public_backend <- function(backend) {
+  if (!is.null(backend) && length(backend) == 1L &&
+      identical(tolower(as.character(backend)), "cpp")) {
+    backend <- "cpu"
+  }
+  backend <- .fastpls_resolve_backend(backend)
   if (length(backend) > 1L) {
     backend <- backend[[1L]]
   }
@@ -3865,14 +3870,19 @@ pls.model2.fast.gpu =
 #' pred$Ypred
 #' @export
 predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
-                           backend = c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"),
+                           backend = NULL,
                            flash.block_size = NULL, top = 1L, top5 = FALSE,
                            raw_scores = FALSE, ...) {
   if (!is(object, "fastPLS")) {
     stop("object is not a fastPLS object")
   }
   object <- .fastpls_restore_internal_output_fields(object)
-  backend <- match.arg(backend)
+  if (is.null(backend)) {
+    backend <- .fastpls_resolve_backend(NULL)
+    if (identical(backend, "cuda")) backend <- "cuda_flash"
+  } else {
+    backend <- match.arg(backend, c("auto", "cpu", "cpu_flash", "cuda_flash", "metal"))
+  }
   top <- .resolve_top_k(top, top5)
   if (identical(object$precision, "float32")) {
     return(.fastpls_public_predict_output(.predict_fastpls_float32(
@@ -6586,7 +6596,7 @@ fastsvd <- function(x,
                     nu = NULL,
                     nv = NULL,
                     ncomp = NULL,
-                    backend = c("cpu", "cuda", "metal"),
+                    backend = NULL,
                     method = c("rsvd", "irlba"),
                     oversample = 10L,
                     power = 1L,
@@ -7811,7 +7821,7 @@ pls =  function (Xtrain,
                  proj = FALSE,
                  perm.test = FALSE,
                  times = 100,
-                 backend = c("cpu", "cuda", "metal"),
+                 backend = NULL,
                  north = 1L,
                  kernel = c("linear", "rbf", "poly"),
                  gamma = NULL,
@@ -8934,7 +8944,7 @@ pls.single.cv =  function (Xdata,
                           constrain=NULL,
                           scaling = c("centering", "autoscaling","none"),
                           method = c("simpls", "plssvd", "opls", "kernelpls"),
-                          backend = c("cpu", "cuda", "metal"),
+                          backend = NULL,
                           svd.method = c("irlba", "rsvd"),
                           seed = 1L,
                           kfold=10,
@@ -9400,7 +9410,7 @@ pls.double.cv = function(Xdata,
                          constrain=1:nrow(Xdata),
                          scaling = c("centering", "autoscaling","none"),
                          method = c("simpls", "plssvd", "opls", "kernelpls"),
-                         backend = c("cpu", "cuda", "metal"),
+                         backend = NULL,
                          svd.method = c("irlba", "rsvd"),
                          seed = 1L,
                          perm.test=FALSE,
