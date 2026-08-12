@@ -1,7 +1,7 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.16
+Version: 0.99.17
 Date: 2026-08-08
 Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "cre"),email = "stefano.cacciatore@icgeb.org", comment = c(ORCID = "0000-0001-7052-7156")),
              person("Dupe", "Ojo", role = "aut",email = "dupe.ojo@icgeb.org", comment = c(ORCID = "0000-0002-5301-8592")),

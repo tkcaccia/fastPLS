@@ -1,8 +1,12 @@
-# fastPLS 0.99.16
+# fastPLS 0.99.17
 
 * Added a session-wide backend selector through `fastPLS_backend()`,
-  `options(fastPLS.backend = ...)`, and `FASTPLS_BACKEND`. Explicit function
-  arguments retain precedence and CPU remains the default.
+  `options(backend = ...)`, and `BACKEND`. Explicit function
+  arguments retain precedence and CPU remains the default. Legacy
+  fastPLS-specific selectors remain compatibility fallbacks.
+
+# fastPLS 0.99.16
+
 * Corrected CUDA cross-validation smoke tests to request the supported rSVD
   backend explicitly instead of inheriting an incompatible IRLBA setting.
 
