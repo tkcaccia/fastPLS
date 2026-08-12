@@ -105,6 +105,6 @@ test_that("unsupported backend labels are rejected", {
   Y <- matrix(rnorm(24), ncol = 1)
   expect_error(
     pls(X, Y, ncomp = 1, backend = "r", svd.method = "cpu_rsvd"),
-    "'arg' should be one of"
+    "must be one of"
   )
 })

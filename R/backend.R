@@ -1,8 +1,8 @@
 #' Configure the default fastPLS execution backend
 #'
 #' An explicit function argument takes precedence over
-#' `options(backend = ...)`, then `BACKEND`; CPU is the final default.
-#' Package-specific settings remain supported as compatibility fallbacks.
+#' `options(fastPLS.backend = ...)`, then `FASTPLS_BACKEND`; CPU is the final
+#' default.
 #'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @return The active backend. Setting returns the previous option invisibly.
@@ -10,8 +10,8 @@
 fastPLS_backend <- function(backend = NULL) {
   if (is.null(backend)) return(.fastpls_resolve_backend(NULL))
   backend <- .fastpls_validate_backend(backend, "backend")
-  old <- getOption("backend", NULL)
-  options(backend = backend)
+  old <- getOption("fastPLS.backend", NULL)
+  options(fastPLS.backend = backend)
   invisible(old)
 }
 
@@ -30,13 +30,9 @@ fastPLS_backend <- function(backend = NULL) {
     if (allow_auto && identical(value, "auto")) return("auto")
     return(.fastpls_validate_backend(value))
   }
-  option <- getOption("backend", NULL)
-  if (!is.null(option)) return(.fastpls_validate_backend(option, "option backend"))
-  legacy_option <- getOption("fastPLS.backend", NULL)
-  if (!is.null(legacy_option)) return(.fastpls_validate_backend(legacy_option, "option fastPLS.backend"))
-  environment <- Sys.getenv("BACKEND", unset = "")
-  if (nzchar(environment)) return(.fastpls_validate_backend(environment, "BACKEND"))
-  legacy_environment <- Sys.getenv("FASTPLS_BACKEND", unset = "")
-  if (nzchar(legacy_environment)) return(.fastpls_validate_backend(legacy_environment, "FASTPLS_BACKEND"))
+  option <- getOption("fastPLS.backend", NULL)
+  if (!is.null(option)) return(.fastpls_validate_backend(option, "option fastPLS.backend"))
+  environment <- Sys.getenv("FASTPLS_BACKEND", unset = "")
+  if (nzchar(environment)) return(.fastpls_validate_backend(environment, "FASTPLS_BACKEND"))
   "cpu"
 }

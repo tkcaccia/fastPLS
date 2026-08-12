@@ -1,3 +1,9 @@
+# fastPLS 0.99.18
+
+* Standardized backend selection on the package-specific API used across the
+  KODAMA ecosystem: explicit `backend`, `options(fastPLS.backend = ...)`,
+  `FASTPLS_BACKEND`, then CPU. Unrelated global backend settings are ignored.
+
 # fastPLS 0.99.17
 
 * Added a session-wide backend selector through `fastPLS_backend()`,

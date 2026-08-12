@@ -25,7 +25,7 @@ CPU is the default. Set one backend for the R session when several fastPLS
 calls should use the same accelerator:
 
 ```r
-options(backend = "cuda")
+options(fastPLS.backend = "cuda")
 # Equivalent: fastPLS_backend("cuda")
 
 fit <- pls(X, y, method = "simpls")    # CUDA

@@ -59,9 +59,9 @@ low-rank prediction factors. The default threshold is controlled by
 
 ## Backends
 
-Set the session default shared by fastPLS, KODAMA, fastEmbedR, and faissR with
-`options(backend = "cuda")`, or use `Sys.setenv(BACKEND = "cuda")`. An explicit
-function argument always takes precedence.
+Set the fastPLS session default with `options(fastPLS.backend = "cuda")`, or use
+`Sys.setenv(FASTPLS_BACKEND = "cuda")`. An explicit function argument always
+takes precedence.
 
 CPU backends:
 
