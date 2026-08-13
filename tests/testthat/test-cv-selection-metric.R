@@ -112,6 +112,7 @@ test_that("balanced accuracy drives both classification selection and permutatio
     method = "plssvd",
     backend = "cpu",
     svd.method = "rsvd",
+    classifier = "lda",
     seed = 122,
     selection_metric = "balanced_accuracy",
     perm.test = TRUE,

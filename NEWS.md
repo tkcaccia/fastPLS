@@ -1,3 +1,10 @@
+# fastPLS 0.99.20
+
+* Fixed nested permutation testing with latent-space LDA. Recursive
+  `pls.double.cv()` calls now receive the public `"lda"` classifier name and
+  resolve it for the selected backend internally, instead of leaking the
+  CPU-specific internal identifier `"lda_cpp"` through the public API.
+
 # fastPLS 0.99.19
 
 * Incremented the Bioconductor development version after synchronizing the
