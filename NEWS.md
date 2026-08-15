@@ -1,3 +1,18 @@
+# fastPLS 0.99.21
+
+* Made randomized SVD the effective default throughout the public PLS and
+  cross-validation APIs, including the internal cross-validation tuning grid
+  and the refit path used by stored CV configurations.
+
+* Corrected single-split permutation p-values for multi-component models so
+  each permuted Q2 distribution is compared with the corresponding observed
+  component rather than a recycled full Q2 vector.
+
+* Expanded the permanent input-grid tests across all four PLS families,
+  regression and classification, argmax and LDA, IRLBA and rSVD, and both
+  single and double cross-validation. CPU, CUDA, Metal, and float32 grids were
+  also exercised during release validation.
+
 # fastPLS 0.99.20
 
 * Fixed nested permutation testing with latent-space LDA. Recursive

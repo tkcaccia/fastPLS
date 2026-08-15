@@ -4241,7 +4241,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            gamma = NULL,
                            degree = 3L,
                            coef0 = 1,
-                           svd.method = c("irlba", "cpu_rsvd"),
+                           svd.method = c("cpu_rsvd", "irlba"),
                            rsvd_oversample = 10L,
                            rsvd_power = 1L,
                            svds_tol = 0,
@@ -4438,7 +4438,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                      ncomp = 2,
                      north = 1L,
                      scaling = c("centering", "autoscaling", "none"),
-                     svd.method = c("irlba", "cpu_rsvd"),
+                     svd.method = c("cpu_rsvd", "irlba"),
                      rsvd_oversample = 10L,
                      rsvd_power = 1L,
                      svds_tol = 0,
@@ -5239,7 +5239,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
       ncomp = as.integer(cv$best_ncomp[[1L]]),
       scaling = params$scaling %||% "centering",
       method = params$method %||% "simpls",
-      svd.method = params$svd.method %||% "irlba",
+      svd.method = params$svd.method %||% "rsvd",
       classifier = params$classifier %||% "argmax",
       lda_ridge = params$lda_ridge %||% 1e-8,
       fit = fit,
@@ -8367,10 +8367,14 @@ pls =  function (Xtrain,
 
           v[i,]=res_perm$Q2Y
         }
-        model$pval=NULL
-        for(j in 1:length(ncomp)){
-          model$pval[j] = sum(v[,j] > model$Q2Y)/times
-        }
+        model$pval <- vapply(seq_along(ncomp), function(j) {
+          valid <- is.finite(v[, j])
+          if (!any(valid) || !is.finite(model$Q2Y[[j]])) {
+            return(NA_real_)
+          }
+          mean(v[valid, j] > model$Q2Y[[j]])
+        }, numeric(1L))
+        names(model$pval) <- names(model$Q2Y)
         perm_df <- data.frame(
           type = rep("permutation", times * length(ncomp) * 2L),
           permutation = rep(seq_len(times), times = length(ncomp) * 2L),
@@ -8659,7 +8663,7 @@ pls =  function (Xtrain,
       svd.method = .cv_grid_choice_values(
         svd.method, svd_missing,
         choices = c("irlba", "cpu_rsvd"),
-        default = "irlba",
+        default = "cpu_rsvd",
         name = "svd.method",
         normalizer = svd_normalizer
       ),
@@ -8945,7 +8949,7 @@ pls.single.cv =  function (Xdata,
                           scaling = c("centering", "autoscaling","none"),
                           method = c("simpls", "plssvd", "opls", "kernelpls"),
                           backend = NULL,
-                          svd.method = c("irlba", "rsvd"),
+                          svd.method = c("rsvd", "irlba"),
                           seed = 1L,
                           kfold=10,
                           north = 1L,
@@ -9411,7 +9415,7 @@ pls.double.cv = function(Xdata,
                          scaling = c("centering", "autoscaling","none"),
                          method = c("simpls", "plssvd", "opls", "kernelpls"),
                          backend = NULL,
-                         svd.method = c("irlba", "rsvd"),
+                         svd.method = c("rsvd", "irlba"),
                          seed = 1L,
                          perm.test=FALSE,
                          times=100,

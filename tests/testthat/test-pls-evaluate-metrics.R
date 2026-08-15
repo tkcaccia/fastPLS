@@ -78,3 +78,28 @@ test_that("PLS metric paths honor bycol and retain permutation metrics", {
   )
   expect_named(permuted$metrics$permutation, c("results", "p_value"))
 })
+
+test_that("single-split permutation p-values are calculated per component", {
+  set.seed(204)
+  X <- matrix(rnorm(72), nrow = 18, ncol = 4)
+  Y <- cbind(X[, 1] + rnorm(18, sd = 0.2), X[, 2] + rnorm(18, sd = 0.2))
+
+  fit <- pls(
+    X, Y, X, Y, ncomp = 1:2, method = "simpls", backend = "cpu",
+    svd.method = "rsvd", perm.test = TRUE, times = 4, seed = 17,
+    return_variance = FALSE
+  )
+
+  perm_q2 <- subset(
+    fit$permutation,
+    type == "permutation" & metric == "Q2"
+  )
+  component_values <- sort(unique(perm_q2$ncomp))
+  expected <- vapply(seq_along(fit$Q2Y), function(j) {
+    mean(perm_q2$value[perm_q2$ncomp == component_values[[j]]] > fit$Q2Y[[j]])
+  }, numeric(1L))
+  names(expected) <- names(fit$Q2Y)
+
+  expect_equal(fit$pval, expected)
+  expect_identical(names(fit$pval), names(fit$Q2Y))
+})

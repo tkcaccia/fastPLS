@@ -12,7 +12,7 @@ pls.double.cv(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
-  svd.method = c("irlba", "rsvd"),
+  svd.method = c("rsvd", "irlba"),
   seed = 1L,
   perm.test = FALSE,
   times = 100,
