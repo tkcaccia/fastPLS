@@ -80,6 +80,10 @@ as unreliable relative to a deterministic reference if prediction relative
 error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
 angle exceeds 10 degrees, classification-label agreement is below 0.99, or
 the predictive metric differs by more than 0.01.
+The package-wide default uses oversampling 10 and two power iterations, the
+configuration that met all prespecified CPU checks in the formal validation.
+These controls are fixed across matrix shapes unless the user explicitly
+overrides them; no hidden dataset-specific solver tuning is applied.
 Very small SVD inputs automatically fall back to a full dense decomposition
 inside the compiled backends when the truncated route is not meaningful, but
 `exact` is no longer exposed as a user-selectable PLS benchmark option.

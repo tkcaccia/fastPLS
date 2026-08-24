@@ -62,7 +62,7 @@ make_config <- function(shape_name, shape, method, backend, replicate) {
     seed = seed,
     data_seed = 777L,
     oversample = 10L,
-    power = 1L,
+    power = 2L,
     svd_method = "rsvd",
     task_path = NULL,
     n_train = as.integer(shape[["n_train"]]),

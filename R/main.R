@@ -2282,7 +2282,7 @@ print.fastPLS <- function(x, ...) {
   list(
     svd.method = "rsvd",
     rsvd_oversample = 10L,
-    rsvd_power = 1L,
+    rsvd_power = 2L,
     svds_tol = 0,
     irlba_work = 0L,
     irlba_maxit = 1000L,
@@ -2954,7 +2954,7 @@ print.fastPLS <- function(x, ...) {
   1 - sum((yd - pd)^2) / denom
 }
 
-.float32_rsvd <- function(A, k, oversample = 10L, power = 1L, seed = 1L) {
+.float32_rsvd <- function(A, k, oversample = 10L, power = 2L, seed = 1L) {
   .require_float_package()
   k <- min(max(1L, as.integer(k)[1L]), min(nrow(A), ncol(A)))
   l <- min(ncol(A), k + max(0L, as.integer(oversample)[1L]))
@@ -3437,56 +3437,6 @@ print.fastPLS <- function(x, ...) {
   )
 }
 
-.resolve_simpls_fast_rsvd_tuning <- function(n, p, q, svd.method) {
-  stopifnot(length(n) == 1L, length(p) == 1L, length(q) == 1L, length(svd.method) == 1L)
-  n <- as.integer(n)
-  p <- as.integer(p)
-  q <- as.integer(q)
-
-  if (identical(svd.method, "cpu_rsvd")) {
-    if (p >= 700L && n >= 20000L) {
-      return(list(rsvd_oversample = 16L, rsvd_power = 0L))
-    }
-    if (p <= 128L && n >= 10000L) {
-      return(list(rsvd_oversample = 8L, rsvd_power = 0L))
-    }
-    if (p >= 900L && n <= 5000L) {
-      return(list(rsvd_oversample = 4L, rsvd_power = 2L))
-    }
-    if (p > n) {
-      return(list(rsvd_oversample = 10L, rsvd_power = 2L))
-    }
-    if (p >= 512L) {
-      return(list(rsvd_oversample = 10L, rsvd_power = 1L))
-    }
-    return(list(rsvd_oversample = 8L, rsvd_power = 1L))
-  }
-
-  if (identical(svd.method, "cuda_rsvd")) {
-    if (p >= 700L && n >= 20000L) {
-      return(list(rsvd_oversample = 4L, rsvd_power = 2L))
-    }
-    if (p <= 128L && n >= 10000L) {
-      return(list(rsvd_oversample = 16L, rsvd_power = 1L))
-    }
-    if (p >= 900L && n <= 5000L) {
-      return(list(rsvd_oversample = 16L, rsvd_power = 2L))
-    }
-    if (p > n) {
-      return(list(rsvd_oversample = 8L, rsvd_power = 1L))
-    }
-    if (p >= 512L) {
-      return(list(rsvd_oversample = 10L, rsvd_power = 2L))
-    }
-    return(list(rsvd_oversample = 4L, rsvd_power = 2L))
-  }
-
-  list(
-    rsvd_oversample = as.integer(10L),
-    rsvd_power = as.integer(1L)
-  )
-}
-
 pls.model1 =
   function (Xtrain,
             Ytrain,
@@ -3495,7 +3445,7 @@ pls.model1 =
             scaling = 1,
             svd.method = 1,
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             irlba_work = 0L,
             irlba_maxit = 1000L,
@@ -3540,7 +3490,7 @@ pls.model1.gpu =
             scaling = 1,
             svd.method = "cuda_rsvd",
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             seed = 1L)
   {
@@ -3577,7 +3527,7 @@ pls.model1.gpu.implicit.xprod =
             scaling = 1,
             svd.method = "cuda_rsvd",
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             seed = 1L)
   {
@@ -3612,7 +3562,7 @@ pls.model2 =
             scaling = 1,
             svd.method = 1,
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             irlba_work = 0L,
             irlba_maxit = 1000L,
@@ -3654,7 +3604,7 @@ pls.model2.fast =
             scaling = 1,
             svd.method = 1,
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             irlba_work = 0L,
             irlba_maxit = 1000L,
@@ -3699,7 +3649,7 @@ pls.model1.rsvd.xprod.precision =
             fit = FALSE,
             scaling = 1,
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             irlba_work = 0L,
             irlba_maxit = 1000L,
@@ -3751,7 +3701,7 @@ pls.model2.fast.rsvd.xprod.precision =
             fit = FALSE,
             scaling = 1,
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             irlba_work = 0L,
             irlba_maxit = 1000L,
@@ -3805,7 +3755,7 @@ pls.model2.fast.gpu =
             scaling = 1,
             svd.method = "cuda_rsvd",
             rsvd_oversample = 10L,
-            rsvd_power = 1L,
+            rsvd_power = 2L,
             svds_tol = 0,
             seed = 1L)
   {
@@ -4243,7 +4193,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                            coef0 = 1,
                            svd.method = c("cpu_rsvd", "irlba"),
                            rsvd_oversample = 10L,
-                           rsvd_power = 1L,
+                           rsvd_power = 2L,
                            svds_tol = 0,
                            irlba_work = 0L,
                            irlba_maxit = 1000L,
@@ -4292,7 +4242,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
                             degree = 3L,
                             coef0 = 1,
                             rsvd_oversample = 10L,
-                            rsvd_power = 1L,
+                            rsvd_power = 2L,
                             svds_tol = 0,
                             svd.method = "cuda_rsvd",
                             seed = 1L,
@@ -4440,7 +4390,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                      scaling = c("centering", "autoscaling", "none"),
                      svd.method = c("cpu_rsvd", "irlba"),
                      rsvd_oversample = 10L,
-                     rsvd_power = 1L,
+                     rsvd_power = 2L,
                      svds_tol = 0,
                      irlba_work = 0L,
                      irlba_maxit = 1000L,
@@ -4486,7 +4436,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE, .
                       north = 1L,
                       scaling = c("centering", "autoscaling", "none"),
                       rsvd_oversample = 10L,
-                      rsvd_power = 1L,
+                      rsvd_power = 2L,
                       svds_tol = 0,
                       svd.method = "cuda_rsvd",
                       seed = 1L,
@@ -4592,7 +4542,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       ncomp = 2,
                       scaling = c("centering", "autoscaling", "none"),
                       rsvd_oversample = 10L,
-                      rsvd_power = 1L,
+                      rsvd_power = 2L,
                       svds_tol = 0,
                       svd.method = "cuda_rsvd",
                       seed = 1L,
@@ -4623,15 +4573,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
-
-  tuned <- .resolve_simpls_fast_rsvd_tuning(
-    n = nrow(Xtrain),
-    p = ncol(Xtrain),
-    q = ncol(Ytrain),
-    svd.method = "cuda_rsvd"
-  )
-  if (missing(rsvd_oversample)) rsvd_oversample <- tuned$rsvd_oversample
-  if (missing(rsvd_power)) rsvd_power <- tuned$rsvd_power
 
   use_xprod_default <- identical(svd.method, "cuda_rsvd") &&
     .should_use_xprod_default(ncol(Xtrain), ncol(Ytrain), ncomp)
@@ -4756,7 +4697,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                       ncomp = 2,
                       scaling = c("centering", "autoscaling", "none"),
                       rsvd_oversample = 10L,
-                      rsvd_power = 1L,
+                      rsvd_power = 2L,
                       svds_tol = 0,
                       svd.method = "cuda_rsvd",
                       seed = 1L,
@@ -4909,7 +4850,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @noRd
 .plssvd_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
                              ncomp = 2, scaling = c("centering", "autoscaling", "none"),
-                             rsvd_oversample = 10L, rsvd_power = 1L,
+                             rsvd_oversample = 10L, rsvd_power = 2L,
                              svds_tol = 0, seed = 1L, fit = FALSE,
                              proj = FALSE, gpu_qr = TRUE, gpu_eig = TRUE,
                              gpu_finalize_threshold = 32L) {
@@ -4927,7 +4868,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @noRd
 .simpls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
                              ncomp = 2, scaling = c("centering", "autoscaling", "none"),
-                             rsvd_oversample = 10L, rsvd_power = 1L,
+                             rsvd_oversample = 10L, rsvd_power = 2L,
                              svds_tol = 0, seed = 1L, fit = FALSE,
                              proj = FALSE, gpu_device_state = TRUE,
                              gpu_qr = TRUE, gpu_eig = TRUE,
@@ -4948,7 +4889,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 .opls_flash_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
                            ncomp = 2, north = 1L,
                            scaling = c("centering", "autoscaling", "none"),
-                           rsvd_oversample = 10L, rsvd_power = 1L,
+                           rsvd_oversample = 10L, rsvd_power = 2L,
                            svds_tol = 0, seed = 1L, fit = FALSE,
                            proj = FALSE, ...) {
   model <- .opls_cuda(
@@ -4976,7 +4917,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                                  scaling = c("centering", "autoscaling", "none"),
                                  kernel = c("linear", "rbf", "poly"),
                                  gamma = NULL, degree = 3L, coef0 = 1,
-                                 rsvd_oversample = 10L, rsvd_power = 1L,
+                                 rsvd_oversample = 10L, rsvd_power = 2L,
                                  svds_tol = 0, seed = 1L,
                                  fit = FALSE, proj = FALSE, ...) {
   model <- .kernel_pls_cuda(
@@ -5417,7 +5358,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                              backend = c("cpp", "cuda", "metal"),
                              svd.method = c("rsvd", "irlba"),
                              rsvd_oversample = 10L,
-                             rsvd_power = 1L,
+                             rsvd_power = 2L,
                              svds_tol = 0,
                              irlba_work = 0L,
                              irlba_maxit = 1000L,
@@ -6205,7 +6146,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 .truncated_rsvd_metal <- function(A,
                                   k,
                                   rsvd_oversample = 10L,
-                                  rsvd_power = 1L,
+                                  rsvd_power = 2L,
                                   seed = 1L,
                                   left_only = FALSE) {
   if (!isTRUE(has_metal())) {
@@ -6264,7 +6205,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                                         Y,
                                         k,
                                         rsvd_oversample = 10L,
-                                        rsvd_power = 1L,
+                                        rsvd_power = 2L,
                                         seed = 1L,
                                         left_only = FALSE) {
   if (!isTRUE(has_metal())) {
@@ -6328,7 +6269,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
                           k,
                           method = c("cpu_rsvd", "irlba", "cuda_rsvd", "metal_rsvd"),
                           rsvd_oversample = 10L,
-                          rsvd_power = 1L,
+                          rsvd_power = 2L,
                           svds_tol = 0,
                           seed = 1L,
                           left_only = FALSE) {
@@ -6561,9 +6502,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #'   randomized SVD. The sketch dimension is approximately
 #'   `ncomp + oversample`, capped by the matrix rank. Larger values can improve
 #'   approximation accuracy at the cost of extra time and memory.
-#' @param power Number of randomized-SVD power iterations. Larger values improve
-#'   accuracy when singular values decay slowly, but each iteration adds
-#'   additional matrix multiplications.
+#' @param power Number of randomized-SVD power iterations. The default of two
+#'   is the package's numerically qualified configuration. Larger values can
+#'   improve accuracy when singular values decay slowly, but each iteration
+#'   adds additional matrix multiplications.
 #' @param svds_tol Tolerance forwarded to iterative SVD backends. A value of
 #'   `0` keeps the backend default.
 #' @param work IRLBA working subspace size. A value of `0` lets the bundled
@@ -6599,7 +6541,7 @@ fastsvd <- function(x,
                     backend = NULL,
                     method = c("rsvd", "irlba"),
                     oversample = 10L,
-                    power = 1L,
+                    power = 2L,
                     svds_tol = 0,
                     work = 0L,
                     maxit = 1000L,
@@ -7348,7 +7290,7 @@ plot.permutation <- function(x,
   used <- 0L
   if (north > 0L) {
     for (a in seq_len(north)) {
-      s <- fastsvd(.metal_crossprod(Xf, Yc), ncomp = 1L, backend = "metal", method = "rsvd", power = 1L)
+      s <- fastsvd(.metal_crossprod(Xf, Yc), ncomp = 1L, backend = "metal", method = "rsvd", power = 2L)
       w <- s$u[, 1L, drop = FALSE]
       w_norm <- sqrt(sum(w * w))
       if (!is.finite(w_norm) || w_norm <= 0) break
@@ -7483,7 +7425,7 @@ plot.permutation <- function(x,
                        degree = 3L,
                        coef0 = 1,
                        rsvd_oversample = 10L,
-                       rsvd_power = 1L,
+                       rsvd_power = 2L,
                        seed = 1L,
                        classifier = c("argmax", "lda"),
                        lda_ridge = 1e-8,
@@ -8132,17 +8074,6 @@ pls =  function (Xtrain,
   Ytrain <- yprep$Ytrain
   classification <- yprep$classification
   lev <- yprep$lev
-
-  if (meth == 3L && svd.method %in% c("cpu_rsvd", "cuda_rsvd")) {
-    tuned <- .resolve_simpls_fast_rsvd_tuning(
-      n = nrow(Xtrain),
-      p = ncol(Xtrain),
-      q = ncol(Ytrain),
-      svd.method = svd.method
-    )
-    if (!("rsvd_oversample" %in% svd_ctl$supplied)) rsvd_oversample <- tuned$rsvd_oversample
-    if (!("rsvd_power" %in% svd_ctl$supplied)) rsvd_power <- tuned$rsvd_power
-  }
 
   use_xprod_default <- meth %in% c(1L, 3L) && (
     (identical(svd.method, "cpu_rsvd") &&

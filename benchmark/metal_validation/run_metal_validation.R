@@ -25,7 +25,7 @@ log_msg <- function(...) {
 
 cfg <- function(experiment, dataset, task_type, method, backend,
                 precision = "float64", classifier = "argmax", ncomp = 10L,
-                replicate = 1L, seed = 123L, oversample = 10L, power = 1L,
+                replicate = 1L, seed = 123L, oversample = 10L, power = 2L,
                 svd_method = "rsvd",
                 task_path = NULL, n_train = 600L, n_test = 200L,
                 p = 120L, q = 8L, latent_rank = 8L, noise = 0.25,

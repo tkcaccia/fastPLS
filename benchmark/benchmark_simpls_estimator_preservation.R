@@ -28,7 +28,7 @@ nmr_path <- get_arg(
 )
 quick <- identical(get_arg("quick", "false"), "true")
 rsvd_oversample <- as.integer(get_arg("rsvd-oversample", "10"))
-rsvd_power <- as.integer(get_arg("rsvd-power", "1"))
+rsvd_power <- as.integer(get_arg("rsvd-power", "2"))
 if (!is.finite(rsvd_oversample) || rsvd_oversample < 0L) {
   stop("--rsvd-oversample must be a non-negative integer")
 }

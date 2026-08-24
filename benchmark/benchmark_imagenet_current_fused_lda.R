@@ -99,7 +99,7 @@ output_csv <- path.expand(env(
 ))
 ncomp <- as.integer(env("NCOMP", "100"))
 oversample <- as.integer(env("OVERSAMPLE", "20"))
-power <- as.integer(env("POWER", "1"))
+power <- as.integer(env("POWER", "2"))
 seed <- as.integer(env("SEED", "123"))
 replicate_id <- as.integer(env("REPLICATE", "1"))
 precision <- match.arg(env("PRECISION", "float32"), c("float32", "float64"))

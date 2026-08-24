@@ -10,7 +10,7 @@ fastsvd(
   backend = NULL,
   method = c("rsvd", "irlba"),
   oversample = 10L,
-  power = 1L,
+  power = 2L,
   svds_tol = 0,
   work = 0L,
   maxit = 1000L,
@@ -52,9 +52,10 @@ The sketch dimension is approximately \code{ncomp + oversample}, capped by the
 matrix rank. Larger values can improve approximation accuracy at the cost of
 extra time and memory.}
 
-\item{power}{Number of randomized-SVD power iterations. Larger values improve
-accuracy when singular values decay slowly, but each iteration adds
-additional matrix multiplications.}
+\item{power}{Number of randomized-SVD power iterations. The default of two is
+the package's numerically qualified configuration. Larger values can improve
+accuracy when singular values decay slowly, but each iteration adds additional
+matrix multiplications.}
 
 \item{svds_tol}{Tolerance forwarded to iterative SVD backends. A value of
 \code{0} keeps the backend default.}

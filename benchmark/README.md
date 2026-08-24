@@ -38,6 +38,10 @@ repository is supplied, and data/split identifiers. The accompanying
 version is not a substitute for a Git commit, and a manuscript-generation
 commit must never be assigned retrospectively to an older result archive.
 
+Unless a sensitivity analysis explicitly states otherwise, randomized-SVD
+publication runs use `oversample = 10`, `power = 2`, and `seed = 123`. Scripts
+must write these effective values into every result row.
+
 ## Pipeline 1: real and simulated datasets
 
 Purpose: benchmark PLSSVD, SIMPLS, OPLS, and kernel-PLS on the real dataset

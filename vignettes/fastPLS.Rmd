@@ -112,6 +112,10 @@ loading subspace angle above 10 degrees, classification-label agreement below
 0.99, or an absolute predictive-metric difference above 0.01. Increasing
 `power` or `oversample` can improve a borderline rSVD approximation, but IRLBA
 is the recommended fallback when any criterion remains unsatisfied.
+The default randomized configuration uses `oversample = 10` and `power = 2`,
+which met all prespecified CPU checks in the formal validation. These defaults
+do not change with matrix shape; any override must be supplied explicitly and
+is recorded in the model diagnostics.
 
 For large predictor-response cross-products, `fastPLS` can avoid forming
 `S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD

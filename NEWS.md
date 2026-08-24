@@ -1,3 +1,16 @@
+# fastPLS 0.99.22
+
+* Made the numerically qualified randomized-SVD configuration the package-wide
+  default: oversampling is 10 and the number of power iterations is 2.
+
+* Removed undocumented, matrix-shape-dependent SIMPLS overrides that could
+  silently reduce randomized-SVD oversampling or power iterations. Explicit
+  controls supplied through `...` still take precedence and are recorded in
+  fitted-model diagnostics.
+
+* Added release tests that verify the effective randomized-SVD defaults used by
+  `fastsvd()`, `pls()`, and cross-validation.
+
 # fastPLS 0.99.21
 
 * Made randomized SVD the effective default throughout the public PLS and

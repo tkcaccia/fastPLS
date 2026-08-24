@@ -38,7 +38,7 @@ ncomp <- as.integer(strsplit(
 )[[1L]])
 ncomp <- sort(unique(ncomp[is.finite(ncomp) & ncomp > 0L]))
 oversample <- as.integer(env("OVERSAMPLE", "20"))
-power <- as.integer(env("POWER", "1"))
+power <- as.integer(env("POWER", "2"))
 seed <- as.integer(env("SEED", "123"))
 replicate_id <- as.integer(env("REPLICATE", "1"))
 
