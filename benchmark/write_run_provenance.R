@@ -18,7 +18,7 @@ parse_args <- function(values) {
 }
 
 git_value <- function(repo, ...) {
-  if (!dir.exists(file.path(repo, ".git"))) {
+  if (!file.exists(file.path(repo, ".git"))) {
     return(NA_character_)
   }
   result <- suppressWarnings(
@@ -32,6 +32,13 @@ md5_file <- function(path) {
     return(NA_character_)
   }
   unname(tools::md5sum(path)) # Retained for base-R portability; field names identify MD5.
+}
+
+sha256_file <- function(path) {
+  if (is.null(path) || !nzchar(path) || !file.exists(path)) {
+    return(NA_character_)
+  }
+  unname(tools::sha256sum(path))
 }
 
 opt <- parse_args(args)
@@ -50,8 +57,10 @@ status <- git_value(repo, "status", "--porcelain")
 record <- data.frame(
   field = c(
     "analysis_id", "created_utc", "repository", "repository_remote",
-    "repository_commit", "repository_dirty", "script", "script_md5",
-    "fastPLS_version", "external_core_repository", "external_core_commit",
+    "repository_commit", "repository_tree", "repository_tag",
+    "repository_dirty", "script", "script_md5", "script_sha256",
+    "source_archive", "source_archive_sha256", "fastPLS_version",
+    "external_core_repository", "external_core_commit",
     "data_id", "split_id", "seed", "notes"
   ),
   value = c(
@@ -60,9 +69,14 @@ record <- data.frame(
     repo,
     git_value(repo, "config", "--get", "remote.origin.url"),
     git_value(repo, "rev-parse", "HEAD"),
+    git_value(repo, "rev-parse", "HEAD^{tree}"),
+    git_value(repo, "describe", "--tags", "--exact-match", "HEAD"),
     if (is.na(status) || !nzchar(status)) "FALSE" else "TRUE",
     script,
     md5_file(script),
+    sha256_file(script),
+    opt$archive %||% NA_character_,
+    sha256_file(opt$archive),
     as.character(utils::packageVersion("fastPLS")),
     opt$core_repo %||% NA_character_,
     if (!is.null(opt$core_repo)) git_value(opt$core_repo, "rev-parse", "HEAD") else NA_character_,

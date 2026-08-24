@@ -11,6 +11,10 @@
 * Added release tests that verify the effective randomized-SVD defaults used by
   `fastsvd()`, `pls()`, and cross-validation.
 
+* Strengthened benchmark provenance records with Git worktree support, source
+  tree and tag identifiers, and SHA-256 checksums for both the benchmark script
+  and frozen package archive.
+
 # fastPLS 0.99.21
 
 * Made randomized SVD the effective default throughout the public PLS and

@@ -26,14 +26,16 @@ Rscript benchmark/write_run_provenance.R \
   --analysis=analysis_id \
   --output=RESULTS_DIR/run_provenance.csv \
   --script=benchmark/the_benchmark_script.R \
+  --archive=/absolute/path/to/fastPLS_VERSION.tar.gz \
   --data=prepared_task_identifier \
   --split=split_identifier \
   --seed=123
 ```
 
-The record contains the package repository commit and dirty state, benchmark
-script checksum, installed `fastPLS` version, reusable-core commit when a core
-repository is supplied, and data/split identifiers. The accompanying
+The record contains the package repository commit, tree, exact tag and dirty
+state; MD5 and SHA-256 script checksums; source-archive SHA-256; installed
+`fastPLS` version; reusable-core commit when a core repository is supplied;
+and data/split identifiers. The accompanying
 `run_provenance.csv.session_info.txt` captures the R environment. A package
 version is not a substitute for a Git commit, and a manuscript-generation
 commit must never be assigned retrospectively to an older result archive.
