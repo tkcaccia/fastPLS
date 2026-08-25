@@ -28,7 +28,8 @@
 
 \item{newdata}{Numeric predictor matrix.}
 
-\item{Ytest}{Optional observed response used to compute \code{Q2Y}.}
+\item{Ytest}{Optional observed response used to compute independent-test
+\code{Q2Y} relative to the response mean stored from model training.}
 
 \item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
@@ -51,7 +52,7 @@ reporting ImageNet-style top-5 candidate labels.}
 \item{...}{Unused.}
 }
 \value{
-A list containing \code{Ypred}, optional \code{Q2Y}, optional \code{Ttest}, and
+A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional \code{Ttest}, and
 optional LDA scores for LDA classification models.
 }
 \description{

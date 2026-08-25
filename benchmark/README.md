@@ -5,6 +5,12 @@ The four main pipelines can be launched from this directory through small
 wrapper scripts.  The wrappers call the lower-level scripts in `scripts/`
 and keep the benchmark entry points visible in one place.
 
+`synthetic_end_to_end_example.R` is an unrestricted, compact reproduction of
+the complete analysis sequence: simulation, fixed splitting, training-only
+component/classifier selection, final fitting, held-out prediction, metric
+calculation, timing, and result export. It requires no restricted benchmark
+data and writes to `benchmark_results/synthetic_end_to_end_example/`.
+
 Dataset redistribution and reproducible acquisition are documented in
 [`DATA_ACQUISITION.md`](DATA_ACQUISITION.md). Run
 `Rscript benchmark/acquire_publication_datasets.R --list` to see the prepared
@@ -41,8 +47,10 @@ version is not a substitute for a Git commit, and a manuscript-generation
 commit must never be assigned retrospectively to an older result archive.
 
 Unless a sensitivity analysis explicitly states otherwise, randomized-SVD
-publication runs use `oversample = 10`, `power = 2`, and `seed = 123`. Scripts
-must write these effective values into every result row.
+publication runs use `oversample = 20`, `power = 2` on CPU and CUDA. The CPU
+setting met all 585 CPU and 40 CUDA checks across five prespecified random seeds; the former
+oversampling-10 setting failed five checks and was rejected.
+Scripts must write these effective values and the seed into every result row.
 
 ## Pipeline 1: real and simulated datasets
 
@@ -102,6 +110,14 @@ Default outputs:
 - `rearranged_tables/pipeline2_simpls_package_wide_table.csv`
 - `rearranged_tables/pipeline2_opls_package_wide_table.csv`
 - `rearranged_tables/pipeline2_kernelpls_package_wide_table.csv`
+
+### Repeated external SIMPLS timing
+
+`benchmark/external_simpls_timing/` provides the stricter publication timing
+comparison. It separates a minimum-common-output deterministic SIMPLS kernel
+comparison from the ordinary public fit/predict workflows. Every repetition is
+run in a fresh process and summaries report medians, IQRs, completed
+repetitions, output materialization, and retained failures.
 
 The four wide tables have datasets as columns and function/package
 implementations as rows.  Each implementation has two rows: predictive metric
@@ -169,6 +185,30 @@ bash scripts/run_simpls_multidataset_ablation_remote.sh RESULTS_DIR
 Rscript benchmark/summarize_simpls_multidataset_ablation.R RESULTS_DIR
 Rscript benchmark/plot_simpls_multidataset_ablation.R RESULTS_DIR
 ```
+
+## Controlled SIMPLS scaling
+
+`benchmark/controlled_scaling/` provides a one-factor-at-a-time study of sample
+count, predictor dimension, response dimension, retained components, requested
+component prefixes, effective rank, class count, and explicit cross-covariance
+size. Every scenario has a deterministic CPU-IRLBA reference. Candidate rSVD
+routes use oversampling 20, two power iterations, and fixed seeds; the
+cross-covariance-size panel also forces explicit and matrix-free products to
+identify time and memory crossovers.
+
+Each fit runs in a fresh process. Fit and prediction time are recorded
+separately, while a 20-ms external sampler measures incremental host RSS and
+CUDA device memory during fitting and prediction. Numerical comparison with
+the reference occurs after the sampling window, so reading the reference does
+not contaminate candidate memory. Failed and timed-out routes retain their full
+configuration metadata.
+
+```sh
+bash scripts/run_controlled_scaling.sh RESULTS_DIR smoke cpu,metal 1
+bash scripts/run_controlled_scaling.sh RESULTS_DIR publication cpu,cuda 3
+```
+
+See `benchmark/controlled_scaling/README.md` for complete grids and outputs.
 
 ## Pipeline 4: ImageNet DINOv2 SIMPLS classifier scaling
 

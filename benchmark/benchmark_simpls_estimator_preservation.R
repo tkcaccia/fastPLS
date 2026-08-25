@@ -29,11 +29,18 @@ nmr_path <- get_arg(
 quick <- identical(get_arg("quick", "false"), "true")
 rsvd_oversample <- as.integer(get_arg("rsvd-oversample", "10"))
 rsvd_power <- as.integer(get_arg("rsvd-power", "2"))
+rsvd_seeds <- as.integer(strsplit(
+  get_arg("rsvd-seeds", "1,7,19,43,123"), ",", fixed = TRUE
+)[[1L]])
+rsvd_seeds <- unique(rsvd_seeds[is.finite(rsvd_seeds) & rsvd_seeds >= 0L])
 if (!is.finite(rsvd_oversample) || rsvd_oversample < 0L) {
   stop("--rsvd-oversample must be a non-negative integer")
 }
 if (!is.finite(rsvd_power) || rsvd_power < 0L) {
   stop("--rsvd-power must be a non-negative integer")
+}
+if (!length(rsvd_seeds)) {
+  stop("--rsvd-seeds must contain at least one non-negative integer")
 }
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -440,7 +447,7 @@ task_manifest <- do.call(rbind, lapply(tasks, function(task) {
   )
 }))
 
-fit_pair <- function(task, solver) {
+fit_pair <- function(task, solver, randomized_seed = task$seed) {
   grid <- sort(unique(as.integer(task$ncomp_grid)))
   max_component <- max(grid)
   fast_time <- system.time({
@@ -459,7 +466,7 @@ fit_pair <- function(task, solver) {
       fit = TRUE,
       return_variance = FALSE,
       return_loadings = TRUE,
-      seed = task$seed
+      seed = randomized_seed
     ))
   })[["elapsed"]]
   reference_time <- system.time({
@@ -478,7 +485,7 @@ fit_pair <- function(task, solver) {
   )
 }
 
-evaluate_pair <- function(task, pair, solver) {
+evaluate_pair <- function(task, pair, solver, randomized_seed = NA_integer_) {
   grid <- sort(unique(as.integer(task$ncomp_grid)))
   identifiable <- safe_rank(
     sweep(task$Xtrain, 2L, colMeans(task$Xtrain), "-")
@@ -577,6 +584,7 @@ evaluate_pair <- function(task, pair, solver) {
       condition = task$condition,
       seed = task$seed,
       solver = solver,
+      randomized_seed = if (identical(solver, "rsvd")) randomized_seed else NA_integer_,
       rsvd_oversample = if (identical(solver, "rsvd")) rsvd_oversample else NA_integer_,
       rsvd_power = if (identical(solver, "rsvd")) rsvd_power else NA_integer_,
       n_train = nrow(task$Xtrain),
@@ -625,7 +633,7 @@ make_folds <- function(task, folds = 5L) {
   assignment
 }
 
-cv_selection <- function(task, solver, folds = 5L) {
+cv_selection <- function(task, solver, randomized_seed = task$seed, folds = 5L) {
   grid <- sort(unique(as.integer(task$ncomp_grid)))
   fold_id <- make_folds(task, folds)
   fast_values <- matrix(NA_real_, folds, length(grid))
@@ -645,7 +653,7 @@ cv_selection <- function(task, solver, folds = 5L) {
         levels = levels(task$labels_train)
       )
     }
-    pair <- fit_pair(fold_task, solver)
+    pair <- fit_pair(fold_task, solver, randomized_seed)
     for (i in seq_along(grid)) {
       component <- grid[[i]]
       fast_pred <- fast_prediction(pair$fast, i, component)
@@ -681,6 +689,7 @@ cv_selection <- function(task, solver, folds = 5L) {
       condition = task$condition,
       seed = task$seed,
       solver = solver,
+      randomized_seed = if (identical(solver, "rsvd")) randomized_seed else NA_integer_,
       rsvd_oversample = if (identical(solver, "rsvd")) rsvd_oversample else NA_integer_,
       rsvd_power = if (identical(solver, "rsvd")) rsvd_power else NA_integer_,
       folds = folds,
@@ -701,6 +710,7 @@ cv_selection <- function(task, solver, folds = 5L) {
       condition = task$condition,
       seed = task$seed,
       solver = solver,
+      randomized_seed = if (identical(solver, "rsvd")) randomized_seed else NA_integer_,
       rsvd_oversample = if (identical(solver, "rsvd")) rsvd_oversample else NA_integer_,
       rsvd_power = if (identical(solver, "rsvd")) rsvd_power else NA_integer_,
       ncomp = grid,
@@ -716,26 +726,34 @@ failure_rows <- list()
 cv_rows <- list()
 cv_curve_rows <- list()
 endpoint_index <- failure_index <- cv_index <- cv_curve_index <- 1L
-solvers <- c("irlba", "rsvd")
+solver_runs <- c(
+  list(list(solver = "irlba", randomized_seed = NA_integer_)),
+  lapply(rsvd_seeds, function(value) {
+    list(solver = "rsvd", randomized_seed = value)
+  })
+)
 
 for (task in tasks) {
   run_cv <- identical(task$source, "real") ||
     identical(task$seed, synthetic_seeds[[1L]])
-  for (solver in solvers) {
+  for (solver_run in solver_runs) {
+    solver <- solver_run$solver
+    randomized_seed <- solver_run$randomized_seed
     message(
       sprintf(
-        "[%s] dataset=%s solver=%s n=%d p=%d q=%d",
+        "[%s] dataset=%s solver=%s randomized_seed=%s n=%d p=%d q=%d",
         format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
         task$dataset,
         solver,
+        if (is.na(randomized_seed)) "NA" else randomized_seed,
         nrow(task$Xtrain),
         ncol(task$Xtrain),
         ncol(task$Ytrain)
       )
     )
     endpoint <- tryCatch({
-      pair <- fit_pair(task, solver)
-      evaluate_pair(task, pair, solver)
+      pair <- fit_pair(task, solver, randomized_seed)
+      evaluate_pair(task, pair, solver, randomized_seed)
     }, error = function(error) error)
     if (inherits(endpoint, "error")) {
       failure_rows[[failure_index]] <- data.frame(
@@ -746,6 +764,7 @@ for (task in tasks) {
         condition = task$condition,
         seed = task$seed,
         solver = solver,
+        randomized_seed = randomized_seed,
         error_message = conditionMessage(endpoint),
         stringsAsFactors = FALSE
       )
@@ -755,7 +774,10 @@ for (task in tasks) {
       endpoint_index <- endpoint_index + 1L
     }
     if (run_cv) {
-      cv <- tryCatch(cv_selection(task, solver), error = function(error) error)
+      cv <- tryCatch(
+        cv_selection(task, solver, randomized_seed),
+        error = function(error) error
+      )
       if (inherits(cv, "error")) {
         failure_rows[[failure_index]] <- data.frame(
           stage = "cross_validation",
@@ -765,6 +787,7 @@ for (task in tasks) {
           condition = task$condition,
           seed = task$seed,
           solver = solver,
+          randomized_seed = randomized_seed,
           error_message = conditionMessage(cv),
           stringsAsFactors = FALSE
         )
@@ -798,6 +821,7 @@ if (!nrow(failures)) {
     condition = character(),
     seed = integer(),
     solver = character(),
+    randomized_seed = integer(),
     error_message = character(),
     stringsAsFactors = FALSE
   )
@@ -824,12 +848,12 @@ deterministic_summary <- if (nrow(deterministic)) {
 }
 
 validation_summary <- data.frame(
-  endpoint_runs = length(tasks) * length(solvers),
+  endpoint_runs = length(tasks) * length(solver_runs),
   endpoint_failures = sum(failures$stage == "endpoint"),
   cv_runs = sum(vapply(tasks, function(task) {
     identical(task$source, "real") ||
       identical(task$seed, synthetic_seeds[[1L]])
-  }, logical(1))) * length(solvers),
+  }, logical(1))) * length(solver_runs),
   cv_failures = sum(failures$stage == "cross_validation"),
   deterministic_endpoint_rows = nrow(deterministic),
   deterministic_endpoint_tolerance_passes = sum(
@@ -858,6 +882,28 @@ validation_summary <- data.frame(
     NA_real_
   }
 )
+
+rsvd_seed_summary <- if (nrow(approximate)) {
+  do.call(rbind, lapply(split(approximate, approximate$randomized_seed), function(x) {
+    data.frame(
+      randomized_seed = unique(x$randomized_seed)[1L],
+      rows = nrow(x),
+      passes = sum(x$approximation_tolerance_pass, na.rm = TRUE),
+      failures = sum(!x$approximation_tolerance_pass, na.rm = TRUE),
+      maximum_prediction_relative_error = max(x$prediction_relative_error, na.rm = TRUE),
+      minimum_prediction_correlation = min(x$prediction_correlation, na.rm = TRUE),
+      minimum_classification_label_agreement = if (all(is.na(x$classification_label_agreement))) {
+        NA_real_
+      } else {
+        min(x$classification_label_agreement, na.rm = TRUE)
+      },
+      maximum_metric_absolute_difference = max(x$metric_absolute_difference, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }))
+} else {
+  data.frame()
+}
 
 utils::write.csv(
   task_manifest,
@@ -904,6 +950,11 @@ utils::write.csv(
   file.path(out_dir, "simpls_estimator_preservation_validation_summary.csv"),
   row.names = FALSE
 )
+utils::write.csv(
+  rsvd_seed_summary,
+  file.path(out_dir, "simpls_estimator_rsvd_seed_summary.csv"),
+  row.names = FALSE
+)
 
 saveRDS(
   list(
@@ -912,6 +963,7 @@ saveRDS(
     endpoints = endpoints,
     deterministic = deterministic,
     approximate = approximate,
+    rsvd_seed_summary = rsvd_seed_summary,
     cv_results = cv_results,
     cv_curves = cv_curves,
     failures = failures,
@@ -945,6 +997,9 @@ writeLines(
     "",
     "## Aggregate results",
     paste(capture.output(print(validation_summary, row.names = FALSE)), collapse = "\n"),
+    "",
+    "## rSVD variability across prespecified seeds",
+    paste(capture.output(print(rsvd_seed_summary, row.names = FALSE)), collapse = "\n"),
     "",
     "## Interpretation",
     "IRLBA rows test the estimator-preservation claim against pls::simpls.fit.",

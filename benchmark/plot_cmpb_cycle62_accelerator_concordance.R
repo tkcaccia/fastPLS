@@ -129,12 +129,12 @@ backend_panel <- function(data, accelerator, title) {
 p_cuda <- backend_panel(
   audit[audit$accelerator == "CUDA", , drop = FALSE],
   "CUDA",
-  "A  Numerically concordant CUDA speed-up"
+  "A  Numerically concordant CPU/CUDA runtime ratio"
 )
 p_metal <- backend_panel(
   audit[audit$accelerator == "Metal", , drop = FALSE],
   "Metal",
-  "B  Numerically concordant Metal speed-up"
+  "B  Numerically concordant CPU/Metal runtime ratio"
 )
 
 solver$dataset_label <- factor(
@@ -171,7 +171,7 @@ p_solver <- ggplot(solver, aes(time_speedup, dataset_label)) +
 
 figure <- p_cuda | p_metal +
   plot_annotation(
-    title = "Numerically concordant accelerator workflows",
+    title = "CPU/accelerator runtime ratios for numerically concordant workflows",
     subtitle = paste(
       "Gray cells are excluded because the predictive metric or paired predictions",
       "were discordant, or paired predictions were not retained."

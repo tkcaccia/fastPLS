@@ -249,8 +249,8 @@ test_that("simpls path uses the SVD backend selector", {
     fit = TRUE,
     method = "simpls",
     svd.method = "cpu_rsvd",
-    rsvd_oversample = 10L,
-    rsvd_power = 1L,
+    rsvd_oversample = 20L,
+    rsvd_power = 2L,
     seed = 99L
   )
 
@@ -260,7 +260,7 @@ test_that("simpls path uses the SVD backend selector", {
   expect_true(all(is.finite(rsvd$Q)))
   expect_identical(
     rsvd$diagnostics$status,
-    "basic_checks_passed_approximation_not_audited"
+    "basic_checks_passed_qualified_configuration_not_case_audited"
   )
   expect_true(isTRUE(rsvd$diagnostics$stochastic))
   expect_equal(rsvd$diagnostics$effective_components, 5L)
@@ -296,7 +296,7 @@ test_that("SIMPLS rSVD uses oversampled updates and improves with power iteratio
   )
   approximate <- pls(
     X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", oversample = 10L, power = 4L, seed = 204L,
+    svd.method = "rsvd", oversample = 20L, power = 2L, seed = 204L,
     fit = TRUE, return_variance = FALSE
   )
 
@@ -305,7 +305,7 @@ test_that("SIMPLS rSVD uses oversampled updates and improves with power iteratio
   expect_lt(relative_error, 0.02)
   expect_identical(
     approximate$diagnostics$status,
-    "basic_checks_passed_approximation_not_audited"
+    "basic_checks_passed_qualified_configuration_not_case_audited"
   )
 })
 

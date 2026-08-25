@@ -502,17 +502,12 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
     MetalMatrix rbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
     MetalMatrix ttbuf = make_matrix(device, static_cast<NSUInteger>(X.n_rows), 1);
     MetalMatrix vvbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
-    bool has_rr_prev = false;
-    arma::vec rr_prev;
-
     for (int a = 0; a < max_comp; ++a) {
       arma::vec rr(X.n_cols);
-      if (has_rr_prev && rr_prev.n_elem == X.n_cols) {
-        rr = rr_prev;
-      } else {
-        for (arma::uword j = 0; j < X.n_cols; ++j) {
-          rr[j] = static_cast<double>(normal(rng));
-        }
+      // Draw a fresh direction for every deflated SIMPLS component. The
+      // preceding latent direction is deliberately not used as a warm start.
+      for (arma::uword j = 0; j < X.n_cols; ++j) {
+        rr[j] = static_cast<double>(normal(rng));
       }
       double rnorm = arma::norm(rr, 2);
       if (!std::isfinite(rnorm) || rnorm <= std::numeric_limits<double>::epsilon()) break;
@@ -551,8 +546,6 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       if (!std::isfinite(tnorm) || tnorm <= std::numeric_limits<double>::epsilon()) break;
       tt /= tnorm;
       rr /= tnorm;
-      rr_prev = rr;
-      has_rr_prev = true;
       write_metal_col_vector(ttbuf, tt);
 
       MetalMatrix ppbuf = metal_matmul(device, queue, Xg, ttbuf, true, false);

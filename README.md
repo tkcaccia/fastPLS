@@ -16,6 +16,14 @@ The `simpls` implementation is the optimized fastPLS SIMPLS core. Older
 low-level SIMPLS tuning arguments are not part of the public API; new analyses
 should use `method = "simpls"`.
 
+The explicit package exports are `pls()`, `pls.single.cv()`, `pls.double.cv()`,
+`evaluate()`, `plot.permutation()`, `ViP()`, `fastsvd()`, `fastcor()`,
+`fastPLS_backend()`, `has_cuda()`, and `has_metal()`. Standard `predict()` and
+`plot()` generics dispatch to registered fastPLS methods. There is no exported PCA API. The supported model families are `plssvd`,
+`simpls`, `opls`, and `kernelpls`; classification uses `argmax` or latent-space
+`lda`. The deprecated `lda_ridge` compatibility argument is ignored and warns
+when supplied because LDA uses a fixed scale-normalized Cholesky fallback.
+
 ## Bundled data
 
 The package includes two small, fixed example datasets that can be loaded with
@@ -30,8 +38,13 @@ for bundled examples are provided in the dataset help pages and in
 
 - `plssvd`: computes the dominant subspace of the cross-covariance
   `S = X^T Y` and reuses it for the requested component path.
-- `simpls`: optimized SIMPLS with compact latent prediction and automatic
-  matrix-free `xprod` selection when it reduces cross-covariance work.
+- `simpls`: optimized sequential SIMPLS. Every component uses a fresh
+  rank-one direction solve on the current deflated cross-covariance; compact
+  prediction, cached deflation products, incremental coefficient updates, and
+  automatic matrix-free `xprod` reduce repeated work without reusing direction
+  blocks or warm starts. As in `pls::simpls.fit`, one fit supplies the standard
+  sequential component path; fastPLS contributes a compiled, shape-dependent
+  execution and storage strategy rather than the path itself.
 - `opls`: supervised orthogonal filtering followed by the selected PLS core.
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
@@ -70,9 +83,10 @@ CPU backends:
   iterations.
 
 `rsvd` is a stochastic approximation, not a deterministic replacement for
-IRLBA. Every `pls()` fit reports `diagnostics`; the status
-`basic_checks_passed_approximation_not_audited` confirms only finite factors
-and the requested effective rank. For confirmatory coefficient or subspace
+IRLBA. Every `pls()` fit reports `diagnostics`; even the status
+`basic_checks_passed_qualified_configuration_not_case_audited` confirms only
+finite factors, requested effective rank, and use of controls qualified on a
+prespecified panel. It is not a case-specific comparison. For confirmatory coefficient or subspace
 interpretation, ill-conditioned or rank-deficient problems, slowly decaying
 singular spectra, or unstable predictions across random seeds, use
 `svd.method = "irlba"` on the CPU. The validation suite classifies an rSVD fit
@@ -80,10 +94,15 @@ as unreliable relative to a deterministic reference if prediction relative
 error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
 angle exceeds 10 degrees, classification-label agreement is below 0.99, or
 the predictive metric differs by more than 0.01.
-The package-wide default uses oversampling 10 and two power iterations, the
-configuration that met all prespecified CPU checks in the formal validation.
-These controls are fixed across matrix shapes unless the user explicitly
-overrides them; no hidden dataset-specific solver tuning is applied.
+The CPU and CUDA default uses oversampling 20 and two power iterations. On CPU,
+this setting met all 585 component-level checks across five prespecified seeds;
+on CUDA it met all 40 checks across the same seeds.
+The previous oversampling-10 setting was rejected after failing five of 255
+screening checks.
+Metal uses the wider sketch conservatively but remains explicitly unqualified
+until a dedicated audit is completed. Explicit nonqualified overrides emit a
+warning and are recorded in model diagnostics; no hidden dataset-specific
+solver tuning is applied.
 Very small SVD inputs automatically fall back to a full dense decomposition
 inside the compiled backends when the truncated route is not meaningful, but
 `exact` is no longer exposed as a user-selectable PLS benchmark option.

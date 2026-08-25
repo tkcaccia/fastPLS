@@ -9,7 +9,7 @@ fastsvd(
   ncomp = NULL,
   backend = NULL,
   method = c("rsvd", "irlba"),
-  oversample = 10L,
+  oversample = 20L,
   power = 2L,
   svds_tol = 0,
   work = 0L,
@@ -50,12 +50,16 @@ IRLBA-style CPU backend and is valid only with \code{backend = cpu}.
 \item{oversample}{Non-negative oversampling dimension used by randomized SVD.
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the
 matrix rank. Larger values can improve approximation accuracy at the cost of
-extra time and memory.}
+extra time and memory. When omitted, the qualified backend default is 20 on
+CPU and CUDA. Metal uses 20 conservatively but remains explicitly
+marked as not yet qualified.}
 
 \item{power}{Number of randomized-SVD power iterations. The default of two is
-the package's numerically qualified configuration. Larger values can improve
-accuracy when singular values decay slowly, but each iteration adds additional
-matrix multiplications.}
+used on CPU and CUDA. Together with backend-specific oversampling, these
+controls met the package's prespecified numerical audit. Larger values can
+improve accuracy when singular values decay slowly, but each iteration adds
+additional matrix multiplications. Explicit combinations outside the audited
+settings produce a warning.}
 
 \item{svds_tol}{Tolerance forwarded to iterative SVD backends. A value of
 \code{0} keeps the backend default.}
@@ -85,7 +89,10 @@ A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{diagnostics} element reports rank and finiteness checks. For
 double-precision input it also reports sampled singular-triplet residuals and
 left/right orthogonality errors. A residual above 0.01 produces a warning
-status and a residual above 0.1 produces a failure status.
+status and a residual above 0.1 produces a failure status. For randomized SVD,
+the diagnostics also state whether the controls were qualified on the
+prespecified backend validation panel; this is not a case-specific comparison
+with deterministic IRLBA.
 }
 \description{
 Computes a truncated singular value decomposition of a dense numeric matrix

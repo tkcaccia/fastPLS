@@ -25,7 +25,7 @@ pls.double.cv(
   degree = 3L,
   coef0 = 1,
   classifier = c("argmax", "lda"),
-  lda_ridge = 1e-08,
+  lda_ridge = NULL,
   bycol = FALSE,
   xprod = NULL,
   selection_metric = "auto",
@@ -60,17 +60,19 @@ CPU iterative backend.}
 \item{seed}{Random seed used for outer/inner fold assignment and randomized
 SVD steps.}
 
-\item{perm.test}{Run a nested-CV permutation test. For each permutation, the
-rows of \code{Xdata} are shuffled and the complete double cross-validation is
-repeated. The statistic is the median outer-CV value of the same metric
-used for inner model selection. Thus \code{selection_metric = "balanced_accuracy"} tunes and tests balanced accuracy rather than Q2Y.}
+\item{perm.test}{Run a nested-CV permutation test. Independent rows are
+permuted individually. With repeated \code{constrain} values, complete blocks
+are exchanged only among groups with the same number of rows, preserving
+group sizes, within-group response structure, and class frequencies.
+Outer/inner folds and randomized-solver seeds are fixed across observed
+and null fits. The statistic is the median outer-CV value of the metric
+used for inner model selection.}
 
-\item{times}{Number of permutations. For predictive metrics where larger is
-better, such as balanced accuracy or Q2Y, the empirical p-value is the
-proportion of permuted values at least as large as the observed value.
-For loss metrics where smaller is
-better, such as RMSD, it is \code{mean(loss_permuted <= loss_observed)}. No +1
-correction is applied.}
+\item{times}{Number of requested permutations. The corrected Monte Carlo
+p-value is \code{(b + 1) / (B + 1)}, using the upper tail for metrics where
+larger is better and the lower tail for losses such as RMSD. \code{B} counts
+successful null fits only; failed fits are reported. A grouped test
+requires at least two constraint groups of equal size.}
 
 \item{runn}{Number of repeated runs.}
 
@@ -96,8 +98,9 @@ sharing the same constraint value are never split across training and test.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
-scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
+\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
+a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
+fallback sequence rather than a user-tuned ridge.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
@@ -120,7 +123,8 @@ and \code{svtol}. Vector values are tuned in the inner loop.}
 A list with the following elements. \code{metrics$cross_validated}
 contains one complete \code{evaluate()} result per repeated outer-CV run, and
 \code{metrics$aggregate} evaluates the final vote-aggregated or averaged
-prediction. Fold-aware \code{Q2Y} values remain separate top-level outputs.
+prediction. \code{metrics$definitions} records the exact R2Y and Q2Y
+denominator conventions.
 \itemize{
 \item \code{results}: list with one element per repeated run. Each run stores
 \code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
@@ -130,8 +134,10 @@ default \code{backend} and \code{method}.
 \item \code{Ypred}: final cross-validated predictions. For classification, repeated
 runs are combined by voting; for regression, numeric predictions are
 averaged across runs.
-\item \code{Q2Y}: one held-out Q2 value per repeated run. For factor responses this
-is calculated on dummy-coded PLS-DA response scores.
+\item \code{Q2Y}: one outer cross-validated Q2 value per repeated run. Numeric
+responses use each outer fold's training-response mean. For factor
+responses this is the mean outer-fold dummy-response PLS-DA Q2 using
+outer-training class proportions and is not classification accuracy.
 \item \code{R2Y}: one training-fit R2 value per repeated run, averaged across the
 selected outer-fold models.
 \item \code{RMSD}: one held-out RMSD value per repeated run for numeric responses;
@@ -160,6 +166,11 @@ metric name, observed median, and permuted medians returned when
 \code{perm.test = TRUE}. \code{Q2Ysampled} is retained only when Q2 is the selected
 permutation metric.
 \item \code{p.value}: permutation-test p-value returned when \code{perm.test = TRUE}.
+\item \code{permutation_unit}, \code{permutation_group_sizes_preserved},
+\code{permutation_class_frequencies_preserved}, \code{permutation_folds},
+\code{permutation_solver_seed}, \code{permutation_requested},
+\code{permutation_completed}, \code{permutation_failed}, and \code{permutation_errors}:
+the exchangeability contract and null-fit audit.
 }
 }
 \description{

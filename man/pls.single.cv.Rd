@@ -21,7 +21,7 @@ pls.single.cv(
   degree = 3L,
   coef0 = 1,
   classifier = c("argmax", "lda"),
-  lda_ridge = 1e-08,
+  lda_ridge = NULL,
   fit = TRUE,
   bycol = FALSE,
   xprod = NULL,
@@ -75,8 +75,9 @@ are always held out together and are never split across training and test.}
 \item{classifier}{Classification rule for factor responses: \code{"argmax"} or
 latent-space \code{"lda"}. Multiple values are treated as a tuning grid.}
 
-\item{lda_ridge}{Retained for source compatibility. LDA regularization is a
-deterministic numerical fallback and is not tuned during cross-validation.}
+\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
+a warning when supplied. LDA regularization follows the fixed numerical
+fallback sequence documented in \code{\link[=pls]{pls()}}.}
 
 \item{fit}{Fit one additional model on the full dataset and return its
 fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
@@ -105,8 +106,8 @@ and \code{svtol}. Vector values are included in the tuning grid.}
 A list describing the cross-validation run and selected model.
 \code{metrics$cross_validated} contains complete \code{evaluate()} results for each
 requested component count and \code{metrics$fitted} contains the corresponding
-full-data fit results when \code{fit = TRUE}. The fold-aware \code{Q2Y} path remains a
-separate top-level output. Other fields are:
+full-data fit results when \code{fit = TRUE}. \code{metrics$definitions} records the
+exact R2Y and Q2Y denominator conventions. Other fields are:
 \itemize{
 \item \code{best_ncomp}: number of components selected by the chosen metric.
 \item \code{best_index}: position of \code{best_ncomp} in the tested component grid.
@@ -115,8 +116,10 @@ classification uses accuracy and regression uses the default prediction
 error rule.
 \item \code{best_metric_name} and \code{best_metric_value}: name and value of the
 metric at the selected component count.
-\item \code{Q2Y}: held-out cross-validated Q2. For factor responses, Q2 is
-calculated on the dummy-coded PLS-DA response scores.
+\item \code{Q2Y}: held-out cross-validated Q2; every held-out fold is centered
+on its corresponding fold-training response mean. For factor responses,
+this is dummy-response PLS-DA Q2 using fold-training class proportions and
+is not classification accuracy.
 \item \code{accuracy}: held-out decoded-label accuracy for factor responses.
 \item \code{balanced_accuracy}: held-out mean class recall for factor responses.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is

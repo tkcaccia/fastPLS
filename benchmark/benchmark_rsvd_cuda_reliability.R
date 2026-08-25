@@ -13,6 +13,10 @@ out_dir <- normalizePath(
 )
 lib <- value_arg("lib", "")
 if (nzchar(lib)) .libPaths(c(lib, .libPaths()))
+metref_path <- value_arg("metref", "")
+seeds <- as.integer(strsplit(value_arg("seeds", "1,7,19,43,123"), ",", fixed = TRUE)[[1L]])
+seeds <- unique(seeds[is.finite(seeds) & seeds >= 0L])
+if (!length(seeds)) stop("--seeds must contain at least one non-negative integer.")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 suppressPackageStartupMessages(library(fastPLS))
@@ -64,6 +68,17 @@ make_high_rank <- function(seed = 123L) {
 }
 
 make_metref <- function() {
+  if (nzchar(metref_path) && file.exists(metref_path)) {
+    task <- readRDS(metref_path)
+    required <- c(
+      "dataset", "Xtrain", "Ytrain", "Xtest", "Ytest", "ncomp",
+      "classification"
+    )
+    if (!all(required %in% names(task))) {
+      stop("--metref RDS does not contain the required prepared task fields.")
+    }
+    return(task)
+  }
   if (!requireNamespace("KODAMA", quietly = TRUE)) return(NULL)
   env <- new.env(parent = emptyenv())
   data("MetRef", package = "KODAMA", envir = env)
@@ -102,12 +117,13 @@ for (task in tasks) {
 
   for (oversample in c(10L, 20L)) {
   for (power in c(1L, 2L, 4L)) {
+  for (randomized_seed in seeds) {
     cuda_time <- system.time({
       candidate <- pls(
         task$Xtrain, task$Ytrain, task$Xtest, task$Ytest,
         ncomp = task$ncomp, method = "simpls", backend = "cuda",
         svd.method = "rsvd", oversample = oversample, power = power,
-        seed = 123L, scaling = "none", fit = FALSE,
+        seed = randomized_seed, scaling = "none", fit = FALSE,
         return_variance = FALSE
       )
     })[["elapsed"]]
@@ -143,6 +159,7 @@ for (task in tasks) {
         solver = "rsvd",
         oversample = oversample,
         power = power,
+        randomized_seed = randomized_seed,
         ncomp = component,
         reference_time_sec = as.numeric(reference_time),
         candidate_time_sec = as.numeric(cuda_time),
@@ -163,12 +180,31 @@ for (task in tasks) {
     }
   }
   }
+  }
 }
 
 results <- do.call(rbind, rows)
 write.csv(results, file.path(out_dir, "rsvd_cuda_reliability.csv"), row.names = FALSE)
+configuration_summary <- aggregate(
+  approximation_tolerance_pass ~ dataset + oversample + power,
+  results,
+  function(value) c(
+    checks = length(value),
+    passed = sum(value),
+    failed = sum(!value)
+  )
+)
+write.csv(
+  configuration_summary,
+  file.path(out_dir, "rsvd_cuda_reliability_summary.csv"),
+  row.names = FALSE
+)
 writeLines(capture.output(sessionInfo()), file.path(out_dir, "session_info.txt"))
-print(results)
+print(configuration_summary)
 if (any(!results$approximation_tolerance_pass, na.rm = TRUE)) {
   message("One or more CUDA rSVD rows failed the prespecified approximation criteria.")
+}
+default_rows <- results$oversample == 20L & results$power == 2L
+if (!all(results$approximation_tolerance_pass[default_rows])) {
+  stop("The candidate CUDA default failed the prespecified multi-seed audit.")
 }

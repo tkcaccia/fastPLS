@@ -1,4 +1,4 @@
-# Accelerated SIMPLS mapping to the de Jong update
+# Shape-aware SIMPLS execution mapped to the de Jong update
 
 This executable-style pseudocode documents the deterministic SIMPLS path used
 for estimator-preservation validation. The low-rank solver supplies only the
@@ -54,13 +54,47 @@ simpls_component_path <- function(X, Y, ncomp, dominant_left) {
 
 | Optimization | de Jong quantity preserved | Change in execution |
 |---|---|---|
-| One maximal component path | Components 1 to `k` in their original order | Requested prefixes are snapshots rather than independent refits |
 | Cached `X'X` for eligible tall matrices | `p = X't`, `||t||`, and the accepted `r` | Reuses an algebraically equivalent cross-product |
 | Cached deflation row product | `S <- S - v(v'S)` | Evaluates `v'S` once before the rank-one update |
 | Incremental coefficient update | `B_k = R_k Q_k'` | Uses `B_k = B_{k-1} + r_k q_k'` |
 | Incremental fitted-response update | `Yhat_k = T_k Q_k'` | Uses `Yhat_k = Yhat_{k-1} + t_k q_k'` |
+| Compact latent prediction | `X_new B_k = (X_new R_k) Q_k'` | Retains latent factors instead of every dense coefficient and prediction prefix |
 | Matrix-free cross-covariance | The global operator `S = X'Y` | Evaluates `S z = X'(Y z)` and `S' u = Y'(X u)` without storing `S` |
 
-For deterministic IRLBA validation, each deflated component requests a fresh
-IRLBA direction from the current operator. Randomized workspace reuse belongs
-only to the rSVD route and is evaluated separately as an approximation.
+Like `pls::simpls.fit`, the reference SIMPLS implementation in the `pls`
+package, one fit supplies the sequential coefficient and fitted-value path for
+components 1 through `ncomp`. fastPLS does not claim component-path generation
+itself as a novelty. Its contribution is the compiled, shape-dependent
+execution and storage layer summarized above.
+
+## Cost and storage model
+
+Let `n`, `p`, and `q` denote samples, predictors, and responses; let `A` be the
+largest requested component count; and let `C` be the set of requested prefixes.
+A minimally optimized compiled baseline first forms `S = X'Y` in `O(npq)` time
+and `O(pq)` storage. Beyond the solver-specific direction cost, `A` sequential
+SIMPLS updates require `O(A[np + nq + pq] + pA^2)` work and retain
+`O(pq + (2p + q)A)` core state. Rebuilding dense coefficients and fitted values
+at every requested prefix adds
+`O(pq sum(C) + nq sum(C))` work. Retaining every dense prefix adds
+`O(|C|(pq + nq))` storage.
+
+Incremental updates reduce the prefix-reconstruction work to `O(Apq + Anq)`;
+they do not change the SIMPLS estimator. Compact prediction retains
+`R_A` and `Q_A`, requiring `O((p + q)A)` model storage and
+`O(n_test A(p + q))` prediction work, instead of a dense `p` by `q`
+coefficient matrix per prefix and `O(n_test pq)` prediction per prefix.
+For an operator sketch of width `l`, the matrix-free route replaces the
+`O(pq)` cross-covariance with `O((n + p + q)l)` working storage; each operator
+pair costs `O(n(p + q)l)`. It can therefore be slower when `pq` is modest, but
+substantially reduce memory when the predictor-response cross-product is large.
+Caching `X'X` adds `O(np^2)` setup and `O(p^2)` storage, and is enabled only for
+tall, sufficiently reused shapes where replacing repeated sample-space
+products can amortize that cost. Caching the deflation row product changes a
+constant factor rather than the asymptotic order.
+
+Every deflated component requests a fresh direction from the current operator.
+IRLBA starts a new rank-one iterative solve; rSVD draws a new oversampled
+Gaussian sketch using the base seed plus the zero-based component index.
+Candidate blocks, cross-component warm starts, and adaptive refresh policies
+were rejected during development and are not part of the release algorithm.

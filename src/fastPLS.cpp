@@ -90,13 +90,6 @@ void annotate_coefficient_storage(Rcpp::List& out, const bool store_B) {
   out["compact_prediction"] = !store_B;
 }
 
-bool is_rsvd_backend_method(const int svd_method) {
-  return (
-    svd_method == fastpls_svd::SVD_METHOD_CPU_RSVD ||
-    svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD
-  );
-}
-
 arma::mat gaussian_matrix_local(
   const arma::uword n_rows,
   const arma::uword n_cols,
@@ -115,67 +108,17 @@ arma::mat gaussian_matrix_local(
   return out;
 }
 
-arma::vec top1_rsvd_left_vector(
-  const arma::mat& S,
-  const arma::vec* warm_start,
-  const int oversample,
-  const int power_iters,
-  const unsigned int seed
-) {
-  if (S.n_rows < 1 || S.n_cols < 1) {
-    return arma::vec();
-  }
-
-  arma::vec u;
-  if (warm_start != nullptr && warm_start->n_elem == S.n_rows) {
-    u = *warm_start;
-  } else {
-    arma::mat omega = gaussian_matrix_local(S.n_cols, 1, seed + static_cast<unsigned int>(std::max(oversample, 0)));
-    u = S * omega.col(0);
-  }
-
-  double unorm = arma::norm(u, 2);
-  if (!std::isfinite(unorm) || unorm <= 0.0) {
-    return arma::vec();
-  }
-  u /= unorm;
-
-  arma::vec v(S.n_cols, arma::fill::zeros);
-  for (int it = 0; it < std::max(power_iters, 0); ++it) {
-    v = S.t() * u;
-    const double vnorm = arma::norm(v, 2);
-    if (!std::isfinite(vnorm) || vnorm <= 0.0) {
-      return arma::vec();
-    }
-    v /= vnorm;
-    u = S * v;
-    unorm = arma::norm(u, 2);
-    if (!std::isfinite(unorm) || unorm <= 0.0) {
-      return arma::vec();
-    }
-    u /= unorm;
-  }
-
-  return u;
-}
-
 arma::vec leading_left_vec_dispatch(
   const arma::mat& S,
   const int svd_method,
   const int rsvd_oversample,
   const int rsvd_power,
   const double svds_tol,
-  const unsigned int seed,
-  const arma::vec* warm_start
+  const unsigned int seed
 ) {
   if (S.n_rows < 1 || S.n_cols < 1) {
     return arma::vec();
   }
-
-  // A requested rSVD must use the oversampled randomized range finder.
-  // A single warm-started power vector is not an equivalent approximation and
-  // can be unstable when leading singular values are clustered.
-  (void)warm_start;
 
   fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
     S,
@@ -1193,63 +1136,6 @@ struct SimplsFastRefreshWorkspace {
       Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
     }
     return (Ublock.n_cols > 0);
-  }
-};
-
-struct AdaptiveRefreshPolicy {
-  bool enabled = false;
-  int base_block = 8;
-  int base_power = 2;
-  int min_block = 2;
-  int max_block = 16;
-  int min_power = 1;
-  int max_power = 4;
-  double flat_ratio = 0.55;
-  double steep_ratio = 0.12;
-  int current_block = 8;
-  int current_power = 2;
-
-  static AdaptiveRefreshPolicy from_env(int base_block_in, int base_power_in) {
-    AdaptiveRefreshPolicy out;
-    out.enabled = (env_int_or("FASTPLS_FAST_ADAPTIVE_RSVD", 0, 0, 1) == 1);
-    out.base_block = base_block_in;
-    out.base_power = base_power_in;
-    out.min_block = env_int_or("FASTPLS_FAST_ADAPTIVE_MIN_BLOCK", std::min(4, std::max(1, base_block_in)), 1, 64);
-    out.max_block = env_int_or("FASTPLS_FAST_ADAPTIVE_MAX_BLOCK", std::max(base_block_in, 16), 1, 128);
-    out.min_power = env_int_or("FASTPLS_FAST_ADAPTIVE_MIN_POWER", std::min(base_power_in, 1), 0, 8);
-    out.max_power = env_int_or("FASTPLS_FAST_ADAPTIVE_MAX_POWER", std::max(base_power_in, 4), 0, 12);
-    out.flat_ratio = std::max(0.0, std::min(0.99, std::atof(std::getenv("FASTPLS_FAST_ADAPTIVE_FLAT_RATIO") ? std::getenv("FASTPLS_FAST_ADAPTIVE_FLAT_RATIO") : "0.55")));
-    out.steep_ratio = std::max(0.0, std::min(out.flat_ratio, std::atof(std::getenv("FASTPLS_FAST_ADAPTIVE_STEEP_RATIO") ? std::getenv("FASTPLS_FAST_ADAPTIVE_STEEP_RATIO") : "0.12")));
-    out.current_block = std::min(std::max(out.base_block, out.min_block), out.max_block);
-    out.current_power = std::min(std::max(out.base_power, out.min_power), out.max_power);
-    return out;
-  }
-
-  std::pair<int,int> current(int remaining) const {
-    return std::make_pair(
-      std::max(1, std::min(current_block, remaining)),
-      std::max(0, current_power)
-    );
-  }
-
-  void update_from_spectrum(const arma::vec& shat_in, int remaining_after) {
-    if (!enabled || shat_in.n_elem < 2) {
-      return;
-    }
-    const double head = std::max(shat_in(0), std::numeric_limits<double>::epsilon());
-    const arma::uword tail_idx = std::min<arma::uword>(shat_in.n_elem - 1, 1);
-    const double tail = std::max(shat_in(tail_idx), 0.0);
-    const double ratio = tail / head;
-
-    if (ratio >= flat_ratio) {
-      current_block = std::min(max_block, std::max(current_block + 2, current_block * 2));
-      current_power = std::min(max_power, current_power + 1);
-    } else if (ratio <= steep_ratio) {
-      current_block = std::max(min_block, current_block / 2);
-      current_power = std::max(min_power, current_power - 1);
-    }
-
-    current_block = std::max(1, std::min(current_block, remaining_after));
   }
 };
 
@@ -4058,8 +3944,7 @@ List pls_model2(
       rsvd_oversample,
       rsvd_power,
       svds_tol,
-      static_cast<unsigned int>(seed + a),
-      nullptr
+      static_cast<unsigned int>(seed + a)
     );
     if (rr.n_elem != static_cast<arma::uword>(S.n_rows)) {
       break;
@@ -4216,38 +4101,18 @@ List pls_model2_fast(
   }
   int i_out = 0;
 
-  // Inspired by block-Krylov randomized SVD literature (e.g. arXiv:1504.05477):
-  // refresh a small block of singular vectors to reduce per-component SVD overhead.
-  const int refresh_block = 1;
+  // Every SIMPLS component receives a fresh rank-one direction solve from the
+  // current deflated cross-covariance. Candidate blocks and warm starts are
+  // intentionally not reused across components.
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
-  // Independent oversampled rSVD updates are the reliability baseline.
-  // The former warm-started incremental refresh could select a different
-  // direction in flat or clustered spectra and is intentionally disabled.
-  const int incremental_svd = 0;
-  const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
   const int defl_cache = env_int_or("FASTPLS_FAST_DEFLCACHE", 1, 0, 1);
   const int fast_optimized = env_int_or("FASTPLS_FAST_OPTIMIZED", 1, 0, 1);
   const int incremental_coefficients = env_int_or("FASTPLS_INCREMENTAL_COEFFICIENTS", 1, 0, 1);
-  const int fast_top1_rsvd = env_int_or("FASTPLS_FAST_RSVD_TOP1", 0, 0, 1);
   const int fast_crossprod_min_ncomp = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024);
   const int fast_crossprod_max_p = env_int_or("FASTPLS_FAST_CROSSPROD_MAX_P", 512, 16, 65536);
   const int fast_crossprod_min_n_to_p_ratio = env_int_or("FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024);
   const bool return_ttrain = env_int_or("FASTPLS_RETURN_TTRAIN", 0, 0, 1) == 1;
-  const int top1_rsvd_oversample = env_int_or(
-    "FASTPLS_FAST_RSVD_TOP1_OVERSAMPLE",
-    std::min(std::max(rsvd_oversample, 0), 2),
-    0,
-    8
-  );
-  const int top1_rsvd_power = env_int_or(
-    "FASTPLS_FAST_RSVD_TOP1_POWER",
-    std::min(std::max(rsvd_power, 0) + 1, 2),
-    0,
-    4
-  );
-  arma::vec rr_prev;
-  bool has_rr_prev = false;
   arma::mat TT;
   if (return_ttrain) {
     TT.zeros(n, max_ncomp);
@@ -4263,7 +4128,6 @@ List pls_model2_fast(
     XtX_cache = Xt * Xtrain;
     Sxy_cache = S;
   }
-  bool gpu_deflation_enabled = false;
   auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
     arma::vec pp;
     arma::vec qq;
@@ -4295,9 +4159,6 @@ List pls_model2_fast(
       pp = Xt * tt;
       qq = Yt * tt;
     }
-    rr_prev = rr;
-    has_rr_prev = true;
-
     arma::vec vv = pp;
     if (a_idx > 0) {
       auto Vprev = VV.cols(0, a_idx - 1);
@@ -4312,21 +4173,7 @@ List pls_model2_fast(
     }
     vv /= vnorm;
 
-    if (gpu_deflation_enabled) {
-      arma::vec vS(S.n_cols, arma::fill::zeros);
-      fastpls_svd::cuda_rsvd_project_left_row(
-        vv.memptr(),
-        static_cast<int>(S.n_rows),
-        static_cast<int>(S.n_cols),
-        vS.memptr()
-      );
-      fastpls_svd::cuda_rsvd_deflate_left_rank1(
-        vv.memptr(),
-        vS.memptr(),
-        static_cast<int>(S.n_rows),
-        static_cast<int>(S.n_cols)
-      );
-    } else if (defl_cache == 1) {
+    if (defl_cache == 1) {
       arma::rowvec vS = vv.t() * S;
       S -= vv * vS;
     } else {
@@ -4363,101 +4210,20 @@ List pls_model2_fast(
     return true;
   };
 
-  const bool can_incremental = (incremental_svd == 1) && (S.n_rows > 5) && (S.n_cols > 1);
-  // The refresh workspace is an rSVD acceleration only.  In particular, an
-  // explicit IRLBA request must retain the IRLBA update at every deflated
-  // SIMPLS step rather than silently substituting a randomized direction.
-  const bool use_incremental_refresh =
-    (fast_optimized == 1) &&
-    can_incremental &&
-    is_rsvd_backend_method(svd_method);
-  const bool use_optimized_top1_rsvd =
-    use_incremental_refresh &&
-    (fast_top1_rsvd == 1);
-  const bool use_gpu_refresh =
-    use_incremental_refresh &&
-    (svd_method == fastpls_svd::SVD_METHOD_CUDA_RSVD) &&
-    fastpls_svd::cuda_rsvd_prefer_block_gpu(
-      static_cast<int>(S.n_rows),
-      static_cast<int>(S.n_cols),
-      std::min(refresh_block, max_ncomp),
-      inc_power_iters
+  for (int a = 0; a < max_ncomp; ++a) {
+    fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
+      S,
+      1,
+      svd_method,
+      rsvd_oversample,
+      rsvd_power,
+      svds_tol,
+      static_cast<unsigned int>(seed + a),
+      true,
+      false
     );
-  SimplsFastRefreshWorkspace refresh_ws;
-  refresh_ws.gpu_refresh_enabled = use_gpu_refresh;
-  AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
-  gpu_deflation_enabled = use_gpu_refresh;
-  if (use_gpu_refresh) {
-    fastpls_svd::cuda_rsvd_set_resident_matrix(
-      S.memptr(),
-      static_cast<int>(S.n_rows),
-      static_cast<int>(S.n_cols)
-    );
-  }
-
-  if (use_optimized_top1_rsvd) {
-    for (int a = 0; a < max_ncomp; ++a) {
-      arma::vec rr = top1_rsvd_left_vector(
-        S,
-        has_rr_prev ? &rr_prev : nullptr,
-        top1_rsvd_oversample,
-        top1_rsvd_power,
-        static_cast<unsigned int>(seed + a)
-      );
-      if (rr.n_elem != S.n_rows || !append_component(rr, a)) {
-        break;
-      }
-    }
-  } else {
-    int a = 0;
-    while (a < max_ncomp) {
-      const int remaining = max_ncomp - a;
-      const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
-      const int k_block = std::min(refresh_cfg.first, remaining);
-      const int power_iters_block = refresh_cfg.second;
-      arma::mat Ublock;
-      if (use_incremental_refresh) {
-        const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
-        if (!refresh_ws.refresh(
-              S,
-              warm_start,
-              k_block,
-              power_iters_block,
-              static_cast<unsigned int>(seed + a),
-              Ublock
-            )) {
-          break;
-        }
-        adaptive_policy.update_from_spectrum(refresh_ws.shat, max_ncomp - (a + k_block));
-      } else {
-        fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
-          S,
-          k_block,
-          svd_method,
-          rsvd_oversample,
-          rsvd_power,
-          svds_tol,
-          static_cast<unsigned int>(seed + a),
-          true,
-          false
-        );
-        Ublock = svd_res.U;
-      }
-      if (Ublock.n_cols < 1) {
-        break;
-      }
-
-      const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
-      bool stop_now = false;
-      for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
-        if (!append_component(Ublock.col(j), a)) {
-          stop_now = true;
-          break;
-        }
-      }
-      if (stop_now) {
-        break;
-      }
+    if (svd_res.U.n_cols < 1 || !append_component(svd_res.U.col(0), a)) {
+      break;
     }
   }
 
@@ -4636,9 +4402,9 @@ List pls_model2_fast_gpu(
               !use_implicit_xprod
             );
         if (!appended) {
-          // A warm-started randomized refresh can occasionally land in a
-          // direction removed by SIMPLS deflation. Retry entirely on-device
-          // with fresh random starts instead of terminating the coefficient path.
+          // A randomized direction can occasionally land in a direction
+          // removed by SIMPLS deflation. Retry with a fresh independent sketch
+          // instead of terminating the coefficient path.
           const int max_gpu_refresh_retries = 8;
           for (int retry = 0; retry < max_gpu_refresh_retries && !appended; ++retry) {
             arma::vec retry_shat(1, arma::fill::zeros);
@@ -7103,15 +6869,9 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
   }
   int i_out = 0;
 
-  const int refresh_block = 1;
   const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
   const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
   const int incremental_coefficients = env_int_or("FASTPLS_INCREMENTAL_COEFFICIENTS", 1, 0, 1);
-  const int inc_power_iters = env_int_or("FASTPLS_FAST_INC_ITERS", 2, 1, 6);
-  AdaptiveRefreshPolicy adaptive_policy = AdaptiveRefreshPolicy::from_env(refresh_block, inc_power_iters);
-
-  arma::vec rr_prev;
-  bool has_rr_prev = false;
   auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
     arma::vec tt = Xop.times(rr);
     if (center_t == 1) {
@@ -7123,9 +6883,6 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
     rr /= tnorm;
     arma::vec pp = Xop.t_times(tt);
     arma::vec qq = Yop.t_times(tt);
-
-    rr_prev = rr;
-    has_rr_prev = true;
 
     arma::vec vv = pp;
     if (a_idx > 0) {
@@ -7168,28 +6925,23 @@ List pls_model2_fast_rsvd_xprod_precision_view_impl(
 
   int a = 0;
   while (a < max_ncomp) {
-    const int remaining = max_ncomp - a;
-    const std::pair<int,int> refresh_cfg = adaptive_policy.current(remaining);
-    const int k_block = std::min(refresh_cfg.first, remaining);
-    const int power_iters_block = refresh_cfg.second;
+    const int k_block = 1;
     arma::mat Ublock;
     arma::vec shat_block;
-    const arma::vec* warm_start = has_rr_prev ? &rr_prev : nullptr;
     if (!refresh_deflated_crossprod_left_double_view(
           Xop,
           Yop,
           VV,
           a,
-          warm_start,
+          nullptr,
           k_block,
-          power_iters_block,
+          std::max(rsvd_power, 0),
           static_cast<unsigned int>(seed + a),
           Ublock,
           shat_block
         )) {
       break;
     }
-    adaptive_policy.update_from_spectrum(shat_block, max_ncomp - (a + k_block));
     if (Ublock.n_cols < 1) break;
 
     const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);

@@ -54,6 +54,7 @@ test_that("evaluate can omit response-wise regression metrics", {
 
   expect_null(res$per_response)
   expect_true(all(c("R2", "Q2", "RMSD", "MAE") %in% names(res$metrics)))
+  expect_true(is.na(res$metrics$Q2))
 })
 
 test_that("evaluate only reports notes when they are informative", {
@@ -63,5 +64,7 @@ test_that("evaluate only reports notes when they are informative", {
   res <- evaluate(observed, predicted)
 
   expect_true("notes" %in% names(res))
-  expect_match(res$notes[[1]], "Q2 uses the observed response mean")
+  expect_match(res$notes[[1]], "Q2 was not computed")
+  expect_true(is.na(res$metrics$Q2))
+  expect_match(res$metric_definitions$Q2, "requires ytrain")
 })

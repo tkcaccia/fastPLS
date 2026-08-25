@@ -1,3 +1,66 @@
+# fastPLS 0.99.25
+
+* Synchronized the exported API, vignette, manual, README, and manuscript
+  capability descriptions. Removed stale PCA references and deprecated the
+  ignored `lda_ridge` compatibility argument; supplying it now warns, and it is
+  no longer included in cross-validation tuning records.
+
+* Standardized response-variance metrics across the public API. Training
+  `R2Y`, independent-test `Q2Y`, fold-training-mean single-CV `Q2Y`, and
+  outer-fold `Q2Y` now use explicit, documented denominators; dummy-response
+  PLS-DA values are labelled separately from classification accuracy.
+  `evaluate()` returns `NA` for Q2 when no training response is supplied rather
+  than silently reproducing R2.
+
+* Corrected finite Monte Carlo permutation inference to use
+  `(b + 1) / (B + 1)`, preventing zero p-values. Grouped nested validation now
+  permutes complete constraint blocks within equal-size exchangeability strata,
+  holds folds and randomized-solver seeds fixed, and records failed null fits.
+
+* Clarified that returning the sequential SIMPLS component path is standard
+  behavior also provided by `pls::simpls.fit` and is not claimed as a fastPLS
+  novelty.
+
+* Defined the fastPLS contribution as compiled, shape-dependent execution and
+  storage: cached deflation and cross-products, incremental coefficient and
+  fitted-value updates, compact latent prediction, and implicit
+  cross-covariance products.
+
+* Added a minimally optimized compiled SIMPLS baseline and explicit asymptotic
+  time/storage expressions to the implementation mapping and vignette, while
+  documenting that the retained optimizations are not uniformly faster.
+
+# fastPLS 0.99.24
+
+* Standardized the public SIMPLS direction-refresh rule across CPU, CUDA, and
+  Metal. Every component now receives a fresh rank-one IRLBA solve or
+  oversampled rSVD sketch from the current deflated cross-covariance; no
+  candidate block or preceding latent direction is reused.
+
+* Removed the abandoned warm-start, block-refresh, and adaptive-refresh
+  controls from the backend-control registry and removed the residual native
+  Metal warm start.
+
+* Added fitted-model diagnostics and unit tests that identify the active
+  `fresh_per_component` rule, retained execution optimizations, and rejected
+  development prototypes.
+
+# fastPLS 0.99.23
+
+* Changed the randomized-SVD default to `(oversample = 20, power = 2)` on CPU
+  and CUDA. This stronger setting met all 585 CPU and 40 CUDA component-level checks across
+  five prespecified random seeds in the release-candidate audits; the prior
+  `(10, 2)` setting failed five of 255 screening checks and is not treated as
+  qualified.
+
+* Added an explicit warning and fitted-model diagnostic status whenever a
+  user requests randomized controls that were not qualified on the
+  prespecified backend validation panel. Metal randomized SVD remains marked
+  as unqualified pending a dedicated multi-seed audit.
+
+* Aligned non-exported C++ bridge defaults with the qualified CPU controls and
+  expanded release tests for backend-specific dispatch and diagnostics.
+
 # fastPLS 0.99.22
 
 * Made the numerically qualified randomized-SVD configuration the package-wide

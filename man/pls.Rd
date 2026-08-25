@@ -14,7 +14,7 @@ pls(
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   svd.method = c("rsvd", "irlba"),
   classifier = c("argmax", "lda"),
-  lda_ridge = 1e-08,
+  lda_ridge = NULL,
   fit = FALSE,
   bycol = FALSE,
   return_variance = TRUE,
@@ -39,7 +39,8 @@ predictor matrix for the supported float32 route.}
 
 \item{Xtest}{Optional test predictor matrix.}
 
-\item{Ytest}{Optional test response for \code{Q2Y}.}
+\item{Ytest}{Optional test response for independent-test \code{Q2Y}, whose
+denominator uses the training-response mean.}
 
 \item{ncomp}{Number of components (scalar or vector).}
 
@@ -56,8 +57,9 @@ CPU iterative backend.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{lda_ridge}{Retained for source compatibility. PLS-LDA uses a fixed,
-scale-normalized Cholesky fallback sequence rather than a tuned ridge.}
+\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
+a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
+fallback sequence rather than a user-tuned ridge.}
 
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 
@@ -75,13 +77,15 @@ weights and response-side coefficients.}
 \item{proj}{Return projected \code{Ttest} when \code{TRUE}.}
 
 \item{perm.test}{Run a single-split permutation test when \code{Xtest} and
-\code{Ytest} are supplied. The rows of \code{Xtrain} are randomly permuted, the
-model is refitted, and the permuted test-set \code{Q2Y} path is compared with
-the observed \code{Q2Y} path.}
+\code{Ytest} are supplied. Because \code{pls()} has no grouping argument, the
+exchangeability unit is one training row. Training rows are permuted, the
+model is refitted with the same randomized-solver seed, and the permuted
+test-set \code{Q2Y} path is compared with the observed path.}
 
-\item{times}{Number of permutations. For \code{pls()}, the empirical p-value for
-each component is \code{mean(Q2Y_permuted > Q2Y_observed)} and is returned in
-\code{pval}. No +1 correction is applied.}
+\item{times}{Number of requested permutations. For each component, \code{pls()}
+returns \code{(b + 1) / (B + 1)}, where \code{b} is the number of successful null
+fits with \code{Q2Y} at least as large as observed and \code{B} is the number of
+successful null fits. Failed fits are excluded from \code{B} and reported.}
 
 \item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
 for CUDA-native fitting, or experimental \code{metal} for Apple Metal
@@ -129,30 +133,37 @@ when no scaling is applied.
 \code{fit = TRUE}.
 \item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE};
 otherwise \code{NA} placeholders may be returned for compatibility. Elements
-are named by component count, for example \code{"ncomp=2"}.
+are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
+is a dummy-response quantity, not classification accuracy.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.
 \item \code{Ypred_index}: integer class indices for classification predictions, when
 available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: test-set Q2 for numeric \code{Ytest}, or dummy-response PLS-DA Q2 for
-factor \code{Ytest}, returned when response scores are available. Elements are
-named by component count.
+\item \code{Q2Y}: independent-test Q2 whose denominator uses the training-response
+mean. For factor \code{Ytest}, this is dummy-response PLS-DA Q2 relative to
+training class proportions, not classification accuracy. It is returned
+when response scores are available. Elements are named by component count.
 \item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when
 classification predictions are available. Elements are named by component
 count.
-\item \code{metrics}: complete \code{evaluate()} outputs. \code{fitted} evaluates \code{Yfit}
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{definitions} records the exact
+R2Y and Q2Y denominator conventions. \code{fitted} evaluates \code{Yfit}
 against \code{Ytrain}; \code{test} evaluates \code{Ypred} against \code{Ytest}. For
 multivariate regression, response-wise metrics are included only when
 \code{bycol = TRUE}. \code{metrics$permutation} stores permutation metrics and
 p-values when \code{perm.test = TRUE}.
-\item \code{pval}: single-split permutation-test p-values by component, returned
-when \code{perm.test = TRUE}. Each p-value is the fraction of permuted
-\code{Q2Y} values larger than the observed \code{Q2Y}.
+\item \code{pval}: corrected Monte Carlo permutation-test p-values by component,
+returned when \code{perm.test = TRUE}.
 \item \code{permutation}: long-format permutation table, returned when
 \code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the
 permutation correlation used by \code{plot.permutation()}.
+\item \code{permutation_unit}, \code{permutation_group_sizes_preserved},
+\code{permutation_class_frequencies_preserved}, \code{permutation_folds},
+\code{permutation_solver_seed}, \code{permutation_requested},
+\code{permutation_completed}, \code{permutation_failed}, and \code{permutation_errors}:
+the permutation contract and null-fit audit.
 \item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained},
 \code{variance_total}, \code{variance_basis}: predictor-space variance summaries
 returned when \code{return_variance = TRUE}.
@@ -166,9 +177,11 @@ predictor-space variance summaries.
 kernel settings and execution metadata.
 \item \code{diagnostics}: numerical solver diagnostics. For rSVD this records the
 structural-check status, finiteness, requested and effective component
-counts, and the randomized controls. A status of
-\code{basic_checks_passed_approximation_not_audited} means only that the fit is
-structurally valid; it is not evidence of deterministic equivalence.
+counts, randomized controls, and whether those controls were qualified on
+a prespecified validation panel. SIMPLS-family fits additionally record
+the active \code{fresh_per_component} direction rule and the retained and
+abandoned execution optimizations. Even a qualified configuration is not
+a case-specific audit and is not evidence of deterministic equivalence.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
@@ -208,6 +221,21 @@ enforced: \code{method = "simpls"} fits SIMPLS and \code{method = "plssvd"} fits
 PLS-SVD. If a large CUDA classification response would exceed the guarded
 dense-indicator path, SIMPLS stops with a clear error rather than silently
 substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
+
+The SIMPLS direction-refresh rule is identical across supported backends.
+Every component invokes a fresh rank-one direction calculation on the
+current deflated cross-covariance. IRLBA starts a new iterative solve and
+rSVD draws a new oversampled sketch using the base seed plus the zero-based
+component index. Candidate blocks, cross-component warm starts, and adaptive
+refresh policies were rejected during development and are not used by the
+public implementation. Like reference SIMPLS software, one fit supplies the
+sequential component path through the largest requested component count;
+fastPLS does not claim this path construction as a novelty. Retained
+optimizations include cached rank-one deflation products, incremental
+coefficient and fitted-value updates, conditional cross-product caching,
+compact latent prediction, and matrix-free cross-covariance products. These
+are shape-dependent execution and storage choices, not a guarantee that
+every SIMPLS problem runs faster.
 
 Randomized SVD is an approximate solver. The returned \code{diagnostics} performs
 inexpensive structural checks for finite latent factors and the requested

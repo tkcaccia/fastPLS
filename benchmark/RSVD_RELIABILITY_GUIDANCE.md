@@ -25,7 +25,9 @@ application-specific tolerances.
 Each SIMPLS deflation now obtains its leading direction from a fresh,
 oversampled randomized range finder applied to the current deflated
 cross-covariance operator. The rejected one-vector warm-start and adaptive
-refresh shortcut is no longer used by the public CPU or CUDA rSVD paths.
+refresh shortcut is no longer used by the public CPU, CUDA, or Metal rSVD
+paths. Each solve requests exactly one accepted direction; only its workspace,
+not a candidate direction, may persist within an accelerator implementation.
 
 In the prespecified CPU validation, oversampling by 10 directions and one power
 iteration passed 101 of 117 component-level comparisons. The 16 failures were
@@ -39,6 +41,16 @@ A smaller CUDA audit showed that oversampling by 10 directions and four power
 iterations, or oversampling by 20 directions with one or more power iterations,
 passed all eight audited high-rank regression and MetRef component points.
 These results guide settings but are not a universal guarantee.
+
+The release-candidate multi-seed audit subsequently found that oversampling 10
+with two power iterations failed 5 of 255 component-level checks across seeds
+1, 7, 19, 43, and 123. Oversampling 20 with two power iterations met all 585
+CPU checks and all 40 CUDA checks. Accordingly, the public CPU and CUDA default is oversampling 20 with
+two power iterations. A configuration outside the exact audited combinations emits a
+warning and is identified as unqualified in model diagnostics. Metal rSVD is
+also identified as unqualified until a dedicated audit is available. The
+release qualification repeats randomized fits across multiple seeds; a single
+fixed seed is insufficient for a general reliability claim.
 
 ## Choosing IRLBA
 

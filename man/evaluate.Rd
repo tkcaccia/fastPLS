@@ -27,9 +27,10 @@ matrix for classification.}
 as classification and numeric values as regression, unless a one-hot observed
 matrix is detected.}
 
-\item{ytrain}{Optional training response for regression Q2. When supplied, Q2
-is computed relative to the training-set response mean. When omitted, Q2 uses
-the observed response mean and is therefore identical to R2.}
+\item{ytrain}{Optional training response for independent-test regression Q2.
+When supplied, Q2 is computed relative to the training-response mean. When
+omitted, Q2 is returned as \code{NA} rather than being silently equated with
+R2.}
 
 \item{top_k}{Integer vector of top-k classification accuracies to compute when
 \code{predicted} is a class-score matrix.}
@@ -43,7 +44,7 @@ threshold are ignored for relative-error metrics.}
 \item{na.rm}{Remove incomplete observations before computing metrics.}
 }
 \value{
-A list with \code{task}, \code{metrics}, and optionally \code{per_response},
+A list with \code{task}, \code{metrics}, \code{metric_definitions}, and optionally \code{per_response},
 \code{per_class}, \code{confusion}, and \code{topk}. A \code{notes} element is
 included only when the evaluation has an explanatory note to report.
 }
@@ -68,6 +69,9 @@ include the main spectral prediction metrics used by Vignoli et al. (2025):
 median relative error percentage, RMSE, R2, and RPD.
 Set \code{bycol = FALSE} to return only the aggregate metrics and avoid
 calculating a separate metric vector for every response column.
+R2 uses the observed-response mean. Independent-test Q2 uses the training
+mean supplied through \code{ytrain}; if that reference is unavailable, Q2 is
+\code{NA} and \code{metric_definitions} records why it was not calculated.
 }
 \examples{
 evaluate(iris$Species, iris$Species)
