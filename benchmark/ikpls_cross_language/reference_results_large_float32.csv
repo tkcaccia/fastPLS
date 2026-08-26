@@ -1,0 +1,8 @@
+dataset,implementation,precision,ncomp,fit_sec,predict_sec,model_total_sec,preprocess_sec,total_including_preprocess_sec,top1_accuracy,top5_accuracy,rmsd,peak_process_rss_mib,status,notes
+ImageNet,IKPLS 6.1.2 cross-product,float32,100,43.976551,8.693845,52.670396,26.362552,79.032947,0.629114,0.864017,,8238.84,success,One CPU thread; centred float32 arrays; blocked prediction
+ImageNet,IKPLS 6.1.2 cross-product,float32,200,62.212330,6.193331,68.405661,26.362552,94.768213,0.702173,0.913624,,8634.05,success,One CPU thread; centred float32 arrays; blocked prediction
+ImageNet,IKPLS 6.1.2 cross-product,float32,500,109.929966,7.156578,117.086543,26.362552,143.449095,0.766071,0.946381,,9783.24,success,One CPU thread; centred float32 arrays; blocked prediction
+ImageNet,IKPLS 6.1.2 cross-product,float32,1000,190.839807,6.216577,197.056385,26.362552,223.418936,0.799891,0.956144,,11791.91,success,One CPU thread; centred float32 arrays; blocked prediction
+NMR,IKPLS 6.1.2 cross-product,float32,1,53.132622,3.451165,56.583787,,56.583787,,,0.00211327,4281.32,degenerate,Near-zero first weight; predictions equal training-response mean
+NMR,IKPLS 6.1.2 cross-product,float32,5,,,,,,,,,,failed,MemoryError under 10-GiB guard
+NMR,IKPLS 6.1.2 cross-product,float32,50,,,,,,,,,,not_run,Retained coefficient tensor alone would require 68.66 GiB
