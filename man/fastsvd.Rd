@@ -50,16 +50,15 @@ IRLBA-style CPU backend and is valid only with \code{backend = cpu}.
 \item{oversample}{Non-negative oversampling dimension used by randomized SVD.
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the
 matrix rank. Larger values can improve approximation accuracy at the cost of
-extra time and memory. When omitted, the qualified backend default is 20 on
-CPU and CUDA. Metal uses 20 conservatively but remains explicitly
-marked as not yet qualified.}
+extra time and memory. The default starting value is 20. Historical panel
+agreement is not a guarantee for a new matrix; CPU float64 fits additionally
+apply the case-specific audit described in Details.}
 
-\item{power}{Number of randomized-SVD power iterations. The default of two is
-used on CPU and CUDA. Together with backend-specific oversampling, these
-controls met the package's prespecified numerical audit. Larger values can
-improve accuracy when singular values decay slowly, but each iteration adds
-additional matrix multiplications. Explicit combinations outside the audited
-settings produce a warning.}
+\item{power}{Number of randomized-SVD power iterations. CPU starts from the
+requested value and applies case-specific auditing and recovery. CUDA enforces
+a minimum of four iterations together with an oversampling minimum of 48,
+because weaker CUDA controls did not generalize across the controlled shape
+study. Each additional iteration adds matrix multiplications.}
 
 \item{svds_tol}{Tolerance forwarded to iterative SVD backends. A value of
 \code{0} keeps the backend default.}
@@ -87,12 +86,11 @@ A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{v}, plus backend metadata \code{backend}, \code{method},
 \code{svd.method}, \code{elapsed}, and \code{ncomp}. The
 \code{diagnostics} element reports rank and finiteness checks. For
-double-precision input it also reports sampled singular-triplet residuals and
-left/right orthogonality errors. A residual above 0.01 produces a warning
-status and a residual above 0.1 produces a failure status. For randomized SVD,
-the diagnostics also state whether the controls were qualified on the
-prespecified backend validation panel; this is not a case-specific comparison
-with deterministic IRLBA.
+double-precision input it also reports singular-triplet residuals and
+left/right orthogonality errors. CPU rSVD diagnostics include the case-specific
+audit, strengthened retries, effective controls, and whether deterministic
+IRLBA recovery was required. Historical validation-panel status is reported
+separately and is not general-use certification.
 }
 \description{
 Computes a truncated singular value decomposition of a dense numeric matrix
@@ -101,13 +99,15 @@ values, requested singular vectors, decomposition rank, elapsed time, and
 backend metadata.
 }
 \details{
-Randomized SVD is stochastic. Passing the returned singular-triplet checks
-does not prove that the selected dominant subspace agrees with a deterministic
-IRLBA fit, particularly when singular values decay slowly. Increase
-\code{power} or \code{oversample} and compare multiple seeds when approximation
-stability matters. Prefer CPU IRLBA for confirmatory coefficient or subspace
-interpretation, ill-conditioned or rank-deficient matrices, or unstable rSVD
-results.
+Randomized SVD is stochastic. CPU float64 execution audits each decomposition
+using normalized left/right singular-triplet residuals and an omitted-direction
+search. An estimated omitted-to-retained boundary ratio above 0.95 is treated
+as weak separation. The routine retries with wider sketches and more power
+iterations. A weak boundary must agree across independent strengthened
+sketches; if it remains unresolved, the routine returns a deterministic IRLBA
+recovery rather than an uncertified CPU result. Routes without this certificate
+warn and are marked unverified. Confirm coefficient or subspace interpretation
+with CPU IRLBA and compare seeds when conclusions are near a decision boundary.
 }
 \examples{
 set.seed(1)

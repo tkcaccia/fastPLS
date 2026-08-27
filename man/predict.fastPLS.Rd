@@ -66,6 +66,6 @@ X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
            svd.method = "rsvd", return_variance = FALSE)
-pred <- predict(fit, X[1:3, , drop = FALSE])
+pred <- predict(fit, X[seq_len(3), , drop = FALSE])
 pred$Ypred
 }

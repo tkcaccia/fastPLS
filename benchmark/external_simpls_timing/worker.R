@@ -32,11 +32,20 @@ source(file.path(repo_root, "benchmark", "helpers_dataset_memory_compare.R"))
 dataset_id <- tolower(arg("dataset"))
 implementation <- match.arg(arg("implementation"), c("fastpls", "pls"))
 profile <- match.arg(arg("profile"), c("estimator_kernel", "complete_workflow"))
+timing_mode <- match.arg(arg("timing_mode", "cold_process"), c("cold_process", "warm_batch"))
+measurement_scope <- match.arg(arg("measurement_scope", "primary"), c("primary", "phase_decomposition"))
+phase_timing_enabled <- identical(tolower(arg("phase_timing", "false")), "true")
+batch_iterations <- as.integer(arg("iterations", if (identical(timing_mode, "warm_batch")) "20" else "1"))
+if (!is.finite(batch_iterations) || batch_iterations < 1L) batch_iterations <- 1L
+if (identical(timing_mode, "cold_process")) batch_iterations <- 1L
 ncomp <- as.integer(arg("ncomp"))
+requested_ncomp <- ncomp
 replicate_id <- as.integer(arg("replicate", "1"))
 split_seed <- as.integer(arg("seed", "123"))
 row_out <- arg("row_out")
 timeout_sec <- as.numeric(arg("timeout_sec", "10000"))
+cpu_profile <- arg("cpu_profile", "reference_1")
+requested_threads <- as.integer(arg("threads", "1"))
 
 if (!nzchar(dataset_id) || is.na(ncomp) || ncomp < 1L || !nzchar(row_out)) {
   stop("dataset, ncomp, and row-out are required.")
@@ -63,11 +72,13 @@ Ytest <- droplevels(Ytest[keep])
 class_levels <- levels(Ytrain)
 Ydummy <- stats::model.matrix(~ Ytrain - 1)
 colnames(Ydummy) <- class_levels
+ncomp <- min(ncomp, ncol(Xtrain), nrow(Xtrain) - 1L, ncol(Ydummy) - 1L)
+if (ncomp < 1L) stop("No positive component count remains after the centered-response rank limit.")
 
 elapsed <- function(expr) {
-  start <- proc.time()[[3L]]
+  start <- Sys.time()
   value <- force(expr)
-  list(value = value, seconds = unname(proc.time()[[3L]] - start))
+  list(value = value, seconds = as.numeric(difftime(Sys.time(), start, units = "secs")))
 }
 
 size_mb <- function(x) as.numeric(utils::object.size(x)) / 1024^2
@@ -85,6 +96,36 @@ current_rss_mb <- function() {
     "ps", c("-o", "rss=", "-p", as.character(Sys.getpid())), stdout = TRUE, stderr = FALSE
   )))
   if (length(value_kb) && is.finite(value_kb[[1L]])) value_kb[[1L]] / 1024 else NA_real_
+}
+
+loaded_blas_library <- function() {
+  maps <- "/proc/self/maps"
+  if (file.exists(maps)) {
+    paths <- unique(sub(".*[[:space:]](/[^[:space:]]+)$", "\\1", readLines(maps, warn = FALSE)))
+    paths <- paths[grepl("(openblas|libblas|accelerate|veclib)", paths, ignore.case = TRUE)]
+    if (length(paths)) return(paste(paths, collapse = " | "))
+  }
+  blas <- unname(extSoftVersion()["BLAS"])
+  if (length(blas) && nzchar(blas)) blas else NA_character_
+}
+
+reported_blas_threads <- function() {
+  if (!requireNamespace("RhpcBLASctl", quietly = TRUE)) return(NA_integer_)
+  suppressWarnings(as.integer(RhpcBLASctl::blas_get_num_procs()))
+}
+
+blas_library <- loaded_blas_library()
+blas_threads <- reported_blas_threads()
+if (startsWith(cpu_profile, "optimized_")) {
+  if (!grepl("openblas", blas_library, ignore.case = TRUE)) {
+    stop("Optimized CPU profile requested, but OpenBLAS is not loaded.")
+  }
+  if (!is.finite(blas_threads) || blas_threads != requested_threads) {
+    stop(
+      "Optimized CPU profile requested ", requested_threads,
+      " BLAS threads, but the runtime reports ", blas_threads, "."
+    )
+  }
 }
 
 dense_mb <- function(...) prod(as.double(c(...))) * 8 / 1024^2
@@ -106,10 +147,21 @@ decode <- function(scores) {
 
 fit_fastpls <- function() {
   old_store <- Sys.getenv("FASTPLS_STORE_B", unset = NA_character_)
+  old_phase_timing <- Sys.getenv("FASTPLS_BENCH_PHASE_TIMING", unset = NA_character_)
   on.exit({
     if (is.na(old_store)) Sys.unsetenv("FASTPLS_STORE_B") else Sys.setenv(FASTPLS_STORE_B = old_store)
+    if (is.na(old_phase_timing)) {
+      Sys.unsetenv("FASTPLS_BENCH_PHASE_TIMING")
+    } else {
+      Sys.setenv(FASTPLS_BENCH_PHASE_TIMING = old_phase_timing)
+    }
   }, add = TRUE)
   if (identical(profile, "estimator_kernel")) Sys.setenv(FASTPLS_STORE_B = "always")
+  if (phase_timing_enabled) {
+    Sys.setenv(FASTPLS_BENCH_PHASE_TIMING = "1")
+  } else {
+    Sys.unsetenv("FASTPLS_BENCH_PHASE_TIMING")
+  }
 
   call <- list(
     Xtrain = Xtrain,
@@ -155,31 +207,47 @@ predict_pls <- function(fit) {
   decode(scores)
 }
 
-status <- "success"
-error_message <- ""
+status <- rep("success", batch_iterations)
+error_message <- rep("", batch_iterations)
 warning_message <- character()
 fit <- prediction <- NULL
-fit_sec <- prediction_sec <- NA_real_
+fit_sec <- prediction_sec <- rep(NA_real_, batch_iterations)
+phase_rows <- vector("list", batch_iterations)
+
+if (identical(timing_mode, "warm_batch")) {
+  # Warm package dispatch, allocations, and accelerator/runtime state without
+  # mixing that first-call cost into steady-state iteration timings.
+  warm_fit <- if (identical(implementation, "fastpls")) fit_fastpls() else fit_pls()
+  invisible(if (identical(implementation, "fastpls")) predict_fastpls(warm_fit) else predict_pls(warm_fit))
+  rm(warm_fit)
+  gc(FALSE)
+}
 
 gc(FALSE)
 prefit_rss_mb <- current_rss_mb()
-tryCatch(
-  withCallingHandlers({
-    fitted <- elapsed(if (identical(implementation, "fastpls")) fit_fastpls() else fit_pls())
-    fit <- fitted$value
-    fit_sec <- fitted$seconds
-    predicted <- elapsed(if (identical(implementation, "fastpls")) predict_fastpls(fit) else predict_pls(fit))
-    prediction <- predicted$value
-    prediction_sec <- predicted$seconds
-  }, warning = function(w) {
-    warning_message <<- c(warning_message, conditionMessage(w))
-    invokeRestart("muffleWarning")
-  }),
-  error = function(e) {
-    status <<- "failed"
-    error_message <<- conditionMessage(e)
-  }
-)
+for (iteration in seq_len(batch_iterations)) {
+  tryCatch(
+    withCallingHandlers({
+      fitted <- elapsed(if (identical(implementation, "fastpls")) fit_fastpls() else fit_pls())
+      fit <- fitted$value
+      fit_sec[[iteration]] <- fitted$seconds
+      predicted <- elapsed(if (identical(implementation, "fastpls")) predict_fastpls(fit) else predict_pls(fit))
+      prediction <- predicted$value
+      prediction_sec[[iteration]] <- predicted$seconds
+      internal_iteration <- if (identical(implementation, "fastpls")) {
+        attr(fit, "fastPLS_internal", exact = TRUE)
+      } else NULL
+      phase_rows[iteration] <- list(internal_iteration$benchmark_phase_timing)
+    }, warning = function(w) {
+      warning_message <<- c(warning_message, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }),
+    error = function(e) {
+      status[[iteration]] <<- "failed"
+      error_message[[iteration]] <<- conditionMessage(e)
+    }
+  )
+}
 final_rss_mb <- current_rss_mb()
 
 internal <- if (identical(implementation, "fastpls") && !is.null(fit)) {
@@ -193,9 +261,15 @@ loading_mb <- named_size_mb(materialized, c("P", "loadings", "loadingsX", "loadi
 fitted_mb <- named_size_mb(materialized, c("Yfit", "fitted.values", "fitted"))
 variance_mb <- named_size_mb(materialized, c("variance_explained", "Xvar", "Xtotvar", "explvar"))
 
-accuracy <- if (identical(status, "success")) {
+accuracy <- if (any(status == "success") && !is.null(prediction)) {
   mean(as.character(prediction) == as.character(Ytest))
 } else NA_real_
+
+phase_value <- function(name) {
+  vapply(phase_rows, function(x) {
+    if (is.null(x) || is.null(x[[name]])) NA_real_ else as.numeric(x[[name]])
+  }, numeric(1L))
+}
 
 theoretical_cross_covariance_mb <- dense_mb(ncol(Xtrain), ncol(Ydummy))
 theoretical_final_coefficient_mb <- dense_mb(ncol(Xtrain), ncol(Ydummy))
@@ -221,15 +295,32 @@ row <- data.frame(
   implementation = implementation,
   function_name = if (identical(implementation, "fastpls")) "fastPLS::pls" else "pls::simpls.fit",
   package_version = as.character(utils::packageVersion(if (identical(implementation, "fastpls")) "fastPLS" else "pls")),
+  fastpls_source_archive_sha256 = Sys.getenv(
+    "FASTPLS_SOURCE_ARCHIVE_SHA256",
+    unset = NA_character_
+  ),
   estimator = "deterministic SIMPLS",
   solver = if (identical(implementation, "fastpls")) "IRLBA" else "eigen",
   precision = "float64",
+  cpu_profile = cpu_profile,
+  requested_blas_threads = requested_threads,
+  reported_blas_threads = blas_threads,
+  loaded_blas_library = blas_library,
   output_contract = if (identical(profile, "estimator_kernel")) {
     "coefficient path plus final test predictions; scores/loadings/fitted arrays suppressed"
   } else {
     "ordinary public fit object plus final test predictions"
   },
-  warmup_policy = "none; every repetition starts in a fresh R process",
+  timing_mode = timing_mode,
+  measurement_scope = measurement_scope,
+  phase_timing_enabled = phase_timing_enabled,
+  warmup_policy = if (identical(timing_mode, "warm_batch")) {
+    "one untimed complete fit and prediction before measured iterations"
+  } else {
+    "none; every repetition starts in a fresh R process"
+  },
+  batch_iterations = batch_iterations,
+  iteration = seq_len(batch_iterations),
   timeout_sec = timeout_sec,
   split_seed = split_seed,
   replicate = replicate_id,
@@ -238,9 +329,18 @@ row <- data.frame(
   p = ncol(Xtrain),
   q = ncol(Ydummy),
   ncomp = ncomp,
+  requested_ncomp = requested_ncomp,
+  effective_ncomp = ncomp,
   fit_sec = fit_sec,
   prediction_sec = prediction_sec,
   total_sec = fit_sec + prediction_sec,
+  preprocess_crosscov_sec = phase_value("preprocess_crosscov_sec"),
+  estimator_sec = phase_value("estimator_sec"),
+  coefficient_path_sec = phase_value("coefficient_path_sec"),
+  fitted_values_sec = phase_value("fitted_values_sec"),
+  model_assembly_sec = phase_value("model_assembly_sec"),
+  cpp_total_sec = phase_value("cpp_total_sec"),
+  r_wrapper_fit_overhead_sec = pmax(0, fit_sec - phase_value("cpp_total_sec")),
   accuracy = accuracy,
   fit_object_mb = if (is.null(fit)) NA_real_ else size_mb(fit),
   prediction_object_mb = if (is.null(prediction)) NA_real_ else size_mb(prediction),
@@ -268,4 +368,4 @@ row <- data.frame(
 
 dir.create(dirname(row_out), recursive = TRUE, showWarnings = FALSE)
 utils::write.csv(row, row_out, row.names = FALSE, quote = TRUE, na = "")
-print(row[, c("dataset", "comparison_profile", "implementation", "replicate", "total_sec", "accuracy", "status")])
+print(row[, c("dataset", "comparison_profile", "implementation", "timing_mode", "replicate", "iteration", "total_sec", "accuracy", "status")])

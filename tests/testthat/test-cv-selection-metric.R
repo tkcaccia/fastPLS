@@ -17,6 +17,12 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
   expect_identical(opt_r2$selection_metric, "r2")
   expect_identical(opt_r2$best_metric_name, "r2")
   expect_true(opt_r2$best_ncomp %in% 1:2)
+  expected_r2 <- vapply(seq_along(opt_r2$ncomp), function(i) {
+    pred <- matrix(opt_r2$Ypred[, , i], ncol = ncol(y))
+    1 - sum((y - pred)^2) / sum((y - mean(y))^2)
+  }, numeric(1L))
+  expect_equal(opt_r2$selection_metrics$metric_value, expected_r2)
+  expect_false(isTRUE(all.equal(opt_r2$selection_metrics$metric_value, opt_r2$R2Y)))
 
   opt_rmsd <- pls.single.cv(
     Xdata = X,
@@ -34,6 +40,27 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
   expect_true(opt_rmsd$best_ncomp %in% 1:2)
   expect_false(is.null(opt_rmsd$Ypred))
   expect_false(is.null(opt_rmsd$Ypred_optim))
+})
+
+test_that("classification cannot select on descriptive training R2", {
+  set.seed(2105)
+  X <- matrix(rnorm(36 * 5), nrow = 36, ncol = 5)
+  y <- factor(rep(c("A", "B"), each = 18))
+
+  expect_error(
+    pls.single.cv(
+      Xdata = X,
+      Ydata = y,
+      ncomp = 1:2,
+      kfold = 3,
+      method = "simpls",
+      backend = "cpu",
+      svd.method = "rsvd",
+      seed = 15,
+      selection_metric = "r2"
+    ),
+    "cannot be optimized by held-out folds"
+  )
 })
 
 test_that("classification CV selects by accuracy and nested CV forwards the rule", {

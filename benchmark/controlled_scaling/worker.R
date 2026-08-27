@@ -12,7 +12,36 @@ measurement_done <- args[[4L]]
 dir.create(dirname(result_path), recursive = TRUE, showWarnings = FALSE)
 writeLines(as.character(Sys.getpid()), pid_file)
 
+benchmark_library <- Sys.getenv("FASTPLS_SCALING_LIB", unset = "")
+if (nzchar(benchmark_library)) {
+  .libPaths(unique(c(benchmark_library, .libPaths())))
+}
 suppressPackageStartupMessages(library(fastPLS))
+expected_version <- Sys.getenv(
+  "FASTPLS_SCALING_EXPECTED_VERSION", unset = "0.99.25"
+)
+actual_version <- as.character(utils::packageVersion("fastPLS"))
+if (!identical(actual_version, expected_version)) {
+  stop(
+    "Controlled-scaling worker expected fastPLS ", expected_version,
+    " but loaded ", actual_version, ".",
+    call. = FALSE
+  )
+}
+
+loaded_blas_library <- function() {
+  maps <- "/proc/self/maps"
+  if (file.exists(maps)) {
+    paths <- unique(sub(".*[[:space:]](/[^[:space:]]+)$", "\\1", readLines(maps, warn = FALSE)))
+    paths <- paths[grepl("(openblas|libblas|accelerate|veclib)", paths, ignore.case = TRUE)]
+    if (length(paths)) return(paste(paths, collapse = " | "))
+  }
+  unname(extSoftVersion()["BLAS"])
+}
+
+reported_blas_threads <- if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+  suppressWarnings(as.integer(RhpcBLASctl::blas_get_num_procs()))
+} else NA_integer_
 
 rss_mb <- function() {
   if (!requireNamespace("ps", quietly = TRUE)) return(NA_real_)
@@ -84,7 +113,17 @@ numeric_agreement <- function(candidate, reference) {
 
 row <- data.frame(
   run_id = cfg$run_id,
+  package_version = actual_version,
+  source_archive_sha256 = Sys.getenv(
+    "FASTPLS_SOURCE_ARCHIVE_SHA256",
+    unset = NA_character_
+  ),
+  cpu_profile = Sys.getenv("FASTPLS_SCALING_CPU_PROFILE", unset = "reference_1"),
+  requested_blas_threads = as.integer(Sys.getenv("FASTPLS_SCALING_THREADS", unset = "1")),
+  reported_blas_threads = reported_blas_threads,
+  loaded_blas_library = loaded_blas_library(),
   scenario_id = cfg$scenario_id,
+  design_partition = if (is.null(cfg$design_partition)) "one_factor" else cfg$design_partition,
   factor_name = cfg$factor_name,
   factor_value = cfg$factor_value,
   factor_label = cfg$factor_label,
@@ -110,6 +149,14 @@ row <- data.frame(
   fit_seed = cfg$fit_seed,
   oversample = cfg$oversample,
   power = cfg$power,
+  rsvd_case_audit_available = NA,
+  rsvd_case_audit_certified = NA,
+  rsvd_deterministic_fallbacks = NA_integer_,
+  rsvd_audit_max_attempts = NA_integer_,
+  rsvd_effective_oversample = NA_integer_,
+  rsvd_effective_power = NA_integer_,
+  rsvd_max_triplet_residual = NA_real_,
+  rsvd_max_omitted_direction_ratio = NA_real_,
   baseline_rss_mb = NA_real_,
   rss_after_fit_mb = NA_real_,
   rss_after_prediction_mb = NA_real_,
@@ -184,6 +231,18 @@ tryCatch({
   })[["elapsed"]]
   row$rss_after_fit_mb <- rss_mb()
   row$model_size_mb <- as.numeric(object.size(fit)) / 1024^2
+  audit <- fit$diagnostics$rsvd$case_audit
+  if (!is.null(audit)) {
+    row$rsvd_case_audit_available <- audit$solves > 0L
+    row$rsvd_case_audit_certified <- audit$solves > 0L &&
+      audit$certified == audit$solves && audit$failures == 0L
+    row$rsvd_deterministic_fallbacks <- audit$deterministic_fallbacks
+    row$rsvd_audit_max_attempts <- audit$max_attempts
+    row$rsvd_effective_oversample <- audit$max_effective_oversample
+    row$rsvd_effective_power <- audit$max_effective_power
+    row$rsvd_max_triplet_residual <- audit$max_triplet_residual
+    row$rsvd_max_omitted_direction_ratio <- audit$max_omitted_direction_ratio
+  }
 
   row$prediction_sec <- system.time({
     pred <- predict(

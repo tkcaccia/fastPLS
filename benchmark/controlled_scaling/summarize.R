@@ -17,7 +17,8 @@ raw <- raw[order(raw$factor_name, raw$factor_value, raw$route, raw$replicate), ]
 write.csv(raw, file.path(out_dir, "controlled_scaling_raw.csv"), row.names = FALSE)
 
 ok <- raw[raw$status == "success", , drop = FALSE]
-keys <- c("scenario_id", "factor_name", "factor_value", "task_type", "route", "backend", "svd_method", "xprod_requested")
+if (!"design_partition" %in% names(raw)) raw$design_partition <- "one_factor"
+keys <- c("scenario_id", "design_partition", "factor_name", "factor_value", "task_type", "route", "backend", "svd_method", "xprod_requested")
 groups <- split(ok, interaction(ok[keys], drop = TRUE, lex.order = TRUE))
 med <- function(x) if (any(is.finite(x))) median(x[is.finite(x)]) else NA_real_
 iqr <- function(x) if (any(is.finite(x))) IQR(x[is.finite(x)]) else NA_real_
@@ -27,6 +28,7 @@ collapse_unique <- function(x) {
 }
 summary <- do.call(rbind, lapply(groups, function(x) data.frame(
   scenario_id = x$scenario_id[1L],
+  design_partition = x$design_partition[1L],
   factor_name = x$factor_name[1L],
   factor_value = x$factor_value[1L],
   task_type = x$task_type[1L],
@@ -57,6 +59,66 @@ summary <- do.call(rbind, lapply(groups, function(x) data.frame(
 summary <- summary[order(summary$factor_name, summary$factor_value, summary$route), ]
 write.csv(summary, file.path(out_dir, "controlled_scaling_summary.csv"), row.names = FALSE)
 
+interaction <- summary[startsWith(summary$factor_name, "interaction_") & summary$backend == "cpu", ]
+route_validation <- data.frame()
+if (nrow(interaction)) {
+  validation_rows <- lapply(split(interaction, interaction$scenario_id), function(z) {
+    auto <- z[z$xprod_requested == "auto", , drop = FALSE]
+    explicit <- z[z$xprod_requested == "explicit", , drop = FALSE]
+    implicit <- z[z$xprod_requested == "implicit", , drop = FALSE]
+    if (!nrow(auto) || !nrow(explicit) || !nrow(implicit)) return(NULL)
+    qualified_explicit <- explicit$numerical_failures[[1L]] == 0L
+    qualified_implicit <- implicit$numerical_failures[[1L]] == 0L
+    best_route <- if (!qualified_explicit && !qualified_implicit) {
+      "none_qualified"
+    } else if (!qualified_implicit || explicit$median_total_sec[[1L]] <= implicit$median_total_sec[[1L]]) {
+      "explicit"
+    } else {
+      "implicit"
+    }
+    used_text <- tolower(paste(auto$xprod_used, collapse = "|"))
+    selected_route <- if (grepl("implicit|true|1", used_text)) "implicit" else "explicit"
+    best_time <- min(
+      if (qualified_explicit) explicit$median_total_sec[[1L]] else Inf,
+      if (qualified_implicit) implicit$median_total_sec[[1L]] else Inf
+    )
+    data.frame(
+      scenario_id = z$scenario_id[[1L]],
+      design_partition = z$design_partition[[1L]],
+      n_train = z$n_train[[1L]], p = z$p[[1L]], q = z$q[[1L]],
+      max_ncomp = z$max_ncomp[[1L]], requested_prefixes = z$requested_prefixes[[1L]],
+      crosscov_mb = z$crosscov_mb[[1L]],
+      automatic_route = selected_route,
+      empirically_best_qualified_route = best_route,
+      route_selection_correct = identical(selected_route, best_route),
+      automatic_total_sec = auto$median_total_sec[[1L]],
+      best_qualified_total_sec = if (is.finite(best_time)) best_time else NA_real_,
+      automatic_over_best_time = auto$median_total_sec[[1L]] / best_time,
+      automatic_numerical_failures = auto$numerical_failures[[1L]],
+      explicit_numerical_failures = explicit$numerical_failures[[1L]],
+      implicit_numerical_failures = implicit$numerical_failures[[1L]],
+      stringsAsFactors = FALSE
+    )
+  })
+  route_validation <- do.call(rbind, route_validation_rows <- validation_rows)
+  if (!is.null(route_validation) && nrow(route_validation)) {
+    write.csv(route_validation, file.path(out_dir, "interaction_route_validation.csv"), row.names = FALSE)
+    route_summary <- do.call(rbind, lapply(split(route_validation, route_validation$design_partition), function(x) {
+      data.frame(
+        design_partition = x$design_partition[[1L]],
+        cases = nrow(x),
+        numerically_qualified_automatic_cases = sum(x$automatic_numerical_failures == 0L),
+        correct_route_choices = sum(x$route_selection_correct),
+        route_choice_accuracy = mean(x$route_selection_correct),
+        median_automatic_over_best_time = median(x$automatic_over_best_time, na.rm = TRUE),
+        worst_automatic_over_best_time = max(x$automatic_over_best_time, na.rm = TRUE),
+        stringsAsFactors = FALSE
+      )
+    }))
+    write.csv(route_summary, file.path(out_dir, "interaction_route_validation_summary.csv"), row.names = FALSE)
+  }
+}
+
 cross <- summary[summary$factor_name == "crosscov_mb" & grepl("_(explicit|implicit)$", summary$route), ]
 crossovers <- data.frame()
 if (nrow(cross)) {
@@ -67,6 +129,9 @@ if (nrow(cross)) {
     ex <- z[z$xprod_requested == "explicit", ]
     im <- z[z$xprod_requested == "implicit", ]
     if (!nrow(ex) || !nrow(im)) return(NULL)
+    ex_mem <- ex$median_incremental_rss_mb[1L]
+    im_mem <- im$median_incremental_rss_mb[1L]
+    memory_available <- is.finite(ex_mem) && is.finite(im_mem)
     data.frame(
       backend = k$backend,
       crosscov_mb = k$factor_value,
@@ -75,14 +140,18 @@ if (nrow(cross)) {
       implicit_over_explicit_time = im$median_total_sec[1L] / ex$median_total_sec[1L],
       explicit_incremental_rss_mb = ex$median_incremental_rss_mb[1L],
       implicit_incremental_rss_mb = im$median_incremental_rss_mb[1L],
-      implicit_rss_reduction_fraction = 1 - im$median_incremental_rss_mb[1L] / ex$median_incremental_rss_mb[1L],
+      implicit_rss_reduction_fraction = if (memory_available && ex_mem > 0) {
+        1 - im_mem / ex_mem
+      } else NA_real_,
       explicit_numerical_failures = ex$numerical_failures[1L],
       implicit_numerical_failures = im$numerical_failures[1L],
       qualified_time_preference = if (im$numerical_failures[1L] == 0L && ex$numerical_failures[1L] == 0L) {
         if (im$median_total_sec[1L] <= ex$median_total_sec[1L]) "implicit" else "explicit"
       } else "not_qualified",
-      qualified_memory_preference = if (im$numerical_failures[1L] == 0L && ex$numerical_failures[1L] == 0L) {
-        if (im$median_incremental_rss_mb[1L] <= ex$median_incremental_rss_mb[1L]) "implicit" else "explicit"
+      qualified_memory_preference = if (!memory_available) {
+        "not_measured"
+      } else if (im$numerical_failures[1L] == 0L && ex$numerical_failures[1L] == 0L) {
+        if (im_mem <= ex_mem) "implicit" else "explicit"
       } else "not_qualified",
       stringsAsFactors = FALSE
     )

@@ -41,6 +41,10 @@ oversample <- as.integer(env("OVERSAMPLE", "20"))
 power <- as.integer(env("POWER", "2"))
 seed <- as.integer(env("SEED", "123"))
 replicate_id <- as.integer(env("REPLICATE", "1"))
+prediction_block_rows <- as.integer(env("PREDICTION_BLOCK_ROWS", "5000"))
+if (!is.finite(prediction_block_rows) || prediction_block_rows < 1L) {
+  stop("PREDICTION_BLOCK_ROWS must be a positive integer.")
+}
 
 rss_mb <- function() {
   if (file.exists("/proc/self/status")) {
@@ -65,6 +69,12 @@ gpu_used_mb <- function() {
   )
   if (!length(value)) return(NA_real_)
   as.numeric(trimws(value[[1L]]))
+}
+
+finite_max <- function(...) {
+  value <- unlist(list(...), use.names = FALSE)
+  value <- value[is.finite(value)]
+  if (length(value)) max(value) else NA_real_
 }
 
 component_value <- function(x, i, n_expected) {
@@ -108,6 +118,11 @@ metric_row <- function(truth, predicted, top_labels) {
 dir.create(dirname(output_csv), recursive = TRUE, showWarnings = FALSE)
 base_row <- data.frame(
   dataset = "imagenet",
+  package_version = as.character(utils::packageVersion("fastPLS")),
+  source_archive_sha256 = Sys.getenv(
+    "FASTPLS_SOURCE_ARCHIVE_SHA256",
+    unset = NA_character_
+  ),
   train_n = NA_integer_,
   test_n = NA_integer_,
   p = NA_integer_,
@@ -121,6 +136,7 @@ base_row <- data.frame(
   power = power,
   seed = seed,
   replicate = replicate_id,
+  prediction_block_rows = prediction_block_rows,
   ncomp = ncomp,
   fit_time_sec = NA_real_,
   predict_time_sec = NA_real_,
@@ -132,9 +148,11 @@ base_row <- data.frame(
   rss_before_fit_mb = NA_real_,
   rss_after_fit_mb = NA_real_,
   rss_after_predict_mb = NA_real_,
+  rss_peak_predict_mb = NA_real_,
   gpu_before_fit_mb = NA_real_,
   gpu_after_fit_mb = NA_real_,
   gpu_after_predict_mb = NA_real_,
+  gpu_peak_predict_mb = NA_real_,
   audit_status = if (backend == "cuda" && oversample >= 20L) {
     "qualified_approximate_controls"
   } else if (backend == "cpu" && power >= 2L) {
@@ -201,24 +219,81 @@ tryCatch({
   gc(FALSE)
   stamp("Reading ImageNet held-out features")
   Xtest <- readRDS(task$Xtest_rds)
-  stamp("Predicting top-5 labels for all requested prefixes")
+  class_levels <- levels(factor(c(task$Ytrain, task$Ytest)))
+  confusion <- lapply(ncomp, function(...) {
+    matrix(0, length(class_levels), length(class_levels))
+  })
+  top5_correct <- numeric(length(ncomp))
+  total_seen <- 0L
+  rss_peak_predict <- rss_mb()
+  gpu_peak_predict <- gpu_used_mb()
+  blocks <- split(
+    seq_len(nrow(Xtest)),
+    ceiling(seq_len(nrow(Xtest)) / prediction_block_rows)
+  )
+  stamp(
+    "Predicting top-5 labels for all requested prefixes in ",
+    length(blocks), " blocks"
+  )
   predict_time <- unname(system.time({
-    pred <- predict(model, Xtest, backend = backend, top = 5L, top5 = TRUE)
+    for (block_id in seq_along(blocks)) {
+      index <- blocks[[block_id]]
+      pred <- predict(
+        model, Xtest[index, , drop = FALSE], backend = backend,
+        top = 5L, top5 = TRUE
+      )
+      truth <- as.character(task$Ytest[index])
+      for (i in seq_along(ncomp)) {
+        predicted <- component_value(pred$Ypred, i, length(ncomp))
+        if (is.matrix(predicted) || is.data.frame(predicted)) {
+          predicted <- predicted[, 1L]
+        }
+        predicted <- as.character(predicted)
+        top_labels <- as.matrix(component_value(
+          pred$Ypred_top, i, length(ncomp)
+        ))
+        confusion[[i]] <- confusion[[i]] + unclass(table(
+          factor(truth, levels = class_levels),
+          factor(predicted, levels = class_levels)
+        ))
+        top5_correct[[i]] <- top5_correct[[i]] + sum(vapply(
+          seq_along(truth),
+          function(j) truth[[j]] %in% top_labels[j, seq_len(min(5L, ncol(top_labels)))],
+          logical(1L)
+        ))
+      }
+      total_seen <- total_seen + length(index)
+      rss_peak_predict <- finite_max(rss_peak_predict, rss_mb())
+      gpu_peak_predict <- finite_max(gpu_peak_predict, gpu_used_mb())
+      rm(pred)
+      if (block_id %% 10L == 0L) {
+        stamp("Completed prediction block ", block_id, "/", length(blocks))
+        gc(FALSE)
+      }
+    }
   })[["elapsed"]])
   result$rss_after_predict_mb <- rss_mb()
+  result$rss_peak_predict_mb <- rss_peak_predict
   result$gpu_after_predict_mb <- gpu_used_mb()
+  result$gpu_peak_predict_mb <- gpu_peak_predict
+  if (total_seen != length(task$Ytest)) {
+    stop("Blocked prediction did not evaluate every held-out sample.")
+  }
 
   for (i in seq_along(ncomp)) {
-    predicted <- component_value(pred$Ypred, i, length(ncomp))
-    if (is.matrix(predicted) || is.data.frame(predicted)) {
-      predicted <- predicted[, 1L]
-    }
-    top_labels <- component_value(pred$Ypred_top, i, length(ncomp))
-    metrics <- metric_row(task$Ytest, predicted, top_labels)
-    result$top1_accuracy[[i]] <- metrics[["top1_accuracy"]]
-    result$top5_accuracy[[i]] <- metrics[["top5_accuracy"]]
-    result$balanced_accuracy[[i]] <- metrics[["balanced_accuracy"]]
-    result$macro_f1[[i]] <- metrics[["macro_f1"]]
+    tab <- confusion[[i]]
+    support <- rowSums(tab)
+    predicted_n <- colSums(tab)
+    recall <- ifelse(support > 0, diag(tab) / support, NA_real_)
+    precision <- ifelse(predicted_n > 0, diag(tab) / predicted_n, 0)
+    f1 <- ifelse(
+      is.finite(precision + recall) & precision + recall > 0,
+      2 * precision * recall / (precision + recall), 0
+    )
+    result$top1_accuracy[[i]] <- sum(diag(tab)) / total_seen
+    result$top5_accuracy[[i]] <- top5_correct[[i]] / total_seen
+    result$balanced_accuracy[[i]] <- mean(recall, na.rm = TRUE)
+    result$macro_f1[[i]] <- mean(f1, na.rm = TRUE)
   }
   result$fit_time_sec <- fit_time
   result$predict_time_sec <- predict_time

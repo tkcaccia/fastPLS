@@ -812,6 +812,18 @@ endpoints <- empty_or_bind(endpoint_rows)
 failures <- empty_or_bind(failure_rows)
 cv_results <- empty_or_bind(cv_rows)
 cv_curves <- empty_or_bind(cv_curve_rows)
+release_version <- as.character(utils::packageVersion("fastPLS"))
+release_sha256 <- Sys.getenv("FASTPLS_SOURCE_ARCHIVE_SHA256", unset = NA_character_)
+attach_release <- function(x) {
+  x$package_version <- rep(release_version, nrow(x))
+  x$source_archive_sha256 <- rep(release_sha256, nrow(x))
+  x
+}
+task_manifest <- attach_release(task_manifest)
+endpoints <- attach_release(endpoints)
+failures <- attach_release(failures)
+cv_results <- attach_release(cv_results)
+cv_curves <- attach_release(cv_curves)
 if (!nrow(failures)) {
   failures <- data.frame(
     stage = character(),
@@ -823,6 +835,8 @@ if (!nrow(failures)) {
     solver = character(),
     randomized_seed = integer(),
     error_message = character(),
+    package_version = character(),
+    source_archive_sha256 = character(),
     stringsAsFactors = FALSE
   )
 }
@@ -848,6 +862,8 @@ deterministic_summary <- if (nrow(deterministic)) {
 }
 
 validation_summary <- data.frame(
+  package_version = release_version,
+  source_archive_sha256 = release_sha256,
   endpoint_runs = length(tasks) * length(solver_runs),
   endpoint_failures = sum(failures$stage == "endpoint"),
   cv_runs = sum(vapply(tasks, function(task) {

@@ -24,6 +24,7 @@ dir.create(file.path(out_dir, "rows"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_dir, "logs"), recursive = TRUE, showWarnings = FALSE)
 
 base <- list(
+  design_partition = "one_factor",
   task_type = "regression",
   n_train = 2000L,
   n_test = 400L,
@@ -135,6 +136,70 @@ for (factor_name in names(levels)) {
   }
 }
 
+# Add an interaction panel independently of the one-factor crossover grid.
+# A deterministic Latin-hypercube construction covers combinations of n, p,
+# q, rank, component count, prefix count, and class count. The held-out cases
+# are reserved for evaluating the automatic route rule after it is fixed.
+lhs_values <- function(count, lower, upper, seed, logarithmic = FALSE) {
+  set.seed(seed)
+  u <- ((seq_len(count) - 1) + stats::runif(count)) / count
+  u <- sample(u)
+  if (logarithmic) exp(log(lower) + u * (log(upper) - log(lower))) else lower + u * (upper - lower)
+}
+
+interaction_scenarios <- function(count, partition, seed_offset) {
+  n_values <- lhs_values(count, 500, 6000, 7000L + seed_offset, TRUE)
+  p_values <- lhs_values(count, 64, 4000, 7100L + seed_offset, TRUE)
+  q_values <- lhs_values(count, 8, 2000, 7200L + seed_offset, TRUE)
+  comp_values <- lhs_values(count, 2, 80, 7300L + seed_offset, TRUE)
+  prefix_values <- lhs_values(count, 1, 20, 7400L + seed_offset, TRUE)
+  rank_values <- lhs_values(count, 3, 120, 7500L + seed_offset, TRUE)
+  out <- vector("list", count)
+  for (i in seq_len(count)) {
+    p_i <- as.integer(round(p_values[[i]]))
+    q_i <- as.integer(round(q_values[[i]]))
+    n_i <- as.integer(round(n_values[[i]]))
+    # Keep isolated runs feasible while preserving broad shape interactions.
+    n_i <- min(n_i, max(300L, as.integer(floor(8e6 / p_i))))
+    n_i <- min(n_i, max(300L, as.integer(floor(5e6 / q_i))))
+    task_type <- if (i %% 4L == 0L) "classification" else "regression"
+    class_count <- if (task_type == "classification") max(3L, min(q_i, 200L)) else NA_integer_
+    q_effective <- if (task_type == "classification") class_count else q_i
+    max_component <- max(1L, min(n_i - 1L, p_i, q_effective))
+    ncomp_i <- max(1L, min(as.integer(round(comp_values[[i]])), max_component))
+    rank_i <- max(ncomp_i, min(as.integer(round(rank_values[[i]])), p_i, q_effective))
+    prefixes_i <- min(ncomp_i, max(1L, as.integer(round(prefix_values[[i]]))))
+    index <<- index + 1L
+    out[[i]] <- list(
+      design_partition = partition,
+      task_type = task_type,
+      n_train = n_i,
+      n_test = max(100L, as.integer(round(n_i / 5))),
+      p = p_i,
+      q = q_effective,
+      latent_rank = rank_i,
+      class_count = class_count,
+      ncomp = prefix_grid(ncomp_i, prefixes_i),
+      requested_prefixes = prefixes_i,
+      noise = 0.10,
+      factor_name = paste0("interaction_", partition),
+      factor_value = i,
+      factor_label = paste0(partition, "_", i),
+      data_seed = 20000L + seed_offset + i,
+      scenario_id = sprintf("%02d_interaction_%s_%02d", index, partition, i)
+    )
+  }
+  out
+}
+
+if (identical(profile, "publication")) {
+  scenarios <- c(
+    scenarios,
+    interaction_scenarios(24L, "development", 0L),
+    interaction_scenarios(16L, "holdout", 1000L)
+  )
+}
+
 route <- function(name, backend, svd_method, xprod, reference = FALSE) {
   list(
     route = name,
@@ -149,7 +214,7 @@ routes_for <- function(s) {
   out <- list(route("cpu_irlba_explicit", "cpu", "irlba", "explicit", TRUE))
   if ("cpu" %in% backends) {
     out <- c(out, list(route("cpu_rsvd_auto", "cpu", "rsvd", "auto")))
-    if (s$factor_name == "crosscov_mb") {
+    if (s$factor_name == "crosscov_mb" || startsWith(s$factor_name, "interaction_")) {
       out <- c(out, list(
         route("cpu_rsvd_explicit", "cpu", "rsvd", "explicit"),
         route("cpu_rsvd_implicit", "cpu", "rsvd", "implicit")
@@ -179,8 +244,8 @@ for (s in scenarios) {
       cfg <- c(s, r)
       cfg$replicate <- as.integer(replicate)
       cfg$fit_seed <- 123L + replicate
-      cfg$oversample <- 20L
-      cfg$power <- 2L
+      cfg$oversample <- if (identical(r$backend, "cuda")) 48L else 20L
+      cfg$power <- if (identical(r$backend, "cuda")) 4L else 2L
       cfg$reference_file <- reference_file
       cfg$run_id <- paste(s$scenario_id, r$route, paste0("rep", replicate), sep = "__")
       configs[[length(configs) + 1L]] <- cfg
@@ -199,6 +264,7 @@ for (i in seq_along(configs)) {
     run_id = cfg$run_id,
     scenario_id = cfg$scenario_id,
     factor_name = cfg$factor_name,
+    design_partition = cfg$design_partition,
     factor_value = cfg$factor_value,
     task_type = cfg$task_type,
     n_train = cfg$n_train,
@@ -227,12 +293,12 @@ writeLines(c(
   paste0("backends=", paste(backends, collapse = ",")),
   paste0("replicates=", reps),
   paste0("scenario_count=", length(scenarios)),
+  "interaction_design=24 deterministic Latin-hypercube development cases plus 16 independent held-out cases",
   paste0("run_count=", length(configs)),
   "precision=float64",
   "method=simpls",
   "reference=cpu_irlba_explicit",
-  "rsvd_oversample=20",
-  "rsvd_power=2",
+  "rsvd_controls=cpu:oversample20/power2;cuda:oversample48/power4;metal:oversample20/power2_unqualified",
   "seed_rule=data_seed fixed by scenario; fit_seed=123+replicate"
 ), file.path(out_dir, "grid_parameters.txt"))
 

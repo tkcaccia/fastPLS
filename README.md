@@ -83,23 +83,31 @@ CPU backends:
   iterations.
 
 `rsvd` is a stochastic approximation, not a deterministic replacement for
-IRLBA. Every `pls()` fit reports `diagnostics`; even the status
-`basic_checks_passed_qualified_configuration_not_case_audited` confirms only
-finite factors, requested effective rank, and use of controls qualified on a
-prespecified panel. It is not a case-specific comparison. For confirmatory coefficient or subspace
-interpretation, ill-conditioned or rank-deficient problems, slowly decaying
-singular spectra, or unstable predictions across random seeds, use
-`svd.method = "irlba"` on the CPU. The validation suite classifies an rSVD fit
+IRLBA. It remains the primary starting solver. For CPU float64 fits, every
+randomized decomposition is checked using normalized singular-triplet
+residuals and an omitted-direction audit. The solver strengthens the sketch
+automatically when needed. A weak spectral boundary must either agree with an
+independent strengthened sketch or recover with IRLBA; consensus and recovery
+are recorded in `diagnostics`, not hidden.
+CUDA, Metal, or float32 routes without an equivalent case certificate warn and
+are marked unverified. For confirmatory coefficient or subspace interpretation,
+use `svd.method = "irlba"` on the CPU. The validation suite classifies an rSVD fit
 as unreliable relative to a deterministic reference if prediction relative
 error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
 angle exceeds 10 degrees, classification-label agreement is below 0.99, or
 the predictive metric differs by more than 0.01.
-The CPU and CUDA default uses oversampling 20 and two power iterations. On CPU,
-this setting met all 585 component-level checks across five prespecified seeds;
-on CUDA it met all 40 checks across the same seeds.
+CPU starts with oversampling 20 and two power iterations, then applies the
+case-specific audit and adaptive recovery described above. CUDA enforces a
+wider safety floor of oversampling 48 and four power iterations; weaker
+requested CUDA controls are raised with a warning. This CUDA floor met all 174
+runs in the three-seed controlled shape sweep, whereas 20/2 did not.
+With the CPU case audit and recovery enabled, the corresponding CPU sweep also
+met tolerance in all 174 runs. Across the 276 automatic CPU/CUDA routes that
+replace the former 73-failure panel, all 276 met the prespecified tolerances.
 The previous oversampling-10 setting was rejected after failing five of 255
 screening checks.
-Metal uses the wider sketch conservatively but remains explicitly unqualified
+These panel results are historical evidence rather than a universal guarantee.
+Metal remains explicitly unverified
 until a dedicated audit is completed. Explicit nonqualified overrides emit a
 warning and are recorded in model diagnostics; no hidden dataset-specific
 solver tuning is applied.

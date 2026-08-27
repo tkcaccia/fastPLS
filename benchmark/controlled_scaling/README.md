@@ -5,6 +5,12 @@ synthetic-data parameters fixed. It measures the shape-dependent execution
 claims made for fastPLS SIMPLS rather than treating heterogeneous real datasets
 as a scaling experiment.
 
+The publication profile also adds a joint-shape validation: 24 deterministic
+Latin-hypercube development cases and 16 independently generated holdout cases
+vary the principal dimensions together. The automatic, forced-explicit, and
+forced-implicit routes are compared on every interaction case. Only the
+holdout partition is used to report route-choice accuracy.
+
 The publication profile sweeps sample count, predictor dimension, response
 dimension, retained components, requested component prefixes, effective
 cross-covariance rank, class count, and explicit cross-covariance size. Every
@@ -42,5 +48,11 @@ bash scripts/run_controlled_scaling.sh \
 
 Primary outputs are `controlled_scaling_raw.csv`,
 `controlled_scaling_summary.csv`, `explicit_implicit_crossover.csv`,
+`interaction_route_validation.csv`,
+`interaction_route_validation_summary.csv`,
 `failures_and_numerical_discordance.csv`, and four PDF figures. Failed and
 timed-out routes remain in the raw and failure tables.
+
+CPU runs record `cpu_profile`, the loaded BLAS library, requested threads, and
+runtime-reported BLAS threads. A multithread claim is accepted only when the
+optimized BLAS and active thread count are independently verified.

@@ -1,4 +1,4 @@
-test_that("the qualified rSVD controls are package-wide defaults", {
+test_that("the audited rSVD starting controls are package-wide defaults", {
   defaults <- fastPLS:::.svd_control_defaults()
   expect_identical(defaults$rsvd_oversample, 20L)
   expect_identical(defaults$rsvd_power, 2L)
@@ -10,28 +10,47 @@ test_that("the qualified rSVD controls are package-wide defaults", {
   expect_identical(resolved$rsvd_power, 2L)
 })
 
-test_that("backend defaults use only audited rSVD configurations", {
+test_that("backend controls distinguish panel evidence from general certification", {
   base <- fastPLS:::.resolve_svd_control(context = "test")
 
   cpu <- fastPLS:::.apply_backend_rsvd_controls(base, "cpu", "test")
   expect_identical(cpu$rsvd_oversample, 20L)
   expect_identical(cpu$rsvd_power, 2L)
   expect_true(cpu$rsvd_qualification$qualified_on_prespecified_panel)
+  expect_true(cpu$rsvd_qualification$met_prespecified_panel)
+  expect_false(cpu$rsvd_qualification$general_use_certified)
 
-  cuda <- fastPLS:::.apply_backend_rsvd_controls(base, "cuda", "test")
-  expect_identical(cuda$rsvd_oversample, 20L)
-  expect_identical(cuda$rsvd_power, 2L)
+  expect_warning(
+    cuda <- fastPLS:::.apply_backend_rsvd_controls(base, "cuda", "test"),
+    "raised CUDA rSVD controls"
+  )
+  expect_identical(cuda$rsvd_oversample, 48L)
+  expect_identical(cuda$rsvd_power, 4L)
   expect_true(cuda$rsvd_qualification$qualified_on_prespecified_panel)
+  expect_false(cuda$rsvd_qualification$general_use_certified)
+
+  explicit_weak <- fastPLS:::.resolve_svd_control(
+    dots = list(oversample = 10L, power = 1L),
+    context = "test"
+  )
+  expect_warning(
+    cuda_weak <- fastPLS:::.apply_backend_rsvd_controls(
+      explicit_weak, "cuda", "test"
+    ),
+    "raised CUDA rSVD controls"
+  )
+  expect_identical(cuda_weak$rsvd_oversample, 48L)
+  expect_identical(cuda_weak$rsvd_power, 4L)
 
   expect_warning(
     metal <- fastPLS:::.apply_backend_rsvd_controls(base, "metal", "test"),
-    "not qualified"
+    "did not meet"
   )
   expect_identical(metal$rsvd_oversample, 20L)
   expect_false(metal$rsvd_qualification$qualified_on_prespecified_panel)
 })
 
-test_that("pls records the qualified rSVD controls unless explicitly overridden", {
+test_that("pls records starting controls and a case-specific audit", {
   set.seed(2201)
   X <- matrix(rnorm(80 * 12), 80, 12)
   Y <- matrix(rnorm(80 * 3), 80, 3)
@@ -39,13 +58,22 @@ test_that("pls records the qualified rSVD controls unless explicitly overridden"
   fit_default <- pls(X, Y, ncomp = 2, method = "simpls")
   expect_identical(fit_default$diagnostics$rsvd$oversample, 20L)
   expect_identical(fit_default$diagnostics$rsvd$power, 2L)
+  expect_true(fit_default$diagnostics$status %in% c(
+    "case_audit_passed",
+    "case_audit_passed_with_deterministic_recovery"
+  ))
+  expect_gt(fit_default$diagnostics$rsvd$case_audit$solves, 0L)
+  expect_identical(
+    fit_default$diagnostics$rsvd$case_audit$certified,
+    fit_default$diagnostics$rsvd$case_audit$solves
+  )
 
   expect_warning(
     fit_explicit <- pls(
       X, Y, ncomp = 2, method = "simpls",
       oversample = 6L, power = 1L
     ),
-    "not qualified"
+    "did not meet"
   )
   expect_identical(fit_explicit$diagnostics$rsvd$oversample, 6L)
   expect_identical(fit_explicit$diagnostics$rsvd$power, 1L)

@@ -108,16 +108,17 @@ SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt) {
   Mat Y = A * Omega;
 
   const int power_iters = std::max(opt.power_iters, 0);
-  if (power_iters == 1) {
-    Y = A * (A.t() * Y);
-  } else {
-    for (int i = 0; i < power_iters; ++i) {
-      Mat Z = A.t() * Y;
-      Mat Qz;
-      Mat Rz;
-      arma::qr_econ(Qz, Rz, Z);
-      Y = A * Qz;
-    }
+  for (int i = 0; i < power_iters; ++i) {
+    // Stabilized subspace iteration protects weaker retained directions.
+    Mat Qy;
+    Mat Ry;
+    arma::qr_econ(Qy, Ry, Y);
+
+    Mat Z = A.t() * Qy;
+    Mat Qz;
+    Mat Rz;
+    arma::qr_econ(Qz, Rz, Z);
+    Y = A * Qz;
   }
 
   return finalize_rsvd_from_sample(A, Y, static_cast<int>(target), opt.left_only);

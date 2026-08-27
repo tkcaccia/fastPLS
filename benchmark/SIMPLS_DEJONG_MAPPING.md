@@ -5,6 +5,14 @@ for estimator-preservation validation. The low-rank solver supplies only the
 current dominant direction. The SIMPLS normalization, orthogonalization,
 deflation, coefficient update, and component order remain sequential.
 
+With centered `X` of dimension `n x p` and centered `Y` of dimension `n x q`,
+the current cross-covariance `S = X'Y` has dimension `p x q`. The implementation
+extracts its leading **left** singular direction `r` in predictor space
+(`r` has length `p`) and then forms the score `t = Xr`. A mathematically
+equivalent right-direction formulation would first extract a response-space
+vector and map it through `S`, but that is not the convention used below or in
+the compiled implementation.
+
 ```r
 simpls_component_path <- function(X, Y, ncomp, dominant_left) {
   X <- sweep(X, 2L, colMeans(X), "-")
@@ -98,3 +106,20 @@ IRLBA starts a new rank-one iterative solve; rSVD draws a new oversampled
 Gaussian sketch using the base seed plus the zero-based component index.
 Candidate blocks, cross-component warm starts, and adaptive refresh policies
 were rejected during development and are not part of the release algorithm.
+
+## Exact dense-reference audit
+
+`benchmark/benchmark_simpls_exact_reference.R` independently implements the
+updates above with base R's dense LAPACK `svd()` and compares them, component
+prefix by component prefix, with the compiled SIMPLS path forced to its
+audit-only dense LAPACK solver. This reference is separate from both the
+iterative IRLBA validation and the approximate rSVD qualification.
+
+The fixed panel includes well-conditioned, nearly tied, rank-deficient,
+highly collinear, `p < n`, `p > n`, high-response-dimensional, effective-rank
+boundary, multivariate-regression, and dummy-response classification cases.
+It records coefficient, fitted-value, held-out-prediction, score/loading/
+projection-subspace, orthogonality, deflation, decoded-label, and convergence
+results for every component prefix. Near-tied singular values are interpreted
+through subspaces and predictions because individual singular vectors are not
+identifiable within a tied subspace.

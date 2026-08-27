@@ -86,8 +86,8 @@ than silently falling back.
 
 | Model or operation | CPU | CUDA | Metal |
 |---|---|---|---|
-| PLS-SVD, float64 | IRLBA validated; rSVD qualified approximate | rSVD qualified approximate | rSVD experimental/hybrid |
-| SIMPLS, float64 | IRLBA validated; rSVD qualified approximate | rSVD qualified approximate with route diagnostics | rSVD experimental/hybrid |
+| PLS-SVD, float64 | IRLBA validated; rSVD case-audited with deterministic recovery | rSVD approximate; case certificate route-dependent | rSVD experimental/hybrid |
+| SIMPLS, float64 | IRLBA validated; each rSVD direction case-audited with deterministic recovery | rSVD approximate; case certificate route-dependent | rSVD experimental/hybrid |
 | OPLS, float64 | Supported; deterministic validation available | rSVD hybrid | rSVD experimental/hybrid |
 | Linear kernel PLS, float64 | Same linear SIMPLS core | Same accelerated linear core | Experimental/hybrid |
 | RBF or polynomial kernel PLS | Supported; explicit \(n \times n\) Gram matrix | Hybrid; host kernel stages | Experimental/hybrid; host kernel stages |
@@ -133,11 +133,20 @@ rank-deficient matrices, slowly decaying singular spectra, and any analysis in
 which different rSVD seeds give materially different predictions. rSVD is an
 approximation intended primarily for speed and accelerator execution. A
 completed randomized fit is not automatically a reliable approximation.
-`pls()` therefore returns `diagnostics`, which checks finiteness and whether all
-requested latent components were obtained. These inexpensive structural checks
-cannot prove agreement with a deterministic fit. For important analyses, repeat
-the rSVD fit with at least three seeds and compare predictions and the selected
-metric, or confirm the final model with CPU IRLBA.
+On CPU float64, rSVD remains the primary starting solver but is not accepted
+solely because its controls passed a historical panel. Every decomposition is
+checked using normalized left/right singular-triplet residuals and a search for
+an omitted direction. A weak boundary, defined conservatively by an estimated
+omitted-to-retained singular-value ratio above 0.95, is treated as unsafe for a
+seed-stable sequential direction. The solver retries with wider sketches and
+additional power iterations. A weak boundary is accepted only when independent
+strengthened sketches agree on the retained subspace and singular values. If
+the audit remains unresolved, CPU execution recovers that direction with
+deterministic IRLBA; accelerator routes fail or
+return an explicit unverified warning rather than silently claiming agreement.
+The fitted object's `diagnostics$rsvd$case_audit` reports the number of solves,
+retries, recoveries, residuals, and effective controls. For confirmatory work,
+comparison across seeds or a full CPU IRLBA refit remains appropriate.
 
 The package validation classifies an rSVD result as unreliable if any of the
 following occurs relative to the deterministic reference: relative prediction
@@ -146,15 +155,19 @@ loading subspace angle above 10 degrees, classification-label agreement below
 0.99, or an absolute predictive-metric difference above 0.01. Increasing
 `power` or `oversample` can improve a borderline rSVD approximation, but IRLBA
 is the recommended fallback when any criterion remains unsatisfied.
-The CPU and CUDA default is `oversample = 20` and `power = 2`. Across the
-release audits, this setting met all 585 CPU and 40 CUDA component-level checks
-across five prespecified seeds; the
-previous oversampling-10 setting was rejected after failing five of 255
-screening checks. Metal uses the
-wider sketch conservatively but remains explicitly marked as unqualified until
-a dedicated audit is completed. Explicit nonqualified overrides produce a
-warning and are recorded in model diagnostics. Defaults do not change with
-matrix shape.
+CPU starts with `oversample = 20` and `power = 2`, then audits each randomized
+decomposition and strengthens or deterministically recovers unsafe cases.
+CUDA enforces `oversample >= 48` and `power >= 4`; weaker requested controls are
+raised with a warning because 20/2 failed part of the controlled shape study,
+whereas 48/4 met all 174 tested routes across three seeds. This remains
+controlled-panel evidence,
+not a deterministic certificate for every future matrix. Metal is explicitly
+marked unqualified until its route study meets the same criteria.
+The release qualification combined 138 automatic CPU routes with 138 matched
+automatic CUDA routes. All 276 met the prespecified numerical tolerances; the
+CPU case audit invoked deterministic recovery where independent sketches could
+not certify a weak spectral boundary. Recovery counts and effective controls
+remain visible in model diagnostics.
 
 For large predictor-response cross-products, `fastPLS` can avoid forming
 `S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD
@@ -835,6 +848,16 @@ dummy-coded response scores. Dummy-response `Q2Y` and `R2Y` are not
 classification accuracy. The exact convention used by each function is also
 reported in its `metrics$definitions` element. `RMSD` is not used for
 classification.
+
+For numeric responses, `selection_metric = "r2"` is a cross-validated
+observed-mean endpoint calculated from held-out predictions; it is not the
+full-data training `R2Y`. In contrast, `selection_metric = "q2"` uses the
+fold-training response mean in each denominator. The training `R2Y` returned
+when `fit = TRUE` is descriptive and is never used to select components.
+Classification can be selected by `accuracy`, `balanced_accuracy`, or
+dummy-response `q2`, but not by training R2. Use balanced accuracy when unequal
+class frequencies make majority-class accuracy misleading; ordinary accuracy
+is appropriate when overall row-level correctness is the intended endpoint.
 
 ```{r chunk-027}
 data.frame(

@@ -8,7 +8,7 @@ pls.double.cv(
   Xdata,
   Ydata,
   ncomp = 2,
-  constrain = 1:nrow(Xdata),
+  constrain = seq_len(nrow(Xdata)),
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
@@ -43,7 +43,7 @@ pls.double.cv(
 one value per sample. Samples with the same value are assigned to the same
 fold, so all rows from the same patient, subject, batch, or technical
 replicate stay together in training or test data. The default
-\code{1:nrow(Xdata)} treats every sample as an independent group.}
+\code{seq_len(nrow(Xdata))} treats every sample as an independent group.}
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
@@ -112,7 +112,11 @@ inner component optimization. \code{NULL} applies fastPLS defaults.}
 \item{selection_metric}{Metric used by inner CV and by the permutation test.
 Use \code{"auto"} (accuracy for classification and RMSD for regression),
 \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}.
-Balanced accuracy gives each observed class equal weight.}
+For numeric responses, \code{"r2"} is an observed-mean held-out endpoint and
+\code{"q2"} uses fold-training response means. Training \code{R2Y} is descriptive
+and is never optimized. Classification can use accuracy, balanced
+accuracy, or dummy-response Q2, but not training R2. Balanced accuracy
+gives each observed class equal weight.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
@@ -180,10 +184,10 @@ selection. Constraint groups are respected in both loops so related samples
 remain in the same fold.
 }
 \examples{
-idx <- c(1:10, 51:60, 101:110)
-X <- as.matrix(iris[idx, 1:4])
+idx <- c(seq_len(10), 51:60, 101:110)
+X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
-dcv <- pls.double.cv(X, y, ncomp = 1:2, runn = 1, kfold_inner = 2,
+dcv <- pls.double.cv(X, y, ncomp = seq_len(2), runn = 1, kfold_inner = 2,
                      kfold_outer = 2, method = "simpls", backend = "cpu",
                      svd.method = "rsvd", seed = 1)
 names(dcv)

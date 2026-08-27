@@ -498,6 +498,7 @@ class CudaRSVDWorkspace {
     const double beta = 0.0;
 
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(p, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
         "cublasDgemm(S^T*Y)"
@@ -556,6 +557,10 @@ class CudaRSVDWorkspace {
     }
 
     for (int i = 0; i < power_iters; ++i) {
+      subtract_left_projection_inplace(
+        p, l, prev_v_cols, dY_, "implicit_SIMPLS_project_before_power_qr"
+      );
+      orthonormalize_qr_inplace(p, l);
       implicit_at_times_mat_deflated(
         n,
         p,
@@ -977,6 +982,7 @@ class CudaRSVDWorkspace {
       "cublasDgemm(S*Omega)"
     );
     for (int i = 0; i < std::max(opt.power_iters, 0); ++i) {
+      orthonormalize_qr_inplace(p, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
         "cublasDgemm(S^T*Y)"
@@ -1158,6 +1164,7 @@ class CudaRSVDWorkspace {
 
     implicit_a_times_mat(n, p, m, l, dOmega_, dY_, "implicit_A_times_Omega");
     for (int i = 0; i < std::max(opt.power_iters, 0); ++i) {
+      orthonormalize_qr_inplace(p, l);
       implicit_at_times_mat(n, p, m, l, dY_, dZ_, "implicit_AT_times_Y");
       implicit_a_times_mat(n, p, m, l, dZ_, dY_, "implicit_A_times_Z");
     }
@@ -1478,6 +1485,7 @@ class CudaRSVDWorkspace {
     );
 
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(m, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, dY_, m, &beta, dZ_, n),
         "cublasDgemm(A^T*Y)"
@@ -1515,6 +1523,7 @@ class CudaRSVDWorkspace {
     const double beta = 0.0;
 
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(m, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, dY_, m, &beta, dZ_, n),
         "cublasDgemm(A^T*Y)"
@@ -1556,6 +1565,7 @@ class CudaRSVDWorkspace {
     const double beta = 0.0;
 
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(m, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, dY_, m, &beta, dZ_, n),
         "cublasDgemm(A^T*Y)"
@@ -1617,6 +1627,7 @@ class CudaRSVDWorkspace {
     const double beta = 0.0;
 
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(m, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, dY_, m, &beta, dZ_, n),
         "cublasDgemm(A^T*Y)"
@@ -1681,6 +1692,7 @@ class CudaRSVDWorkspace {
 
     const int power_iters = std::max(opt.power_iters, 0);
     for (int i = 0; i < power_iters; ++i) {
+      orthonormalize_qr_inplace(m, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, n, l, m, &alpha, dA_, m, dY_, m, &beta, dZ_, n),
         "cublasDgemm(A^T*Y)"

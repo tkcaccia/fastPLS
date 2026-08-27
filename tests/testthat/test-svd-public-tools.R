@@ -14,10 +14,11 @@ test_that("fastsvd returns decomposition outputs from public backends", {
   expect_equal(length(out$d), 5)
   expect_equal(ncol(out$v), 5)
   expect_true(out$diagnostics$status %in% c(
-    "rsvd_triplet_checks_passed",
-    "warning_approximation_quality",
-    "failed_large_triplet_residual"
+    "rsvd_case_audit_passed",
+    "rsvd_case_audit_recovered_with_deterministic_irlba"
   ))
+  expect_true(out$diagnostics$rsvd_case_audit$performed)
+  expect_true(out$diagnostics$rsvd_case_audit$certified)
   expect_true(is.finite(out$diagnostics$max_relative_triplet_residual))
   if (identical(out$diagnostics$status, "failed_large_triplet_residual")) {
     expect_gt(
@@ -60,7 +61,7 @@ test_that("small SVD inputs use exact fallback for iterative public backends", {
   ref <- base::svd(A, nu = 3, nv = 3)
 
   for (method in c("irlba", "rsvd")) {
-    out <- fastsvd(
+    out <- suppressWarnings(fastsvd(
       A,
       ncomp = 3,
       backend = "cpu",
@@ -68,7 +69,7 @@ test_that("small SVD inputs use exact fallback for iterative public backends", {
       oversample = 0L,
       power = 0L,
       seed = 99L
-    )
+    ))
     expect_equal(out$d, ref$d[1:3], tolerance = 1e-8)
     expect_equal(abs(out$u), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
     expect_equal(abs(out$v), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)

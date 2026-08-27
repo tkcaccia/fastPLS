@@ -94,8 +94,14 @@ aggregate metrics.}
 \item{selection_metric}{Metric used to select predictive settings from
 held-out folds. Use \code{"auto"} (accuracy for classification and RMSD for
 regression), \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or
-\code{"rmsd"}. Balanced accuracy is the unweighted mean of class-specific
-recalls and is appropriate when class frequencies are unequal.}
+\code{"rmsd"}. For numeric responses, \code{"r2"} is calculated from held-out
+predictions relative to the mean of all observed responses, whereas
+\code{"q2"} uses the corresponding fold-training response mean. The
+full-data training \code{R2Y} returned when \code{fit = TRUE} is descriptive and is
+not used for component selection. Classification can use accuracy,
+balanced accuracy, or dummy-response Q2, but not training R2. Balanced
+accuracy is the unweighted mean of class-specific recalls and is
+appropriate when class frequencies are unequal.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
@@ -158,13 +164,13 @@ over a compact hyperparameter grid. The selection can be based on
 cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
 }
 \examples{
-idx <- c(1:12, 51:62, 101:112)
-X <- as.matrix(iris[idx, 1:4])
+idx <- c(seq_len(12), 51:62, 101:112)
+X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
-opt <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+opt <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
                      backend = "cpu", svd.method = "rsvd", seed = 1)
 opt$best_ncomp
-opt_kernel <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3,
+opt_kernel <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3,
                             method = "kernelpls", backend = "cpu",
                             svd.method = "rsvd",
                             kernel = c("linear", "rbf"),

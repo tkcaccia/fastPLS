@@ -155,6 +155,11 @@ for (task in tasks) {
         (!task$classification || label_agreement >= 0.99)
       rows[[length(rows) + 1L]] <- data.frame(
         dataset = task$dataset,
+        package_version = as.character(utils::packageVersion("fastPLS")),
+        source_archive_sha256 = Sys.getenv(
+          "FASTPLS_SOURCE_ARCHIVE_SHA256",
+          unset = NA_character_
+        ),
         backend = "cuda",
         solver = "rsvd",
         oversample = oversample,

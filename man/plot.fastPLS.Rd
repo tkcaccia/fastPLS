@@ -44,7 +44,7 @@ score ellipses. Axis labels include predictor-space variance explained when
 it was requested during model fitting.
 }
 \examples{
-X <- as.matrix(iris[, 1:4])
+X <- as.matrix(iris[, seq_len(4)])
 fit <- pls(X, iris$Species, ncomp = 2, fit = TRUE,
            return_variance = TRUE, seed = 1)
 plot(fit, groups = iris$Species, ellipse = TRUE)

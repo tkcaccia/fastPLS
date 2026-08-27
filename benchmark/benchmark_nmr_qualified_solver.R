@@ -36,6 +36,10 @@ oversample <- as.integer(arg("oversample", "20"))
 power <- as.integer(arg("power", "2"))
 seed <- as.integer(arg("seed", "123"))
 replicates <- as.integer(arg("replicates", "3"))
+source_archive_sha256 <- Sys.getenv(
+  "FASTPLS_SOURCE_ARCHIVE_SHA256", unset = NA_character_
+)
+input_sha256 <- Sys.getenv("FASTPLS_INPUT_SHA256", unset = NA_character_)
 
 script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_path <- normalizePath(
@@ -131,6 +135,9 @@ for (replicate_id in seq_len(replicates)) {
   diagnostics <- model$diagnostics
   rows[[replicate_id]] <- data.frame(
     dataset = "nmr",
+    package_version = as.character(utils::packageVersion("fastPLS")),
+    source_archive_sha256 = source_archive_sha256,
+    input_sha256 = input_sha256,
     family = family,
     backend = backend,
     solver = solver,

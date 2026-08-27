@@ -11,6 +11,16 @@ REPS="${4:-3}"
 RUN_TIMEOUT_SEC="${FASTPLS_SCALING_TIMEOUT_SEC:-600}"
 LIB_LOC="${FASTPLS_SCALING_LIB:-${OUT_DIR}/Rlib}"
 ARCHIVE="${FASTPLS_SCALING_ARCHIVE:-${REPO_ROOT}/fastPLS_0.99.25.tar.gz}"
+CPU_PROFILE="${FASTPLS_SCALING_CPU_PROFILE:-reference_1}"
+CPU_THREADS="${FASTPLS_SCALING_THREADS:-1}"
+
+export FASTPLS_SCALING_CPU_PROFILE="${CPU_PROFILE}"
+export FASTPLS_SCALING_THREADS="${CPU_THREADS}"
+export OMP_NUM_THREADS="${CPU_THREADS}"
+export OPENBLAS_NUM_THREADS="${CPU_THREADS}"
+export MKL_NUM_THREADS="${CPU_THREADS}"
+export BLIS_NUM_THREADS="${CPU_THREADS}"
+export VECLIB_MAXIMUM_THREADS="${CPU_THREADS}"
 
 mkdir -p "${OUT_DIR}" "${LIB_LOC}"
 
@@ -23,6 +33,16 @@ fi
 
 BASE_R_LIBS="$(Rscript -e 'cat(paste(.libPaths(), collapse=.Platform$path.sep))')"
 export R_LIBS_USER="${LIB_LOC}${BASE_R_LIBS:+:${BASE_R_LIBS}}"
+export R_LIBS="${LIB_LOC}${BASE_R_LIBS:+:${BASE_R_LIBS}}"
+
+EXPECTED_VERSION="${FASTPLS_SCALING_EXPECTED_VERSION:-0.99.25}"
+ACTUAL_VERSION="$(FASTPLS_SCALING_LIB="${LIB_LOC}" Rscript -e \
+  '.libPaths(unique(c(Sys.getenv("FASTPLS_SCALING_LIB"), .libPaths()))); cat(as.character(utils::packageVersion("fastPLS")))')"
+if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
+  printf 'Expected fastPLS %s in %s, but R loaded %s\n' \
+    "${EXPECTED_VERSION}" "${LIB_LOC}" "${ACTUAL_VERSION}" >&2
+  exit 1
+fi
 
 Rscript "${REPO_ROOT}/benchmark/controlled_scaling/generate_grid.R" \
   "${OUT_DIR}" "${PROFILE}" "${BACKENDS}" "${REPS}"
@@ -121,7 +141,11 @@ Rscript "${REPO_ROOT}/benchmark/controlled_scaling/summarize.R" "${OUT_DIR}"
   echo "profile=${PROFILE}"
   echo "backends=${BACKENDS}"
   echo "replicates=${REPS}"
+  echo "cpu_profile=${CPU_PROFILE}"
+  echo "requested_blas_threads=${CPU_THREADS}"
   echo "archive=${ARCHIVE}"
+  echo "expected_package_version=${EXPECTED_VERSION}"
+  echo "loaded_package_version=${ACTUAL_VERSION}"
   shasum -a 256 "${ARCHIVE}" 2>/dev/null || sha256sum "${ARCHIVE}" 2>/dev/null || true
   uname -a
   Rscript -e 'cat(R.version.string, "\n"); print(extSoftVersion())'

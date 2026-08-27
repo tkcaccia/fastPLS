@@ -17,3 +17,9 @@ An explicit function argument takes precedence over
 \code{options(fastPLS.backend = ...)}, then \code{FASTPLS_BACKEND}; CPU is the final
 default.
 }
+\examples{
+current <- fastPLS_backend()
+current
+previous <- fastPLS_backend("cpu")
+fastPLS_backend(previous)
+}

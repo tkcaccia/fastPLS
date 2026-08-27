@@ -41,7 +41,7 @@ value. R2 is shown in blue and Q2 in red.
 }
 \examples{
 set.seed(1)
-X <- as.matrix(iris[, 1:4])
+X <- as.matrix(iris[, seq_len(4)])
 y <- iris$Sepal.Length
 idx <- sample(seq_len(nrow(X)), 30)
 fit <- pls(X[idx, ], y[idx], X[idx, ], y[idx],

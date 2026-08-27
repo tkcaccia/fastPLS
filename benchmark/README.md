@@ -116,8 +116,22 @@ Default outputs:
 `benchmark/external_simpls_timing/` provides the stricter publication timing
 comparison. It separates a minimum-common-output deterministic SIMPLS kernel
 comparison from the ordinary public fit/predict workflows. Every repetition is
-run in a fresh process and summaries report medians, IQRs, completed
-repetitions, output materialization, and retained failures.
+run in a fresh process. The default adaptive policy uses 50 cold repetitions
+for pilot runs no longer than 0.5 s, 30 up to 2 s, 15 up to 10 s, and five for
+longer jobs. A separately labelled steady-state batch performs one untimed
+warm-up and then 10--50 measured iterations. Raw iteration times are retained;
+summaries report medians, IQRs, completed repetitions, output materialization,
+and failures.
+
+For fastPLS, benchmark-only internal instrumentation decomposes fitting into
+preprocessing/cross-covariance construction, latent-direction and deflation
+work, coefficient-path construction, fitted-value construction, C++ model
+assembly, R-wrapper overhead, and held-out prediction. The instrumentation is
+enabled only through `FASTPLS_BENCH_PHASE_TIMING` and is hidden from ordinary
+user output. Optional `reference_1`, `optimized_1`, and `optimized_4` CPU
+profiles record the loaded BLAS and both requested and runtime-reported thread
+counts. Optimized profiles fail rather than being reported if OpenBLAS or the
+requested active thread count cannot be verified.
 
 The four wide tables have datasets as columns and function/package
 implementations as rows.  Each implementation has two rows: predictive metric
@@ -196,6 +210,15 @@ routes use oversampling 20, two power iterations, and fixed seeds; the
 cross-covariance-size panel also forces explicit and matrix-free products to
 identify time and memory crossovers.
 
+The publication profile additionally contains 24 deterministic
+Latin-hypercube development cases and 16 independently generated held-out
+cases that vary sample count, predictor and response dimensions, rank,
+component count, prefix count, and class count jointly. Automatic, forced
+explicit, and forced implicit routes are compared on every case. The held-out
+summary reports numerical qualification, route-choice accuracy, and automatic
+runtime relative to the empirically faster qualified route; it therefore tests
+shape interactions rather than extrapolating from isolated one-factor values.
+
 Each fit runs in a fresh process. Fit and prediction time are recorded
 separately, while a 20-ms external sampler measures incremental host RSS and
 CUDA device memory during fitting and prediction. Numerical comparison with
@@ -235,6 +258,21 @@ Default outputs:
 - `pipeline4_imagenet_summary.csv`
 - accuracy, runtime, host-memory, and GPU-memory plots
 - run manifest and logs
+
+## Cross-language IKPLS comparisons
+
+`benchmark/ikpls_cross_language/` contains two explicitly separated studies:
+
+- a repeated float64 CPU software comparison on Breast, MetRef, and CIFAR-100;
+- a float32 feasibility extension on the large ImageNet and extreme-response
+  NMR tasks.
+
+The large-case runner applies a configurable NMR memory guard, uses blocked
+ImageNet prediction, excludes conversion from fitting time, retains failures,
+and writes all precision, timing, metric, memory, and coefficient-storage
+metadata. IKPLS implements Improved Kernel PLS rather than de Jong SIMPLS, so
+these outputs must not be labelled estimator-equivalence evidence. See
+`benchmark/ikpls_cross_language/README.md` for commands and interpretation.
 
 Pipeline 4 expects a prepared ImageNet/DINOv2 task RDS on the remote machine.
 The path can be overridden with `TASK_RDS`.
@@ -386,6 +424,35 @@ Rscript benchmark/benchmark_opls_kernel_estimator_validation.R \
 
 The output directory contains endpoint, tolerance, failure, fold-level,
 component-path, selected-component, session, and Markdown report files.
+
+## Exact dense SIMPLS reference
+
+`benchmark/benchmark_simpls_exact_reference.R` compares the compiled SIMPLS
+execution path with an independent de Jong implementation whose direction
+solve uses base R's dense LAPACK `svd()`. This audit is intentionally separate
+from the iterative IRLBA comparison and the approximate rSVD qualification.
+The compiled candidate is forced to its audit-only dense solver; no additional
+public solver option is exposed.
+
+The fixed panel covers well-conditioned matrices, nearly tied leading singular
+values, rank-deficient predictors and responses, highly collinear predictors,
+`p < n`, `p > n`, high response dimension, dummy-response classification,
+multivariate regression, and a requested component at effective rank. Results
+are written for every component prefix and include coefficient, fitted-value,
+held-out prediction, score/loading/projection subspace, orthogonality,
+deflation, decoded-label, and convergence diagnostics. Distribution summaries
+are reported in addition to case-wise maxima.
+
+Run:
+
+```sh
+Rscript benchmark/benchmark_simpls_exact_reference.R \
+  --root=. \
+  --out=benchmark_results/simpls_exact_reference
+```
+
+The output directory contains prefix-level results, case summaries, error
+distributions, failures, parameters, and session information.
 
 ## Float32 capability summary
 

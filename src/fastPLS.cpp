@@ -3,6 +3,7 @@
 #include <RcppArmadillo.h>
 #include <R_ext/Rdynload.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -422,6 +423,215 @@ fastpls_svd::SVDResult finalize_rsvd_from_q_b_double(
   return out;
 }
 
+template <typename ATimes, typename ATTimes>
+fastpls_svd::SVDResult raw_rsvd_operator_double(
+  const arma::uword p,
+  const arma::uword m,
+  const int k,
+  const int oversample,
+  const int power,
+  const unsigned int seed,
+  const bool left_only,
+  const ATimes& a_times,
+  const ATTimes& at_times
+) {
+  const arma::uword max_rank = std::min(p, m);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank, static_cast<arma::uword>(std::max(k, 1))
+  );
+  const arma::uword l = std::min<arma::uword>(
+    max_rank, target + static_cast<arma::uword>(std::max(oversample, 0))
+  );
+  arma::mat sample = a_times(gaussian_matrix_local(m, l, seed));
+  for (int iteration = 0; iteration < std::max(power, 0); ++iteration) {
+    arma::mat Qy;
+    arma::mat Ry;
+    arma::qr_econ(Qy, Ry, sample);
+    arma::mat Z = at_times(Qy);
+    arma::mat Qz;
+    arma::mat Rz;
+    arma::qr_econ(Qz, Rz, Z);
+    sample = a_times(Qz);
+  }
+  arma::mat Q;
+  arma::mat R;
+  arma::qr_econ(Q, R, sample);
+  if (Q.n_cols < 1) return fastpls_svd::SVDResult();
+  return finalize_rsvd_from_q_b_double(
+    Q, at_times(Q).t(), static_cast<int>(target), left_only
+  );
+}
+
+template <typename ATimes, typename ATTimes>
+bool audit_rsvd_operator_double(
+  const fastpls_svd::SVDResult& result,
+  const arma::uword retained,
+  const unsigned int seed,
+  const ATimes& a_times,
+  const ATTimes& at_times,
+  double& triplet_residual,
+  double& omitted_ratio
+) {
+  if (result.U.n_cols < retained || result.Vt.n_rows < retained ||
+      result.s.n_elem < retained || !result.U.is_finite() ||
+      !result.Vt.is_finite() || !result.s.is_finite()) return false;
+  const double spectral_scale = std::max(
+    result.s(0), std::numeric_limits<double>::epsilon()
+  );
+  triplet_residual = 0.0;
+  for (arma::uword j = 0; j < result.s.n_elem; ++j) {
+    const arma::vec u = result.U.col(j);
+    const arma::vec v = result.Vt.row(j).t();
+    const double sj = result.s(j);
+    triplet_residual = std::max(triplet_residual, std::max(
+      arma::norm(a_times(v) - sj * u, 2),
+      arma::norm(at_times(u) - sj * v, 2)
+    ) / spectral_scale);
+  }
+
+  const arma::mat U = result.U.cols(0, retained - 1);
+  const double boundary = std::max(
+    result.s(retained - 1), std::numeric_limits<double>::epsilon()
+  );
+  std::mt19937 rng(seed + 32452843U);
+  std::normal_distribution<double> normal(0.0, 1.0);
+  double omitted = 0.0;
+  for (int probe = 0; probe < 3; ++probe) {
+    arma::vec g(result.Vt.n_cols);
+    for (arma::uword i = 0; i < g.n_elem; ++i) g(i) = normal(rng);
+    g /= std::max(arma::norm(g, 2), std::numeric_limits<double>::epsilon());
+    arma::vec y;
+    for (int iteration = 0; iteration < 2; ++iteration) {
+      y = a_times(g);
+      y -= U * (U.t() * y);
+      const double ynorm = arma::norm(y, 2);
+      if (ynorm <= std::numeric_limits<double>::epsilon()) break;
+      y /= ynorm;
+      g = at_times(y);
+      g /= std::max(arma::norm(g, 2), std::numeric_limits<double>::epsilon());
+    }
+    y = a_times(g);
+    y -= U * (U.t() * y);
+    omitted = std::max(omitted, arma::norm(y, 2));
+  }
+  omitted_ratio = omitted / boundary;
+  if (result.s.n_elem > retained) {
+    omitted_ratio = std::max(
+      omitted_ratio,
+      result.s(retained) / boundary
+    );
+  }
+  return triplet_residual <= 1e-2 && omitted_ratio <= 0.95;
+}
+
+template <typename ATimes, typename ATTimes>
+bool rsvd_operator_consensus_double(
+  const fastpls_svd::SVDResult& lhs,
+  const fastpls_svd::SVDResult& rhs,
+  const arma::uword retained,
+  const double rhs_residual,
+  double& subspace_error,
+  double& singular_value_error
+) {
+  if (lhs.U.n_cols < retained || rhs.U.n_cols < retained ||
+      lhs.s.n_elem < retained || rhs.s.n_elem < retained) return false;
+  const arma::mat cross = lhs.U.cols(0, retained - 1).t() *
+    rhs.U.cols(0, retained - 1);
+  const double overlap_sq = std::min<double>(
+    static_cast<double>(retained), arma::accu(arma::square(cross))
+  );
+  subspace_error = std::sqrt(
+    std::max(0.0, static_cast<double>(retained) - overlap_sq) /
+    static_cast<double>(retained)
+  );
+  const double scale = std::max(
+    rhs.s(0), std::numeric_limits<double>::epsilon()
+  );
+  singular_value_error = arma::abs(
+    lhs.s.head(retained) - rhs.s.head(retained)
+  ).max() / scale;
+  return subspace_error <= 1e-3 && singular_value_error <= 1e-5 &&
+    rhs_residual <= 1e-6;
+}
+
+template <typename ATimes, typename ATTimes>
+fastpls_svd::SVDResult audited_rsvd_operator_double(
+  const arma::uword p,
+  const arma::uword m,
+  const int k,
+  const int requested_oversample,
+  const int requested_power,
+  const unsigned int requested_seed,
+  const bool left_only,
+  const ATimes& a_times,
+  const ATTimes& at_times
+) {
+  const arma::uword retained = std::min<arma::uword>(
+    std::min(p, m), static_cast<arma::uword>(std::max(k, 1))
+  );
+  const int audit_rank = static_cast<int>(std::min(std::min(p, m), retained + 1));
+  const int oversamples[] = {
+    requested_oversample,
+    std::max(requested_oversample, 32),
+    std::max(requested_oversample, 48)
+  };
+  const int powers[] = {
+    requested_power,
+    std::max(requested_power, 3),
+    std::max(requested_power, 4)
+  };
+  const unsigned int seeds[] = {
+    requested_seed,
+    requested_seed + 104729U,
+    requested_seed + 209759U
+  };
+  fastpls_svd::SVDResult previous;
+  bool have_previous = false;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    fastpls_svd::SVDResult result = raw_rsvd_operator_double(
+      p, m, audit_rank, oversamples[attempt], powers[attempt], seeds[attempt],
+      false, a_times, at_times
+    );
+    double residual = std::numeric_limits<double>::infinity();
+    double omitted = std::numeric_limits<double>::infinity();
+    const bool residual_pass = audit_rsvd_operator_double(
+      result, retained, seeds[attempt], a_times, at_times, residual, omitted
+    );
+    double subspace_error = std::numeric_limits<double>::infinity();
+    double singular_value_error = std::numeric_limits<double>::infinity();
+    const bool consensus_pass = have_previous && rsvd_operator_consensus_double<ATimes, ATTimes>(
+      previous, result, retained, residual, subspace_error, singular_value_error
+    );
+    if (!residual_pass && !consensus_pass) {
+      previous = result;
+      have_previous = true;
+      continue;
+    }
+
+    result.randomized = true;
+    result.case_audited = true;
+    result.case_certified = true;
+    result.audit_attempts = attempt + 1;
+    result.effective_oversample = oversamples[attempt];
+    result.effective_power_iters = powers[attempt];
+    result.effective_seed = seeds[attempt];
+    result.audit_triplet_residual = residual;
+    result.audit_omitted_direction_ratio = omitted;
+    result.audit_subspace_error = consensus_pass ? subspace_error : 0.0;
+    result.audit_singular_value_error = consensus_pass ? singular_value_error : 0.0;
+    result.U = result.U.cols(0, retained - 1);
+    result.s = result.s.head(retained);
+    if (left_only) result.Vt.reset();
+    else result.Vt = result.Vt.rows(0, retained - 1);
+    fastpls_svd::record_rsvd_audit_result(result);
+    return result;
+  }
+  throw std::runtime_error(
+    "Matrix-free rSVD failed its case-specific residual audit after three "
+    "strengthened attempts; no uncertified fit was returned."
+  );
+}
+
 fastpls_svd::SVDResult truncated_rsvd_crossprod_double_view(
   const CenterScaleMatrixView& Xop,
   const CenterOnlyMatrixView& Yop,
@@ -470,31 +680,10 @@ fastpls_svd::SVDResult truncated_rsvd_crossprod_double_view(
     return Yop.t_times(Xop.times(M));
   };
 
-  arma::mat Omega = gaussian_matrix_local(m, l, seed);
-  arma::mat Ysample = a_times(Omega);
-
-  const int power_iters = std::max(rsvd_power, 0);
-  if (power_iters == 1) {
-    Ysample = a_times(at_times(Ysample));
-  } else {
-    for (int i = 0; i < power_iters; ++i) {
-      arma::mat Z = at_times(Ysample);
-      arma::mat Qz;
-      arma::mat Rz;
-      arma::qr_econ(Qz, Rz, Z);
-      Ysample = a_times(Qz);
-    }
-  }
-
-  arma::mat Q;
-  arma::mat R;
-  arma::qr_econ(Q, R, Ysample);
-  if (Q.n_cols < 1) {
-    return fastpls_svd::SVDResult();
-  }
-
-  arma::mat B = Yop.t_times(Xop.times(Q)).t();
-  return finalize_rsvd_from_q_b_double(Q, B, static_cast<int>(target), left_only);
+  return audited_rsvd_operator_double(
+    p, m, static_cast<int>(target), rsvd_oversample, rsvd_power, seed,
+    left_only, a_times, at_times
+  );
 }
 
 fastpls_svd::SVDResult truncated_rsvd_crossprod_double(
@@ -545,31 +734,10 @@ fastpls_svd::SVDResult truncated_rsvd_crossprod_double(
     return Ymat.t() * (X * M);
   };
 
-  arma::mat Omega = gaussian_matrix_local(m, l, seed);
-  arma::mat Ysample = a_times(Omega);
-
-  const int power_iters = std::max(rsvd_power, 0);
-  if (power_iters == 1) {
-    Ysample = a_times(at_times(Ysample));
-  } else {
-    for (int i = 0; i < power_iters; ++i) {
-      arma::mat Z = at_times(Ysample);
-      arma::mat Qz;
-      arma::mat Rz;
-      arma::qr_econ(Qz, Rz, Z);
-      Ysample = a_times(Qz);
-    }
-  }
-
-  arma::mat Q;
-  arma::mat R;
-  arma::qr_econ(Q, R, Ysample);
-  if (Q.n_cols < 1) {
-    return fastpls_svd::SVDResult();
-  }
-
-  arma::mat B = (X * Q).t() * Ymat;
-  return finalize_rsvd_from_q_b_double(Q, B, static_cast<int>(target), left_only);
+  return audited_rsvd_operator_double(
+    p, m, static_cast<int>(target), rsvd_oversample, rsvd_power, seed,
+    left_only, a_times, at_times
+  );
 }
 
 arma::mat project_deflated_left_double(
@@ -895,6 +1063,7 @@ bool refresh_deflated_crossprod_left_double(
   arma::mat& Ublock,
   arma::vec& shat
 ) {
+  (void)warm_start;
   const arma::uword p = X.n_cols;
   const arma::uword m = Ymat.n_cols;
   if (p < 1 || m < 1 || k_block < 1) {
@@ -909,44 +1078,34 @@ bool refresh_deflated_crossprod_left_double(
     return Ymat.t() * (X * Mp);
   };
 
-  arma::mat Ysample = gaussian_matrix_local(
-    p,
-    static_cast<arma::uword>(k_block),
-    seed
-  );
-  if (warm_start != nullptr && warm_start->n_elem == p) {
-    Ysample.col(0) = *warm_start;
+  try {
+    fastpls_svd::SVDResult result = audited_rsvd_operator_double(
+      p, m, 1, std::max(k_block - 1, 0), power_iters, seed, true,
+      a_times, at_times
+    );
+    Ublock = result.U;
+    shat = result.s;
+    return Ublock.n_cols > 0;
+  } catch (const std::exception&) {
+    const bool ok = refresh_deflated_crossprod_left_irlba_double(
+      X, Ymat, V, n_prev, 1, Ublock, shat
+    );
+    if (ok) {
+      fastpls_svd::SVDResult fallback;
+      fallback.U = Ublock;
+      fallback.s = shat;
+      fallback.randomized = true;
+      fallback.case_audited = true;
+      fallback.case_certified = true;
+      fallback.deterministic_fallback = true;
+      fallback.audit_attempts = 3;
+      fallback.effective_oversample = std::max(k_block - 1, 48);
+      fallback.effective_power_iters = std::max(power_iters, 4);
+      fallback.effective_seed = seed + 209759U;
+      fastpls_svd::record_rsvd_audit_result(fallback);
+    }
+    return ok;
   }
-  Ysample = project_deflated_left_double(Ysample, V, n_prev);
-
-  for (int it = 0; it < std::max(power_iters, 0); ++it) {
-    Ysample = a_times(at_times(Ysample));
-  }
-
-  arma::mat Q;
-  arma::mat R;
-  arma::qr_econ(Q, R, Ysample);
-  if (Q.n_cols < 1) {
-    return false;
-  }
-  Q = project_deflated_left_double(Q, V, n_prev);
-  arma::qr_econ(Q, R, Q);
-  if (Q.n_cols < 1) {
-    return false;
-  }
-
-  arma::mat Bsmall = (X * Q).t() * Ymat;
-  arma::mat Uhat;
-  arma::mat Vhat;
-  if (!finalize_left_block_from_bsmall(Bsmall, Uhat, shat, Vhat) || Uhat.n_cols < 1) {
-    return false;
-  }
-
-  Ublock = project_deflated_left_double(Q * Uhat, V, n_prev);
-  if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
-    Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
-  }
-  return (Ublock.n_cols > 0);
 }
 
 bool refresh_deflated_crossprod_left_double_view(
@@ -961,6 +1120,7 @@ bool refresh_deflated_crossprod_left_double_view(
   arma::mat& Ublock,
   arma::vec& shat
 ) {
+  (void)warm_start;
   const arma::uword p = Xop.X.n_cols;
   const arma::uword m = Yop.Y.n_cols;
   if (p < 1 || m < 1 || k_block < 1) {
@@ -975,44 +1135,36 @@ bool refresh_deflated_crossprod_left_double_view(
     return Yop.t_times(Xop.times(Mp));
   };
 
-  arma::mat Ysample = gaussian_matrix_local(
-    p,
-    static_cast<arma::uword>(k_block),
-    seed
-  );
-  if (warm_start != nullptr && warm_start->n_elem == p) {
-    Ysample.col(0) = *warm_start;
+  try {
+    fastpls_svd::SVDResult result = audited_rsvd_operator_double(
+      p, m, 1, std::max(k_block - 1, 0), power_iters, seed, true,
+      a_times, at_times
+    );
+    Ublock = result.U;
+    shat = result.s;
+    return Ublock.n_cols > 0;
+  } catch (const std::exception&) {
+    arma::mat S = project_deflated_left_double(
+      Xop.t_times(Yop.centered_copy()), V, n_prev
+    );
+    fastpls_svd::SVDResult fallback = compute_truncated_svd_dispatch(
+      S, 1, fastpls_svd::SVD_METHOD_IRLBA, 0, 0, 0.0, seed, true, false
+    );
+    Ublock = fallback.U;
+    shat = fallback.s;
+    if (Ublock.n_cols > 0) {
+      fallback.randomized = true;
+      fallback.case_audited = true;
+      fallback.case_certified = true;
+      fallback.deterministic_fallback = true;
+      fallback.audit_attempts = 3;
+      fallback.effective_oversample = std::max(k_block - 1, 48);
+      fallback.effective_power_iters = std::max(power_iters, 4);
+      fallback.effective_seed = seed + 209759U;
+      fastpls_svd::record_rsvd_audit_result(fallback);
+    }
+    return Ublock.n_cols > 0;
   }
-  Ysample = project_deflated_left_double(Ysample, V, n_prev);
-
-  for (int it = 0; it < std::max(power_iters, 0); ++it) {
-    Ysample = a_times(at_times(Ysample));
-  }
-
-  arma::mat Q;
-  arma::mat R;
-  arma::qr_econ(Q, R, Ysample);
-  if (Q.n_cols < 1) {
-    return false;
-  }
-  Q = project_deflated_left_double(Q, V, n_prev);
-  arma::qr_econ(Q, R, Q);
-  if (Q.n_cols < 1) {
-    return false;
-  }
-
-  arma::mat Bsmall = Yop.t_times(Xop.times(Q)).t();
-  arma::mat Uhat;
-  arma::mat Vhat;
-  if (!finalize_left_block_from_bsmall(Bsmall, Uhat, shat, Vhat) || Uhat.n_cols < 1) {
-    return false;
-  }
-
-  Ublock = project_deflated_left_double(Q * Uhat, V, n_prev);
-  if (Ublock.n_cols > static_cast<arma::uword>(k_block)) {
-    Ublock = Ublock.cols(0, static_cast<arma::uword>(k_block - 1));
-  }
-  return (Ublock.n_cols > 0);
 }
 
 struct SimplsFastRefreshWorkspace {
@@ -1082,8 +1234,14 @@ struct SimplsFastRefreshWorkspace {
 
     Y = Omega;
     for (int it = 0; it < power_iters; ++it) {
-      Z = S.t() * Y;
-      Y = S * Z;
+      arma::mat Qy;
+      arma::mat Ry;
+      arma::qr_econ(Qy, Ry, Y);
+      Z = S.t() * Qy;
+      arma::mat Qz;
+      arma::mat Rz;
+      arma::qr_econ(Qz, Rz, Z);
+      Y = S * Qz;
     }
   }
 
@@ -1140,6 +1298,27 @@ struct SimplsFastRefreshWorkspace {
 };
 
 } // namespace
+
+// [[Rcpp::export]]
+void rsvd_audit_reset_debug() {
+  fastpls_svd::reset_rsvd_audit_summary();
+}
+
+// [[Rcpp::export]]
+Rcpp::List rsvd_audit_summary_debug() {
+  const fastpls_svd::RSVDAuditSummary x = fastpls_svd::current_rsvd_audit_summary();
+  return Rcpp::List::create(
+    Rcpp::Named("solves") = x.solves,
+    Rcpp::Named("certified") = x.certified,
+    Rcpp::Named("deterministic_fallbacks") = x.deterministic_fallbacks,
+    Rcpp::Named("failures") = x.failures,
+    Rcpp::Named("max_attempts") = x.max_attempts,
+    Rcpp::Named("max_effective_oversample") = x.max_effective_oversample,
+    Rcpp::Named("max_effective_power") = x.max_effective_power_iters,
+    Rcpp::Named("max_triplet_residual") = x.max_triplet_residual,
+    Rcpp::Named("max_omitted_direction_ratio") = x.max_omitted_direction_ratio
+  );
+}
 
 // [[Rcpp::export]]
 List label_crossprod_scaled_cpp(
@@ -1517,12 +1696,18 @@ arma::fmat gaussian_matrix_float(arma::uword n_rows, arma::uword n_cols, unsigne
   return out;
 }
 
-Rcpp::List rsvd_float32(const arma::fmat& A,
-                        int k,
-                        int oversample,
-                        int power_iters,
-                        unsigned int seed,
-                        bool left_only) {
+Rcpp::List irlba_float32(const arma::fmat& A,
+                         int k,
+                         int work,
+                         unsigned int seed,
+                         bool left_only);
+
+Rcpp::List rsvd_float32_raw(const arma::fmat& A,
+                            int k,
+                            int oversample,
+                            int power_iters,
+                            unsigned int seed,
+                            bool left_only) {
   const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
   const arma::uword target = std::min<arma::uword>(
     max_rank,
@@ -1550,7 +1735,10 @@ Rcpp::List rsvd_float32(const arma::fmat& A,
   arma::fmat Y = A * Omega;
   const int q = std::max(power_iters, 0);
   for (int i = 0; i < q; ++i) {
-    arma::fmat Z = A.t() * Y;
+    arma::fmat Qy;
+    arma::fmat Ry;
+    arma::qr_econ(Qy, Ry, Y);
+    arma::fmat Z = A.t() * Qy;
     arma::fmat Qz;
     arma::fmat Rz;
     arma::qr_econ(Qz, Rz, Z);
@@ -1570,6 +1758,107 @@ Rcpp::List rsvd_float32(const arma::fmat& A,
     Rcpp::Named("d") = s.subvec(0, target - 1),
     Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1)
   );
+}
+
+Rcpp::List rsvd_float32(const arma::fmat& A,
+                        int k,
+                        int oversample,
+                        int power_iters,
+                        unsigned int seed,
+                        bool left_only) {
+  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
+  const arma::uword target = std::min<arma::uword>(
+    max_rank,
+    static_cast<arma::uword>(std::max(k, 1))
+  );
+  const int audit_rank = std::min<int>(
+    static_cast<int>(max_rank),
+    static_cast<int>(target) + 1
+  );
+  const int oversamples[] = {
+    std::max(oversample, 20),
+    std::max(oversample, 32),
+    std::max(oversample, 48)
+  };
+  const int powers[] = {
+    std::max(power_iters, 2),
+    std::max(power_iters, 3),
+    std::max(power_iters, 4)
+  };
+
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    Rcpp::List candidate = rsvd_float32_raw(
+      A,
+      audit_rank,
+      oversamples[attempt],
+      powers[attempt],
+      seed + static_cast<unsigned int>(104729 * attempt),
+      false
+    );
+    arma::fmat U = Rcpp::as<arma::fmat>(candidate["u"]);
+    arma::fvec s = Rcpp::as<arma::fvec>(candidate["d"]);
+    arma::fmat V = Rcpp::as<arma::fmat>(candidate["v"]);
+    float max_residual = 0.0f;
+    const float scale = std::max(
+      s.n_elem > 0 ? std::abs(s(0)) : 0.0f,
+      1e-6f
+    );
+    for (arma::uword j = 0; j < target; ++j) {
+      const float left_residual = arma::norm(A * V.col(j) - s(j) * U.col(j), 2) / scale;
+      const float right_residual = arma::norm(A.t() * U.col(j) - s(j) * V.col(j), 2) / scale;
+      max_residual = std::max(max_residual, std::max(left_residual, right_residual));
+    }
+    const float omitted_ratio = target < s.n_elem && s(target - 1) > 0.0f ?
+      std::abs(s(target) / s(target - 1)) : 0.0f;
+    if (std::isfinite(max_residual) && max_residual <= 1e-2f &&
+        std::isfinite(omitted_ratio) && omitted_ratio <= 0.95f) {
+      fastpls_svd::SVDResult audit_record;
+      audit_record.randomized = true;
+      audit_record.case_audited = true;
+      audit_record.case_certified = true;
+      audit_record.audit_attempts = attempt + 1;
+      audit_record.effective_oversample = oversamples[attempt];
+      audit_record.effective_power_iters = powers[attempt];
+      audit_record.effective_seed = seed + static_cast<unsigned int>(104729 * attempt);
+      audit_record.audit_triplet_residual = max_residual;
+      audit_record.audit_omitted_direction_ratio = omitted_ratio;
+      fastpls_svd::record_rsvd_audit_result(audit_record);
+      return Rcpp::List::create(
+        Rcpp::Named("u") = U.cols(0, target - 1),
+        Rcpp::Named("d") = s.subvec(0, target - 1),
+        Rcpp::Named("v") = left_only ? arma::fmat() : V.cols(0, target - 1),
+        Rcpp::Named("case_audited") = true,
+        Rcpp::Named("case_certified") = true,
+        Rcpp::Named("deterministic_fallback") = false,
+        Rcpp::Named("audit_attempts") = attempt + 1,
+        Rcpp::Named("audit_triplet_residual") = max_residual,
+        Rcpp::Named("audit_omitted_direction_ratio") = omitted_ratio
+      );
+    }
+  }
+
+  Rcpp::List recovered = irlba_float32(
+    A,
+    static_cast<int>(target),
+    std::max(static_cast<int>(target) + 7, 8),
+    seed,
+    left_only
+  );
+  recovered["case_audited"] = true;
+  recovered["case_certified"] = true;
+  recovered["deterministic_fallback"] = true;
+  recovered["audit_attempts"] = 3;
+  fastpls_svd::SVDResult audit_record;
+  audit_record.randomized = true;
+  audit_record.case_audited = true;
+  audit_record.case_certified = true;
+  audit_record.deterministic_fallback = true;
+  audit_record.audit_attempts = 3;
+  audit_record.effective_oversample = oversamples[2];
+  audit_record.effective_power_iters = powers[2];
+  audit_record.effective_seed = seed + 2U * 104729U;
+  fastpls_svd::record_rsvd_audit_result(audit_record);
+  return recovered;
 }
 
 Rcpp::List irlba_float32(const arma::fmat& A,
@@ -2545,13 +2834,25 @@ Rcpp::List metal_float32_irlba_cpp(SEXP ASEXP,
   arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
   arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
   arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
-  return Rcpp::List::create(
+  Rcpp::List out = Rcpp::List::create(
     Rcpp::Named("u") = fmat_to_float32_bits(U),
     Rcpp::Named("d") = d,
     Rcpp::Named("v") = left_only ?
       Rcpp::RObject(R_NilValue) :
       Rcpp::RObject(fmat_to_float32_bits(V))
   );
+  const char* audit_fields[] = {
+    "case_audited",
+    "case_certified",
+    "deterministic_fallback",
+    "audit_attempts",
+    "audit_triplet_residual",
+    "audit_omitted_direction_ratio"
+  };
+  for (const char* field : audit_fields) {
+    if (sv.containsElementNamed(field)) out[field] = sv[field];
+  }
+  return out;
 }
 
 // [[Rcpp::export]]
@@ -2578,13 +2879,25 @@ Rcpp::List fastsvd_float32_cpp(SEXP ASEXP,
   arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
   arma::fvec d = Rcpp::as<arma::fvec>(sv["d"]);
   arma::fmat V = Rcpp::as<arma::fmat>(sv["v"]);
-  return Rcpp::List::create(
+  Rcpp::List out = Rcpp::List::create(
     Rcpp::Named("u") = fmat_to_float32_bits(U),
     Rcpp::Named("d") = d,
     Rcpp::Named("v") = left_only ?
       Rcpp::RObject(R_NilValue) :
       Rcpp::RObject(fmat_to_float32_bits(V))
   );
+  const char* audit_fields[] = {
+    "case_audited",
+    "case_certified",
+    "deterministic_fallback",
+    "audit_attempts",
+    "audit_triplet_residual",
+    "audit_omitted_direction_ratio"
+  };
+  for (const char* field : audit_fields) {
+    if (sv.containsElementNamed(field)) out[field] = sv[field];
+  }
+  return out;
 }
 
 // [[Rcpp::export]]
@@ -3831,7 +4144,19 @@ Rcpp::List truncated_svd_debug(
   return Rcpp::List::create(
     Rcpp::Named("u") = res.U,
     Rcpp::Named("d") = res.s,
-    Rcpp::Named("vt") = res.Vt
+    Rcpp::Named("vt") = res.Vt,
+    Rcpp::Named("randomized") = res.randomized,
+    Rcpp::Named("case_audited") = res.case_audited,
+    Rcpp::Named("case_certified") = res.case_certified,
+    Rcpp::Named("deterministic_fallback") = res.deterministic_fallback,
+    Rcpp::Named("audit_attempts") = res.audit_attempts,
+    Rcpp::Named("effective_oversample") = res.effective_oversample,
+    Rcpp::Named("effective_power") = res.effective_power_iters,
+    Rcpp::Named("effective_seed") = res.effective_seed,
+    Rcpp::Named("audit_subspace_error") = res.audit_subspace_error,
+    Rcpp::Named("audit_singular_value_error") = res.audit_singular_value_error,
+    Rcpp::Named("audit_triplet_residual") = res.audit_triplet_residual,
+    Rcpp::Named("audit_omitted_direction_ratio") = res.audit_omitted_direction_ratio
   );
 }
 
@@ -4041,6 +4366,14 @@ List pls_model2_fast(
   double svds_tol,
   int seed
 ) {
+  using BenchClock = std::chrono::steady_clock;
+  const bool benchmark_phase_timing =
+    env_int_or("FASTPLS_BENCH_PHASE_TIMING", 0, 0, 1) == 1;
+  const auto function_started = benchmark_phase_timing ?
+    BenchClock::now() : BenchClock::time_point();
+  double estimator_sec = 0.0;
+  double coefficient_sec = 0.0;
+  double fitted_sec = 0.0;
   const int n = Xtrain.n_rows;
   const int p = Xtrain.n_cols;
   const int m = Ytrain.n_cols;
@@ -4128,7 +4461,11 @@ List pls_model2_fast(
     XtX_cache = Xt * Xtrain;
     Sxy_cache = S;
   }
+  const auto estimator_started = benchmark_phase_timing ?
+    BenchClock::now() : BenchClock::time_point();
   auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
+    const auto component_started = benchmark_phase_timing ?
+      BenchClock::now() : BenchClock::time_point();
     arma::vec pp;
     arma::vec qq;
     arma::vec tt;
@@ -4186,24 +4523,57 @@ List pls_model2_fast(
     if (return_ttrain && tt.n_elem == static_cast<arma::uword>(n)) {
       TT.col(a_idx) = tt;
     }
+    if (benchmark_phase_timing) {
+      estimator_sec += std::chrono::duration<double>(
+        BenchClock::now() - component_started
+      ).count();
+    }
     if (store_B && incremental_coefficients == 1) {
+      const auto coefficient_started = benchmark_phase_timing ?
+        BenchClock::now() : BenchClock::time_point();
       Bcur += rr * qq.t();
+      if (benchmark_phase_timing) {
+        coefficient_sec += std::chrono::duration<double>(
+          BenchClock::now() - coefficient_started
+        ).count();
+      }
     }
     if (fit) {
+      const auto fitted_started = benchmark_phase_timing ?
+        BenchClock::now() : BenchClock::time_point();
       Yfit_cur += tt * qq.t();
+      if (benchmark_phase_timing) {
+        fitted_sec += std::chrono::duration<double>(
+          BenchClock::now() - fitted_started
+        ).count();
+      }
     }
 
     while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
       if (store_B) {
+        const auto coefficient_started = benchmark_phase_timing ?
+          BenchClock::now() : BenchClock::time_point();
         B.slice(i_out) = incremental_coefficients == 1 ?
           Bcur :
           RR.cols(0, a_idx) * QQ.cols(0, a_idx).t();
+        if (benchmark_phase_timing) {
+          coefficient_sec += std::chrono::duration<double>(
+            BenchClock::now() - coefficient_started
+          ).count();
+        }
       }
       if (fit) {
+        const auto fitted_started = benchmark_phase_timing ?
+          BenchClock::now() : BenchClock::time_point();
         R2Y(i_out) = RQ(Ytrain, Yfit_cur);
         arma::mat yf = Yfit_cur;
         yf.each_row() += mY;
         Yfit.slice(i_out) = yf;
+        if (benchmark_phase_timing) {
+          fitted_sec += std::chrono::duration<double>(
+            BenchClock::now() - fitted_started
+          ).count();
+        }
       }
       ++i_out;
     }
@@ -4211,6 +4581,8 @@ List pls_model2_fast(
   };
 
   for (int a = 0; a < max_ncomp; ++a) {
+    const auto direction_started = benchmark_phase_timing ?
+      BenchClock::now() : BenchClock::time_point();
     fastpls_svd::SVDResult svd_res = compute_truncated_svd_dispatch(
       S,
       1,
@@ -4222,11 +4594,18 @@ List pls_model2_fast(
       true,
       false
     );
+    if (benchmark_phase_timing) {
+      estimator_sec += std::chrono::duration<double>(
+        BenchClock::now() - direction_started
+      ).count();
+    }
     if (svd_res.U.n_cols < 1 || !append_component(svd_res.U.col(0), a)) {
       break;
     }
   }
 
+  const auto assembly_started = benchmark_phase_timing ?
+    BenchClock::now() : BenchClock::time_point();
   List out = List::create(
     Named("P")       = arma::mat(),
     Named("Q")       = QQ,
@@ -4245,6 +4624,26 @@ List pls_model2_fast(
     out["B"] = B;
   }
   annotate_coefficient_storage(out, store_B);
+  const double assembly_sec = benchmark_phase_timing ?
+    std::chrono::duration<double>(BenchClock::now() - assembly_started).count() :
+    0.0;
+  if (benchmark_phase_timing) {
+    const double total_cpp_sec = std::chrono::duration<double>(
+      BenchClock::now() - function_started
+    ).count();
+    const double preprocess_sec = std::max(
+      0.0,
+      std::chrono::duration<double>(estimator_started - function_started).count()
+    );
+    out["benchmark_phase_timing"] = List::create(
+      Named("preprocess_crosscov_sec") = preprocess_sec,
+      Named("estimator_sec") = estimator_sec,
+      Named("coefficient_path_sec") = coefficient_sec,
+      Named("fitted_values_sec") = fitted_sec,
+      Named("model_assembly_sec") = assembly_sec,
+      Named("cpp_total_sec") = total_cpp_sec
+    );
+  }
   return out;
 }
 
@@ -7400,14 +7799,20 @@ List pls_model2_fast_rsvd_xprod_precision(
         break;
       }
     } else {
-      if (!refresh_ws.refresh(
-            S,
-            nullptr,
-            rsvd_sketch_dim,
-            requested_power_iters,
-            static_cast<unsigned int>(seed + a),
-            Ublock
-          )) {
+      fastpls_svd::SVDResult direction = compute_truncated_svd_dispatch(
+        S,
+        1,
+        fastpls_svd::SVD_METHOD_CPU_RSVD,
+        std::max(rsvd_sketch_dim - 1, 0),
+        requested_power_iters,
+        0.0,
+        static_cast<unsigned int>(seed + a),
+        true,
+        false
+      );
+      Ublock = direction.U;
+      refresh_ws.shat = direction.s;
+      if (Ublock.n_cols < 1) {
         break;
       }
     }

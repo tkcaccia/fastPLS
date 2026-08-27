@@ -21,6 +21,13 @@
   if (is.null(x)) y else x
 }
 
+.fastpls_quiet <- function(expr) {
+  withCallingHandlers(
+    expr,
+    warning = function(condition) invokeRestart("muffleWarning")
+  )
+}
+
 .cap_plssvd_ncomp <- function(ncomp, nrows_x, ncols_x, ncols_y,
                               factor_response = FALSE, warn = TRUE) {
   ncomp <- as.integer(ncomp)
@@ -594,7 +601,7 @@
   if (is.null(value)) {
     value <- Sys.getenv(env_name, unset = as.character(default))
   }
-  value <- suppressWarnings(as.integer(value)[1L])
+  value <- .fastpls_quiet(as.integer(value)[1L])
   if (!is.finite(value) || is.na(value) || value < 1L) {
     value <- as.integer(default)
   }
@@ -603,7 +610,9 @@
 
 .dense_indicator_exceeds_cuda_guard <- function(n, q) {
   dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
-  threshold <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", "512"))[1L])
+  threshold <- .fastpls_quiet(
+    as.numeric(Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", "512"))[1L]
+  )
   if (!is.finite(threshold) || threshold < 0) threshold <- 512
   isTRUE(dense_y_mb >= threshold)
 }
@@ -612,13 +621,14 @@
   dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
   stop(
     sprintf(
-      paste(
-        "CUDA SIMPLS would require an approximately %.1f MB dense indicator",
-        "response. fastPLS does not replace a requested SIMPLS estimator with",
-        "PLS-SVD. Request method = 'plssvd' explicitly or use a smaller",
-        "response representation."
+      "%s%s%s%s",
+      sprintf(
+        "CUDA SIMPLS would require an approximately %.1f MB dense indicator ",
+        dense_y_mb
       ),
-      dense_y_mb
+      "response. fastPLS does not replace a requested SIMPLS estimator with ",
+      "PLS-SVD. Request method = 'plssvd' explicitly or use a smaller ",
+      "response representation."
     ),
     call. = FALSE
   )
@@ -627,7 +637,7 @@
 .rowsum_compact_codes <- function(x, codes, n_groups) {
   sums <- rowsum(x, group = as.integer(codes), reorder = FALSE)
   out <- matrix(0, nrow = n_groups, ncol = ncol(x))
-  positions <- suppressWarnings(as.integer(rownames(sums)))
+  positions <- .fastpls_quiet(as.integer(rownames(sums)))
   valid <- !is.na(positions) & positions >= 1L & positions <= n_groups
   out[positions[valid], ] <- sums[valid, , drop = FALSE]
   out
@@ -1602,7 +1612,8 @@
   "lda_backend",
   "R_predict",
   "R_offset",
-  "precision"
+  "precision",
+  "benchmark_phase_timing"
 )
 
 .fastpls_hide_internal_output_fields <- function(x) {
@@ -1670,7 +1681,9 @@ print.fastPLS <- function(x, ...) {
     NULL
   }
   latent_model <- if (is.list(model$inner_model)) model$inner_model else model
-  requested <- suppressWarnings(max(as.integer(latent_model$ncomp), na.rm = TRUE))
+  requested <- .fastpls_quiet(
+    max(as.integer(latent_model$ncomp), na.rm = TRUE)
+  )
   if (!is.finite(requested)) requested <- NA_integer_
 
   factors <- Filter(
@@ -1698,13 +1711,23 @@ print.fastPLS <- function(x, ...) {
 
   structural_failure <- isFALSE(finite_factors) ||
     (is.finite(requested) && is.finite(effective) && effective < requested)
+  audit_summary <- if (randomized) {
+    tryCatch(rsvd_audit_summary_debug(), error = function(e) NULL)
+  } else {
+    NULL
+  }
+  case_audited <- !is.null(audit_summary) && audit_summary$solves > 0L &&
+    audit_summary$certified == audit_summary$solves &&
+    identical(audit_summary$failures, 0L)
   status <- if (structural_failure) {
     "failed_structural_check"
   } else if (randomized) {
-    if (isTRUE(qualification$qualified_on_prespecified_panel)) {
-      "basic_checks_passed_qualified_configuration_not_case_audited"
+    if (isTRUE(case_audited) && audit_summary$deterministic_fallbacks > 0L) {
+      "case_audit_passed_with_deterministic_recovery"
+    } else if (isTRUE(case_audited)) {
+      "case_audit_passed"
     } else {
-      "basic_checks_passed_unqualified_configuration"
+      "structural_checks_passed_case_audit_unavailable"
     }
   } else {
     "deterministic_solver_basic_checks_passed"
@@ -1717,13 +1740,20 @@ print.fastPLS <- function(x, ...) {
     finite_latent_factors = finite_factors,
     requested_components = requested,
     effective_components = effective,
-    approximation_audited = !randomized,
+    approximation_audited = !randomized || isTRUE(case_audited),
     guidance = if (randomized) {
-      paste(
-        "Structural checks do not establish rSVD agreement with a deterministic fit.",
-        "For confirmatory analysis, compare multiple seeds or refit with",
-        "svd.method = 'irlba' on the CPU."
-      )
+      if (isTRUE(case_audited)) {
+        paste(
+          "Every randomized decomposition in this fit met the case-specific",
+          "singular-triplet and omitted-direction checks; strengthened retries",
+          "or deterministic CPU recovery are recorded below when used."
+        )
+      } else {
+        paste(
+          "This route does not yet expose a case-specific rSVD certificate.",
+          "Confirm important results across seeds or with CPU IRLBA."
+        )
+      }
     } else {
       "IRLBA is deterministic for fixed data and numerical controls."
     }
@@ -1733,6 +1763,7 @@ print.fastPLS <- function(x, ...) {
       oversample = as.integer(oversample)[1L],
       power = as.integer(power)[1L],
       seed = as.integer(seed)[1L],
+      case_audit = audit_summary,
       qualified_on_prespecified_panel =
         qualification$qualified_on_prespecified_panel,
       qualification_panel = qualification$qualification_panel,
@@ -1790,6 +1821,18 @@ print.fastPLS <- function(x, ...) {
   if (structural_failure) {
     stop(
       "PLS fit failed numerical structural checks: non-finite latent factors or fewer effective components than requested.",
+      call. = FALSE
+    )
+  }
+  if (randomized && !isTRUE(case_audited)) {
+    warning(
+      sprintf(
+        "%s %s %s %s",
+        "This rSVD route completed but did not produce a case-specific residual",
+        "certificate. It is marked unverified in diagnostics; compare important",
+        "results across seeds or confirm them with backend='cpu' and",
+        "svd.method='irlba'."
+      ),
       call. = FALSE
     )
   }
@@ -1979,7 +2022,8 @@ print.fastPLS <- function(x, ...) {
   exchangeable <- vapply(strata, length, integer(1L)) > 1L
   if (!any(exchangeable)) {
     stop(
-      paste(
+      sprintf(
+        "%s %s",
         "No non-trivial exchangeability-block permutation is possible:",
         "at least two constraint groups must have the same number of rows."
       ),
@@ -2396,14 +2440,16 @@ print.fastPLS <- function(x, ...) {
   if (is.null(object$B)) {
     return(TRUE)
   }
-  p <- suppressWarnings(as.numeric(ncol(Xtest)))
-  m <- suppressWarnings(as.numeric(object$m))
-  k <- suppressWarnings(max(as.integer(object$ncomp), na.rm = TRUE))
+  p <- .fastpls_quiet(as.numeric(ncol(Xtest)))
+  m <- .fastpls_quiet(as.numeric(object$m))
+  k <- .fastpls_quiet(max(as.integer(object$ncomp), na.rm = TRUE))
   if (!is.finite(p) || !is.finite(m) || !is.finite(k) || p <= 0 || m <= 0 || k <= 0) {
     return(FALSE)
   }
   dense_b_mb <- p * m * 8 / 1024^2
-  min_b_mb <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_PREDICT_LATENT_MIN_B_MB", "256")))
+  min_b_mb <- .fastpls_quiet(
+    as.numeric(Sys.getenv("FASTPLS_PREDICT_LATENT_MIN_B_MB", "256"))
+  )
   if (!is.finite(min_b_mb) || min_b_mb < 0) {
     min_b_mb <- 256
   }
@@ -2497,24 +2543,26 @@ print.fastPLS <- function(x, ...) {
   }
   duplicated_names <- unique(names(x)[duplicated(names(x))])
   if (length(duplicated_names)) {
+    duplicated_text <- paste(duplicated_names, collapse = ", ")
     stop(
       sprintf(
         "SVD control value%s supplied more than once in %s: %s",
         if (length(duplicated_names) == 1L) "" else "s",
         label,
-        paste(duplicated_names, collapse = ", ")
+        duplicated_text
       ),
       call. = FALSE
     )
   }
   unknown <- setdiff(names(x), accepted)
   if (length(unknown)) {
+    unknown_text <- paste(unknown, collapse = ", ")
     stop(
       sprintf(
         "Unknown entr%s in %s: %s",
         if (length(unknown) == 1L) "y" else "ies",
         label,
-        paste(unknown, collapse = ", ")
+        unknown_text
       ),
       call. = FALSE
     )
@@ -2569,12 +2617,13 @@ print.fastPLS <- function(x, ...) {
   supplied_flat <- unlist(supplied_sources, use.names = FALSE)
   duplicated <- unique(supplied_flat[duplicated(supplied_flat)])
   if (length(duplicated)) {
+    duplicated_text <- paste(duplicated, collapse = ", ")
     stop(
       sprintf(
         "SVD control value%s supplied more than once in %s: %s",
         if (length(duplicated) == 1L) "" else "s",
         context,
-        paste(duplicated, collapse = ", ")
+        duplicated_text
       ),
       call. = FALSE
     )
@@ -2613,23 +2662,31 @@ print.fastPLS <- function(x, ...) {
 
   qualified <- switch(
     backend,
-    cpu = identical(oversample, 20L) && identical(power, 2L),
-    cuda = (identical(oversample, 10L) && identical(power, 4L)) ||
-      (identical(oversample, 20L) && power %in% c(1L, 2L, 4L)),
+    cpu = oversample >= 20L && power >= 2L,
+    cuda = oversample >= 48L && power >= 4L,
     metal = FALSE
   )
   qualification_panel <- switch(
     backend,
     cpu = "585-component, five-seed CPU SIMPLS panel",
-    cuda = "40-component, five-seed CUDA high-rank/MetRef panel",
+    cuda = paste(
+      "controlled CUDA shape panel with oversample >= 48 and power >= 4"
+    ),
     metal = "no prespecified Metal rSVD qualification panel"
   )
   list(
     backend = backend,
     oversample = oversample,
     power = power,
+    general_use_certified = FALSE,
     qualified_on_prespecified_panel = isTRUE(qualified),
-    qualification_panel = qualification_panel
+    met_prespecified_panel = isTRUE(qualified),
+    qualification_panel = qualification_panel,
+    interpretation = paste(
+      "Panel agreement is historical validation evidence, not a guarantee for",
+      "a new matrix. Reliability for an individual fit requires the",
+      "case-specific residual audit recorded in model diagnostics."
+    )
   )
 }
 
@@ -2641,11 +2698,33 @@ print.fastPLS <- function(x, ...) {
     return(control)
   }
 
-  supplied <- control$supplied %||% character()
-  if (!"rsvd_oversample" %in% supplied && backend %in% c("cuda", "metal")) {
-    # Metal uses the wider package default conservatively but remains
-    # explicitly unqualified.
-    control$rsvd_oversample <- 20L
+  if (identical(backend, "cuda")) {
+    requested_oversample <- control$rsvd_oversample
+    requested_power <- control$rsvd_power
+    control$rsvd_oversample <- max(48L, requested_oversample)
+    control$rsvd_power <- max(4L, requested_power)
+    if (requested_oversample < 48L || requested_power < 4L) {
+      message_format <- paste0(
+        "%s raised CUDA rSVD controls from oversample=%d, power=%d to ",
+        "the safety floor oversample=%d, power=%d."
+      )
+      warning(
+        sprintf(
+          message_format,
+          context,
+          requested_oversample,
+          requested_power,
+          control$rsvd_oversample,
+          control$rsvd_power
+        ),
+        call. = FALSE
+      )
+    }
+  } else if (identical(backend, "metal")) {
+    # Metal remains explicitly unqualified until its controlled route study
+    # meets the same numerical criteria as CPU and CUDA.
+    control$rsvd_oversample <- max(20L, control$rsvd_oversample)
+    control$rsvd_power <- max(2L, control$rsvd_power)
   }
   qualification <- .rsvd_configuration_qualification(
     backend,
@@ -2655,15 +2734,16 @@ print.fastPLS <- function(x, ...) {
   control$rsvd_qualification <- qualification
 
   if (!isTRUE(qualification$qualified_on_prespecified_panel)) {
+    message_format <- paste0(
+      "%s is using an rSVD configuration that did not meet the prespecified ",
+      "%s: backend='%s', oversample=%d, power=%d. Structural diagnostics ",
+      "do not establish agreement with deterministic IRLBA. Use controls ",
+      "that met the backend panel, and require the fit-level residual audit ",
+      "or confirm the result across seeds and against CPU IRLBA."
+    )
     warning(
       sprintf(
-        paste0(
-          "%s is using an rSVD configuration not qualified on the prespecified ",
-          "%s: backend='%s', oversample=%d, power=%d. Structural diagnostics ",
-          "do not establish agreement with deterministic IRLBA. Use the ",
-          "backend-qualified defaults or confirm the result across seeds and ",
-          "against CPU IRLBA."
-        ),
+        message_format,
         context,
         qualification$qualification_panel,
         backend,
@@ -2679,19 +2759,19 @@ print.fastPLS <- function(x, ...) {
 .should_use_xprod_default <- function(p, q, ncomp) {
   p <- as.numeric(p)
   q <- as.numeric(q)
-  ncomp <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
+  ncomp <- .fastpls_quiet(max(as.integer(ncomp), na.rm = TRUE))
   if (!is.finite(p) || !is.finite(q) || !is.finite(ncomp)) {
     return(FALSE)
   }
   s_mb <- p * q * 8 / 1024^2
-  isTRUE(s_mb > 32) || (isTRUE(q >= 100) && isTRUE(ncomp <= 10))
+  isTRUE(s_mb > 32)
 }
 
 .should_use_xprod_irlba_default <- function(n, p, q, ncomp) {
   n <- as.numeric(n)
   p <- as.numeric(p)
   q <- as.numeric(q)
-  ncomp <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
+  ncomp <- .fastpls_quiet(max(as.integer(ncomp), na.rm = TRUE))
   if (!is.finite(n) || !is.finite(p) || !is.finite(q) || !is.finite(ncomp)) {
     return(FALSE)
   }
@@ -2720,7 +2800,9 @@ print.fastPLS <- function(x, ...) {
   if (!isTRUE(compact_prediction_available)) {
     return(TRUE)
   }
-  max_mb <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_STORE_B_MAX_MB", unset = "256")))
+  max_mb <- .fastpls_quiet(
+    as.numeric(Sys.getenv("FASTPLS_STORE_B_MAX_MB", unset = "256"))
+  )
   if (!is.finite(max_mb) || max_mb < 0) {
     max_mb <- 256
   }
@@ -2808,9 +2890,9 @@ print.fastPLS <- function(x, ...) {
   classifier <- .normalize_classifier(classifier)
   classifier <- if (.is_lda_classifier(classifier)) "lda" else "argmax"
   svd_method <- if (svd_method %in% c("rsvd", "cpu_rsvd")) "rsvd" else svd_method
-  k <- suppressWarnings(max(as.integer(ncomp), na.rm = TRUE))
+  k <- .fastpls_quiet(max(as.integer(ncomp), na.rm = TRUE))
   if (!is.finite(k)) k <- 0L
-  q <- suppressWarnings(as.integer(q)[1L])
+  q <- .fastpls_quiet(as.integer(q)[1L])
   if (!is.finite(q) || is.na(q)) q <- 1L
 
   warnings <- character()
@@ -3014,7 +3096,8 @@ print.fastPLS <- function(x, ...) {
     os_type = os_type
   )
   if (length(assessment$errors)) {
-    stop(paste(assessment$errors, collapse = " "), call. = FALSE)
+    assessment_errors <- paste(assessment$errors, collapse = " ")
+    stop(assessment_errors, call. = FALSE)
   }
   for (message in assessment$warnings) {
     key <- message
@@ -3218,7 +3301,7 @@ print.fastPLS <- function(x, ...) {
   )
 }
 
-.float32_rsvd <- function(A, k, oversample = 20L, power = 2L, seed = 1L) {
+.float32_rsvd_raw <- function(A, k, oversample = 20L, power = 2L, seed = 1L) {
   .require_float_package()
   k <- min(max(1L, as.integer(k)[1L]), min(nrow(A), ncol(A)))
   l <- min(ncol(A), k + max(0L, as.integer(oversample)[1L]))
@@ -3241,8 +3324,10 @@ print.fastPLS <- function(x, ...) {
   Y <- A %*% omega
   if (power > 0L) {
     for (i in seq_len(as.integer(power))) {
-      Z <- crossprod(A, Y)
-      Y <- A %*% Z
+      Qy <- qr.Q(qr(Y))
+      Z <- crossprod(A, Qy)
+      Qz <- qr.Q(qr(Z))
+      Y <- A %*% Qz
     }
   }
   Q <- qr.Q(qr(Y))
@@ -3253,6 +3338,65 @@ print.fastPLS <- function(x, ...) {
     u = U,
     d = sv$d[seq_len(k), , drop = FALSE],
     v = sv$v[, seq_len(k), drop = FALSE]
+  )
+}
+
+.float32_rsvd <- function(A, k, oversample = 20L, power = 2L, seed = 1L) {
+  max_rank <- min(nrow(A), ncol(A))
+  k <- min(max(1L, as.integer(k)[1L]), max_rank)
+  audit_k <- min(max_rank, k + 1L)
+  attempts <- list(
+    c(max(20L, oversample), max(2L, power)),
+    c(max(32L, oversample), max(3L, power)),
+    c(max(48L, oversample), max(4L, power))
+  )
+  for (i in seq_along(attempts)) {
+    ctl <- attempts[[i]]
+    candidate <- .float32_rsvd_raw(
+      A, audit_k, ctl[[1L]], ctl[[2L]], seed + 104729L * (i - 1L)
+    )
+    scale <- max(abs(as.numeric(candidate$d[1L, 1L])), 1e-6)
+    residual <- 0
+    for (j in seq_len(k)) {
+      uj <- candidate$u[, j, drop = FALSE]
+      vj <- candidate$v[, j, drop = FALSE]
+      sj <- as.numeric(candidate$d[j, 1L])
+      residual <- max(
+        residual,
+        as.numeric(sqrt(sum((A %*% vj - uj * sj)^2))) / scale,
+        as.numeric(sqrt(sum((crossprod(A, uj) - vj * sj)^2))) / scale
+      )
+    }
+    ratio <- if (audit_k > k && as.numeric(candidate$d[k, 1L]) > 0) {
+      abs(as.numeric(candidate$d[k + 1L, 1L] / candidate$d[k, 1L]))
+    } else {
+      0
+    }
+    if (is.finite(residual) && residual <= 1e-2 &&
+        is.finite(ratio) && ratio <= 0.95) {
+      return(list(
+        u = candidate$u[, seq_len(k), drop = FALSE],
+        d = candidate$d[seq_len(k), , drop = FALSE],
+        v = candidate$v[, seq_len(k), drop = FALSE],
+        case_audited = TRUE,
+        case_certified = TRUE,
+        deterministic_fallback = FALSE,
+        audit_attempts = i,
+        audit_triplet_residual = residual,
+        audit_omitted_direction_ratio = ratio
+      ))
+    }
+  }
+
+  exact <- float::svd(A)
+  list(
+    u = exact$u[, seq_len(k), drop = FALSE],
+    d = exact$d[seq_len(k), , drop = FALSE],
+    v = exact$v[, seq_len(k), drop = FALSE],
+    case_audited = TRUE,
+    case_certified = TRUE,
+    deterministic_fallback = TRUE,
+    audit_attempts = length(attempts)
   )
 }
 
@@ -3701,7 +3845,7 @@ print.fastPLS <- function(x, ...) {
   )
 }
 
-pls.model1 =
+pls.model1 <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3742,11 +3886,11 @@ pls.model1 =
     )
     model$pls_method <- "plssvd"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model1.gpu =
+pls.model1.gpu <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3779,11 +3923,11 @@ pls.model1.gpu =
     )
     model$pls_method <- "plssvd"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model1.gpu.implicit.xprod =
+pls.model1.gpu.implicit.xprod <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3814,11 +3958,11 @@ pls.model1.gpu.implicit.xprod =
     )
     model$pls_method <- "plssvd"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model2 =
+pls.model2 <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3856,11 +4000,11 @@ pls.model2 =
     )
     model$pls_method <- "simpls"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model2.fast =
+pls.model2.fast <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3902,11 +4046,11 @@ pls.model2.fast =
     )
     model$pls_method <- "simpls"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model1.rsvd.xprod.precision =
+pls.model1.rsvd.xprod.precision <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -3954,11 +4098,11 @@ pls.model1.rsvd.xprod.precision =
     )
     model$pls_method <- "plssvd"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model2.fast.rsvd.xprod.precision =
+pls.model2.fast.rsvd.xprod.precision <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -4007,11 +4151,11 @@ pls.model2.fast.rsvd.xprod.precision =
     )
     model$pls_method <- "simpls"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
-pls.model2.fast.gpu =
+pls.model2.fast.gpu <-
   function (Xtrain,
             Ytrain,
             ncomp,
@@ -4045,7 +4189,7 @@ pls.model2.fast.gpu =
     )
     model$pls_method <- "simpls"
     model$predict_latent_ok <- TRUE
-    class(model) = "fastPLS"
+    class(model) <- "fastPLS"
     model
   }
 
@@ -4081,10 +4225,10 @@ pls.model2.fast.gpu =
 #' y <- mtcars$mpg
 #' fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
 #'            svd.method = "rsvd", return_variance = FALSE)
-#' pred <- predict(fit, X[1:3, , drop = FALSE])
+#' pred <- predict(fit, X[seq_len(3), , drop = FALSE])
 #' pred$Ypred
 #' @export
-predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
+predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
                            backend = NULL,
                            flash.block_size = NULL, top = 1L, top5 = FALSE,
                            raw_scores = FALSE, ...) {
@@ -4109,7 +4253,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       raw_scores = raw_scores
     ), object$ncomp))
   }
-  Xtest=as.matrix(newdata)
+  Xtest <- as.matrix(newdata)
   use_cuda_flash <- identical(backend, "cuda_flash") ||
     (identical(backend, "auto") &&
        identical(object$predict_backend, "cuda_flash") &&
@@ -4190,7 +4334,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       pls_predict_flash_cuda(object, Xtest, proj),
       error = function(e) {
         if (identical(backend, "cuda_flash")) {
-          stop(e)
+          stop(conditionMessage(e), call. = FALSE)
         }
         pls_predict(object, Xtest, proj)
       }
@@ -4200,7 +4344,7 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
       pls_predict_flash_cpu(object, Xtest, proj, as.integer(flash.block_size)),
       error = function(e) {
         if (identical(backend, "cpu_flash")) {
-          stop(e)
+          stop(conditionMessage(e), call. = FALSE)
         }
         pls_predict(object, Xtest, proj)
       }
@@ -4208,18 +4352,22 @@ predict.fastPLS = function(object, newdata, Ytest=NULL, proj=FALSE,
   } else {
     pls_predict(object, Xtest, proj)
   }
-  res$Q2Y=NULL
+  res$Q2Y <- NULL
 
   if (!is.null(Ytest)) {
-    for (i in 1:length(object$ncomp)) {
+    for (i in seq_along(object$ncomp)) {
       if(object$classification){
-        Ytest_transf=matrix(0,ncol=length(object$lev),nrow=length(Ytest))
-        colnames(Ytest_transf)=object$lev
+        Ytest_transf <- matrix(
+          0,
+          ncol = length(object$lev),
+          nrow = length(Ytest)
+        )
+        colnames(Ytest_transf) <- object$lev
         for(w in object$lev){
-          Ytest_transf[Ytest==w,w]=1
+          Ytest_transf[Ytest == w, w] <- 1
         }
       } else{
-        Ytest_transf=as.matrix(Ytest)
+        Ytest_transf <- as.matrix(Ytest)
       }
       ypred_i <- matrix(
         res$Ypred[, , i],
@@ -4801,7 +4949,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
 #' @return A `fastPLS` object.
 #' @noRd
-.simpls_gpu = function(Xtrain,
+.simpls_gpu <- function(Xtrain,
                       Ytrain,
                       Xtest = NULL,
                       Ytest = NULL,
@@ -4957,7 +5105,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param gpu_finalize_threshold Component threshold controlling GPU-side finalization.
 #' @return A `fastPLS` object fitted with GPU PLSSVD.
 #' @noRd
-.plssvd_gpu = function(Xtrain,
+.plssvd_gpu <- function(Xtrain,
                       Ytrain,
                       Xtest = NULL,
                       Ytest = NULL,
@@ -5234,7 +5382,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   }
   if (!metric %in% c("auto", "accuracy", "balanced_accuracy", "r2", "q2", "rmsd")) {
     stop(
-      paste0(
+      sprintf(
+        "%s%s",
         "selection_metric must be one of 'auto', 'accuracy', ",
         "'balanced_accuracy', 'r2', 'q2', or 'rmsd'."
       ),
@@ -5528,10 +5677,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     }
     if (!identical(selection_metric, "r2")) {
       stop(
-        paste0(
-          "Classification CV can optimize selection_metric = 'accuracy', ",
-          "'balanced_accuracy', or 'q2'."
-        ),
+        "Classification CV can optimize selection_metric = 'accuracy', 'balanced_accuracy', or 'q2'.",
         call. = FALSE
       )
     }
@@ -5866,7 +6012,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   if (length(kfold) != 1L || is.na(kfold)) {
     stop(context, ": kfold must be a single integer or 'loocv'.", call. = FALSE)
   }
-  kfold_int <- suppressWarnings(as.integer(kfold))
+  kfold_int <- .fastpls_quiet(as.integer(kfold))
   if (is.na(kfold_int) || !is.finite(kfold_int)) {
     stop(context, ": kfold must be a finite integer or 'loocv'.", call. = FALSE)
   }
@@ -6460,11 +6606,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   Y <- metal_matrix_multiply_cpp(A, omega)
 
   power_iters <- max(0L, as.integer(rsvd_power)[1L])
-  if (power_iters == 1L) {
-    Y <- metal_matrix_multiply_cpp(A, metal_crossprod_cpp(A, Y))
-  } else if (power_iters > 1L) {
+  if (power_iters > 0L) {
     for (i in seq_len(power_iters)) {
-      Z <- metal_crossprod_cpp(A, Y)
+      Qy <- qr.Q(qr(Y))
+      Z <- metal_crossprod_cpp(A, Qy)
       Qz <- qr.Q(qr(Z))
       Y <- metal_matrix_multiply_cpp(A, Qz)
     }
@@ -6524,11 +6669,10 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
   Ysk <- multiply(omega)
 
   power_iters <- max(0L, as.integer(rsvd_power)[1L])
-  if (power_iters == 1L) {
-    Ysk <- multiply(tmultiply(Ysk))
-  } else if (power_iters > 1L) {
+  if (power_iters > 0L) {
     for (i in seq_len(power_iters)) {
-      Z <- tmultiply(Ysk)
+      Qy <- qr.Q(qr(Ysk))
+      Z <- tmultiply(Qy)
       Qz <- qr.Q(qr(Z))
       Ysk <- multiply(Qz)
     }
@@ -6611,7 +6755,18 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     s = as.vector(out$d),
     Vt = out$vt,
     method = method,
-    elapsed = as.numeric(t_elapsed)
+    elapsed = as.numeric(t_elapsed),
+    case_audited = isTRUE(out$case_audited),
+    case_certified = isTRUE(out$case_certified),
+    deterministic_fallback = isTRUE(out$deterministic_fallback),
+    audit_attempts = out$audit_attempts,
+    effective_oversample = out$effective_oversample,
+    effective_power = out$effective_power,
+    effective_seed = out$effective_seed,
+    audit_subspace_error = out$audit_subspace_error,
+    audit_singular_value_error = out$audit_singular_value_error,
+    audit_triplet_residual = out$audit_triplet_residual,
+    audit_omitted_direction_ratio = out$audit_omitted_direction_ratio
   )
   out_norm
 }
@@ -6635,7 +6790,13 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     Vt = if (isTRUE(left_only)) NULL else t(raw$v),
     method = svd.method,
     elapsed = as.numeric(t_elapsed),
-    precision = "float32"
+    precision = "float32",
+    case_audited = isTRUE(raw$case_audited),
+    case_certified = isTRUE(raw$case_certified),
+    deterministic_fallback = isTRUE(raw$deterministic_fallback),
+    audit_attempts = raw$audit_attempts,
+    audit_triplet_residual = raw$audit_triplet_residual,
+    audit_omitted_direction_ratio = raw$audit_omitted_direction_ratio
   )
 }
 
@@ -6672,7 +6833,13 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
     Vt = if (is.null(raw$v)) NULL else t(.float32_from_bits(raw$v)),
     method = svd.method,
     elapsed = as.numeric(t_elapsed),
-    precision = "float32"
+    precision = "float32",
+    case_audited = isTRUE(raw$case_audited),
+    case_certified = isTRUE(raw$case_certified),
+    deterministic_fallback = isTRUE(raw$deterministic_fallback),
+    audit_attempts = raw$audit_attempts,
+    audit_triplet_residual = raw$audit_triplet_residual,
+    audit_omitted_direction_ratio = raw$audit_omitted_direction_ratio
   )
 }
 
@@ -6789,15 +6956,15 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE, ...
 #' @param oversample Non-negative oversampling dimension used by
 #'   randomized SVD. The sketch dimension is approximately
 #'   `ncomp + oversample`, capped by the matrix rank. Larger values can improve
-#'   approximation accuracy at the cost of extra time and memory. When omitted,
-#'   the qualified backend default is 20 on CPU and CUDA. Metal uses 20
-#'   conservatively but remains explicitly marked as not yet qualified.
+#'   approximation accuracy at the cost of extra time and memory. The default
+#'   starting value is 20. Historical panel agreement is not a guarantee for a
+#'   new matrix; CPU float64 fits additionally apply the case-specific audit
+#'   described in Details.
 #' @param power Number of randomized-SVD power iterations. The default of two
 #'   is used on CPU and CUDA. Together with backend-specific oversampling, these
-#'   controls met the package's prespecified numerical audit. Larger values can
-#'   improve accuracy when singular values decay slowly, but each iteration
-#'   adds additional matrix multiplications. Explicit combinations outside the
-#'   audited settings produce a warning.
+#'   controls met a prespecified validation panel. Larger values can improve
+#'   accuracy when singular values decay slowly, but each iteration adds matrix
+#'   multiplications. Panel agreement alone is not general-use certification.
 #' @param svds_tol Tolerance forwarded to iterative SVD backends. A value of
 #'   `0` keeps the backend default.
 #' @param work IRLBA working subspace size. A value of `0` lets the bundled
@@ -6885,6 +7052,9 @@ fastsvd <- function(x,
     oversample <- control$rsvd_oversample
     power <- control$rsvd_power
   }
+  if (identical(method, "rsvd")) {
+    try(rsvd_audit_reset_debug(), silent = TRUE)
+  }
   if (is.null(ncomp)) {
     k <- max(as.integer(nu), as.integer(nv), 1L)
   } else {
@@ -6933,9 +7103,40 @@ fastsvd <- function(x,
     randomized = identical(method, "rsvd")
   )
   if (identical(method, "rsvd")) {
+    diagnostics$rsvd_case_audit <- list(
+      performed = isTRUE(out$case_audited),
+      certified = isTRUE(out$case_certified),
+      deterministic_fallback = isTRUE(out$deterministic_fallback),
+      attempts = out$audit_attempts %||% NA_integer_,
+      effective_oversample = out$effective_oversample %||% oversample,
+      effective_power = out$effective_power %||% power,
+      effective_seed = out$effective_seed %||% seed,
+      subspace_error = out$audit_subspace_error %||% NA_real_,
+      singular_value_error = out$audit_singular_value_error %||% NA_real_,
+      triplet_residual = out$audit_triplet_residual %||% NA_real_,
+      omitted_direction_ratio = out$audit_omitted_direction_ratio %||% NA_real_
+    )
     diagnostics$rsvd_qualification <- .rsvd_configuration_qualification(
       backend, oversample, power
     )
+    if (isTRUE(out$case_certified)) {
+      diagnostics$status <- if (isTRUE(out$deterministic_fallback)) {
+        "rsvd_case_audit_recovered_with_deterministic_irlba"
+      } else {
+        "rsvd_case_audit_passed"
+      }
+    } else {
+      warning(
+        sprintf(
+          "%s %s %s %s",
+          "This rSVD route completed but did not produce a case-specific residual",
+          "certificate. It is marked unverified in diagnostics; compare important",
+          "results across seeds or confirm them with backend='cpu' and",
+          "method='irlba'."
+        ),
+        call. = FALSE
+      )
+    }
   }
   result <- list(
     d = out$s,
@@ -7135,7 +7336,7 @@ fastsvd <- function(x,
 #' @param ... Additional arguments passed to `plot()`.
 #' @return Invisibly returns the plotted score matrix.
 #' @examples
-#' X <- as.matrix(iris[, 1:4])
+#' X <- as.matrix(iris[, seq_len(4)])
 #' fit <- pls(X, iris$Species, ncomp = 2, fit = TRUE,
 #'            return_variance = TRUE, seed = 1)
 #' plot(fit, groups = iris$Species, ellipse = TRUE)
@@ -7205,7 +7406,7 @@ plot.fastPLS <- function(x,
 #' @return Invisibly returns the plotted permutation data.
 #' @examples
 #' set.seed(1)
-#' X <- as.matrix(iris[, 1:4])
+#' X <- as.matrix(iris[, seq_len(4)])
 #' y <- iris$Sepal.Length
 #' idx <- sample(seq_len(nrow(X)), 30)
 #' fit <- pls(X[idx, ], y[idx], X[idx, ], y[idx],
@@ -7232,8 +7433,11 @@ plot.permutation <- function(x,
   required <- c("type", "ncomp", "metric", "cor", "value")
   missing_cols <- setdiff(required, names(perm))
   if (length(missing_cols)) {
-    stop("Permutation table is missing required columns: ",
-         paste(missing_cols, collapse = ", "), call. = FALSE)
+    missing_text <- paste(missing_cols, collapse = ", ")
+    stop(
+      sprintf("Permutation table is missing required columns: %s", missing_text),
+      call. = FALSE
+    )
   }
   if (is.null(ncomp)) {
     ncomp <- max(perm$ncomp, na.rm = TRUE)
@@ -7316,12 +7520,16 @@ plot.permutation <- function(x,
 }
 
 .metal_min_flops <- function() {
-  val <- suppressWarnings(as.numeric(Sys.getenv("FASTPLS_METAL_MIN_FLOPS", "200000000")))
+  val <- .fastpls_quiet(
+    as.numeric(Sys.getenv("FASTPLS_METAL_MIN_FLOPS", "200000000"))
+  )
   if (!is.finite(val) || val < 0) 2e8 else val
 }
 
 .metal_exact_max_rank <- function() {
-  val <- suppressWarnings(as.integer(Sys.getenv("FASTPLS_METAL_EXACT_MAX_RANK", "256")))
+  val <- .fastpls_quiet(
+    as.integer(Sys.getenv("FASTPLS_METAL_EXACT_MAX_RANK", "256"))
+  )
   if (!is.finite(val) || is.na(val) || val < 0L) 256L else val
 }
 
@@ -8064,11 +8272,13 @@ plot.permutation <- function(x,
 #'     kernel settings and execution metadata.
 #'   * `diagnostics`: numerical solver diagnostics. For rSVD this records the
 #'     structural-check status, finiteness, requested and effective component
-#'     counts, randomized controls, and whether those controls were qualified on
-#'     a prespecified validation panel. SIMPLS-family fits additionally record
+#'     counts and randomized controls. CPU float64 rSVD fits also record each
+#'     case-specific residual audit, strengthened retry, and deterministic
+#'     recovery. Panel evidence is reported separately and is not interpreted
+#'     as general-use certification. SIMPLS-family fits additionally record
 #'     the active `fresh_per_component` direction rule and the retained and
-#'     abandoned execution optimizations. Even a qualified configuration is not
-#'     a case-specific audit and is not evidence of deterministic equivalence.
+#'     abandoned execution optimizations. Accelerator and float32 routes that do
+#'     not yet expose the same certificate warn and are marked unverified.
 #'
 #'   Function settings and backend bookkeeping, such as the component grid and
 #'   resolved classifier backend, are retained internally for prediction and
@@ -8080,13 +8290,13 @@ plot.permutation <- function(x,
 #'            svd.method = "rsvd", return_variance = FALSE)
 #' head(predict(fit, X)$Ypred)
 #'
-#' cv <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+#' cv <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
 #'                     backend = "cpu", svd.method = "rsvd", seed = 1)
 #' fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 #' cv$best_ncomp
 #' head(fit_cv$Ypred)
 #' @export
-pls =  function (Xtrain,
+pls <- function(Xtrain,
                  Ytrain,
                  Xtest = NULL,
                  Ytest = NULL,
@@ -8137,7 +8347,7 @@ pls =  function (Xtrain,
     ))
   }
 
-  scal = pmatch(scaling, c("centering", "autoscaling","none"))[1]
+  scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
   dots <- .svd_control_from_dots(list(...))
   svd_ctl <- .resolve_svd_control(
     svd.method = if (missing(svd.method)) NULL else svd.method,
@@ -8162,6 +8372,11 @@ pls =  function (Xtrain,
     svd.method <- .backend_svd_method(svd.method, backend)
   }
 		  classifier <- .resolve_classifier_for_backend(classifier, backend)
+
+  if (.normalize_svd_method(svd.method) %in%
+      c("cpu_rsvd", "cuda_rsvd", "metal_rsvd")) {
+    try(rsvd_audit_reset_debug(), silent = TRUE)
+  }
 
   backend_control <- NULL
 
@@ -8413,12 +8628,12 @@ pls =  function (Xtrain,
     return(.fastpls_public_pls_output(model, model$ncomp))
   }
 
-  meth = .normalize_pls_method(requested_method)
+  meth <- .normalize_pls_method(requested_method)
   svd.method <- .normalize_svd_method(svd.method)
   svd.method <- match.arg(svd.method, c("irlba", "cpu_rsvd"))
   svdmeth <- .svd_method_id(svd.method)
 
-  Xtrain = as.matrix(Xtrain)
+  Xtrain <- as.matrix(Xtrain)
   Ytrain_original <- Ytrain
   yprep <- .prepare_response(Ytrain)
   Ytrain <- yprep$Ytrain
@@ -8441,7 +8656,7 @@ pls =  function (Xtrain,
     )
     ncomp <- cap$ncomp
     if (use_xprod_default) {
-      model=pls.model1.rsvd.xprod.precision(
+      model <- pls.model1.rsvd.xprod.precision(
         Xtrain,
         Ytrain,
         ncomp=ncomp,
@@ -8459,7 +8674,7 @@ pls =  function (Xtrain,
         xprod_precision=xprod_precision_default
       )
     } else {
-      model=pls.model1(
+      model <- pls.model1(
         Xtrain,
         Ytrain,
         ncomp=ncomp,
@@ -8479,7 +8694,7 @@ pls =  function (Xtrain,
     }
   }
   if(meth==2){
-    model=pls.model2(
+    model <- pls.model2(
       Xtrain,
       Ytrain,
       ncomp=ncomp,
@@ -8499,7 +8714,7 @@ pls =  function (Xtrain,
   }
   if(meth==3){
     if (use_xprod_default) {
-      model=pls.model2.fast.rsvd.xprod.precision(
+      model <- pls.model2.fast.rsvd.xprod.precision(
         Xtrain,
         Ytrain,
         ncomp=ncomp,
@@ -8518,7 +8733,7 @@ pls =  function (Xtrain,
         return_ttrain=FALSE
       )
     } else {
-      model=pls.model2.fast(
+      model <- pls.model2.fast(
         Xtrain,
         Ytrain,
         ncomp=ncomp,
@@ -8538,13 +8753,13 @@ pls =  function (Xtrain,
       )
     }
   }
-  model$xprod_default=use_xprod_default
+  model$xprod_default <- use_xprod_default
   model$pls_method <- if (meth == 1L) "plssvd" else "simpls"
   model$predict_latent_ok <- TRUE
   if (isTRUE(fit)) model <- .attach_train_scores(model, Xtrain)
   model <- .enable_flash_prediction(model, "cpu")
-  model$classification=classification
-  model$lev=lev
+  model$classification <- classification
+  model$lev <- lev
 	  model <- .attach_lda_classifier(
 	    model,
 	    Xtrain,
@@ -8565,9 +8780,9 @@ pls =  function (Xtrain,
 
   # PLS analysis
   if(!is.null(Xtest)){
-    Xtest = as.matrix(Xtest)
-    res=predict(model,Xtest,Ytest,proj=proj)
-    model=c(model,res)
+    Xtest <- as.matrix(Xtest)
+    res <- predict(model, Xtest, Ytest, proj = proj)
+    model <- c(model, res)
     # output
 
 
@@ -8586,7 +8801,7 @@ pls =  function (Xtrain,
           Xtrain_permuted <- Xtrain[ss, , drop = FALSE]
           cor_perm[[i]] <- .fastpls_permutation_cor(Ytrain, ss)
 
-          permuted_fit <- tryCatch({
+          permutation_attempt <- tryCatch({
             model_perm <- switch(
               as.character(meth),
               `1` = pls.model1(
@@ -8620,11 +8835,15 @@ pls =  function (Xtrain,
             model_perm$classification <- classification
             model_perm$lev <- lev
             res_perm <- predict(model_perm, Xtest, Ytest)
-            list(R2Y = model_perm$R2Y, Q2Y = res_perm$Q2Y)
+            list(
+              value = list(R2Y = model_perm$R2Y, Q2Y = res_perm$Q2Y),
+              error = NA_character_
+            )
           }, error = function(e) {
-            permutation_errors[[i]] <<- conditionMessage(e)
-            NULL
+            list(value = NULL, error = conditionMessage(e))
           })
+          permuted_fit <- permutation_attempt$value
+          permutation_errors[[i]] <- permutation_attempt$error
           if (!is.null(permuted_fit)) {
             if (!is.null(permuted_fit$R2Y)) {
               r2_perm[i, ] <- as.numeric(permuted_fit$R2Y)
@@ -8683,7 +8902,7 @@ pls =  function (Xtrain,
 
 
 
-  class(model)="fastPLS"
+  class(model) <- "fastPLS"
   model <- .attach_backend_control(model, backend_control)
   model <- .fastpls_attach_solver_diagnostics(
     model, svd.method, rsvd_oversample, rsvd_power, seed,
@@ -8713,11 +8932,12 @@ pls =  function (Xtrain,
     )
     finite <- finite & metric_names %in% target_names
     if (!any(finite)) {
+      available_metrics <- paste(unique(metric_names), collapse = ", ")
       stop(
         sprintf(
           "selection_metric = '%s' is not available in these CV results. Available metrics: %s.",
           selection_metric,
-          paste(unique(metric_names), collapse = ", ")
+          available_metrics
         ),
         call. = FALSE
       )
@@ -8791,12 +9011,14 @@ pls =  function (Xtrain,
   }
   bad <- setdiff(value, choices)
   if (length(bad)) {
+    choices_text <- paste(choices, collapse = ", ")
+    bad_text <- paste(bad, collapse = ", ")
     stop(
       sprintf(
         "%s must use values from: %s. Invalid: %s.",
         name,
-        paste(choices, collapse = ", "),
-        paste(bad, collapse = ", ")
+        choices_text,
+        bad_text
       ),
       call. = FALSE
     )
@@ -9041,9 +9263,15 @@ pls =  function (Xtrain,
                                              selection_metric = "auto") {
   ok <- vapply(results, function(x) is.list(x) && identical(x$status, "ok"), logical(1L))
   if (!any(ok)) {
+    first_errors <- paste(
+      head(summaries$error[!is.na(summaries$error)], 5L),
+      collapse = " | "
+    )
     stop(
-      "All CV tuning configurations failed. First errors: ",
-      paste(head(summaries$error[!is.na(summaries$error)], 5L), collapse = " | "),
+      sprintf(
+        "All CV tuning configurations failed. First diagnostics: %s",
+        first_errors
+      ),
       call. = FALSE
     )
   }
@@ -9148,8 +9376,14 @@ pls =  function (Xtrain,
 #' @param selection_metric Metric used to select predictive settings from
 #'   held-out folds. Use `"auto"` (accuracy for classification and RMSD for
 #'   regression), `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or
-#'   `"rmsd"`. Balanced accuracy is the unweighted mean of class-specific
-#'   recalls and is appropriate when class frequencies are unequal.
+#'   `"rmsd"`. For numeric responses, `"r2"` is calculated from held-out
+#'   predictions relative to the mean of all observed responses, whereas
+#'   `"q2"` uses the corresponding fold-training response mean. The
+#'   full-data training `R2Y` returned when `fit = TRUE` is descriptive and is
+#'   not used for component selection. Classification can use accuracy,
+#'   balanced accuracy, or dummy-response Q2, but not training R2. Balanced
+#'   accuracy is the unweighted mean of class-specific recalls and is
+#'   appropriate when class frequencies are unequal.
 #' @param xprod Use the matrix-free cross-product route where available.
 #'   `NULL` applies fastPLS defaults.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
@@ -9204,20 +9438,20 @@ pls =  function (Xtrain,
 #'   refit the selected model on the full training data and predict new samples.
 #'   }
 #' @examples
-#' idx <- c(1:12, 51:62, 101:112)
-#' X <- as.matrix(iris[idx, 1:4])
+#' idx <- c(seq_len(12), 51:62, 101:112)
+#' X <- as.matrix(iris[idx, seq_len(4)])
 #' y <- factor(iris[idx, 5])
-#' opt <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+#' opt <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
 #'                      backend = "cpu", svd.method = "rsvd", seed = 1)
 #' opt$best_ncomp
-#' opt_kernel <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3,
+#' opt_kernel <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3,
 #'                             method = "kernelpls", backend = "cpu",
 #'                             svd.method = "rsvd",
 #'                             kernel = c("linear", "rbf"),
 #'                             gamma = c(0.1, 1), seed = 1)
 #' opt_kernel$best_parameters
 #' @export
-pls.single.cv =  function (Xdata,
+pls.single.cv <- function(Xdata,
                           Ydata,
                           ncomp=2,
                           constrain=NULL,
@@ -9596,7 +9830,7 @@ pls.single.cv =  function (Xdata,
 #'   one value per sample. Samples with the same value are assigned to the same
 #'   fold, so all rows from the same patient, subject, batch, or technical
 #'   replicate stay together in training or test data. The default
-#'   `1:nrow(Xdata)` treats every sample as an independent group.
+#'   `seq_len(nrow(Xdata))` treats every sample as an independent group.
 #' @param runn Number of repeated runs.
 #' @param kfold_inner Inner-fold count, or `"loocv"` to leave out one
 #'   constraint group at a time inside each outer training set.
@@ -9619,7 +9853,11 @@ pls.single.cv =  function (Xdata,
 #' @param selection_metric Metric used by inner CV and by the permutation test.
 #'   Use `"auto"` (accuracy for classification and RMSD for regression),
 #'   `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`.
-#'   Balanced accuracy gives each observed class equal weight.
+#'   For numeric responses, `"r2"` is an observed-mean held-out endpoint and
+#'   `"q2"` uses fold-training response means. Training `R2Y` is descriptive
+#'   and is never optimized. Classification can use accuracy, balanced
+#'   accuracy, or dummy-response Q2, but not training R2. Balanced accuracy
+#'   gives each observed class equal weight.
 #' @param perm.test Run a nested-CV permutation test. Independent rows are
 #'   permuted individually. With repeated `constrain` values, complete blocks
 #'   are exchanged only among groups with the same number of rows, preserving
@@ -9688,18 +9926,18 @@ pls.single.cv =  function (Xdata,
 #'     `permutation_completed`, `permutation_failed`, and `permutation_errors`:
 #'     the exchangeability contract and null-fit audit.
 #' @examples
-#' idx <- c(1:10, 51:60, 101:110)
-#' X <- as.matrix(iris[idx, 1:4])
+#' idx <- c(seq_len(10), 51:60, 101:110)
+#' X <- as.matrix(iris[idx, seq_len(4)])
 #' y <- factor(iris[idx, 5])
-#' dcv <- pls.double.cv(X, y, ncomp = 1:2, runn = 1, kfold_inner = 2,
+#' dcv <- pls.double.cv(X, y, ncomp = seq_len(2), runn = 1, kfold_inner = 2,
 #'                      kfold_outer = 2, method = "simpls", backend = "cpu",
 #'                      svd.method = "rsvd", seed = 1)
 #' names(dcv)
 #' @export
-pls.double.cv = function(Xdata,
+pls.double.cv <- function(Xdata,
                          Ydata,
                          ncomp=2,
-                         constrain=1:nrow(Xdata),
+                         constrain = seq_len(nrow(Xdata)),
                          scaling = c("centering", "autoscaling","none"),
                          method = c("simpls", "plssvd", "opls", "kernelpls"),
                          backend = NULL,
@@ -10069,7 +10307,9 @@ pls.double.cv = function(Xdata,
     acc_tot <- round(sum(diag(conf_final)), digits = 1)
     acc_tot_perc <- 100 * acc_tot / nrow(Xdata)
     res$acc_tot <- paste(acc_tot, " (", acc_tot_perc, "%)", sep = "")
-    conf_perc <- suppressWarnings(t(t(conf_final) / colSums(conf_final)) * 100)
+    conf_perc <- .fastpls_quiet(
+      t(t(conf_final) / colSums(conf_final)) * 100
+    )
     conf_perc[!is.finite(conf_perc)] <- 0
     conf_txt <- matrix(
       paste(round(conf_final, digits = 1), " (", round(conf_perc, digits = 1), "%)", sep = ""),
@@ -10138,7 +10378,7 @@ pls.double.cv = function(Xdata,
     permutation_errors <- rep(NA_character_, times)
     for (i in seq_len(times)) {
       ss <- permutation_indices[[i]]
-      sampled[[i]] <- tryCatch({
+      permutation_attempt <- tryCatch({
         permuted_result <- pls.double.cv(
           Xdata = Xdata[ss, , drop = FALSE],
           Ydata = Ydata_original,
@@ -10176,11 +10416,12 @@ pls.double.cv = function(Xdata,
           na.rm = TRUE
         )
         if (!is.finite(value)) stop("Permutation fit returned no finite metric.")
-        value
+        list(value = value, error = NA_character_)
       }, error = function(e) {
-        permutation_errors[[i]] <<- conditionMessage(e)
-        NA_real_
+        list(value = NA_real_, error = conditionMessage(e))
       })
+      sampled[[i]] <- permutation_attempt$value
+      permutation_errors[[i]] <- permutation_attempt$error
     }
     loss_metric <- permutation_metric %in% c("rmsd", "rmse", "mae", "mse")
     observed <- median(
@@ -10467,8 +10708,12 @@ evaluate <- function(observed,
     rel_err_pct <- abs(err[rel_ok] / o[rel_ok]) * 100
     mre_pct <- if (length(rel_err_pct)) stats::median(rel_err_pct, na.rm = TRUE) else NA_real_
     mape_pct <- if (length(rel_err_pct)) mean(rel_err_pct, na.rm = TRUE) else NA_real_
-    r <- suppressWarnings(stats::cor(o, p, method = "pearson", use = "complete.obs"))
-    rho <- suppressWarnings(stats::cor(o, p, method = "spearman", use = "complete.obs"))
+    r <- .fastpls_quiet(
+      stats::cor(o, p, method = "pearson", use = "complete.obs")
+    )
+    rho <- .fastpls_quiet(
+      stats::cor(o, p, method = "spearman", use = "complete.obs")
+    )
     sd_obs <- stats::sd(o, na.rm = TRUE)
     c(
       n = n,
@@ -10546,7 +10791,9 @@ ViP <- function(model) {
   u <- nrow(model$Q)
   if (u==1) return (as.matrix(Vip(model)))
   V <- list ()
-  for (i in 1:u) V[[i]] <- Vip(list(Q=model$Q[i,], Ttrain=model$Ttrain, R=model$R))
+  for (i in seq_len(u)) {
+    V[[i]] <- Vip(list(Q = model$Q[i, ], Ttrain = model$Ttrain, R = model$R))
+  }
   return (V)
 }
 

@@ -12,6 +12,30 @@ struct SVDResult {
   Mat U;
   Vec s;
   Mat Vt;
+  bool randomized = false;
+  bool case_audited = false;
+  bool case_certified = false;
+  bool deterministic_fallback = false;
+  int audit_attempts = 1;
+  int effective_oversample = 0;
+  int effective_power_iters = 0;
+  unsigned int effective_seed = 0;
+  double audit_subspace_error = 0.0;
+  double audit_singular_value_error = 0.0;
+  double audit_triplet_residual = 0.0;
+  double audit_omitted_direction_ratio = 0.0;
+};
+
+struct RSVDAuditSummary {
+  int solves = 0;
+  int certified = 0;
+  int deterministic_fallbacks = 0;
+  int failures = 0;
+  int max_attempts = 0;
+  int max_effective_oversample = 0;
+  int max_effective_power_iters = 0;
+  double max_triplet_residual = 0.0;
+  double max_omitted_direction_ratio = 0.0;
 };
 
 enum class Backend {
@@ -57,6 +81,10 @@ Backend backend_from_method_id(int svd_method);
 bool method_is_legacy_irlba(int svd_method);
 
 SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend backend);
+
+void reset_rsvd_audit_summary();
+void record_rsvd_audit_result(const SVDResult& result, bool failure = false);
+RSVDAuditSummary current_rsvd_audit_summary();
 
 SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt);
 SVDResult truncated_svd_cpu_irlba(const Mat& A, int k, const SVDOptions& opt);

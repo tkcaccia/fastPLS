@@ -13,6 +13,25 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// rsvd_audit_reset_debug
+void rsvd_audit_reset_debug();
+RcppExport SEXP _fastPLS_rsvd_audit_reset_debug() {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rsvd_audit_reset_debug();
+    return R_NilValue;
+END_RCPP
+}
+// rsvd_audit_summary_debug
+Rcpp::List rsvd_audit_summary_debug();
+RcppExport SEXP _fastPLS_rsvd_audit_summary_debug() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(rsvd_audit_summary_debug());
+    return rcpp_result_gen;
+END_RCPP
+}
 // label_crossprod_scaled_cpp
 List label_crossprod_scaled_cpp(SEXP XtrainSEXP, Rcpp::IntegerVector y, int n_classes, int scaling);
 RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP XtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP scalingSEXP) {
@@ -1033,6 +1052,8 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fastPLS_rsvd_audit_reset_debug", (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug, 0},
+    {"_fastPLS_rsvd_audit_summary_debug", (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug, 0},
     {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
     {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},

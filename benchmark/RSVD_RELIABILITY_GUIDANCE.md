@@ -44,13 +44,43 @@ These results guide settings but are not a universal guarantee.
 
 The release-candidate multi-seed audit subsequently found that oversampling 10
 with two power iterations failed 5 of 255 component-level checks across seeds
-1, 7, 19, 43, and 123. Oversampling 20 with two power iterations met all 585
-CPU checks and all 40 CUDA checks. Accordingly, the public CPU and CUDA default is oversampling 20 with
-two power iterations. A configuration outside the exact audited combinations emits a
-warning and is identified as unqualified in model diagnostics. Metal rSVD is
+1, 7, 19, 43, and 123. CPU therefore starts from oversampling 20 with two power
+iterations and applies a case-specific audit, adaptive retries, and
+deterministic recovery. The wider controlled-shape study showed that CUDA 20/2
+was not sufficiently reliable; CUDA now enforces a safety floor of oversampling
+48 with four power iterations, which met all 174 CUDA runs across three seeds
+in the controlled shape panel. Metal rSVD is
 also identified as unqualified until a dedicated audit is available. The
 release qualification repeats randomized fits across multiple seeds; a single
-fixed seed is insufficient for a general reliability claim.
+fixed seed is insufficient for a general reliability claim. Subsequent wider
+shape sweeps showed that panel-level controls do not certify a new matrix.
+
+After adding CPU case auditing, independent-sketch consensus, and deterministic
+recovery, all 174 CPU and all 174 CUDA controlled-shape runs met the
+prespecified tolerances. The automatic-route subset comprised 138 CPU and 138
+CUDA runs, resolving all 73 failures in the former 276-run automatic panel.
+CPU recovery was used in 30 of 174 runs and is reported explicitly; CUDA's
+174/174 result is panel evidence rather than a per-fit certificate.
+
+## Per-fit safeguards
+
+CPU float64 rSVD now orthonormalizes both sides of every subspace iteration and
+audits every requested decomposition. The audit checks normalized left and
+right singular-triplet residuals and searches the orthogonal complement for a
+missed direction. An omitted-to-retained boundary ratio above 0.95 is treated
+as weak separation: even an accurate randomized subspace may then choose a
+seed-dependent direction that differs from deterministic sequential SIMPLS.
+The solver automatically retries with at least 32 oversampling directions and
+three power iterations, then 48 and four. For a weak boundary, two independent
+strengthened sketches must agree on the retained subspace and singular values.
+If neither the direct audit nor this consensus criterion is met, CPU execution
+replaces only that direction with IRLBA.
+Matrix-free SIMPLS applies the same rule. The recovery and effective controls
+are recorded in `diagnostics$rsvd$case_audit`; they are not silent.
+
+Routes that do not yet expose this case-specific certificate are marked
+unverified and emit a warning. A successful historical panel is reported as
+validation evidence only, never as a universal guarantee.
 
 ## Choosing IRLBA
 

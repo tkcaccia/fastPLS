@@ -177,11 +177,13 @@ predictor-space variance summaries.
 kernel settings and execution metadata.
 \item \code{diagnostics}: numerical solver diagnostics. For rSVD this records the
 structural-check status, finiteness, requested and effective component
-counts, randomized controls, and whether those controls were qualified on
-a prespecified validation panel. SIMPLS-family fits additionally record
+counts and randomized controls. CPU float64 rSVD fits also record each
+case-specific residual audit, strengthened retry, and deterministic
+recovery. Panel evidence is reported separately and is not interpreted
+as general-use certification. SIMPLS-family fits additionally record
 the active \code{fresh_per_component} direction rule and the retained and
-abandoned execution optimizations. Even a qualified configuration is not
-a case-specific audit and is not evidence of deterministic equivalence.
+abandoned execution optimizations. Accelerator and float32 routes that do
+not yet expose the same certificate warn and are marked unverified.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
@@ -269,7 +271,7 @@ fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
            svd.method = "rsvd", return_variance = FALSE)
 head(predict(fit, X)$Ypred)
 
-cv <- pls.single.cv(X, y, ncomp = 1:2, kfold = 3, method = "simpls",
+cv <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
                     backend = "cpu", svd.method = "rsvd", seed = 1)
 fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 cv$best_ncomp
