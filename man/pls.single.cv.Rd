@@ -5,28 +5,28 @@
 \title{Single cross-validation for PLS component optimization}
 \usage{
 pls.single.cv(
-  Xdata,
-  Ydata,
-  ncomp = 2,
-  constrain = NULL,
-  scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = NULL,
-  svd.method = c("rsvd", "irlba"),
-  seed = 1L,
-  kfold = 10,
-  north = 1L,
-  kernel = c("linear", "rbf", "poly"),
-  gamma = NULL,
-  degree = 3L,
-  coef0 = 1,
-  classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
-  fit = TRUE,
-  bycol = FALSE,
-  xprod = NULL,
-  selection_metric = "auto",
-  ...
+    Xdata,
+    Ydata,
+    ncomp = 2,
+    constrain = NULL,
+    scaling = c("centering", "autoscaling", "none"),
+    method = c("simpls", "plssvd", "opls", "kernelpls"),
+    backend = NULL,
+    svd.method = c("rsvd", "irlba"),
+    seed = 1L,
+    kfold = 10,
+    north = 1L,
+    kernel = c("linear", "rbf", "poly"),
+    gamma = NULL,
+    degree = 3L,
+    coef0 = 1,
+    classifier = c("argmax", "lda"),
+    lda_ridge = NULL,
+    fit = TRUE,
+    bycol = FALSE,
+    xprod = NULL,
+    selection_metric = "auto",
+    ...
 )
 }
 \arguments{
@@ -168,7 +168,7 @@ idx <- c(seq_len(12), 51:62, 101:112)
 X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
 opt <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
-                     backend = "cpu", svd.method = "rsvd", seed = 1)
+                        backend = "cpu", svd.method = "rsvd", seed = 1)
 opt$best_ncomp
 opt_kernel <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3,
                             method = "kernelpls", backend = "cpu",

@@ -13,14 +13,39 @@ expected_float32_cpu_backend <- function() {
   }
 }
 
-test_that("native Windows float32 entry points fail with a platform message", {
+test_that("Windows float32 argmax uses the portable compiled entry point", {
   skip_if_not_installed("float")
   skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
   scores <- float::fl(matrix(c(1, 3, 2, 4), nrow = 2L))
-  expect_error(
-    fastPLS:::float32_argmax_cpp(scores),
-    "not available on Windows"
+  expect_identical(fastPLS:::float32_argmax_cpp(scores), c(2L, 2L))
+})
+
+test_that("portable float32 OPLS and LDA helpers retain single precision", {
+  skip_if_not_installed("float")
+  set.seed(148)
+  X <- float::fl(matrix(rnorm(72L * 8L), 72L, 8L))
+  y <- factor(rep(letters[1:3], each = 24L))
+  Y <- float::fl(fastPLS:::transformy(y))
+
+  filtered <- fastPLS:::.float32_portable_opls_filter(
+    X, Y, north = 1L, scaling = 1L,
+    rsvd_oversample = 8L, rsvd_power = 2L, seed = 148L
   )
+  reapplied <- fastPLS:::.float32_portable_opls_apply(
+    X, filtered$mX, filtered$vX, filtered$W_orth, filtered$P_orth
+  )
+  expect_true(inherits(filtered$X, "float32"))
+  expect_true(inherits(reapplied, "float32"))
+  expect_equal(dim(reapplied), dim(X))
+
+  scores <- filtered$X[, 1:3, drop = FALSE]
+  lda <- fastPLS:::.float32_portable_lda_train_prefix(
+    scores, as.integer(y), n_classes = 3L, ncomp = c(1L, 3L)
+  )
+  pred <- fastPLS:::.float32_portable_lda_predict(scores, lda[["3"]])
+  expect_true(inherits(lda[["3"]]$linear, "float32"))
+  expect_true(inherits(pred$scores, "float32"))
+  expect_length(pred$pred, nrow(X))
 })
 
 test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
@@ -56,6 +81,29 @@ test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
     ),
     "backend = 'cpu'"
   )
+})
+
+test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
+  skip_if_not_installed("float")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  set.seed(1491)
+  train <- sample(seq_len(nrow(iris)), 105L)
+  Xtrain <- float::fl(as.matrix(iris[train, 1:4]))
+  Xtest <- float::fl(as.matrix(iris[-train, 1:4]))
+  ytrain <- droplevels(iris$Species[train])
+  ytest <- factor(iris$Species[-train], levels = levels(ytrain))
+
+  for (method in c("opls", "kernelpls")) {
+    fit <- suppressWarnings(pls(
+      Xtrain, ytrain, Xtest, ytest,
+      ncomp = 2L, method = method, kernel = "rbf", north = 1L,
+      backend = "cpu", svd.method = "rsvd", classifier = "lda",
+      return_variance = FALSE, seed = 1491L
+    ))
+    expect_identical(attr(fit, "fastPLS_internal")$precision, "float32")
+    expect_true(is.factor(fit$Ypred[[1L]]))
+    expect_true(all(is.finite(fit$accuracy)))
+  }
 })
 
 test_that("portable Windows float32 SVD fallback returns float32 vectors", {
@@ -593,7 +641,7 @@ test_that("float32 OPLS supports regression, classification, and independent pre
   expect_true(all(vapply(reg32$Ypred, inherits, logical(1L), "float32")))
 })
 
-test_that("float32 kernel PLS supports linear, RBF, and polynomial kernels", {
+test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   set.seed(133)
@@ -607,13 +655,13 @@ test_that("float32 kernel PLS supports linear, RBF, and polynomial kernels", {
     fit32 <- pls(
       float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
       ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
-      svd.method = "rsvd", classifier = "argmax", return_variance = FALSE,
+      svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
       seed = 14
     )
     fit64 <- pls(
       Xtrain, ytrain, Xtest, ytest,
       ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
-      svd.method = "rsvd", classifier = "argmax", return_variance = FALSE,
+      svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
       seed = 14
     )
     expect_identical(attr(fit32, "fastPLS_internal")$precision, "float32")
@@ -637,13 +685,14 @@ test_that("float32 OPLS and kernel PLS use Metal when available", {
 
   opls_fit <- pls(
     X, y, X[1:12, ], y[1:12], ncomp = 2, method = "opls",
-    backend = "metal", svd.method = "rsvd", return_variance = FALSE,
+    backend = "metal", svd.method = "rsvd", classifier = "lda",
+    return_variance = FALSE,
     seed = 15
   )
   kernel_fit <- pls(
     X, y, X[1:12, ], y[1:12], ncomp = 2, method = "kernelpls",
     kernel = "rbf", backend = "metal", svd.method = "rsvd",
-    return_variance = FALSE, seed = 15
+    classifier = "lda", return_variance = FALSE, seed = 15
   )
   expect_identical(attr(opls_fit, "fastPLS_internal")$precision, "float32")
   expect_identical(attr(kernel_fit, "fastPLS_internal")$precision, "float32")
@@ -664,7 +713,7 @@ test_that("float32 OPLS and kernel PLS use CUDA when available", {
     fit <- pls(
       X, y, X[1:12, ], y[1:12], ncomp = 2, method = method,
       kernel = "rbf", backend = "cuda", svd.method = "rsvd",
-      return_variance = FALSE, seed = 16
+      classifier = "lda", return_variance = FALSE, seed = 16
     )
     expect_identical(attr(fit, "fastPLS_internal")$precision, "float32")
     expect_true(is.factor(fit$Ypred[[1L]]))

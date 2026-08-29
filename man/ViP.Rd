@@ -19,6 +19,6 @@ Computes VIP trajectories from fitted model components.
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y, ncomp = 1, method = "plssvd", backend = "cpu",
-           svd.method = "rsvd", return_variance = FALSE)
+            svd.method = "rsvd", return_variance = FALSE)
 ViP(fit)
 }

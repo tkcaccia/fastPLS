@@ -5,39 +5,42 @@
 \title{Partial Least Squares with selectable model family and backend}
 \usage{
 pls(
-  Xtrain,
-  Ytrain,
-  Xtest = NULL,
-  Ytest = NULL,
-  ncomp = 2,
-  scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd", "opls", "kernelpls"),
-  svd.method = c("rsvd", "irlba"),
-  classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
-  fit = FALSE,
-  bycol = FALSE,
-  return_variance = TRUE,
-  return_loadings = FALSE,
-  proj = FALSE,
-  perm.test = FALSE,
-  times = 100,
-  backend = NULL,
-  north = 1L,
-  kernel = c("linear", "rbf", "poly"),
-  gamma = NULL,
-  degree = 3L,
-  coef0 = 1,
-  ...
+    Xtrain,
+    Ytrain,
+    Xtest = NULL,
+    Ytest = NULL,
+    ncomp = 2,
+    scaling = c("centering", "autoscaling", "none"),
+    method = c("simpls", "plssvd", "opls", "kernelpls"),
+    svd.method = c("rsvd", "irlba"),
+    classifier = c("argmax", "lda"),
+    lda_ridge = NULL,
+    fit = FALSE,
+    bycol = FALSE,
+    return_variance = TRUE,
+    return_loadings = FALSE,
+    proj = FALSE,
+    perm.test = FALSE,
+    times = 100,
+    backend = NULL,
+    north = 1L,
+    kernel = c("linear", "rbf", "poly"),
+    gamma = NULL,
+    degree = 3L,
+    coef0 = 1,
+    ...
 )
 }
 \arguments{
-\item{Xtrain}{Numeric training predictor matrix, or a \code{float::float32}
-predictor matrix for the supported float32 route.}
+\item{Xtrain}{Numeric training predictor matrix, a \code{float::float32}
+predictor matrix for the supported float32 route, or a
+\code{Biobase::ExpressionSet}. ExpressionSet assay rows are treated as
+variables and columns as samples.}
 
 \item{Ytrain}{Training response (numeric or factor).}
 
-\item{Xtest}{Optional test predictor matrix.}
+\item{Xtest}{Optional test predictor matrix or
+\code{Biobase::ExpressionSet}.}
 
 \item{Ytest}{Optional test response for independent-test \code{Q2Y}, whose
 denominator uses the training-response mean.}
@@ -216,6 +219,15 @@ PLS-SVD warns about observed performance/memory risk and SIMPLS-derived
 routes warn that the validation regime failed numerically or
 computationally. Unsupported combinations stop before allocation.
 
+On Windows, \code{backend = "cpu"} and \code{svd.method = "rsvd"} use a
+portable single-precision route because the standard Windows R toolchain does
+not expose the single-precision BLAS/LAPACK symbols used by the Unix-like
+compiled kernels. This route supports PLS-SVD, SIMPLS, OPLS, linear and
+nonlinear kernel PLS, argmax, and latent-space LDA. Model factors, kernel
+matrices, LDA buffers, and predictions remain float32. Windows float32
+accelerator and IRLBA requests stop rather than silently converting to
+float64.
+
 For a factor response with \eqn{C} levels, centred dummy coding has rank at
 most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
 component count at \eqn{C-1}. The requested PLS estimator is always
@@ -268,7 +280,7 @@ fallback, not a fitted hyperparameter. Prediction uses
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
-           svd.method = "rsvd", return_variance = FALSE)
+            svd.method = "rsvd", return_variance = FALSE)
 head(predict(fit, X)$Ypred)
 
 cv <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",

@@ -5,31 +5,31 @@
 \title{Nested cross-validation for PLS}
 \usage{
 pls.double.cv(
-  Xdata,
-  Ydata,
-  ncomp = 2,
-  constrain = seq_len(nrow(Xdata)),
-  scaling = c("centering", "autoscaling", "none"),
-  method = c("simpls", "plssvd", "opls", "kernelpls"),
-  backend = NULL,
-  svd.method = c("rsvd", "irlba"),
-  seed = 1L,
-  perm.test = FALSE,
-  times = 100,
-  runn = 1,
-  kfold_inner = 10,
-  kfold_outer = 10,
-  north = 1L,
-  kernel = c("linear", "rbf", "poly"),
-  gamma = NULL,
-  degree = 3L,
-  coef0 = 1,
-  classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
-  bycol = FALSE,
-  xprod = NULL,
-  selection_metric = "auto",
-  ...
+    Xdata,
+    Ydata,
+    ncomp = 2,
+    constrain = seq_len(nrow(Xdata)),
+    scaling = c("centering", "autoscaling", "none"),
+    method = c("simpls", "plssvd", "opls", "kernelpls"),
+    backend = NULL,
+    svd.method = c("rsvd", "irlba"),
+    seed = 1L,
+    perm.test = FALSE,
+    times = 100,
+    runn = 1,
+    kfold_inner = 10,
+    kfold_outer = 10,
+    north = 1L,
+    kernel = c("linear", "rbf", "poly"),
+    gamma = NULL,
+    degree = 3L,
+    coef0 = 1,
+    classifier = c("argmax", "lda"),
+    lda_ridge = NULL,
+    bycol = FALSE,
+    xprod = NULL,
+    selection_metric = "auto",
+    ...
 )
 }
 \arguments{
@@ -188,7 +188,7 @@ idx <- c(seq_len(10), 51:60, 101:110)
 X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
 dcv <- pls.double.cv(X, y, ncomp = seq_len(2), runn = 1, kfold_inner = 2,
-                     kfold_outer = 2, method = "simpls", backend = "cpu",
-                     svd.method = "rsvd", seed = 1)
+                        kfold_outer = 2, method = "simpls", backend = "cpu",
+                        svd.method = "rsvd", seed = 1)
 names(dcv)
 }

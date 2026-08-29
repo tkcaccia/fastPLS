@@ -5,14 +5,14 @@
 \title{Plot PLS latent scores}
 \usage{
 \method{plot}{fastPLS}(
-  x,
-  comps = c(1L, 2L),
-  groups = NULL,
-  score.set = c("auto", "train", "test"),
-  ellipse = FALSE,
-  ellipse.type = c("confidence", "hotelling"),
-  conf = 0.95,
-  ...
+    x,
+    comps = c(1L, 2L),
+    groups = NULL,
+    score.set = c("auto", "train", "test"),
+    ellipse = FALSE,
+    ellipse.type = c("confidence", "hotelling"),
+    conf = 0.95,
+    ...
 )
 }
 \arguments{
@@ -46,6 +46,6 @@ it was requested during model fitting.
 \examples{
 X <- as.matrix(iris[, seq_len(4)])
 fit <- pls(X, iris$Species, ncomp = 2, fit = TRUE,
-           return_variance = TRUE, seed = 1)
+            return_variance = TRUE, seed = 1)
 plot(fit, groups = iris$Species, ellipse = TRUE)
 }

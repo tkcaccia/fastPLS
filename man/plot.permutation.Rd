@@ -5,15 +5,15 @@
 \title{Plot PLS permutation-test R2 and Q2 values}
 \usage{
 \method{plot}{permutation}(
-  x,
-  ncomp = NULL,
-  main = NULL,
-  xlab = "Cor",
-  ylab = "Value",
-  col = c(R2 = "#3155B7", Q2 = "#E5332A"),
-  pch = c(R2 = 16, Q2 = 15),
-  legend_position = "bottomright",
-  ...
+    x,
+    ncomp = NULL,
+    main = NULL,
+    xlab = "Cor",
+    ylab = "Value",
+    col = c(R2 = "#3155B7", Q2 = "#E5332A"),
+    pch = c(R2 = 16, Q2 = 15),
+    legend_position = "bottomright",
+    ...
 )
 }
 \arguments{
@@ -45,6 +45,6 @@ X <- as.matrix(iris[, seq_len(4)])
 y <- iris$Sepal.Length
 idx <- sample(seq_len(nrow(X)), 30)
 fit <- pls(X[idx, ], y[idx], X[idx, ], y[idx],
-           ncomp = 2, perm.test = TRUE, times = 5)
+            ncomp = 2, perm.test = TRUE, times = 5)
 plot.permutation(fit)
 }

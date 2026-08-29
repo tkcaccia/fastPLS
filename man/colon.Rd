@@ -41,8 +41,8 @@ dim(colon$X)
 table(colon$y)
 
 fit <- pls(colon$X[, 1:100], colon$y, ncomp = 1, method = "plssvd",
-           backend = "cpu", svd.method = "rsvd",
-           return_variance = FALSE)
+            backend = "cpu", svd.method = "rsvd",
+            return_variance = FALSE)
 head(fit$Ypred)
 }
 \keyword{datasets}

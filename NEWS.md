@@ -1,3 +1,16 @@
+# fastPLS 0.99.28
+
+* Added direct support for `Biobase::ExpressionSet` predictor inputs in
+  `pls()` and `predict()`. Assay rows are interpreted as variables and assay
+  columns as samples, and are transposed internally to the sample-by-variable
+  layout used by fastPLS.
+
+* Added a Bioconductor-native classification example to the package vignette
+  and expanded automated tests for fitting and predicting from
+  `ExpressionSet` objects.
+
+* Reformatted R and vignette sources to improve Bioconductor style compliance.
+
 # fastPLS 0.99.25
 
 * Synchronized the exported API, vignette, manual, README, and manuscript

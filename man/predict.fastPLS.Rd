@@ -7,16 +7,16 @@
 \title{Predict from fitted fastPLS models}
 \usage{
 \method{predict}{fastPLS}(
-  object,
-  newdata,
-  Ytest = NULL,
-  proj = FALSE,
-  backend = NULL,
-  flash.block_size = NULL,
-  top = 1L,
-  top5 = FALSE,
-  raw_scores = FALSE,
-  ...
+    object,
+    newdata,
+    Ytest = NULL,
+    proj = FALSE,
+    backend = NULL,
+    flash.block_size = NULL,
+    top = 1L,
+    top5 = FALSE,
+    raw_scores = FALSE,
+    ...
 )
 
 \method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE, ...)
@@ -65,7 +65,7 @@ predictions or classification labels.
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
-           svd.method = "rsvd", return_variance = FALSE)
+            svd.method = "rsvd", return_variance = FALSE)
 pred <- predict(fit, X[seq_len(3), , drop = FALSE])
 pred$Ypred
 }

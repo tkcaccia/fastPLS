@@ -3,14 +3,14 @@
 \title{Evaluate prediction performance}
 \usage{
 evaluate(
-  observed,
-  predicted,
-  task = c("auto", "classification", "regression"),
-  ytrain = NULL,
-  top_k = c(1L, 5L),
-  bycol = TRUE,
-  relative_epsilon = .Machine$double.eps,
-  na.rm = TRUE
+    observed,
+    predicted,
+    task = c("auto", "classification", "regression"),
+    ytrain = NULL,
+    top_k = c(1L, 5L),
+    bycol = TRUE,
+    relative_epsilon = .Machine$double.eps,
+    na.rm = TRUE
 )
 }
 \arguments{

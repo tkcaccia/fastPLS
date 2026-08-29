@@ -3,21 +3,21 @@
 \title{Singular value decomposition through fastPLS backends}
 \usage{
 fastsvd(
-  x,
-  nu = NULL,
-  nv = NULL,
-  ncomp = NULL,
-  backend = NULL,
-  method = c("rsvd", "irlba"),
-  oversample = 20L,
-  power = 2L,
-  svds_tol = 0,
-  work = 0L,
-  maxit = 1000L,
-  tol = 1e-05,
-  eps = 1e-09,
-  svtol = 1e-05,
-  seed = 1L
+    x,
+    nu = NULL,
+    nv = NULL,
+    ncomp = NULL,
+    backend = NULL,
+    method = c("rsvd", "irlba"),
+    oversample = 20L,
+    power = 2L,
+    svds_tol = 0,
+    work = 0L,
+    maxit = 1000L,
+    tol = 1e-05,
+    eps = 1e-09,
+    svtol = 1e-05,
+    seed = 1L
 )
 }
 \arguments{

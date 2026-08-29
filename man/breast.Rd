@@ -41,9 +41,9 @@ dim(breast$X_train)
 table(breast$y_train)
 
 fit <- pls(breast$X_train[, 1:50], breast$y_train,
-           breast$X_test[, 1:50], ncomp = 2, method = "simpls",
-           backend = "cpu", svd.method = "rsvd",
-           return_variance = FALSE)
+            breast$X_test[, 1:50], ncomp = 2, method = "simpls",
+            backend = "cpu", svd.method = "rsvd",
+            return_variance = FALSE)
 head(fit$Ypred)
 }
 \keyword{datasets}

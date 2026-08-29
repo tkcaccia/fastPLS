@@ -2,15 +2,16 @@
 title: "fastPLS Public API and Implementation"
 output: BiocStyle::html_document
 header-includes:
-  - \usepackage{array}
+    - \usepackage{array}
 vignette: >
-  %\VignetteIndexEntry{fastPLS Public API and Implementation}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+    %\VignetteIndexEntry{fastPLS Public API and Implementation}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(fastPLS)
 ```
 
 ## Overview
@@ -50,6 +51,33 @@ argument, R option, environment variable, then CPU. An explicitly requested
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check whether Apple Metal-native fastPLS support is available. |
+
+### Bioconductor data containers
+
+`pls()` and `predict()` accept a `Biobase::ExpressionSet` directly. Expression
+measurements are stored as variables by samples in an `ExpressionSet`, so
+fastPLS transposes the assay internally to its samples-by-variables layout.
+The following example predicts the case-control phenotype in the Biobase
+example data while keeping the test samples separate from model fitting.
+
+```{r biobase-expression-set}
+data("sample.ExpressionSet", package = "Biobase")
+y_bioc <- factor(Biobase::pData(sample.ExpressionSet)$type)
+
+set.seed(42)
+test_bioc <- sample(seq_len(ncol(sample.ExpressionSet)), 8)
+fit_bioc <- pls(
+    sample.ExpressionSet[, -test_bioc],
+    y_bioc[-test_bioc],
+    sample.ExpressionSet[, test_bioc],
+    y_bioc[test_bioc],
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cpu",
+    seed = 42
+)
+fit_bioc$accuracy
+```
 
 A practical starting point is:
 
@@ -95,11 +123,13 @@ than silently falling back.
 | Latent-space LDA | Validated compiled Cholesky route | Supported CUDA route with diagnostics | Hybrid: Metal score projection and CPU LDA |
 | IRLBA solver | Supported | Unavailable | Unavailable |
 
-Float32 support is narrower and platform dependent, as described in the
-Float32 Input section. In particular, Windows float32 OPLS, nonlinear kernel
-PLS, and LDA are unavailable. Fitted objects retain route diagnostics so an
-approximate or hybrid execution is not presented as deterministic equivalence
-or full device residency.
+Float32 support is route and platform dependent, as described in the Float32
+Input section. OPLS, nonlinear kernel PLS, and latent-space LDA accept float32
+inputs on supported CPU, CUDA, and Metal routes. Accelerator OPLS and nonlinear
+kernel PLS retain host stages, and Metal LDA is hybrid. Windows uses portable
+CPU float32 implementations for these operations. Fitted objects retain route
+diagnostics so an approximate or hybrid execution is not presented as
+deterministic equivalence or full device residency.
 
 ## Implementation Summary
 
@@ -267,8 +297,6 @@ section use the `iris` data for compact classification examples and the bundled
 `colon` and `breast` omics datasets for score plots.
 
 ```{r chunk-002}
-library(fastPLS)
-
 set.seed(100)
 X <- as.matrix(iris[, c("Sepal.Width", "Petal.Length", "Petal.Width")])
 Y_cls <- iris$Species
@@ -288,14 +316,14 @@ the largest PLS-DA response score.
 
 ```{r chunk-003}
 fit_cls <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  fit = TRUE,
-  return_variance = FALSE,
-  seed = 101
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    fit = TRUE,
+    return_variance = FALSE,
+    seed = 101
 )
 
 fit_cls$accuracy
@@ -311,21 +339,21 @@ create that ranking.
 
 ```{r chunk-004}
 fit_cls_train_only <- pls(
-  Xtrain,
-  Ytrain_cls,
-  ncomp = 1:2,
-  classifier = "lda",
-  fit = TRUE,
-  return_variance = FALSE,
-  seed = 101
+    Xtrain,
+    Ytrain_cls,
+    ncomp = 1:2,
+    classifier = "lda",
+    fit = TRUE,
+    return_variance = FALSE,
+    seed = 101
 )
 
 pred_cls_later <- predict(
-  fit_cls_train_only,
-  Xtest,
-  Ytest = Ytest_cls,
-  top = 2,
-  raw_scores = TRUE
+    fit_cls_train_only,
+    Xtest,
+    Ytest = Ytest_cls,
+    top = 2,
+    raw_scores = TRUE
 )
 
 pred_cls_later$accuracy
@@ -344,8 +372,8 @@ metrics, and the confusion matrix.
 
 ```{r chunk-005}
 eval_cls <- evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls$Ypred[["ncomp=2"]]
+    observed = Ytest_cls,
+    predicted = fit_cls$Ypred[["ncomp=2"]]
 )
 
 eval_cls
@@ -376,9 +404,9 @@ highest-scoring alternatives.
 score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
 
 evaluate(
-  observed = Ytest_cls,
-  predicted = score_last,
-  top_k = c(1, 2)
+    observed = Ytest_cls,
+    predicted = score_last,
+    top_k = c(1, 2)
 )
 ```
 
@@ -392,20 +420,20 @@ responses are predicted directly as continuous values.
 
 ```{r chunk-008}
 fit_cls_plssvd <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  seed = 100
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "plssvd",
+    seed = 100
 )
 
 head(fit_cls_plssvd$Ypred)
 
 evaluate(
-  observed = Ytest_cls,
-  predicted = fit_cls_plssvd$Ypred[["ncomp=2"]]
+    observed = Ytest_cls,
+    predicted = fit_cls_plssvd$Ypred[["ncomp=2"]]
 )$confusion
 ```
 
@@ -415,14 +443,14 @@ with GPU support, the backend is selected through `backend = "cuda"` or
 
 ```{r chunk-009, eval = FALSE}
 fit_cls_lda_gpu <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  backend = "cuda",
-  classifier = "lda"
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "plssvd",
+    backend = "cuda",
+    classifier = "lda"
 )
 ```
 
@@ -430,14 +458,14 @@ When a GPU backend is unavailable, the compiled CPU fallback is:
 
 ```{r chunk-010}
 fit_cls_lda_cpu <- pls(
-  Xtrain,
-  Ytrain_cls,
-  Xtest,
-  Ytest_cls,
-  ncomp = 1:2,
-  method = "plssvd",
-  seed = 100,
-  classifier = "lda"
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
+    ncomp = 1:2,
+    method = "plssvd",
+    seed = 100,
+    classifier = "lda"
 )
 
 head(fit_cls_lda_cpu$Ypred)
@@ -452,19 +480,19 @@ the `poly` kernel uses polynomial interactions among features.
 
 ```{r chunk-012}
 kernel_fits <- lapply(c("linear", "rbf", "poly"), function(k) {
-  pls(
+    pls(
     Xtrain, Ytrain_cls, Xtest, Ytest_cls,
     ncomp = 1:2,
     method = "kernelpls",
     kernel = k,
     degree = 2,
     seed = 102
-  )
+    )
 })
 names(kernel_fits) <- c("linear", "rbf", "poly")
 
 kernel_accuracy <- vapply(kernel_fits, function(fit) {
-  mean(fit$Ypred[["ncomp=2"]] == Ytest_cls)
+    mean(fit$Ypred[["ncomp=2"]] == Ytest_cls)
 }, numeric(1))
 kernel_accuracy
 ```
@@ -489,17 +517,17 @@ set.seed(200)
 X_two <- as.matrix(colon$X)
 y_two <- colon$y
 train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
-  sample(i, floor(0.7 * length(i)))
+    sample(i, floor(0.7 * length(i)))
 }))
 
 fit_two <- pls(
-  X_two[train_two, , drop = FALSE], y_two[train_two],
-  X_two[-train_two, , drop = FALSE], y_two[-train_two],
-  ncomp = 1:2, fit = TRUE, proj = TRUE, seed = 200
+    X_two[train_two, , drop = FALSE], y_two[train_two],
+    X_two[-train_two, , drop = FALSE], y_two[-train_two],
+    ncomp = 1:2, fit = TRUE, proj = TRUE, seed = 200
 )
 
 plot(fit_two, score.set = "train", groups = y_two[train_two],
-     ellipse = TRUE, main = "Colon, two classes")
+        ellipse = TRUE, main = "Colon, two classes")
 ```
 
 The second score-plot example uses a bundled three-subtype breast-cancer
@@ -514,33 +542,33 @@ X_three_test <- as.matrix(breast$X_test)
 y_three_test <- breast$y_test
 
 opls_three <- pls(
-  X_three,
-  y_three,
-  X_three_test,
-  y_three_test,
-  ncomp = 1:2,
-  method = "opls",
-  fit = TRUE,
-  proj = TRUE,
-  north = 2L,
-  seed = 201
+    X_three,
+    y_three,
+    X_three_test,
+    y_three_test,
+    ncomp = 1:2,
+    method = "opls",
+    fit = TRUE,
+    proj = TRUE,
+    north = 2L,
+    seed = 201
 )
 
 old_par <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2.2, 0.8))
 plot(
-  opls_three,
-  score.set = "train",
-  groups = y_three,
-  ellipse = TRUE,
-  ellipse.type = "hotelling",
-  main = "OPLS training, north = 2"
+    opls_three,
+    score.set = "train",
+    groups = y_three,
+    ellipse = TRUE,
+    ellipse.type = "hotelling",
+    main = "OPLS training, north = 2"
 )
 plot(
-  opls_three,
-  score.set = "test",
-  groups = opls_three$Ypred[["ncomp=2"]],
-  xlim = c(-0.16, 0.42),
-  main = "OPLS test prediction"
+    opls_three,
+    score.set = "test",
+    groups = opls_three$Ypred[["ncomp=2"]],
+    xlim = c(-0.16, 0.42),
+    main = "OPLS test prediction"
 )
 par(old_par)
 ```
@@ -573,14 +601,14 @@ test-set predictions and, if `Ytest` is supplied, predictive metrics.
 
 ```{r chunk-017}
 fit_reg <- pls(
-  Xreg_train,
-  Ytrain_reg,
-  Xreg_test,
-  Ytest_reg,
-  ncomp = 1:3,
-  svd.method = "irlba",
-  fit = TRUE,
-  return_variance = FALSE
+    Xreg_train,
+    Ytrain_reg,
+    Xreg_test,
+    Ytest_reg,
+    ncomp = 1:3,
+    svd.method = "irlba",
+    fit = TRUE,
+    return_variance = FALSE
 )
 
 fit_reg$Q2Y
@@ -611,22 +639,25 @@ combinations stop before allocation and are never silently promoted to
 float64.
 
 On Windows, the standard R toolchain does not expose the single-precision
-BLAS/LAPACK symbols needed by the compiled float32 kernels. For this platform,
-fastPLS provides a portable CPU fallback for PLS-SVD and SIMPLS with
-`backend = "cpu"`, `svd.method = "rsvd"`, and `classifier = "argmax"`.
-It preserves float32 input, factors, and predictions, but is slower than the
-compiled CPU route. Windows float32 OPLS, nonlinear kernel-PLS, LDA, and
-accelerator backends currently return a clear unsupported-combination error.
+BLAS/LAPACK symbols used by the Unix-like compiled kernels. The Windows CPU
+route therefore combines float-package rSVD and Cholesky operations with
+portable C++ float kernels. It supports PLS-SVD, SIMPLS, OPLS, linear and
+nonlinear kernel PLS, argmax, and latent-space LDA when `backend = "cpu"` and
+`svd.method = "rsvd"`. Model factors, LDA buffers, kernel matrices, and
+predictions remain float32, but this experimental route can be slower than the
+native Unix-like implementation. Windows float32 accelerator requests and
+IRLBA requests stop with an unsupported-combination error rather than silently
+converting data to float64.
 
 ```{r chunk-018}
 Xreg32 <- float::fl(as.matrix(Xreg_train))
 Yreg32 <- float::fl(matrix(Ytrain_reg, ncol = 1))
 fit_reg32 <- pls(
-  Xreg32,
-  Yreg32,
-  float::fl(as.matrix(Xreg_test)),
-  float::fl(matrix(Ytest_reg, ncol = 1)),
-  ncomp = 1:2
+    Xreg32,
+    Yreg32,
+    float::fl(as.matrix(Xreg_test)),
+    float::fl(matrix(Ytest_reg, ncol = 1)),
+    ncomp = 1:2
 )
 fit_reg32$Q2Y
 ```
@@ -642,14 +673,14 @@ component count, for example `fit_reg$Q2Y["ncomp=3"]`.
 reg_component <- dim(fit_reg$Ypred)[3L]
 pred_mpg <- fit_reg$Ypred[, , reg_component]
 plot(
-  Ytest_reg,
-  pred_mpg,
-  pch = 21,
-  bg = "#4E79A7",
-  col = "black",
-  xlab = "Observed mpg",
-  ylab = "Predicted mpg",
-  main = "Regression: observed vs predicted"
+    Ytest_reg,
+    pred_mpg,
+    pch = 21,
+    bg = "#4E79A7",
+    col = "black",
+    xlab = "Observed mpg",
+    ylab = "Predicted mpg",
+    main = "Regression: observed vs predicted"
 )
 abline(0, 1, col = "#D55E00", lwd = 2)
 ```
@@ -661,18 +692,18 @@ stored in the fitted object.
 
 ```{r chunk-020}
 fit_reg_train_only <- pls(
-  Xreg_train,
-  Ytrain_reg,
-  ncomp = 1:3,
-  fit = TRUE,
-  return_variance = FALSE
+    Xreg_train,
+    Ytrain_reg,
+    ncomp = 1:3,
+    fit = TRUE,
+    return_variance = FALSE
 )
 
 pred_reg_later <- predict(
-  fit_reg_train_only,
-  Xreg_test,
-  Ytest = Ytest_reg,
-  proj = TRUE
+    fit_reg_train_only,
+    Xreg_test,
+    Ytest = Ytest_reg,
+    proj = TRUE
 )
 
 pred_reg_later$Q2Y
@@ -695,9 +726,9 @@ data with many response columns.
 
 ```{r chunk-021}
 eval_reg <- evaluate(
-  observed = Ytest_reg,
-  predicted = pred_mpg,
-  ytrain = Ytrain_reg
+    observed = Ytest_reg,
+    predicted = pred_mpg,
+    ytrain = Ytrain_reg
 )
 
 eval_reg
@@ -710,13 +741,13 @@ often used to separate predictive variation from response-orthogonal variation.
 
 ```{r chunk-022}
 fit_opls <- pls(
-  Xreg_train,
-  Ytrain_reg,
-  Xreg_test,
-  Ytest_reg,
-  ncomp = 1:2,
-  method = "opls",
-  seed = 101
+    Xreg_train,
+    Ytrain_reg,
+    Xreg_test,
+    Ytest_reg,
+    ncomp = 1:2,
+    method = "opls",
+    seed = 101
 )
 
 class(fit_opls)
@@ -740,12 +771,12 @@ example below validates a fixed two-component SIMPLS classifier with five folds.
 
 ```{r chunk-023}
 cv_kfold <- pls.single.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  ncomp = 2,
-  kfold = 5,
-  svd.method = "rsvd",
-  seed = 103
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    ncomp = 2,
+    kfold = 5,
+    svd.method = "rsvd",
+    seed = 103
 )
 
 cv_kfold$metrics$cross_validated[["ncomp=2"]]$metrics
@@ -770,17 +801,17 @@ never one in each.
 patient_id <- rep(seq_len(ceiling(nrow(Xtrain) / 2)), each = 2)[seq_len(nrow(Xtrain))]
 
 cv_grouped <- pls.single.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  constrain = patient_id,
-  ncomp = 2,
-  kfold = 4,
-  svd.method = "rsvd",
-  seed = 104
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    constrain = patient_id,
+    ncomp = 2,
+    kfold = 4,
+    svd.method = "rsvd",
+    seed = 104
 )
 
 c(n_folds = length(unique(cv_grouped$fold)),
-  n_patient_groups = length(unique(patient_id)))
+    n_patient_groups = length(unique(patient_id)))
 ```
 
 ### Leave-one-out CV and leave-one-group-out CV
@@ -794,17 +825,17 @@ as leave-one-group-out CV.
 
 ```{r chunk-025}
 cv_loocv <- pls.single.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  constrain = patient_id,
-  ncomp = 1,
-  kfold = "loocv",
-  svd.method = "rsvd",
-  seed = 105
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    constrain = patient_id,
+    ncomp = 1,
+    kfold = "loocv",
+    svd.method = "rsvd",
+    seed = 105
 )
 
 c(n_loocv_folds = length(unique(cv_loocv$fold)),
-  n_patient_groups = length(unique(patient_id)))
+    n_patient_groups = length(unique(patient_id)))
 ```
 
 ### Component and hyperparameter optimization CV
@@ -818,12 +849,12 @@ as `kfold` remain single settings for the whole CV run.
 
 ```{r chunk-026}
 cv_opt <- pls.single.cv(
-  Xdata = Xreg_train,
-  Ydata = Ytrain_reg,
-  ncomp = 1:3,
-  kfold = 5,
-  svd.method = "irlba",
-  maxit = 1000L
+    Xdata = Xreg_train,
+    Ydata = Ytrain_reg,
+    ncomp = 1:3,
+    kfold = 5,
+    svd.method = "irlba",
+    maxit = 1000L
 )
 
 cv_opt$best_ncomp
@@ -861,10 +892,10 @@ is appropriate when overall row-level correctness is the intended endpoint.
 
 ```{r chunk-027}
 data.frame(
-  ncomp = cv_opt$ncomp,
-  training_R2Y = round(cv_opt$R2Y, 3),
-  heldout_Q2Y = round(cv_opt$Q2Y, 3),
-  heldout_RMSD = round(cv_opt$RMSD, 3)
+    ncomp = cv_opt$ncomp,
+    training_R2Y = round(cv_opt$R2Y, 3),
+    heldout_Q2Y = round(cv_opt$Q2Y, 3),
+    heldout_RMSD = round(cv_opt$RMSD, 3)
 )
 ```
 
@@ -885,15 +916,15 @@ and Q2.
 
 ```{r chunk-028}
 perm_fit <- pls(
-  Xtrain = Xreg_train,
-  Ytrain = Ytrain_reg,
-  Xtest = Xreg_test,
-  Ytest = Ytest_reg,
-  ncomp = 2,
-  fit = TRUE,
-  perm.test = TRUE,
-  return_variance = FALSE,
-  seed = 108
+    Xtrain = Xreg_train,
+    Ytrain = Ytrain_reg,
+    Xtest = Xreg_test,
+    Ytest = Ytest_reg,
+    ncomp = 2,
+    fit = TRUE,
+    perm.test = TRUE,
+    return_variance = FALSE,
+    seed = 108
 )
 
 perm_fit$pval
@@ -920,22 +951,22 @@ from `B`, and summarized by `permutation_completed` and `permutation_failed`.
 
 ```{r chunk-029}
 dcv_perm <- pls.double.cv(
-  Xdata = Xreg_train[1:20, ],
-  Ydata = Ytrain_reg[1:20],
-  ncomp = 1:2,
-  kfold_inner = 2,
-  kfold_outer = 2,
-  svd.method = "rsvd",
-  perm.test = TRUE,
-  seed = 109
+    Xdata = Xreg_train[1:20, ],
+    Ydata = Ytrain_reg[1:20],
+    ncomp = 1:2,
+    kfold_inner = 2,
+    kfold_outer = 2,
+    svd.method = "rsvd",
+    perm.test = TRUE,
+    seed = 109
 )
 
 data.frame(
-  permutation_metric = dcv_perm$permutation_metric,
-  observed = dcv_perm$permutation_observed,
-  p_value = dcv_perm$p.value,
-  completed = dcv_perm$permutation_completed,
-  failed = dcv_perm$permutation_failed
+    permutation_metric = dcv_perm$permutation_metric,
+    observed = dcv_perm$permutation_observed,
+    p_value = dcv_perm$p.value,
+    completed = dcv_perm$permutation_completed,
+    failed = dcv_perm$permutation_failed
 )
 ```
 
@@ -943,16 +974,16 @@ For an imbalanced classification analysis, the corresponding call is:
 
 ```{r balanced-permutation-example, eval=FALSE}
 dcv_balanced <- pls.double.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  ncomp = 1:5,
-  kfold_inner = 5,
-  kfold_outer = 5,
-  constrain = patient_id,
-  selection_metric = "balanced_accuracy",
-  perm.test = TRUE,
-  times = 100,
-  seed = 109
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    ncomp = 1:5,
+    kfold_inner = 5,
+    kfold_outer = 5,
+    constrain = patient_id,
+    selection_metric = "balanced_accuracy",
+    perm.test = TRUE,
+    times = 100,
+    seed = 109
 )
 dcv_balanced$balanced_accuracy
 dcv_balanced$metrics$permutation
@@ -964,24 +995,24 @@ selected tuning settings, then applied to the independent test set.
 
 ```{r chunk-030}
 cv_select <- pls.single.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  ncomp = 1:3,
-  kfold = 5,
-  svd.method = "rsvd",
-  seed = 106
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    ncomp = 1:3,
+    kfold = 5,
+    svd.method = "rsvd",
+    seed = 106
 )
 
 fit_selected <- pls(
-  cv_select,
-  Xtest = Xtest,
-  Ytest = Ytest_cls,
-  return_variance = FALSE
+    cv_select,
+    Xtest = Xtest,
+    Ytest = Ytest_cls,
+    return_variance = FALSE
 )
 
 data.frame(
-  best_ncomp = cv_select$best_ncomp,
-  test_accuracy = mean(fit_selected$Ypred[[1]] == Ytest_cls)
+    best_ncomp = cv_select$best_ncomp,
+    test_accuracy = mean(fit_selected$Ypred[[1]] == Ytest_cls)
 )
 ```
 
@@ -991,28 +1022,28 @@ same CV object can be passed to `pls()` for the final refit.
 
 ```{r chunk-031}
 cv_kernel <- pls.single.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  ncomp = 1:3,
-  kfold = 5,
-  method = "kernelpls",
-  svd.method = "rsvd",
-  kernel = c("linear", "rbf"),
-  gamma = c(0.1, 1),
-  seed = 107
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    ncomp = 1:3,
+    kfold = 5,
+    method = "kernelpls",
+    svd.method = "rsvd",
+    kernel = c("linear", "rbf"),
+    gamma = c(0.1, 1),
+    seed = 107
 )
 
 fit_kernel <- pls(
-  cv_kernel,
-  Xtest = Xtest,
-  Ytest = Ytest_cls,
-  return_variance = FALSE
+    cv_kernel,
+    Xtest = Xtest,
+    Ytest = Ytest_cls,
+    return_variance = FALSE
 )
 
 data.frame(
-  best_ncomp = cv_kernel$best_parameters$ncomp,
-  best_kernel = cv_kernel$best_parameters$kernel,
-  test_accuracy = mean(fit_kernel$Ypred[[1]] == Ytest_cls)
+    best_ncomp = cv_kernel$best_parameters$ncomp,
+    best_kernel = cv_kernel$best_parameters$kernel,
+    test_accuracy = mean(fit_kernel$Ypred[[1]] == Ytest_cls)
 )
 ```
 
@@ -1036,22 +1067,22 @@ both respect `constrain`.
 
 ```{r chunk-032}
 cv_double <- pls.double.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  constrain = patient_id,
-  ncomp = 1:2,
-  kfold_inner = 3,
-  kfold_outer = 3,
-  svd.method = "rsvd",
-  seed = 104
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    constrain = patient_id,
+    ncomp = 1:2,
+    kfold_inner = 3,
+    kfold_outer = 3,
+    svd.method = "rsvd",
+    seed = 104
 )
 
 data.frame(
-  selected_ncomp_mode = cv_double$bcomp,
-  outer_metric = cv_double$metric_name,
-  outer_accuracy = cv_double$accuracy,
-  outer_Q2Y = cv_double$Q2Y,
-  outer_R2Y = cv_double$R2Y
+    selected_ncomp_mode = cv_double$bcomp,
+    outer_metric = cv_double$metric_name,
+    outer_accuracy = cv_double$accuracy,
+    outer_Q2Y = cv_double$Q2Y,
+    outer_R2Y = cv_double$R2Y
 )
 ```
 
@@ -1062,17 +1093,17 @@ outer fold.
 
 ```{r chunk-033}
 cv_double_kernel <- pls.double.cv(
-  Xdata = Xtrain,
-  Ydata = Ytrain_cls,
-  constrain = patient_id,
-  ncomp = 1:2,
-  kfold_inner = 3,
-  kfold_outer = 3,
-  method = "kernelpls",
-  svd.method = "rsvd",
-  kernel = c("linear", "rbf"),
-  gamma = c(0.1, 1),
-  seed = 108
+    Xdata = Xtrain,
+    Ydata = Ytrain_cls,
+    constrain = patient_id,
+    ncomp = 1:2,
+    kfold_inner = 3,
+    kfold_outer = 3,
+    method = "kernelpls",
+    svd.method = "rsvd",
+    kernel = c("linear", "rbf"),
+    gamma = c(0.1, 1),
+    seed = 108
 )
 
 cv_double_kernel$results[[1]]$best_parameters
@@ -1092,41 +1123,41 @@ The most commonly used `pls.double.cv()` output fields are:
 Important elements returned by `pls.double.cv()` are:
 
 - `results`: one entry per repeated outer CV run. Each entry stores `Ypred` and
-  `pred` for that run, the outer `fold` assignment, the `best_ncomp` selected
-  inside each outer fold, the full `best_parameters` selected inside each outer
-  fold, the complete inner-CV objects in `inner`, the run-level `metric_name`
-  and `metric_value`, and the fitted `backend` and `method`.
+    `pred` for that run, the outer `fold` assignment, the `best_ncomp` selected
+    inside each outer fold, the full `best_parameters` selected inside each outer
+    fold, the complete inner-CV objects in `inner`, the run-level `metric_name`
+    and `metric_value`, and the fitted `backend` and `method`.
 - `Ypred`: the final cross-validated prediction for each sample. For
-  classification, repeated runs are combined by voting; for regression,
-  predictions are averaged across repeated runs.
+    classification, repeated runs are combined by voting; for regression,
+    predictions are averaged across repeated runs.
 - `acc_tot`: classification-only text summary of the total number and
-  percentage of correctly classified samples.
+    percentage of correctly classified samples.
 - `conf`: classification-only confusion matrix. Entries are printed as counts
-  and column percentages so that class-wise errors can be inspected.
+    and column percentages so that class-wise errors can be inspected.
 - `vote_counts`: classification-only matrix with one row per sample and one
-  column per class, showing how many repeated outer-CV runs voted for each
-  class.
+    column per class, showing how many repeated outer-CV runs voted for each
+    class.
 - `accuracy`, `Q2Y`, `RMSD`, and `R2Y`: one value per repeated outer CV run.
-  For classification, `accuracy` reports decoded-label accuracy, `Q2Y` reports
-  held-out Q2 on dummy-coded PLS-DA response scores, `R2Y` reports the mean
-  training-fit R2 of the selected outer-fold PLS-DA models, and `RMSD` is not
-  used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports held-out
-  RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold
-  models.
+    For classification, `accuracy` reports decoded-label accuracy, `Q2Y` reports
+    held-out Q2 on dummy-coded PLS-DA response scores, `R2Y` reports the mean
+    training-fit R2 of the selected outer-fold PLS-DA models, and `RMSD` is not
+    used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports held-out
+    RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold
+    models.
 - `metric_name`: the held-out metric used for inner/outer model selection.
 - `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, `CI95R2Y`, `medianRMSD`, and
-  `CI95RMSD`: summaries across repeated outer CV runs, returned only when
-  `runn > 1`. They are omitted for the default `runn = 1` output.
+    `CI95RMSD`: summaries across repeated outer CV runs, returned only when
+    `runn > 1`. They are omitted for the default `runn = 1` output.
 - `bcomp`: the most frequently selected number of components across all outer
-  folds and repeated runs.
+    folds and repeated runs.
 - `backend` and `method`: the default backend and PLS method used by the call.
-  If vector-valued methods or backends are tuned in the inner loop, the selected
-  fold-level values are stored in `results[[run]]$best_parameters`.
+    If vector-valued methods or backends are tuned in the inner loop, the selected
+    fold-level values are stored in `results[[run]]$best_parameters`.
 - `selection_metric`: the criterion used by the inner CV loop. The default
-  `"auto"` means accuracy for classification and RMSD-style prediction error for
-  multivariate regression. Use `"balanced_accuracy"` when each class should
-  contribute equally despite unequal class frequencies; nested permutation
-  testing then uses balanced accuracy as well.
+    `"auto"` means accuracy for classification and RMSD-style prediction error for
+    multivariate regression. Use `"balanced_accuracy"` when each class should
+    contribute equally despite unequal class frequencies; nested permutation
+    testing then uses balanced accuracy as well.
 
 ## SVD Utility
 
@@ -1153,16 +1184,16 @@ has_metal()
 
 ```{r chunk-039, eval = FALSE}
 if (has_cuda()) {
-  fit_gpu <- pls(
+    fit_gpu <- pls(
     Xtrain,
     Ytrain_cls,
     Xtest,
     Ytest_cls,
     ncomp = 1:2,
     backend = "cuda"
-  )
+    )
 
-  fit_gpu_lda <- pls(
+    fit_gpu_lda <- pls(
     Xtrain,
     Ytrain_cls,
     Xtest,
@@ -1171,20 +1202,20 @@ if (has_cuda()) {
     method = "plssvd",
     backend = "cuda",
     classifier = "lda"
-  )
+    )
 }
 ```
 
 ```{r chunk-040, eval = FALSE}
 if (has_metal()) {
-  fit_metal <- pls(
+    fit_metal <- pls(
     Xtrain,
     Ytrain_cls,
     Xtest,
     Ytest_cls,
     ncomp = 1:2,
     backend = "metal"
-  )
+    )
 }
 ```
 
@@ -1378,50 +1409,50 @@ rather, these papers define the statistical algorithms or numerical building
 blocks that the package implements and accelerates.
 
 - Baglama, J. and Reichel, L. (2005). Augmented implicitly restarted Lanczos
-  bidiagonalization methods. *SIAM Journal on Scientific Computing*, 27,
-  19-42.
+    bidiagonalization methods. *SIAM Journal on Scientific Computing*, 27,
+    19-42.
 - Barker, M. and Rayens, W. (2003). Partial least squares for discrimination.
-  *Journal of Chemometrics*, 17, 166-173.
+    *Journal of Chemometrics*, 17, 166-173.
 - Boulesteix, A.-L. and Strimmer, K. (2007). Partial least squares: a versatile
-  tool for the analysis of high-dimensional genomic data. *Briefings in
-  Bioinformatics*, 8, 32-44.
+    tool for the analysis of high-dimensional genomic data. *Briefings in
+    Bioinformatics*, 8, 32-44.
 - Chong, I.-G. and Jun, C.-H. (2005). Performance of some variable selection
-  methods when multicollinearity is present. *Chemometrics and Intelligent
-  Laboratory Systems*, 78, 103-112.
+    methods when multicollinearity is present. *Chemometrics and Intelligent
+    Laboratory Systems*, 78, 103-112.
 - Cover, T. and Hart, P. (1967). Nearest neighbor pattern classification.
-  *IEEE Transactions on Information Theory*, 13, 21-27.
+    *IEEE Transactions on Information Theory*, 13, 21-27.
 - de Jong, S. (1993). SIMPLS: an alternative approach to partial least squares
-  regression. *Chemometrics and Intelligent Laboratory Systems*, 18, 251-263.
+    regression. *Chemometrics and Intelligent Laboratory Systems*, 18, 251-263.
 - Fisher, R. A. (1936). The use of multiple measurements in taxonomic problems.
-  *Annals of Eugenics*, 7, 179-188.
+    *Annals of Eugenics*, 7, 179-188.
 - Geladi, P. and Kowalski, B. R. (1986). Partial least-squares regression: a
-  tutorial. *Analytica Chimica Acta*, 185, 1-17.
+    tutorial. *Analytica Chimica Acta*, 185, 1-17.
 - Halko, N., Martinsson, P.-G., and Tropp, J. A. (2011). Finding structure with
-  randomness: probabilistic algorithms for constructing approximate matrix
-  decompositions. *SIAM Review*, 53, 217-288.
+    randomness: probabilistic algorithms for constructing approximate matrix
+    decompositions. *SIAM Review*, 53, 217-288.
 - Hotelling, H. (1931). The generalization of Student's ratio. *Annals of
-  Mathematical Statistics*, 2, 360-378.
+    Mathematical Statistics*, 2, 360-378.
 - Johnson, W. B. and Lindenstrauss, J. (1984). Extensions of Lipschitz mappings
-  into a Hilbert space. *Contemporary Mathematics*, 26, 189-206.
+    into a Hilbert space. *Contemporary Mathematics*, 26, 189-206.
 - Mevik, B.-H. and Wehrens, R. (2007). The pls package: principal component and
-  partial least squares regression in R. *Journal of Statistical Software*, 18,
-  1-23.
+    partial least squares regression in R. *Journal of Statistical Software*, 18,
+    1-23.
 - Pearson, K. (1901). On lines and planes of closest fit to systems of points
-  in space. *Philosophical Magazine*, 2, 559-572.
+    in space. *Philosophical Magazine*, 2, 559-572.
 - Rosipal, R. and Trejo, L. J. (2001). Kernel partial least squares regression
-  in reproducing kernel Hilbert space. *Journal of Machine Learning Research*,
-  2, 97-123.
+    in reproducing kernel Hilbert space. *Journal of Machine Learning Research*,
+    2, 97-123.
 - Shao, Z., Wang, Y., Wang, Q., Jiang, T., Du, Z., Ye, H., Zhuo, D., Chen, Y.,
-  and Li, H. (2025). FlashSVD: memory-efficient inference with streaming for
-  low-rank models. arXiv:2508.01506.
+    and Li, H. (2025). FlashSVD: memory-efficient inference with streaming for
+    low-rank models. arXiv:2508.01506.
 - Szymanska, E., Saccenti, E., Smilde, A. K., and Westerhuis, J. A. (2012).
-  Double-check: validation of diagnostic statistics for PLS-DA models in
-  metabolomics studies. *Metabolomics*, 8, S3-S16. doi:10.1007/s11306-011-0330-3.
+    Double-check: validation of diagnostic statistics for PLS-DA models in
+    metabolomics studies. *Metabolomics*, 8, S3-S16. doi:10.1007/s11306-011-0330-3.
 - Trygg, J. and Wold, S. (2002). Orthogonal projections to latent structures
-  (O-PLS). *Journal of Chemometrics*, 16, 119-128.
+    (O-PLS). *Journal of Chemometrics*, 16, 119-128.
 - Wold, S., Sjostrom, M., and Eriksson, L. (2001). PLS-regression: a basic tool
-  of chemometrics. *Chemometrics and Intelligent Laboratory Systems*, 58,
-  109-130.
+    of chemometrics. *Chemometrics and Intelligent Laboratory Systems*, 58,
+    109-130.
 
 ## Session Information
 

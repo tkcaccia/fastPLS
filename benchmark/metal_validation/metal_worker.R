@@ -332,14 +332,23 @@ tryCatch({
   out$status <- "success"
   out$warnings <- paste(unique(warnings_seen), collapse = " | ")
 
-  if (isTRUE(cfg$save_diagnostics)) {
+  if (isTRUE(cfg$save_diagnostics) || isTRUE(cfg$save_prediction)) {
     diagnostic <- list(
       prediction = pred_vec,
-      Ttrain = if (!is.null(fit$Ttrain)) as_numeric_matrix(fit$Ttrain) else NULL,
-      R = if (!is.null(fit$R)) as_numeric_matrix(fit$R) else NULL,
-      P = if (!is.null(fit$P)) as_numeric_matrix(fit$P) else NULL,
-      Q = if (!is.null(fit$Q)) as_numeric_matrix(fit$Q) else NULL,
-      B = if (!is.null(fit$B) && length(fit$B) < 5e6) fit$B else NULL
+      Ttrain = if (isTRUE(cfg$save_diagnostics) && !is.null(fit$Ttrain)) {
+        as_numeric_matrix(fit$Ttrain)
+      } else NULL,
+      R = if (isTRUE(cfg$save_diagnostics) && !is.null(fit$R)) {
+        as_numeric_matrix(fit$R)
+      } else NULL,
+      P = if (isTRUE(cfg$save_diagnostics) && !is.null(fit$P)) {
+        as_numeric_matrix(fit$P)
+      } else NULL,
+      Q = if (isTRUE(cfg$save_diagnostics) && !is.null(fit$Q)) {
+        as_numeric_matrix(fit$Q)
+      } else NULL,
+      B = if (isTRUE(cfg$save_diagnostics) && !is.null(fit$B) &&
+              length(fit$B) < 5e6) fit$B else NULL
     )
     saveRDS(diagnostic, sub("\\.rds$", "_diagnostic.rds", result_path))
   }

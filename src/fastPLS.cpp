@@ -3401,6 +3401,30 @@ namespace {
 Rcpp::List windows_float32_unavailable() {
   Rcpp::stop("Native float32 fastPLS kernels are not available on Windows because the R Windows BLAS/LAPACK toolchain does not provide the required single-precision Fortran symbols; use standard numeric input on Windows or a Linux/macOS/CUDA build for native float32 execution.");
 }
+
+float windows_bits_to_float(const int bits) {
+  float value;
+  std::memcpy(&value, &bits, sizeof(float));
+  return value;
+}
+
+int windows_float_to_bits(const float value) {
+  int bits;
+  std::memcpy(&bits, &value, sizeof(float));
+  return bits;
+}
+
+Rcpp::IntegerMatrix windows_float32_bits(SEXP xSEXP, const char* name) {
+  if (!Rf_isS4(xSEXP)) {
+    Rcpp::stop("%s must be a float32 matrix", name);
+  }
+  Rcpp::S4 x(xSEXP);
+  Rcpp::IntegerMatrix bits = x.slot("Data");
+  if (bits.nrow() < 1 || bits.ncol() < 1) {
+    Rcpp::stop("%s must be a non-empty float32 matrix", name);
+  }
+  return bits;
+}
 }
 
 Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
@@ -3432,20 +3456,123 @@ Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& la
 }
 
 Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP) {
-  windows_float32_unavailable();
-  return Rcpp::IntegerVector();
+  const Rcpp::IntegerMatrix scores = windows_float32_bits(scoresSEXP, "scores");
+  Rcpp::IntegerVector out(scores.nrow());
+  for (int row = 0; row < scores.nrow(); ++row) {
+    int best = 0;
+    float best_value = windows_bits_to_float(scores(row, 0));
+    for (int col = 1; col < scores.ncol(); ++col) {
+      const float value = windows_bits_to_float(scores(row, col));
+      if (value > best_value) {
+        best = col;
+        best_value = value;
+      }
+    }
+    out[row] = best + 1;
+  }
+  return out;
 }
 
 Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend) {
-  return windows_float32_unavailable();
+  if (backend != 0) {
+    Rcpp::stop("Windows float32 kernel PLS supports backend = 'cpu' only");
+  }
+  const Rcpp::IntegerMatrix X1 = windows_float32_bits(X1SEXP, "X1");
+  const Rcpp::IntegerMatrix X2 = windows_float32_bits(X2SEXP, "X2");
+  if (X1.ncol() != X2.ncol()) {
+    Rcpp::stop("X1 and X2 must have the same number of columns");
+  }
+  Rcpp::IntegerMatrix out(X1.nrow(), X2.nrow());
+  const float gamma_f = static_cast<float>(gamma);
+  const float coef0_f = static_cast<float>(coef0);
+  for (int i = 0; i < X1.nrow(); ++i) {
+    for (int j = 0; j < X2.nrow(); ++j) {
+      float dot = 0.0f;
+      float distance = 0.0f;
+      for (int col = 0; col < X1.ncol(); ++col) {
+        const float a = windows_bits_to_float(X1(i, col));
+        const float b = windows_bits_to_float(X2(j, col));
+        dot += a * b;
+        const float delta = a - b;
+        distance += delta * delta;
+      }
+      float value;
+      if (kernel == 1) {
+        value = dot;
+      } else if (kernel == 2) {
+        value = std::exp(-gamma_f * distance);
+      } else if (kernel == 3) {
+        value = std::pow(gamma_f * dot + coef0_f, degree);
+      } else {
+        Rcpp::stop("Unknown kernel id");
+      }
+      out(i, j) = windows_float_to_bits(value);
+    }
+  }
+  return Rcpp::List::create(Rcpp::Named("K") = out);
 }
 
 Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP) {
-  return windows_float32_unavailable();
+  const Rcpp::IntegerMatrix K = windows_float32_bits(KSEXP, "K");
+  Rcpp::IntegerMatrix out(K.nrow(), K.ncol());
+  std::vector<float> row_means(static_cast<std::size_t>(K.nrow()), 0.0f);
+  std::vector<float> col_means(static_cast<std::size_t>(K.ncol()), 0.0f);
+  float grand_mean = 0.0f;
+  for (int row = 0; row < K.nrow(); ++row) {
+    for (int col = 0; col < K.ncol(); ++col) {
+      const float value = windows_bits_to_float(K(row, col));
+      row_means[static_cast<std::size_t>(row)] += value;
+      col_means[static_cast<std::size_t>(col)] += value;
+      grand_mean += value;
+    }
+  }
+  for (float& value : row_means) value /= static_cast<float>(K.ncol());
+  for (float& value : col_means) value /= static_cast<float>(K.nrow());
+  grand_mean /= static_cast<float>(K.nrow() * K.ncol());
+  for (int row = 0; row < K.nrow(); ++row) {
+    for (int col = 0; col < K.ncol(); ++col) {
+      const float value = windows_bits_to_float(K(row, col)) -
+        row_means[static_cast<std::size_t>(row)] -
+        col_means[static_cast<std::size_t>(col)] + grand_mean;
+      out(row, col) = windows_float_to_bits(value);
+    }
+  }
+  Rcpp::IntegerMatrix means(1, K.ncol());
+  for (int col = 0; col < K.ncol(); ++col) {
+    means(0, col) = windows_float_to_bits(
+      col_means[static_cast<std::size_t>(col)]
+    );
+  }
+  return Rcpp::List::create(
+    Rcpp::Named("K") = out,
+    Rcpp::Named("col_means") = means,
+    Rcpp::Named("grand_mean") = grand_mean
+  );
 }
 
 Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP, SEXP trainColMeansSEXP, double train_grand_mean) {
-  return windows_float32_unavailable();
+  const Rcpp::IntegerMatrix K = windows_float32_bits(KtestSEXP, "Ktest");
+  const Rcpp::IntegerMatrix means = windows_float32_bits(
+    trainColMeansSEXP, "train_col_means"
+  );
+  if (means.nrow() != 1 || means.ncol() != K.ncol()) {
+    Rcpp::stop("Ktest columns must match the training kernel size");
+  }
+  Rcpp::IntegerMatrix out(K.nrow(), K.ncol());
+  for (int row = 0; row < K.nrow(); ++row) {
+    float row_mean = 0.0f;
+    for (int col = 0; col < K.ncol(); ++col) {
+      row_mean += windows_bits_to_float(K(row, col));
+    }
+    row_mean /= static_cast<float>(K.ncol());
+    for (int col = 0; col < K.ncol(); ++col) {
+      const float value = windows_bits_to_float(K(row, col)) - row_mean -
+        windows_bits_to_float(means(0, col)) +
+        static_cast<float>(train_grand_mean);
+      out(row, col) = windows_float_to_bits(value);
+    }
+  }
+  return Rcpp::List::create(Rcpp::Named("K") = out);
 }
 
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {

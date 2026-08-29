@@ -94,17 +94,27 @@ test_that("float32 unavailable and hybrid routes are explicit", {
   expect_identical(metal_lda$execution, "hybrid_device_cpu_lda")
   expect_true(any(grepl("LDA is hybrid", metal_lda$warnings)))
 
-  windows_opls <- fastPLS:::.float32_capability_assessment(
-    method = "opls",
-    backend = "cpu",
-    svd_method = "cpu_rsvd",
-    q = 1L,
-    ncomp = 2L,
-    classification = FALSE,
-    os_type = "windows"
-  )
-  expect_identical(windows_opls$status, "unavailable")
-  expect_identical(windows_opls$action, "error")
+  for (cfg in list(
+    list(method = "opls", kernel = "linear", classifier = "argmax"),
+    list(method = "kernelpls", kernel = "rbf", classifier = "argmax"),
+    list(method = "simpls", kernel = "linear", classifier = "lda")
+  )) {
+    windows_route <- fastPLS:::.float32_capability_assessment(
+      method = cfg$method,
+      backend = "cpu",
+      svd_method = "cpu_rsvd",
+      q = if (identical(cfg$classifier, "lda")) 3L else 1L,
+      ncomp = 2L,
+      classification = identical(cfg$classifier, "lda"),
+      kernel = cfg$kernel,
+      classifier = cfg$classifier,
+      os_type = "windows"
+    )
+    expect_identical(windows_route$status, "experimental")
+    expect_identical(windows_route$action, "warn")
+    expect_identical(windows_route$execution, "portable_cpu")
+    expect_true(any(grepl("OPLS, nonlinear kernel PLS", windows_route$warnings)))
+  }
 })
 
 test_that("float32 risk warnings are emitted once per route", {
