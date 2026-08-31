@@ -1,3 +1,9 @@
+# fastPLS 0.99.30
+
+* Fixed Metal PLS dispatch after helper refactoring by validating model,
+  scaling, and kernel arguments against explicit public choices. This removes
+  the missing-argument error in Metal fitting and cross-validation tests.
+
 # fastPLS 0.99.29
 
 * Resolved the BiocCheck source-formatting notes by limiting package-facing

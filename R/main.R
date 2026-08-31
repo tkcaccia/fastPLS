@@ -10191,9 +10191,15 @@ plot.permutation <- function(
   if (!isTRUE(has_metal())) {
     stop("backend='metal' requires Apple Metal support.", call. = FALSE)
   }
-  method <- match.arg(method)
-  scaling <- match.arg(scaling)
-  kernel <- match.arg(kernel)
+  method <- match.arg(
+    method,
+    c("simpls", "plssvd", "opls", "kernelpls")
+  )
+  scaling <- match.arg(
+    scaling,
+    c("centering", "autoscaling", "none")
+  )
+  kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
   classifier <- .resolve_classifier_for_backend(classifier, "metal")
   Xtrain <- as.matrix(Xtrain)
   yprep <- .prepare_response(Ytrain)
