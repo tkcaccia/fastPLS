@@ -42,7 +42,9 @@ implied by \code{nu} and \code{nv}; the final rank is always capped at
 
 \item{backend}{Compute backend. \code{cpu} runs on the host CPU. \code{cuda}
 dispatches randomized SVD to a CUDA-capable backend. \code{metal} dispatches
-randomized SVD to the Apple Metal backend.}
+randomized SVD to the Apple Metal backend. When omitted, the function uses
+\code{options(backend = ...)}, then \code{FASTPLS_BACKEND}, then CPU. For CPU
+execution, \code{options(cores = n)} requests \code{n} BLAS/OpenMP threads.}
 
 \item{method}{SVD algorithm family. \code{irlba} uses the bundled iterative
 IRLBA-style CPU backend and is valid only with \code{backend = cpu}.

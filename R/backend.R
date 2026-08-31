@@ -1,8 +1,13 @@
 #' Configure the default fastPLS execution backend
 #'
 #' An explicit function argument takes precedence over
-#' `options(fastPLS.backend = ...)`, then `FASTPLS_BACKEND`; CPU is the final
+#' `options(backend = ...)`, then `FASTPLS_BACKEND`; CPU is the final
 #' default.
+#'
+#' For CPU execution, `options(cores = n)` requests `n` threads from the
+#' linked BLAS and OpenMP runtimes. Matrix operations can use those threads
+#' when the installed numerical library supports runtime thread control;
+#' sequential PLS deflation steps remain serial.
 #'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @return The active backend. Setting returns the previous option invisibly.
@@ -17,8 +22,8 @@ fastPLS_backend <- function(backend = NULL) {
         return(.fastpls_resolve_backend(NULL))
     }
     backend <- .fastpls_validate_backend(backend, "backend")
-    old <- getOption("fastPLS.backend", NULL)
-    options(fastPLS.backend = backend)
+    old <- getOption("backend", NULL)
+    options(backend = backend)
     invisible(old)
 }
 
@@ -48,13 +53,63 @@ fastPLS_backend <- function(backend = NULL) {
         }
         return(.fastpls_validate_backend(value))
     }
-    option <- getOption("fastPLS.backend", NULL)
+    option <- getOption("backend", NULL)
     if (!is.null(option)) {
-        return(.fastpls_validate_backend(option, "option fastPLS.backend"))
+        return(.fastpls_validate_backend(option, "option backend"))
     }
     environment <- Sys.getenv("FASTPLS_BACKEND", unset = "")
     if (nzchar(environment)) {
         return(.fastpls_validate_backend(environment, "FASTPLS_BACKEND"))
     }
     "cpu"
+}
+
+.fastpls_validate_cores <- function(cores) {
+    if (
+        length(cores) != 1L ||
+            !is.numeric(cores) ||
+            is.na(cores) ||
+            !is.finite(cores) ||
+            cores < 1 ||
+            cores != floor(cores)
+    ) {
+        stop("`options(cores = ...)` must contain one positive integer.",
+            call. = FALSE)
+    }
+    as.integer(cores)
+}
+
+.fastpls_cpu_cores <- function() {
+    cores <- getOption("cores", NULL)
+    if (is.null(cores)) {
+        return(NULL)
+    }
+    .fastpls_validate_cores(cores)
+}
+
+.fastpls_apply_cpu_cores <- function() {
+    cores <- .fastpls_cpu_cores()
+    if (is.null(cores)) {
+        return(invisible(NULL))
+    }
+    value <- as.character(cores)
+    do.call(
+        Sys.setenv,
+        as.list(stats::setNames(
+            rep(value, 6L),
+            c(
+                "OMP_NUM_THREADS",
+                "OPENBLAS_NUM_THREADS",
+                "GOTO_NUM_THREADS",
+                "MKL_NUM_THREADS",
+                "BLIS_NUM_THREADS",
+                "VECLIB_MAXIMUM_THREADS"
+            )
+        ))
+    )
+    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+        try(RhpcBLASctl::blas_set_num_threads(cores), silent = TRUE)
+        try(RhpcBLASctl::omp_set_num_threads(cores), silent = TRUE)
+    }
+    invisible(cores)
 }

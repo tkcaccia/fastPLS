@@ -493,3 +493,34 @@ include:
 Datasets are not stored in this repository.  The loaders search the configured
 benchmark data locations and stop with an explicit error if a dataset is not
 available.
+
+## Release 0.99.34 backend audit
+
+The release audit uses
+`metal_validation/run_matched_cuda_dataset_metal.R` for both accelerators. Set
+`FASTPLS_MATCHED_ACCELERATOR=cuda` or `metal`; the script selects the
+platform-appropriate process-memory command automatically and writes raw,
+summary, and paired result tables. Each campaign contains 11 prepared tasks,
+four PLS families, CPU and accelerator routes, and three isolated repetitions.
+
+`plot_cmpb_complete_accelerator_panel.R` combines the paired CUDA and Metal
+tables. The figure always reports CPU total fitting-plus-prediction time divided
+by accelerator time for every completed route. Metric differences and
+prediction agreement remain in the paired CSV files and are not used to hide
+timing cells.
+
+The accelerated SIMPLS audit additionally covers:
+
+- rank-one CPU rSVD with a preceding-direction warm start;
+- resident rank-one Metal refresh;
+- resident rank-one CUDA refresh for general workloads;
+- guarded CUDA candidate batches of at most eight directions for one-hot
+  classification with at least 5,000 training observations and 50 requested
+  components;
+- one-, two-, and four-thread OpenBLAS execution, reported as a capability test
+  rather than an assumed multicore speed-up; and
+- NMR regression at 50 and 165 components, which remains on rank-one refresh.
+
+Unconditional candidate batching is not a supported route: it changed NMR
+predictions, and the corresponding Metal prototype slowed CIFAR-100. These
+negative experiments are intentionally excluded from package dispatch.

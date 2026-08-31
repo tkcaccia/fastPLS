@@ -38,16 +38,27 @@ for bundled examples are provided in the dataset help pages and in
 
 - `plssvd`: computes the dominant subspace of the cross-covariance
   `S = X^T Y` and reuses it for the requested component path.
-- `simpls`: optimized sequential SIMPLS. Every component uses a fresh
-  rank-one direction solve on the current deflated cross-covariance; compact
+- `simpls`: accelerated sequential SIMPLS. The default rSVD route is an
+  explicitly approximate high-speed profile: CPU refreshes are warm-started
+  from the preceding accepted direction, CUDA refreshes reuse resident device
+  workspaces, and large dummy-coded classification paths refresh up to eight
+  candidates together to amortize GPU launches. Regression and smaller
+  classification tasks remain rank-one. Task-aware power iterations avoid
+  unnecessary work. Compact
   prediction, cached deflation products, incremental coefficient updates, and
-  automatic matrix-free `xprod` reduce repeated work without reusing direction
-  blocks or warm starts. As in `pls::simpls.fit`, one fit supplies the standard
-  sequential component path; fastPLS contributes a compiled, shape-dependent
-  execution and storage strategy rather than the path itself.
+  automatic matrix-free `xprod` further reduce computation and storage.
+  `svd.method = "irlba"` retains a closer component-wise reference route.
 - `opls`: supervised orthogonal filtering followed by the selected PLS core.
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
+
+The CPU backend uses the BLAS/LAPACK library linked when the package is built.
+Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
+operations can use multiple cores when linked to a multithreaded BLAS,
+for example by installing with `FASTPLS_USE_OPENBLAS=1` and a valid
+`OPENBLAS_ROOT`. SIMPLS deflation remains sequential, so multicore gains depend
+on matrix shape; on the evaluated Apple M3 tasks, two and four OpenBLAS threads
+did not improve runtime over one thread.
 
 For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient
@@ -72,7 +83,7 @@ low-rank prediction factors. The default threshold is controlled by
 
 ## Backends
 
-Set the fastPLS session default with `options(fastPLS.backend = "cuda")`, or use
+Set the fastPLS session default with `options(backend = "cuda")`, or use
 `Sys.setenv(FASTPLS_BACKEND = "cuda")`. An explicit function argument always
 takes precedence.
 
@@ -96,10 +107,13 @@ as unreliable relative to a deterministic reference if prediction relative
 error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
 angle exceeds 10 degrees, classification-label agreement is below 0.99, or
 the predictive metric differs by more than 0.01.
-CPU starts with oversampling 20 and two power iterations, then applies the
-case-specific audit and adaptive recovery described above. CUDA enforces a
-wider safety floor of oversampling 48 and four power iterations; weaker
-requested CUDA controls are raised with a warning. This CUDA floor met all 174
+Direct PLS-SVD and `fastsvd()` start from the audited controls described above;
+CUDA PLS-SVD retains its wider safety floor. Accelerated SIMPLS-family rSVD is
+an explicitly approximate profile instead: it uses oversampling 10 and chooses
+two power iterations for classification or one for numeric regression. This
+profile prioritizes end-to-end speed and is not labelled estimator-equivalent
+to deterministic de Jong SIMPLS.
+The wider CUDA PLS-SVD floor met all 174
 runs in the three-seed controlled shape sweep, whereas 20/2 did not.
 With the CPU case audit and recovery enabled, the corresponding CPU sweep also
 met tolerance in all 174 runs. Across the 276 automatic CPU/CUDA routes that

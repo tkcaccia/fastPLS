@@ -16,6 +16,11 @@ metal_objects=" svd_metal_backend_stub.o"
 metal_mm_rule=""
 
 if [ "${use_openblas}" = "1" ]; then
+  if [ ! -d "${openblas_root}/include" ] || [ ! -d "${openblas_root}/lib" ]; then
+    echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OPENBLAS_ROOT is incomplete: ${openblas_root}" >&2
+    exit 1
+  fi
+  echo "fastPLS configure: using OpenBLAS from ${openblas_root}; thread count is controlled by OpenBLAS"
   pkg_cppflags="-I${openblas_root}/include"
   pkg_libs="-L${openblas_root}/lib -lopenblas"
 fi

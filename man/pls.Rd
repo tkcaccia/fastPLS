@@ -96,7 +96,9 @@ successful null fits. Failed fits are excluded from \code{B} and reported.}
 
 \item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
 for CUDA-native fitting, or experimental \code{metal} for Apple Metal
-randomized-SVD/GEMM acceleration.}
+randomized-SVD/GEMM acceleration. When omitted, \code{options(backend = ...)}
+defines the session default. For CPU execution, \code{options(cores = n)}
+requests \code{n} BLAS/OpenMP threads.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
@@ -209,10 +211,12 @@ structural-check status, finiteness, requested and effective component
 counts and randomized controls. CPU float64 rSVD fits also record each
 case-specific residual audit, strengthened retry, and deterministic
 recovery. Panel evidence is reported separately and is not interpreted
-as general-use certification. SIMPLS-family fits additionally record
-the active \code{fresh_per_component} direction rule and the retained and
-abandoned execution optimizations. Accelerator and float32 routes that do
-not yet expose the same certificate warn and are marked unverified.
+as general-use certification. SIMPLS-family fits additionally record whether
+the active approximate route uses CPU warm-started, resident rank-one, or
+guarded resident-batch refresh, together with retained and abandoned execution
+optimizations.
+Accelerator and float32 routes that do not yet expose the same certificate
+warn and are marked unverified.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
@@ -226,6 +230,12 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
+The compiled CPU backend uses the BLAS/LAPACK implementation selected at
+package build time. A multithreaded BLAS can execute eligible matrix products
+on several CPU cores. Set \code{options(cores = n)} to request \code{n}
+threads. The SIMPLS deflation sequence remains serial, and additional threads
+are not guaranteed to reduce runtime.
+
 Supplying \code{float::float32} predictors or responses requests
     single-precision
 execution without silent promotion to double. Float32 is route-specific,
@@ -263,20 +273,29 @@ PLS-SVD. If a large CUDA classification response would exceed the guarded
 dense-indicator path, SIMPLS stops with a clear error rather than silently
 substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
 
-The SIMPLS direction-refresh rule is identical across supported backends.
-Every component invokes a fresh rank-one direction calculation on the
-current deflated cross-covariance. IRLBA starts a new iterative solve and
-rSVD draws a new oversampled sketch using the base seed plus the zero-based
-component index. Candidate blocks, cross-component warm starts, and adaptive
-refresh policies were rejected during development and are not used by the
-public implementation. Like reference SIMPLS software, one fit supplies the
-sequential component path through the largest requested component count;
-fastPLS does not claim this path construction as a novelty. Retained
-optimizations include cached rank-one deflation products, incremental
-coefficient and fitted-value updates, conditional cross-product caching,
-compact latent prediction, and matrix-free cross-covariance products. These
-are shape-dependent execution and storage choices, not a guarantee that
-every SIMPLS problem runs faster.
+The accelerated rSVD SIMPLS route is an explicitly approximate execution
+profile rather than an estimator-equivalent implementation of de Jong
+SIMPLS. CPU and Metal extract one direction from the current deflated
+cross-covariance at a time. CPU initializes each randomized refresh from the
+preceding accepted direction, whereas Metal draws a fresh direction in its
+resident rank-one route. CUDA also uses resident rank-one refresh for regression
+and small classification tasks. For dummy-coded classification with at least
+5,000 training samples and a requested path of at least 50 components, CUDA
+refreshes at most eight candidate directions together and consumes them
+sequentially through the supervised orthogonalization path. This guarded batch
+amortizes GPU launches on large image-embedding tasks; it is not used for
+regression or small biomedical datasets. Classification uses two power
+iterations by default; numeric regression uses one. Both use oversampling 10,
+and explicit \code{power} or \code{oversample} values override these choices.
+IRLBA keeps a fresh component-wise solve and remains the route for comparisons
+with conventional SIMPLS.
+
+Like reference SIMPLS software, one fit supplies the sequential component
+path through the largest requested component count; fastPLS does not claim
+this standard path construction as a novelty. Retained optimizations include
+cached rank-one deflation products, incremental coefficient and fitted-value
+updates, conditional cross-product caching, compact latent prediction, and
+matrix-free cross-covariance products.
 
 Randomized SVD is an approximate solver. The returned \code{diagnostics}
     performs

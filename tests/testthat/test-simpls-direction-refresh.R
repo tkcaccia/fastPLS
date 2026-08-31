@@ -18,13 +18,13 @@ test_that("SIMPLS reports the release direction-refresh rule", {
   )
 
   rule <- fit$diagnostics$simpls_direction
-  expect_identical(rule$rule, "fresh_per_component")
+  expect_identical(rule$rule, "warm_started_rank_one_randomized_refresh")
   expect_identical(rule$directions_per_solve, 1L)
-  expect_false(rule$warm_start)
+  expect_true(rule$warm_start)
   expect_false(rule$adaptive_block_refresh)
   expect_identical(rule$seed_rule, "seed_plus_component_index")
   expect_true("cached_rank_one_deflation_product" %in% rule$active_optimizations)
-  expect_true("cross_component_warm_start" %in% rule$abandoned_optimizations)
+  expect_true(rule$approximate_execution)
 })
 
 test_that("rejected refresh environment variables no longer affect SIMPLS", {
@@ -57,11 +57,11 @@ test_that("rejected refresh environment variables no longer affect SIMPLS", {
   expect_equal(fit_obsolete_env$Q, fit_reference$Q, tolerance = 0)
   expect_identical(
     fit_obsolete_env$diagnostics$simpls_direction$rule,
-    "fresh_per_component"
+    "warm_started_rank_one_randomized_refresh"
   )
 })
 
-test_that("available accelerator dispatches expose the same SIMPLS rule", {
+test_that("available accelerator dispatches expose their SIMPLS rule", {
   set.seed(43)
   X <- matrix(rnorm(48 * 10), 48, 10)
   Y <- cbind(X[, 1] + rnorm(48, sd = 0.1), X[, 2] + rnorm(48, sd = 0.1))
@@ -76,27 +76,39 @@ test_that("available accelerator dispatches expose the same SIMPLS rule", {
     expect_equal(ncol(fit$Q), 2L, info = backend)
     expect_true(all(is.finite(fit$R)), info = backend)
     expect_true(all(is.finite(fit$Q)), info = backend)
-    expect_identical(
-      fit$diagnostics$simpls_direction[c(
-        "rule", "directions_per_solve", "warm_start",
-        "adaptive_block_refresh", "seed_rule"
-      )],
-      list(
-        rule = "fresh_per_component",
-        directions_per_solve = 1L,
-        warm_start = FALSE,
-        adaptive_block_refresh = FALSE,
-        seed_rule = "seed_plus_component_index"
-      ),
-      info = backend
-    )
+    rule <- fit$diagnostics$simpls_direction
+    expect_identical(rule$directions_per_solve, 1L, info = backend)
+    expect_false(rule$adaptive_block_refresh, info = backend)
+    expect_identical(rule$seed_rule, "seed_plus_component_index", info = backend)
+    if (identical(backend, "cpu")) {
+      expect_identical(rule$rule, "warm_started_rank_one_randomized_refresh")
+      expect_true(rule$warm_start)
+    } else {
+      expect_identical(rule$rule, "resident_rank_one_randomized_refresh")
+      expect_false(rule$warm_start)
+    }
   }
 })
 
-test_that("release source contains no active Metal warm start", {
+test_that("Metal source retains fresh resident rank-one refresh", {
   source_path <- testthat::test_path("..", "..", "src", "svd_metal_backend.mm.in")
   skip_if_not(file.exists(source_path), "source tree unavailable after installation")
   source <- paste(readLines(source_path, warn = FALSE), collapse = "\n")
   expect_false(grepl("has_rr_prev|rr_prev", source))
-  expect_match(source, "fresh direction for every deflated SIMPLS component")
+  expect_match(source, "A fresh direction avoids propagating approximation")
+})
+
+test_that("CUDA classification diagnostics report batched refresh", {
+  rule <- fastPLS:::.simpls_direction_diagnostics(
+    randomized = TRUE,
+    backend = "cuda",
+    classification = TRUE,
+    training_samples = 50000L,
+    response_dimension = 100L,
+    requested_components = 100L
+  )
+  expect_identical(rule$rule, "resident_batched_randomized_refresh")
+  expect_identical(rule$directions_per_solve, 8L)
+  expect_true(rule$adaptive_block_refresh)
+  expect_false(rule$warm_start)
 })

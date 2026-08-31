@@ -51,7 +51,9 @@ replicate stay together in training or test data. The default
 \code{kernelpls}. Multiple values are tuned in the inner loop.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
-\code{metal}. Multiple values are tuned in the inner loop.}
+\code{metal}. Multiple values are tuned in the inner loop. When omitted,
+\code{options(backend = ...)} defines the session default;
+\code{options(cores = n)} controls the CPU thread request.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
 randomized SVD for the selected backend, and \code{irlba} uses the bundled

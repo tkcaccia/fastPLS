@@ -53,12 +53,13 @@
     }
     over <- max(ncomp, na.rm = TRUE) > max_plssvd_rank
     if (isTRUE(over) && isTRUE(warn)) {
+        message_format <- paste0(
+            "plssvd rank is limited to %d; requested ncomp above this ",
+            "value will use %d components internally"
+        )
         warning(
             sprintf(
-                paste0(
-                    "plssvd rank is limited to %d; requested ncomp above this ",
-                    "value will use %d components internally"
-                ),
+                message_format,
                 max_plssvd_rank,
                 max_plssvd_rank
             ),
@@ -536,14 +537,12 @@
 
 .resolve_deprecated_lda_ridge <- function(value, supplied, context) {
     if (isTRUE(supplied) && !is.null(value)) {
+        message_format <- paste0(
+            "%s argument 'lda_ridge' is deprecated and ignored; PLS-LDA ",
+            "uses the fixed scale-normalized Cholesky fallback sequence."
+        )
         warning(
-            sprintf(
-                paste0(
-                "%s argument 'lda_ridge' is deprecated and ignored; PLS-LDA ",
-                "uses the fixed scale-normalized Cholesky fallback sequence."
-                ),
-                context
-            ),
+            sprintf(message_format, context),
             call. = FALSE
         )
     }
@@ -2119,19 +2118,66 @@ print.fastPLS <- function(x, ...) {
         } else {
             paste(
                 "Power iterations improve stability but do not make rSVD",
-            "deterministic; confirm coefficient-level conclusions with IRLBA."
+                paste(
+                    "deterministic; confirm coefficient-level conclusions",
+                    "with IRLBA."
+                )
             )
         }
     )
 }
 
-.simpls_direction_diagnostics <- function(randomized) {
+.simpls_batch_enabled <- function(
+    randomized, backend, classification, training_samples,
+    response_dimension, requested_components
+) {
+    isTRUE(randomized) && isTRUE(classification) &&
+        identical(backend, "cuda") && is.finite(training_samples) &&
+        training_samples >= 5000L && is.finite(response_dimension) &&
+        response_dimension > 1L && response_dimension <= 2048L &&
+        is.finite(requested_components) && requested_components >= 4L
+}
+
+.simpls_refresh_rule <- function(randomized, batched, warm_started) {
+    if (batched) {
+        return("resident_batched_randomized_refresh")
+    }
+    if (warm_started) {
+        return("warm_started_rank_one_randomized_refresh")
+    }
+    if (randomized) {
+        return("resident_rank_one_randomized_refresh")
+    }
+    "fresh_per_component"
+}
+
+.simpls_direction_diagnostics <- function(
+    randomized, backend, classification = FALSE,
+    training_samples = NA_integer_, response_dimension = NA_integer_,
+    requested_components = NA_integer_
+) {
+    scalar <- function(x) {
+        x <- as.integer(x)
+        if (any(is.finite(x))) max(x[is.finite(x)]) else NA_integer_
+    }
+    training_samples <- scalar(training_samples)
+    response_dimension <- scalar(response_dimension)
+    requested_components <- scalar(requested_components)
+    warm_started <- isTRUE(randomized) && identical(backend, "cpu")
+    batched <- .simpls_batch_enabled(
+        randomized, backend, classification, training_samples,
+        response_dimension, requested_components
+    )
     list(
-        rule = "fresh_per_component",
-        directions_per_solve = 1L,
-        warm_start = FALSE,
-        adaptive_block_refresh = FALSE,
-    seed_rule = if (randomized) "seed_plus_component_index" else NA_character_,
+        rule = .simpls_refresh_rule(randomized, batched, warm_started),
+        directions_per_solve = if (batched) 8L else 1L,
+        warm_start = warm_started,
+        adaptive_block_refresh = batched,
+        seed_rule = if (randomized) {
+            "seed_plus_component_index"
+        } else {
+            NA_character_
+        },
         active_optimizations = c(
             "cached_rank_one_deflation_product",
             "incremental_coefficient_path",
@@ -2140,15 +2186,47 @@ print.fastPLS <- function(x, ...) {
             "compact_prediction",
             "implicit_cross_covariance_when_selected"
         ),
+        approximate_execution = isTRUE(randomized),
         abandoned_optimizations = c(
-            "cross_component_warm_start",
-            "multi_direction_block_refresh",
             "adaptive_refresh_policy"
         )
     )
 }
 
-.enforce_solver_diagnostics <- function(context) {
+.solver_diagnostics_base <- function(context) {
+    list(
+        solver = if (context$randomized) "rsvd" else "irlba",
+        stochastic = context$randomized,
+        status = .solver_diagnostic_status(context),
+        finite_latent_factors = context$finite,
+        requested_components = context$requested,
+        effective_components = context$effective,
+        approximation_audited = !context$randomized || context$audited,
+        guidance = .solver_diagnostic_guidance(context)
+    )
+}
+
+.attach_simpls_direction_diagnostics <- function(
+    model, context, family, backend, classification, training_samples
+) {
+    if (!family %in% c("simpls", "simpls_fast", "opls", "kernelpls")) {
+        return(model)
+    }
+    model$diagnostics$simpls_direction <- .simpls_direction_diagnostics(
+        context$randomized, backend,
+        classification = classification,
+        training_samples = training_samples,
+        response_dimension = if (length(model$m) == 1L) {
+            model$m
+        } else {
+            length(model$mY)
+        },
+        requested_components = context$requested
+    )
+    model
+}
+
+.enforce_solver_diagnostics <- function(context, accelerated_simpls = FALSE) {
     if (context$failed) {
         stop(
             "PLS fit failed structural checks: non-finite latent factors or ",
@@ -2156,7 +2234,7 @@ print.fastPLS <- function(x, ...) {
             call. = FALSE
         )
     }
-    if (context$randomized && !context$audited) {
+    if (context$randomized && !context$audited && !accelerated_simpls) {
         warning(
             "rSVD completed without a case-specific residual certificate; ",
             "compare across seeds or confirm with CPU IRLBA.",
@@ -2171,7 +2249,9 @@ print.fastPLS <- function(x, ...) {
     oversample,
     power,
     seed,
-    pls_family = NULL
+    pls_family = NULL,
+    classification = FALSE,
+    training_samples = NA_integer_
 ) {
     solver <- .normalize_svd_method(svd.method)
     backend <- switch(
@@ -2182,16 +2262,7 @@ print.fastPLS <- function(x, ...) {
         "cpu"
     )
     context <- .solver_diagnostic_context(model, solver)
-    model$diagnostics <- list(
-        solver = if (context$randomized) "rsvd" else "irlba",
-        stochastic = context$randomized,
-        status = .solver_diagnostic_status(context),
-        finite_latent_factors = context$finite,
-        requested_components = context$requested,
-        effective_components = context$effective,
-        approximation_audited = !context$randomized || context$audited,
-        guidance = .solver_diagnostic_guidance(context)
-    )
+    model$diagnostics <- .solver_diagnostics_base(context)
     if (context$randomized) {
         model$diagnostics$rsvd <- .rsvd_diagnostic_record(
             context,
@@ -2204,11 +2275,13 @@ print.fastPLS <- function(x, ...) {
     family <- as.character(
         pls_family %||% context$latent$pls_method %||% model$pls_method %||% ""
     )[1L]
-    if (family %in% c("simpls", "simpls_fast", "opls", "kernelpls")) {
-        model$diagnostics$simpls_direction <-
-            .simpls_direction_diagnostics(context$randomized)
-    }
-    .enforce_solver_diagnostics(context)
+    model <- .attach_simpls_direction_diagnostics(
+        model, context, family, backend, classification, training_samples
+    )
+    .enforce_solver_diagnostics(
+        context,
+        accelerated_simpls = .accelerated_simpls_family(family)
+    )
     model
 }
 
@@ -3054,7 +3127,11 @@ print.fastPLS <- function(x, ...) {
     if (identical(backend, "cpp")) {
         backend <- "cpu"
     }
-    match.arg(backend, c("cpu", "cuda", "metal"))
+    backend <- match.arg(backend, c("cpu", "cuda", "metal"))
+    if (identical(backend, "cpu")) {
+        .fastpls_apply_cpu_cores()
+    }
+    backend
 }
 
 .compiled_backend <- function(backend) {
@@ -3305,6 +3382,25 @@ print.fastPLS <- function(x, ...) {
     if (isTRUE(qualification$qualified_on_prespecified_panel)) {
         return(invisible(NULL))
     }
+    if (identical(qualification$backend, "metal")) {
+        message_format <- paste0(
+            "%s is using Metal rSVD with oversample=%d and power=%d; ",
+            "no prespecified Metal qualification panel is available. ",
+            "Structural diagnostics do not establish agreement with ",
+            "CPU IRLBA. Compare important results across seeds and ",
+            "against CPU IRLBA."
+        )
+        warning(
+            sprintf(
+                message_format,
+                context,
+                qualification$oversample,
+                qualification$power
+            ),
+            call. = FALSE
+        )
+        return(invisible(NULL))
+    }
     message_format <- paste0(
         "%s is using an rSVD configuration that did not meet the ",
         "prespecified %s: backend='%s', oversample=%d, power=%d. ",
@@ -3326,11 +3422,43 @@ print.fastPLS <- function(x, ...) {
     )
 }
 
-.apply_backend_rsvd_controls <- function(control, backend, context) {
+.accelerated_simpls_family <- function(pls_family) {
+    as.character(pls_family %||% "")[1L] %in%
+        c("simpls", "opls", "kernelpls")
+}
+
+.apply_backend_rsvd_controls <- function(
+    control,
+    backend,
+    context,
+    pls_family = NULL,
+    classification = FALSE
+) {
     backend <- .normalize_public_backend(backend)
     solver <- .backend_svd_method(control$svd.method, backend)
     if (!solver %in% c("cpu_rsvd", "cuda_rsvd", "metal_rsvd")) {
         control$rsvd_qualification <- NULL
+        return(control)
+    }
+    if (.accelerated_simpls_family(pls_family)) {
+        if (!"rsvd_oversample" %in% control$supplied) {
+            control$rsvd_oversample <- 10L
+        }
+        if (!"rsvd_power" %in% control$supplied) {
+            control$rsvd_power <- if (isTRUE(classification)) 2L else 1L
+        }
+        qualification <- .rsvd_configuration_qualification(
+            backend,
+            control$rsvd_oversample,
+            control$rsvd_power
+        )
+        qualification$execution_profile <-
+            "accelerated_randomized_simpls"
+        qualification$estimator_interpretation <- paste(
+            "Approximate high-speed SIMPLS execution; it is not claimed to",
+            "reproduce a deterministic de Jong SIMPLS fit."
+        )
+        control$rsvd_qualification <- qualification
         return(control)
     }
     if (identical(backend, "cuda")) {
@@ -5338,6 +5466,9 @@ pls.model2.fast.gpu <-
             c("auto", "cpu", "cpu_flash", "cuda_flash", "metal")
         )
     }
+    if (backend %in% c("cpu", "cpu_flash")) {
+        .fastpls_apply_cpu_cores()
+    }
     if (is.null(block_size)) {
         block_size <- object$flash_block_size
     }
@@ -6906,10 +7037,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     Ytrue <- as.matrix(Ytrue); Ypred <- as.matrix(Ypred)
     if (!all(dim(Ytrue) == dim(Ypred))) {
         stop(
-            paste0(
-                "Ytrue and Ypred must have the same dimensions for CV metric ",
-                "calculation."
-            ),
+            "Ytrue and Ypred must have the same dimensions for CV metric ",
+            "calculation.",
             call. = FALSE
         )
     }
@@ -6930,10 +7059,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     }
     if (identical(metric, "q2") && is.null(Ytrain)) {
         stop(
-            paste0(
-                "Q2 requires an explicit training-response reference; use the ",
-                "fold-aware Q2 helper for cross-validation."
-            ),
+            "Q2 requires an explicit training-response reference; use the ",
+            "fold-aware Q2 helper for cross-validation.",
             call. = FALSE
         )
     }
@@ -6943,7 +7070,11 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     tss <- sum(sweep(Ytrue, 2L, center, "-")^2, na.rm = TRUE)
     list(
         metric_name = metric,
-    metric_value = if (is.finite(tss) && tss > 0) 1 - press / tss else NA_real_
+        metric_value = if (is.finite(tss) && tss > 0) {
+            1 - press / tss
+        } else {
+            NA_real_
+        }
     )
 }
 
@@ -7152,10 +7283,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         predictions <- cv_res$pred
         if (is.null(predictions)) {
             stop(
-                paste0(
-                    "Stored class predictions are required to optimize ",
-                    "selection_metric = 'balanced_accuracy'."
-                ),
+                "Stored class predictions are required to optimize ",
+                "selection_metric = 'balanced_accuracy'.",
                 call. = FALSE
             )
         }
@@ -7168,10 +7297,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     if (identical(selection_metric, "q2")) {
         if (is.null(cv_res$Ypred)) {
             stop(
-                paste0(
-                    "Stored classification scores are required to optimize ",
-                    "selection_metric = 'q2'."
-                ),
+                "Stored classification scores are required to optimize ",
+                "selection_metric = 'q2'.",
                 call. = FALSE
             )
         }
@@ -7181,10 +7308,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     }
     if (!identical(selection_metric, "r2")) {
         stop(
-            paste0(
-                "Classification CV can optimize selection_metric = ",
-                "'accuracy', 'balanced_accuracy', or 'q2'."
-            ),
+            "Classification CV can optimize selection_metric = ",
+            "'accuracy', 'balanced_accuracy', or 'q2'.",
             call. = FALSE
         )
     }
@@ -7197,10 +7322,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     if (identical(selection_metric, "auto")) selection_metric <- "rmsd"
     if (selection_metric %in% c("accuracy", "balanced_accuracy")) {
         stop(
-            paste0(
             "Regression CV can only optimize selection_metric = 'r2', 'q2', ",
-                "or 'rmsd'."
-            ),
+            "or 'rmsd'.",
             call. = FALSE
         )
     }
@@ -7209,10 +7332,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     }
     if (is.null(cv_res$Ypred)) {
         stop(
-            paste0(
-                "Stored CV predictions are required to optimize the requested ",
-                "regression metric."
-            ),
+            "Stored CV predictions are required to optimize the requested ",
+            "regression metric.",
             call. = FALSE
         )
     }
@@ -7262,10 +7383,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
 .decode_cv_predictions <- function(Ypred, Ydata, classification, lev) {
     if (classification && is.null(Ypred)) {
         stop(
-            paste0(
             "Classification CV output is missing both class predictions and ",
-                "score predictions"
-            ),
+            "score predictions",
             call. = FALSE
         )
     }
@@ -7781,8 +7900,13 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     control <- .resolve_svd_control(svd.method = svd.method,
         dots = c(.svd_control_from_dots(dots)$dots,
             list(seed = seed)), context = ".pls_cv_via_pls()")
-    control <- .apply_backend_rsvd_controls(control, backend,
-        ".pls_cv_via_pls()")
+    control <- .apply_backend_rsvd_controls(
+        control,
+        backend,
+        ".pls_cv_via_pls()",
+        pls_family = method,
+        classification = is.factor(Ydata) || is.character(Ydata)
+    )
     control$svd.method <- match.arg(
         .normalize_svd_method(
             .backend_svd_method(control$svd.method, backend)
@@ -8524,20 +8648,26 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     backend <- match.arg(backend)
     method <- match.arg(method)
     method <- .normalize_svd_method(method)
-method <- match.arg(method, c("cpu_rsvd", "cuda_rsvd", "metal_rsvd", "irlba"))
+    method <- match.arg(
+        method,
+        c("cpu_rsvd", "cuda_rsvd", "metal_rsvd", "irlba")
+    )
     if (identical(method, "irlba") && !identical(backend, "cpu")) {
         stop(
-            paste0(
             "fastsvd(method='irlba') is only available with backend='cpu'. ",
-                "Use method='rsvd' with backend='cuda' or backend='metal'."
-            ),
+            "Use method='rsvd' with backend='cuda' or backend='metal'.",
             call. = FALSE
         )
     }
     svd_method <- if (identical(method, "irlba")) {
         "irlba"
     } else {
-    switch(backend, cpu = "cpu_rsvd", cuda = "cuda_rsvd", metal = "metal_rsvd")
+        switch(
+            backend,
+            cpu = "cpu_rsvd",
+            cuda = "cuda_rsvd",
+            metal = "metal_rsvd"
+        )
     }
     public_method <- if (identical(svd_method, "irlba")) "irlba" else "rsvd"
     list(backend = backend, method = public_method, svd.method = svd_method)
@@ -8793,10 +8923,8 @@ method <- match.arg(method, c("cpu_rsvd", "cuda_rsvd", "metal_rsvd", "irlba"))
 ) {
     if (!identical(backend, "cpu") || !identical(svd.method, "cpu_rsvd")) {
         stop(
-            paste0(
             "float32 Windows fallback supports backend = 'cpu' and method = ",
-                "'rsvd' only."
-            ),
+            "'rsvd' only.",
             call. = FALSE
         )
     }
@@ -8978,7 +9106,9 @@ method <- match.arg(method, c("cpu_rsvd", "cuda_rsvd", "metal_rsvd", "irlba"))
 #'   `min(nrow(x), ncol(x))`.
 #' @param backend Compute backend. \code{cpu} runs on the host CPU. \code{cuda}
 #'   dispatches randomized SVD to a CUDA-capable backend. \code{metal}
-#'   dispatches randomized SVD to the Apple Metal backend.
+#'   dispatches randomized SVD to the Apple Metal backend. When omitted, the
+#'   function uses `options(backend = ...)`, then `FASTPLS_BACKEND`, then CPU.
+#'   For CPU execution, `options(cores = n)` requests `n` BLAS/OpenMP threads.
 #' @param method SVD algorithm family. \code{irlba} uses the bundled iterative
 #'   CPU backend and is valid only with \code{backend = cpu}. \code{rsvd}
 #'   uses the native fastPLS randomized SVD on the selected backend.
@@ -9505,10 +9635,8 @@ plot.fastPLS <- function(x, comps = c(1L, 2L), groups = NULL,
     scores <- .fastpls_model_scores(x, score.set = score.set)
     if (is.null(scores)) {
         stop(
-            paste0(
-                "The requested PLS scores are not stored. Refit with fit=TRUE ",
-                "for training scores or proj=TRUE for test scores."
-            ),
+            "The requested PLS scores are not stored. Refit with fit=TRUE ",
+            "for training scores or proj=TRUE for test scores.",
             call. = FALSE
         )
     }
@@ -10122,10 +10250,8 @@ plot.permutation <- function(
             !isTRUE(.metal_experimental_iterative_enabled())
     ) {
         stop(
-            paste0(
             "backend='metal' requires the Metal SIMPLS-family path; enable ",
-                "FASTPLS_METAL_RESIDENT_SIMPLS or use backend='cpu'."
-            ),
+            "FASTPLS_METAL_RESIDENT_SIMPLS or use backend='cpu'.",
             call. = FALSE
         )
     }
@@ -10386,6 +10512,11 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 #' model can include predictions for held-out samples, latent scores, fitted
 #' values, variance summaries, and optional classification heads.
 #'
+#' The compiled CPU backend uses the BLAS/LAPACK implementation selected at
+#' package build time. A multithreaded BLAS can execute eligible matrix products
+#' on several CPU cores, but the SIMPLS deflation sequence remains serial and
+#' additional threads are not guaranteed to reduce runtime.
+#'
 #' Supplying `float::float32` predictors or responses requests single-precision
 #' execution without silent promotion to double. Float32 is route-specific,
 #' however, rather than a package-wide speed or memory guarantee. Compiled CPU
@@ -10413,20 +10544,29 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 #' dense-indicator path, SIMPLS stops with a clear error rather than silently
 #' substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
 #'
-#' The SIMPLS direction-refresh rule is identical across supported backends.
-#' Every component invokes a fresh rank-one direction calculation on the
-#' current deflated cross-covariance. IRLBA starts a new iterative solve and
-#' rSVD draws a new oversampled sketch using the base seed plus the zero-based
-#' component index. Candidate blocks, cross-component warm starts, and adaptive
-#' refresh policies were rejected during development and are not used by the
-#' public implementation. Like reference SIMPLS software, one fit supplies the
-#' sequential component path through the largest requested component count;
-#' fastPLS does not claim this path construction as a novelty. Retained
-#' optimizations include cached rank-one deflation products, incremental
-#' coefficient and fitted-value updates, conditional cross-product caching,
-#' compact latent prediction, and matrix-free cross-covariance products. These
-#' are shape-dependent execution and storage choices, not a guarantee that
-#' every SIMPLS problem runs faster.
+#' The accelerated rSVD SIMPLS route is an explicitly approximate execution
+#' profile rather than an estimator-equivalent implementation of de Jong
+#' SIMPLS. CPU and Metal extract one direction from the current deflated
+#' cross-covariance at a time. CPU initializes each randomized refresh from the
+#' preceding accepted direction, whereas Metal draws a fresh direction in its
+#' resident rank-one route. CUDA also uses resident rank-one refresh for
+#' regression and small classification tasks. For dummy-coded classification
+#' with at least 5,000 training samples and a requested path of at least 50
+#' components, CUDA refreshes at most eight candidate directions together and
+#' consumes them sequentially through the supervised orthogonalization path.
+#' This guarded batch amortizes GPU launches on large image-embedding tasks; it
+#' is not used for regression or small biomedical datasets. Classification uses
+#' two power iterations by default; numeric regression uses one. Both use
+#' oversampling 10, and explicit `power` or `oversample` values override these
+#' choices. IRLBA keeps the conventional fresh component-wise route for closer
+#' numerical comparison with reference SIMPLS.
+#'
+#' Like reference SIMPLS software, one fit supplies the sequential component
+#' path through the largest requested component count; fastPLS does not claim
+#' this path construction as a novelty. Additional optimizations include cached
+#' rank-one deflation products, incremental coefficient and fitted-value
+#' updates, conditional cross-product caching, compact latent prediction, and
+#' matrix-free cross-covariance products.
 #'
 #' Randomized SVD is an approximate solver. The returned `diagnostics` performs
 #' inexpensive structural checks for finite latent factors and the requested
@@ -10497,7 +10637,9 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 #'  @param backend Implementation backend: \code{cpu} for compiled CPU,
 #' \code{cuda}
 #'   for CUDA-native fitting, or experimental \code{metal} for Apple Metal
-#'   randomized-SVD/GEMM acceleration.
+#'   randomized-SVD/GEMM acceleration. When omitted, `options(backend = ...)`
+#'   defines the session default. For CPU execution, `options(cores = n)`
+#'   requests `n` BLAS/OpenMP threads.
 #' @param north Number of orthogonal components removed by OPLS.
 #'  @param kernel Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
 #' \code{poly}.
@@ -10584,9 +10726,9 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 #'     case-specific residual audit, strengthened retry, and deterministic
 #'     recovery. Panel evidence is reported separately and is not interpreted
 #'     as general-use certification. SIMPLS-family fits additionally record
-#'     the active `fresh_per_component` direction rule and the retained and
-#'     abandoned execution optimizations. Accelerator and float32 routes that do
-#'     not yet expose the same certificate warn and are marked unverified.
+#'     whether the active approximate route uses CPU warm-started, resident
+#'     rank-one, or guarded resident-batch refresh, together with retained and
+#'     abandoned execution optimizations.
 #'
 #'   Function settings and backend bookkeeping, such as the component grid and
 #'   resolved classifier backend, are retained internally for prediction and
@@ -10608,13 +10750,25 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 #' cv$best_ncomp
 #' head(fit_cv$Ypred)
 #' @export
-.pls_svd_context <- function(svd.method, dots, backend) {
+.pls_svd_context <- function(
+    svd.method,
+    dots,
+    backend,
+    method,
+    classification
+) {
     control <- .resolve_svd_control(
         svd.method = svd.method,
         dots = dots,
         context = "pls()"
     )
-    control <- .apply_backend_rsvd_controls(control, backend, "pls()")
+    control <- .apply_backend_rsvd_controls(
+        control,
+        backend,
+        "pls()",
+        pls_family = method,
+        classification = classification
+    )
     control
 }
 
@@ -10627,7 +10781,14 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     }
     backend <- .normalize_public_backend(backend)
     method <- match.arg(method, c("simpls", "plssvd", "opls", "kernelpls"))
-    control <- .pls_svd_context(svd.method, dots, backend)
+    classification <- is.factor(Ytrain) || is.character(Ytrain)
+    control <- .pls_svd_context(
+        svd.method,
+        dots,
+        backend,
+        method,
+        classification
+    )
     float32 <- .has_float32_input(Xtrain, Ytrain, Xtest, Ytest)
     if (!float32) {
         control$svd.method <- .backend_svd_method(control$svd.method, backend)
@@ -10642,6 +10803,7 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
         method = method,
         backend = backend, backend_compiled = .compiled_backend(backend),
         classifier = classifier,
+        classification = classification,
         scaling = scaling, scal = pmatch(scaling, c("centering", "autoscaling",
             "none"))[1L], control = control, float32 = float32)
 }
@@ -10660,7 +10822,9 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
         control$rsvd_oversample,
         control$rsvd_power,
         control$seed,
-        pls_family = context$method
+        pls_family = context$method,
+        classification = context$classification,
+        training_samples = nrow(context$Xtrain)
     )
     model <- .fastpls_attach_pls_metrics(
         model,
@@ -11217,12 +11381,13 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
         finite <- finite & metric_names %in% target_names
         if (!any(finite)) {
             available_metrics <- paste(unique(metric_names), collapse = ", ")
+            message_format <- paste0(
+                "selection_metric = '%s' is unavailable in these CV results. ",
+                "Available metrics: %s."
+            )
             stop(
                 sprintf(
-                    paste0(
-                "selection_metric = '%s' is unavailable in these CV results. ",
-                        "Available metrics: %s."
-                    ),
+                    message_format,
                     selection_metric,
                     available_metrics
                 ),
@@ -11230,7 +11395,9 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
             )
         }
     }
-loss_metric <- any(metric_names[finite] %in% c("rmsd", "rmse", "mae", "mse"))
+    loss_metric <- any(
+        metric_names[finite] %in% c("rmsd", "rmse", "mae", "mse")
+    )
     idx <- if (loss_metric) {
         which.min(ifelse(finite, values, Inf))
     } else {
@@ -11648,7 +11815,9 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
 #' @param method One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
 #'   \code{kernelpls}. Multiple values are treated as a tuning grid.
 #' @param backend Implementation backend: \code{cpu}, \code{cuda}, or
-#'   \code{metal}. Multiple values are treated as a tuning grid.
+#'   \code{metal}. Multiple values are treated as a tuning grid. When omitted,
+#'   `options(backend = ...)` defines the session default; `options(cores = n)`
+#'   controls the CPU thread request.
 #' @param seed Random seed used for fold assignment and randomized SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
@@ -11900,7 +12069,9 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
     control <- .apply_backend_rsvd_controls(
         control,
         backend,
-        "pls.single.cv()"
+        "pls.single.cv()",
+        pls_family = config$method,
+        classification = is.factor(Ydata) || is.character(Ydata)
     )
     control$svd.method <- match.arg(
         .normalize_svd_method(control$svd.method),
@@ -12190,7 +12361,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #' @param method One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
 #'   \code{kernelpls}. Multiple values are tuned in the inner loop.
 #' @param backend Implementation backend: \code{cpu}, \code{cuda}, or
-#'   \code{metal}. Multiple values are tuned in the inner loop.
+#'   \code{metal}. Multiple values are tuned in the inner loop. When omitted,
+#'   `options(backend = ...)` defines the session default; `options(cores = n)`
+#'   controls the CPU thread request.
 #' @param seed Random seed used for outer/inner fold assignment and randomized
 #'   SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
@@ -12316,7 +12489,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     values
 }
 
-.double_cv_control <- function(config, seed) {
+.double_cv_control <- function(config, seed, classification) {
     control <- .resolve_svd_control(
         svd.method = config$svd.method,
         dots = c(
@@ -12328,7 +12501,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     control <- .apply_backend_rsvd_controls(
         control,
         config$backend,
-        "pls.double.cv()"
+        "pls.double.cv()",
+        pls_family = config$method,
+        classification = classification
     )
     control$svd.method <- match.arg(
         .normalize_svd_method(control$svd.method),
@@ -12378,7 +12553,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         grid_values = .double_cv_grid_values(grid),
         base = base,
         selection_metric = selection_metric,
-        control = .double_cv_control(base, seed),
+        control = .double_cv_control(base, seed, response$classification),
         seed = seed,
         defaults = list(
             scaling = base$scaling,

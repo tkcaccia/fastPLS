@@ -37,7 +37,9 @@
 
 \item{backend}{Prediction backend. \code{auto} uses FlashSVD-style
 low-rank prediction when compact factors are available and the low-rank
-application is expected to be beneficial.}
+application is expected to be beneficial. When omitted, the session
+\code{options(backend = ...)} value is used. For CPU prediction,
+\code{options(cores = n)} controls the thread request.}
 
 \item{flash.block_size}{Row block size for \code{cpu_flash} prediction.}
 

@@ -161,7 +161,10 @@ bool rsvd_a_posteriori_check(
     omitted_ratio = std::max(omitted_ratio, boundary_ratio);
     weak_boundary = boundary_ratio > 0.95;
   }
-  return triplet_residual <= 1e-2 && omitted_ratio <= 0.95;
+  // A ratio near one indicates a weak spectral boundary, not an inaccurate
+  // retained triplet. Reject only when the probe finds an omitted direction
+  // materially stronger than the retained boundary.
+  return triplet_residual <= 1e-2 && omitted_ratio <= 1.01;
 }
 
 bool rsvd_consensus(

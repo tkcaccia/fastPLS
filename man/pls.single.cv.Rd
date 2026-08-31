@@ -48,7 +48,9 @@ each sample is treated as its own group.}
 \code{kernelpls}. Multiple values are treated as a tuning grid.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
-\code{metal}. Multiple values are treated as a tuning grid.}
+\code{metal}. Multiple values are treated as a tuning grid. When omitted,
+\code{options(backend = ...)} defines the session default;
+\code{options(cores = n)} controls the CPU thread request.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
 randomized SVD for the selected backend, and \code{irlba} uses the bundled

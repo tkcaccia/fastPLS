@@ -504,8 +504,8 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
     MetalMatrix vvbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
     for (int a = 0; a < max_comp; ++a) {
       arma::vec rr(X.n_cols);
-      // Draw a fresh direction for every deflated SIMPLS component. The
-      // preceding latent direction is deliberately not used as a warm start.
+      // A fresh direction avoids propagating approximation error across
+      // deflated components on the Metal route.
       for (arma::uword j = 0; j < X.n_cols; ++j) {
         rr[j] = static_cast<double>(normal(rng));
       }

@@ -1,3 +1,53 @@
+# fastPLS 0.99.35
+
+* Replaced the package-specific session option with `options(backend = ...)`.
+  Explicit function arguments retain precedence, followed by the session
+  option, `FASTPLS_BACKEND`, and the CPU default.
+
+* Added `options(cores = n)` CPU thread control. fastPLS forwards the requested
+  positive integer to common BLAS and OpenMP runtimes; eligible matrix products
+  can use those threads when supported by the linked numerical library.
+
+# fastPLS 0.99.34
+
+* Added a CUDA-specific batched randomized direction refresh for dummy-coded
+  classification. The route consumes at most eight candidates through the
+  sequential orthogonalization path while retaining rank-one refresh for
+  regression, CPU, and Metal execution.
+
+* Retained the previously faster resident Metal rank-one implementation after
+  a fused warm-start experiment was slower in matched CIFAR-100 testing.
+
+* Added explicit diagnostics for backend-specific direction batching and
+  audited CPU, multithreaded-BLAS CPU, CUDA, and Metal execution separately.
+
+# fastPLS 0.99.33
+
+* Restored an explicitly approximate accelerated-SIMPLS profile. CPU rSVD
+  refreshes reuse the preceding accepted direction, while CUDA keeps rank-one
+  randomized refreshes in persistent device workspaces. Multi-direction block
+  refresh remains disabled because it reduced NMR predictive accuracy.
+
+* Added task-aware internal rSVD controls without adding public arguments:
+  oversampling 10 with two power iterations for classification and one for
+  numeric regression. Explicit controls supplied through `...` still win.
+
+* Separated the accelerated profile from claims of deterministic de Jong
+  estimator preservation in diagnostics and documentation.
+
+# fastPLS 0.99.32
+
+* Corrected the rSVD case audit so a near-tied retained/omitted singular-value
+  boundary remains diagnostic rather than triggering repeated deterministic
+  recovery. The singular-triplet residual tolerance is unchanged.
+
+* Batched the matrix-free left/right residual products and reused the computed
+  retained-plus-one Ritz boundary, avoiding repeated full operator probes on
+  very wide multivariate responses.
+
+* Added a near-tied-spectrum regression test and clarified Metal rSVD warning
+  text.
+
 # fastPLS 0.99.31
 
 * Reformatted all R sources with four-space indentation while preserving the
@@ -142,16 +192,14 @@
 
 # fastPLS 0.99.18
 
-* Standardized backend selection on the package-specific API used across the
-  KODAMA ecosystem: explicit `backend`, `options(fastPLS.backend = ...)`,
-  `FASTPLS_BACKEND`, then CPU. Unrelated global backend settings are ignored.
+* Standardized backend precedence across the KODAMA ecosystem. This historical
+  package-specific option was superseded by the generic session option in
+  version 0.99.35.
 
 # fastPLS 0.99.17
 
-* Added a session-wide backend selector through `fastPLS_backend()`,
-  `options(backend = ...)`, and `BACKEND`. Explicit function
-  arguments retain precedence and CPU remains the default. Legacy
-  fastPLS-specific selectors remain compatibility fallbacks.
+* Added the initial session-wide backend selector. The current selector and
+  precedence rules are documented under version 0.99.35.
 
 # fastPLS 0.99.16
 

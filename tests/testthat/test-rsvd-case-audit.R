@@ -24,7 +24,22 @@ test_that("rank-deficient CPU rSVD remains finite and audited", {
   expect_true(out$diagnostics$rsvd_case_audit$certified)
 })
 
-test_that("matrix-free SIMPLS rSVD records case-level audits", {
+test_that("near-tied retained boundaries do not force deterministic recovery", {
+  set.seed(995)
+  U <- qr.Q(qr(matrix(rnorm(120L * 20L), 120L, 20L)))
+  V <- qr.Q(qr(matrix(rnorm(80L * 20L), 80L, 20L)))
+  singular_values <- c(rep(10, 6L), seq(9, 1, length.out = 14L))
+  A <- U %*% (singular_values * t(V))
+
+  out <- fastsvd(A, ncomp = 5L, method = "rsvd", seed = 23L)
+
+  expect_true(out$diagnostics$rsvd_case_audit$certified)
+  expect_false(out$diagnostics$rsvd_case_audit$deterministic_fallback)
+  expect_lte(out$diagnostics$rsvd_case_audit$triplet_residual, 1e-2)
+  expect_lte(out$diagnostics$rsvd_case_audit$omitted_direction_ratio, 1.01)
+})
+
+test_that("matrix-free accelerated SIMPLS reports structural diagnostics", {
   old_mode <- Sys.getenv("FASTPLS_ABLATION_MODE", unset = NA_character_)
   old_xprod <- Sys.getenv("FASTPLS_ABLATION_XPROD", unset = NA_character_)
   on.exit({
@@ -38,15 +53,12 @@ test_that("matrix-free SIMPLS rSVD records case-level audits", {
   Y <- matrix(rnorm(220L * 45L), 220L, 45L)
   fit <- pls(X, Y, ncomp = 1:4, method = "simpls", seed = 17L)
 
-  expect_true(fit$diagnostics$status %in% c(
-    "case_audit_passed",
-    "case_audit_passed_with_deterministic_recovery"
-  ))
-  expect_gt(fit$diagnostics$rsvd$case_audit$solves, 0L)
   expect_identical(
-    fit$diagnostics$rsvd$case_audit$certified,
-    fit$diagnostics$rsvd$case_audit$solves
+    fit$diagnostics$status,
+    "structural_checks_passed_case_audit_unavailable"
   )
+  expect_identical(fit$diagnostics$rsvd$case_audit$solves, 0L)
+  expect_true(fit$diagnostics$simpls_direction$approximate_execution)
 })
 
 test_that("float32 CPU rSVD performs a case-specific audit", {

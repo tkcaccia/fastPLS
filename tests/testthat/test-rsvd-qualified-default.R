@@ -44,36 +44,30 @@ test_that("backend controls distinguish panel evidence from general certificatio
 
   expect_warning(
     metal <- fastPLS:::.apply_backend_rsvd_controls(base, "metal", "test"),
-    "did not meet"
+    "no prespecified Metal qualification panel"
   )
   expect_identical(metal$rsvd_oversample, 20L)
   expect_false(metal$rsvd_qualification$qualified_on_prespecified_panel)
 })
 
-test_that("pls records starting controls and a case-specific audit", {
+test_that("accelerated SIMPLS uses task-aware lean randomized controls", {
   set.seed(2201)
   X <- matrix(rnorm(80 * 12), 80, 12)
   Y <- matrix(rnorm(80 * 3), 80, 3)
 
   fit_default <- pls(X, Y, ncomp = 2, method = "simpls")
-  expect_identical(fit_default$diagnostics$rsvd$oversample, 20L)
-  expect_identical(fit_default$diagnostics$rsvd$power, 2L)
-  expect_true(fit_default$diagnostics$status %in% c(
-    "case_audit_passed",
-    "case_audit_passed_with_deterministic_recovery"
-  ))
-  expect_gt(fit_default$diagnostics$rsvd$case_audit$solves, 0L)
-  expect_identical(
-    fit_default$diagnostics$rsvd$case_audit$certified,
-    fit_default$diagnostics$rsvd$case_audit$solves
-  )
+  expect_identical(fit_default$diagnostics$rsvd$oversample, 10L)
+  expect_identical(fit_default$diagnostics$rsvd$power, 1L)
+  expect_true(fit_default$diagnostics$simpls_direction$approximate_execution)
 
-  expect_warning(
-    fit_explicit <- pls(
-      X, Y, ncomp = 2, method = "simpls",
-      oversample = 6L, power = 1L
-    ),
-    "did not meet"
+  y <- factor(rep(c("a", "b"), each = 40L))
+  fit_class <- pls(X, y, ncomp = 2, method = "simpls")
+  expect_identical(fit_class$diagnostics$rsvd$oversample, 10L)
+  expect_identical(fit_class$diagnostics$rsvd$power, 2L)
+
+  fit_explicit <- pls(
+    X, Y, ncomp = 2, method = "simpls",
+    oversample = 6L, power = 1L
   )
   expect_identical(fit_explicit$diagnostics$rsvd$oversample, 6L)
   expect_identical(fit_explicit$diagnostics$rsvd$power, 1L)

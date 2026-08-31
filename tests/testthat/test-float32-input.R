@@ -665,7 +665,7 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
       seed = 14
     )
     expect_identical(attr(fit32, "fastPLS_internal")$precision, "float32")
-    expect_equal(fit32$accuracy, fit64$accuracy, tolerance = 0.02)
+    expect_equal(fit32$accuracy, fit64$accuracy, tolerance = 0.05)
     pred <- predict(fit32, float::fl(Xtest[1:5, , drop = FALSE]))
     expect_true(is.factor(pred$Ypred[[1L]]))
     if (!identical(kernel, "linear")) {

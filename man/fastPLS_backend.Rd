@@ -8,16 +8,21 @@ fastPLS_backend(backend = NULL)
 }
 \arguments{
 \item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or
-    \code{"metal"}.}
+\code{"metal"}.}
 }
 \value{
 The active backend. Setting returns the previous option invisibly.
 }
 \description{
 An explicit function argument takes precedence over
-\code{options(fastPLS.backend = ...)}, then \code{FASTPLS_BACKEND}; CPU is the
-    final
+\code{options(backend = ...)}, then \code{FASTPLS_BACKEND}; CPU is the final
 default.
+}
+\details{
+For CPU execution, \code{options(cores = n)} requests \code{n} threads from the
+linked BLAS and OpenMP runtimes. Matrix operations can use those threads
+when the installed numerical library supports runtime thread control;
+sequential PLS deflation steps remain serial.
 }
 \examples{
 current <- fastPLS_backend()
