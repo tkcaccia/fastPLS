@@ -25,7 +25,8 @@ fastsvd(
 variables or columns in columns. Sparse matrices should be converted by the
 caller; \code{fastsvd()} currently works on a dense numeric matrix.}
 
-\item{nu}{Number of left singular vectors to return. If \code{NULL}, the function
+\item{nu}{Number of left singular vectors to return. If \code{NULL}, the
+    function
 uses the largest feasible rank implied by the matrix dimensions. When
 \code{ncomp} is supplied, \code{ncomp} controls the decomposition rank and
 \code{nu} controls only how many left vectors are kept in the returned object.}

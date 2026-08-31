@@ -19,12 +19,14 @@
     ...
 )
 
-\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE, ...)
+\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE,
+    ...)
 
 \method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
-\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or \code{fastPLSOpls} object.}
+\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or
+    \code{fastPLSOpls} object.}
 
 \item{newdata}{Numeric predictor matrix.}
 
@@ -52,7 +54,8 @@ reporting ImageNet-style top-5 candidate labels.}
 \item{...}{Unused.}
 }
 \value{
-A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional \code{Ttest}, and
+A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
+    \code{Ttest}, and
 optional LDA scores for LDA classification models.
 }
 \description{

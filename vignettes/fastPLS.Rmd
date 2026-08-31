@@ -39,18 +39,18 @@ argument, R option, environment variable, then CPU. An explicitly requested
 
 | Function | Purpose |
 |---|---|
-| `pls()` | Fit PLSSVD, SIMPLS, OPLS, or kernel PLS for regression or classification. |
+| `pls()` | Fit PLS models for regression or classification. |
 | `predict()` | Predict from fitted `fastPLS`, OPLS, or kernel PLS models. |
-| `plot()` | Plot PLS score maps, with optional confidence or Hotelling T2 ellipses. |
+| `plot()` | Plot PLS scores and optional ellipses. |
 | `plot.permutation()` | Plot R2/Q2 diagnostics from a PLS permutation test. |
-| `pls.single.cv()` | Run grouped cross-validation and choose the best component count. |
-| `pls.double.cv()` | Run nested/double cross-validation with inner component optimization. |
-| `evaluate()` | Compute classification and regression performance metrics from predictions. |
+| `pls.single.cv()` | Select components by grouped cross-validation. |
+| `pls.double.cv()` | Run nested cross-validation. |
+| `evaluate()` | Evaluate classification or regression predictions. |
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
-| `has_metal()` | Check whether Apple Metal-native fastPLS support is available. |
+| `has_metal()` | Check for Apple Metal support. |
 
 ### Bioconductor data containers
 
@@ -83,16 +83,16 @@ A practical starting point is:
 
 | Goal | Suggested call |
 |---|---|
-| Fast exploratory regression or PLS-DA | `method = "simpls"`, `backend = "cpu"`, `svd.method = "rsvd"` |
+| Fast exploratory modelling | SIMPLS with CPU rSVD |
 | Confirmatory or exactly reproducible CPU analysis | `svd.method = "irlba"` |
 | Direct cross-covariance PLS-SVD | `method = "plssvd"` |
 | Remove response-unrelated structured variation | `method = "opls"` |
-| Try nonlinear sample relationships | `method = "kernelpls"`, `kernel = "rbf"` or `"poly"` |
+| Nonlinear relationships | Kernel PLS with an RBF or polynomial kernel |
 | Classification: argmax PLS-DA decoding | `classifier = "argmax"` |
 | Classification: latent-space discriminant analysis | `classifier = "lda"` |
 | Small or moderate data | `backend = "cpu"` |
-| Large dense matrices or many classes/responses | `backend = "cuda"` when available |
-| Apple Silicon exploratory acceleration | `backend = "metal"` when `has_metal()` is `TRUE` |
+| Large dense matrices | CUDA when available |
+| Apple Silicon acceleration | Metal when available |
 | Float32 CPU input | `float::fl(X)`, `backend = "cpu"`, `svd.method = "rsvd"` |
 
 The publication release does not export a PCA function. PCA is used only as an
@@ -112,16 +112,19 @@ means that both host and accelerator stages remain. `Experimental` denotes a
 callable route with limited validation. `Unavailable` combinations stop rather
 than silently falling back.
 
+The table uses V for validated, Q for qualified approximate, H for hybrid,
+E for experimental, S for supported, and U for unavailable.
+
 | Model or operation | CPU | CUDA | Metal |
-|---|---|---|---|
-| PLS-SVD, float64 | IRLBA validated; rSVD case-audited with deterministic recovery | rSVD approximate; case certificate route-dependent | rSVD experimental/hybrid |
-| SIMPLS, float64 | IRLBA validated; each rSVD direction case-audited with deterministic recovery | rSVD approximate; case certificate route-dependent | rSVD experimental/hybrid |
-| OPLS, float64 | Supported; deterministic validation available | rSVD hybrid | rSVD experimental/hybrid |
-| Linear kernel PLS, float64 | Same linear SIMPLS core | Same accelerated linear core | Experimental/hybrid |
-| RBF or polynomial kernel PLS | Supported; explicit \(n \times n\) Gram matrix | Hybrid; host kernel stages | Experimental/hybrid; host kernel stages |
-| Argmax PLS-DA | Supported | Supported where CUDA fitting is available | Experimental with Metal fitting |
-| Latent-space LDA | Validated compiled Cholesky route | Supported CUDA route with diagnostics | Hybrid: Metal score projection and CPU LDA |
-| IRLBA solver | Supported | Unavailable | Unavailable |
+|---|---:|---:|---:|
+| PLS-SVD, float64 | V/Q | Q | E/H |
+| SIMPLS, float64 | V/Q | Q | E/H |
+| OPLS, float64 | V | H | E/H |
+| Linear kernel PLS, float64 | S | S | E/H |
+| Nonlinear kernel PLS | S | H | E/H |
+| Argmax PLS-DA | S | S | E |
+| Latent-space LDA | V | S | H |
+| IRLBA solver | S | U | U |
 
 Float32 support is route and platform dependent, as described in the Float32
 Input section. OPLS, nonlinear kernel PLS, and latent-space LDA accept float32
@@ -396,7 +399,8 @@ eval_cls$confusion
 
 When class-score matrices are available, `evaluate()` can also report top-k
 accuracy. Top-k accuracy asks whether the true class appears anywhere among the
-first `k` ranked labels. Thus top-1 accuracy is ordinary classification accuracy,
+first `k` ranked labels. Thus top-1 accuracy is ordinary classification
+    accuracy,
 while top-5 accuracy gives credit when the correct class appears among the five
 highest-scoring alternatives.
 
@@ -474,7 +478,8 @@ head(fit_cls_lda_cpu$Ypred)
 ### Kernel PLS For Classification
 
 Kernel PLS changes the representation of the samples before the inner PLS fit.
-The `linear` kernel is equivalent to an ordinary inner-product representation and
+The `linear` kernel is equivalent to an ordinary inner-product representation
+    and
 is useful as a fast baseline. The `rbf` kernel uses a radial-basis similarity;
 the `poly` kernel uses polynomial interactions among features.
 
@@ -500,7 +505,8 @@ kernel_accuracy
 ### Classification Score Plots
 
 `plot()` can visualize stored PLS score maps. Refit with `fit = TRUE` to store
-training scores, or predict with `proj = TRUE` to store test scores. Ellipses can
+training scores, or predict with `proj = TRUE` to store test scores. Ellipses
+    can
 be ordinary confidence ellipses or Hotelling T2 ellipses.
 
 ```{r chunk-013, fig.width = 5, fig.height = 4}
@@ -713,7 +719,8 @@ head(pred_reg_later$Ttest)
 ### Evaluate Regression Predictions
 
 For numeric regression, `evaluate()` reports R2, Q2, RMSD/RMSE, MAE, bias,
-median relative error percentage, RPD, and correlations. If `ytrain` is supplied,
+median relative error percentage, RPD, and correlations. If `ytrain` is
+    supplied,
 Q2 is calculated relative to the training-set response mean, which is the
 preferred setting for independent test-set evaluation. If `ytrain` is omitted,
 Q2 is returned as `NA`; it is not silently replaced by an R2 calculation.
@@ -798,7 +805,9 @@ that both spectra are placed either in the training set or in the test set,
 never one in each.
 
 ```{r chunk-024}
-patient_id <- rep(seq_len(ceiling(nrow(Xtrain) / 2)), each = 2)[seq_len(nrow(Xtrain))]
+patient_id <- rep(
+    seq_len(ceiling(nrow(Xtrain) / 2)), each = 2
+)[seq_len(nrow(Xtrain))]
 
 cv_grouped <- pls.single.cv(
     Xdata = Xtrain,
@@ -946,7 +955,8 @@ permutation distribution; it does not substitute dummy-response Q2. The output
 records the statistic in `permutation_metric`, `permutation_observed`, and
 `permutation_sampled`. Larger predictive metrics use the upper permutation tail,
 whereas losses such as RMSD use the lower tail. Both tails use
-`(b + 1) / (B + 1)`. Failed null fits are stored in `permutation_errors`, omitted
+`(b + 1) / (B + 1)`. Failed null fits are stored in `permutation_errors`,
+    omitted
 from `B`, and summarized by `permutation_completed` and `permutation_failed`.
 
 ```{r chunk-029}
@@ -1056,7 +1066,8 @@ other modelling choices can otherwise be tuned on the same samples used to
 report performance, producing optimistic accuracy or Q2 estimates. In the
 terminology of Szymanska et al. (2012), the inner CV loop (`CV1`) is used to
 optimize model complexity, such as the number of latent variables, whereas the
-outer CV loop (`CV2`) holds out samples that are not used during optimization and
+outer CV loop (`CV2`) holds out samples that are not used during optimization
+    and
 therefore provides the performance estimate of the complete modelling strategy.
 In `fastPLS`, `pls.double.cv()` follows this idea: the inner loop calls
 `pls.single.cv()` to select the best number of components and any vector-valued
@@ -1114,17 +1125,18 @@ The most commonly used `pls.double.cv()` output fields are:
 | Field | Meaning |
 |---|---|
 | `bcomp` | Most frequently selected number of components. |
-| `accuracy`, `Q2Y`, `RMSD` | Outer-CV predictive performance, depending on task type. |
+| `accuracy`, `Q2Y`, `RMSD` | Outer-CV predictive performance. |
 | `Ypred` | Final cross-validated prediction for each sample. |
 | `conf` | Classification confusion matrix. |
-| `metrics` | Complete `evaluate()` results for each outer-CV run and the aggregate prediction. |
+| `metrics` | Detailed outer-CV evaluation results. |
 | `results` | Detailed per-run and per-fold information. |
 
 Important elements returned by `pls.double.cv()` are:
 
 - `results`: one entry per repeated outer CV run. Each entry stores `Ypred` and
     `pred` for that run, the outer `fold` assignment, the `best_ncomp` selected
-    inside each outer fold, the full `best_parameters` selected inside each outer
+    inside each outer fold, the full `best_parameters` selected inside each
+        outer
     fold, the complete inner-CV objects in `inner`, the run-level `metric_name`
     and `metric_value`, and the fitted `backend` and `method`.
 - `Ypred`: the final cross-validated prediction for each sample. For
@@ -1151,10 +1163,12 @@ Important elements returned by `pls.double.cv()` are:
 - `bcomp`: the most frequently selected number of components across all outer
     folds and repeated runs.
 - `backend` and `method`: the default backend and PLS method used by the call.
-    If vector-valued methods or backends are tuned in the inner loop, the selected
+    If vector-valued methods or backends are tuned in the inner loop, the
+        selected
     fold-level values are stored in `results[[run]]$best_parameters`.
 - `selection_metric`: the criterion used by the inner CV loop. The default
-    `"auto"` means accuracy for classification and RMSD-style prediction error for
+    `"auto"` means accuracy for classification and RMSD-style prediction error
+        for
     multivariate regression. Use `"balanced_accuracy"` when each class should
     contribute equally despite unequal class frequencies; nested permutation
     testing then uses balanced accuracy as well.
@@ -1435,7 +1449,8 @@ blocks that the package implements and accelerates.
 - Johnson, W. B. and Lindenstrauss, J. (1984). Extensions of Lipschitz mappings
     into a Hilbert space. *Contemporary Mathematics*, 26, 189-206.
 - Mevik, B.-H. and Wehrens, R. (2007). The pls package: principal component and
-    partial least squares regression in R. *Journal of Statistical Software*, 18,
+    partial least squares regression in R. *Journal of Statistical Software*,
+        18,
     1-23.
 - Pearson, K. (1901). On lines and planes of closest fit to systems of points
     in space. *Philosophical Magazine*, 2, 559-572.
@@ -1447,7 +1462,8 @@ blocks that the package implements and accelerates.
     low-rank models. arXiv:2508.01506.
 - Szymanska, E., Saccenti, E., Smilde, A. K., and Westerhuis, J. A. (2012).
     Double-check: validation of diagnostic statistics for PLS-DA models in
-    metabolomics studies. *Metabolomics*, 8, S3-S16. doi:10.1007/s11306-011-0330-3.
+    metabolomics studies. *Metabolomics*, 8, S3-S16.
+        doi:10.1007/s11306-011-0330-3.
 - Trygg, J. and Wold, S. (2002). Orthogonal projections to latent structures
     (O-PLS). *Journal of Chemometrics*, 16, 119-128.
 - Wold, S., Sjostrom, M., and Eriksson, L. (2001). PLS-regression: a basic tool

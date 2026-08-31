@@ -1,3 +1,14 @@
+# fastPLS 0.99.29
+
+* Resolved the BiocCheck source-formatting notes by limiting package-facing
+  lines to 80 characters and refactoring functions to at most 50 coding lines.
+
+* Fixed float32 single-cross-validation argument forwarding and completed the
+  resident Metal SIMPLS model-assembly helpers.
+
+* Preserved the public PLS, cross-validation, metric, and permutation
+  contracts. The complete package test suite passes.
+
 # fastPLS 0.99.28
 
 * Added direct support for `Biobase::ExpressionSet` predictor inputs in

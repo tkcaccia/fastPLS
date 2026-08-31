@@ -23,7 +23,8 @@
 \item{groups}{Optional grouping vector used for point fills and grouped
 ellipses.}
 
-\item{score.set}{Plot \code{train} scores, \code{test} scores, or use \code{auto} to select
+\item{score.set}{Plot \code{train} scores, \code{test} scores, or use
+    \code{auto} to select
 stored training scores before test scores.}
 
 \item{ellipse}{Draw confidence ellipses when \code{TRUE}.}

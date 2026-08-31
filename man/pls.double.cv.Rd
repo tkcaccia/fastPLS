@@ -85,7 +85,8 @@ sharing the same constraint value are never split across training and test.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
+    \code{poly}.}
 
 \item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}. For
 \code{method = "kernelpls"}, multiple values are tuned in the inner loop.}
@@ -103,7 +104,8 @@ a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
 fallback sequence rather than a user-tuned ridge.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
+metrics in the returned \code{metrics} list. The default \code{FALSE} returns
+    only
 aggregate metrics.}
 
 \item{xprod}{Use the matrix-free cross-product route where available for
@@ -111,16 +113,20 @@ inner component optimization. \code{NULL} applies fastPLS defaults.}
 
 \item{selection_metric}{Metric used by inner CV and by the permutation test.
 Use \code{"auto"} (accuracy for classification and RMSD for regression),
-\code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}.
+\code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or
+    \code{"rmsd"}.
 For numeric responses, \code{"r2"} is an observed-mean held-out endpoint and
-\code{"q2"} uses fold-training response means. Training \code{R2Y} is descriptive
+\code{"q2"} uses fold-training response means. Training \code{R2Y} is
+    descriptive
 and is never optimized. Classification can use accuracy, balanced
 accuracy, or dummy-response Q2, but not training R2. Balanced accuracy
 gives each observed class equal weight.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
-Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
-\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
+    as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit},
+    \code{tol}, \code{eps},
 and \code{svtol}. Vector values are tuned in the inner loop.}
 }
 \value{
@@ -131,25 +137,32 @@ prediction. \code{metrics$definitions} records the exact R2Y and Q2Y
 denominator conventions.
 \itemize{
 \item \code{results}: list with one element per repeated run. Each run stores
-\code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
+\code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp}
+    selected in
 each outer fold, fold-level \code{best_parameters}, the complete inner-CV
-objects in \code{inner}, run-level \code{metric_name} and \code{metric_value}, and the
+objects in \code{inner}, run-level \code{metric_name} and \code{metric_value},
+    and the
 default \code{backend} and \code{method}.
-\item \code{Ypred}: final cross-validated predictions. For classification, repeated
+\item \code{Ypred}: final cross-validated predictions. For classification,
+    repeated
 runs are combined by voting; for regression, numeric predictions are
 averaged across runs.
 \item \code{Q2Y}: one outer cross-validated Q2 value per repeated run. Numeric
 responses use each outer fold's training-response mean. For factor
 responses this is the mean outer-fold dummy-response PLS-DA Q2 using
 outer-training class proportions and is not classification accuracy.
-\item \code{R2Y}: one training-fit R2 value per repeated run, averaged across the
+\item \code{R2Y}: one training-fit R2 value per repeated run, averaged across
+    the
 selected outer-fold models.
-\item \code{RMSD}: one held-out RMSD value per repeated run for numeric responses;
+\item \code{RMSD}: one held-out RMSD value per repeated run for numeric
+    responses;
 \code{NA} for classification.
 \item \code{metric_name}: held-out metric used for each repeated run.
-\item \code{bcomp}: most frequently selected component count across outer folds and
+\item \code{bcomp}: most frequently selected component count across outer folds
+    and
 repeated runs.
-\item \code{backend}, \code{method}: default backend and PLS method supplied to the call.
+\item \code{backend}, \code{method}: default backend and PLS method supplied to
+    the call.
 If vector-valued methods or backends are tuned, selected fold-level values
 are stored in \code{results[[run]]$best_parameters}.
 \item \code{selection_metric}: criterion used by the inner CV loop.
@@ -161,19 +174,25 @@ column percentages.
 sample and one column per class.
 \item \code{accuracy}: classification-only decoded-label accuracy, one value per
 repeated run.
-\item \code{balanced_accuracy}: classification-only unweighted mean of class recalls,
+\item \code{balanced_accuracy}: classification-only unweighted mean of class
+    recalls,
 one value per repeated run.
-\item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y}, \code{medianRMSD},
+\item \code{medianR2Y}, \code{CI95R2Y}, \code{medianQ2Y}, \code{CI95Q2Y},
+    \code{medianRMSD},
 \code{CI95RMSD}: repeated-run summaries returned only when \code{runn > 1}.
-\item \code{permutation_metric}, \code{permutation_observed}, and \code{permutation_sampled}:
+\item \code{permutation_metric}, \code{permutation_observed}, and
+    \code{permutation_sampled}:
 metric name, observed median, and permuted medians returned when
-\code{perm.test = TRUE}. \code{Q2Ysampled} is retained only when Q2 is the selected
+\code{perm.test = TRUE}. \code{Q2Ysampled} is retained only when Q2 is the
+    selected
 permutation metric.
-\item \code{p.value}: permutation-test p-value returned when \code{perm.test = TRUE}.
+\item \code{p.value}: permutation-test p-value returned when \code{perm.test =
+    TRUE}.
 \item \code{permutation_unit}, \code{permutation_group_sizes_preserved},
 \code{permutation_class_frequencies_preserved}, \code{permutation_folds},
 \code{permutation_solver_seed}, \code{permutation_requested},
-\code{permutation_completed}, \code{permutation_failed}, and \code{permutation_errors}:
+\code{permutation_completed}, \code{permutation_failed}, and
+    \code{permutation_errors}:
 the exchangeability contract and null-fit audit.
 }
 }

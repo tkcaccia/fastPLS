@@ -63,7 +63,8 @@ are always held out together and are never split across training and test.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
+    \code{poly}.}
 
 \item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xdata)}. For
 \code{method = "kernelpls"}, multiple values are treated as a tuning grid.}
@@ -80,12 +81,14 @@ a warning when supplied. LDA regularization follows the fixed numerical
 fallback sequence documented in \code{\link[=pls]{pls()}}.}
 
 \item{fit}{Fit one additional model on the full dataset and return its
-fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
+fitted values (\code{Yfit}) and training \code{R2Y} path. The default is
+    \code{TRUE} for
 backward compatibility. Set to \code{FALSE} to skip this extra full-data fit;
 held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
+metrics in the returned \code{metrics} list. The default \code{FALSE} returns
+    only
 aggregate metrics.}
 
 \item{xprod}{Use the matrix-free cross-product route where available.
@@ -93,34 +96,42 @@ aggregate metrics.}
 
 \item{selection_metric}{Metric used to select predictive settings from
 held-out folds. Use \code{"auto"} (accuracy for classification and RMSD for
-regression), \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or
+regression), \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"},
+    \code{"q2"}, or
 \code{"rmsd"}. For numeric responses, \code{"r2"} is calculated from held-out
 predictions relative to the mean of all observed responses, whereas
 \code{"q2"} uses the corresponding fold-training response mean. The
-full-data training \code{R2Y} returned when \code{fit = TRUE} is descriptive and is
+full-data training \code{R2Y} returned when \code{fit = TRUE} is descriptive and
+    is
 not used for component selection. Classification can use accuracy,
 balanced accuracy, or dummy-response Q2, but not training R2. Balanced
 accuracy is the unweighted mean of class-specific recalls and is
 appropriate when class frequencies are unequal.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
-Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
-\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
+    as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit},
+    \code{tol}, \code{eps},
 and \code{svtol}. Vector values are included in the tuning grid.}
 }
 \value{
 A list describing the cross-validation run and selected model.
-\code{metrics$cross_validated} contains complete \code{evaluate()} results for each
+\code{metrics$cross_validated} contains complete \code{evaluate()} results for
+    each
 requested component count and \code{metrics$fitted} contains the corresponding
-full-data fit results when \code{fit = TRUE}. \code{metrics$definitions} records the
+full-data fit results when \code{fit = TRUE}. \code{metrics$definitions} records
+    the
 exact R2Y and Q2Y denominator conventions. Other fields are:
 \itemize{
 \item \code{best_ncomp}: number of components selected by the chosen metric.
-\item \code{best_index}: position of \code{best_ncomp} in the tested component grid.
+\item \code{best_index}: position of \code{best_ncomp} in the tested component
+    grid.
 \item \code{selection_metric}: metric used for optimization. With \code{"auto"},
 classification uses accuracy and regression uses the default prediction
 error rule.
-\item \code{best_metric_name} and \code{best_metric_value}: name and value of the
+\item \code{best_metric_name} and \code{best_metric_value}: name and value of
+    the
 metric at the selected component count.
 \item \code{Q2Y}: held-out cross-validated Q2; every held-out fold is centered
 on its corresponding fold-training response mean. For factor responses,
@@ -130,7 +141,8 @@ is not classification accuracy.
 \item \code{balanced_accuracy}: held-out mean class recall for factor responses.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
 \code{NA} for classification.
-\item \code{Yfit}: fitted values from the full-data model when \code{fit = TRUE}.
+\item \code{Yfit}: fitted values from the full-data model when \code{fit =
+    TRUE}.
 \item \code{R2Y}: training-set explained-variance path from a model fitted on
 the full dataset when \code{fit = TRUE}; otherwise \code{NA}. For factor
 responses, this is calculated on the dummy-coded PLS-DA response scores,
@@ -139,9 +151,11 @@ not on the decoded class labels.
 \item \code{pred}: decoded cross-validated predictions when predictions are
 stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
-\item \code{metrics}: complete \code{evaluate()} outputs. \code{cross_validated} contains
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{cross_validated}
+    contains
 one result per requested component count from held-out predictions and
-\code{fitted} contains full-data fit results when \code{fit = TRUE}. For multivariate
+\code{fitted} contains full-data fit results when \code{fit = TRUE}. For
+    multivariate
 regression, response-wise metrics are included only when \code{bycol = TRUE}.
 \item \code{selection_metrics}: compact per-component metric table used for
 component selection by the CV backend.
@@ -153,7 +167,8 @@ Irrelevant classifier- or method-specific defaults are omitted; for
 example, controls belonging to an unselected classifier are omitted.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
-\item The returned object can be passed as the first argument to \code{\link[=pls]{pls()}} to
+\item The returned object can be passed as the first argument to
+    \code{\link[=pls]{pls()}} to
 refit the selected model on the full training data and predict new samples.
 }
 }

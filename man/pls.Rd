@@ -49,7 +49,8 @@ denominator uses the training-response mean.}
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
-\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or \code{kernelpls}.
+\item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or
+    \code{kernelpls}.
 \code{simpls} uses the fastPLS accelerated SIMPLS core.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
@@ -67,13 +68,15 @@ fallback sequence rather than a user-tuned ridge.}
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
-metrics in \code{metrics}. The default \code{FALSE} returns only aggregate metrics.}
+metrics in \code{metrics}. The default \code{FALSE} returns only aggregate
+    metrics.}
 
 \item{return_variance}{Compute predictor-space latent-variable variance
 explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
-\item{return_loadings}{Compute and store predictor loadings \code{P}. The default
+\item{return_loadings}{Compute and store predictor loadings \code{P}. The
+    default
 is \code{FALSE} because most prediction workflows only need the projection
 weights and response-side coefficients.}
 
@@ -86,7 +89,8 @@ model is refitted with the same randomized-solver seed, and the permuted
 test-set \code{Q2Y} path is compared with the observed path.}
 
 \item{times}{Number of requested permutations. For each component, \code{pls()}
-returns \code{(b + 1) / (B + 1)}, where \code{b} is the number of successful null
+returns \code{(b + 1) / (B + 1)}, where \code{b} is the number of successful
+    null
 fits with \code{Q2Y} at least as large as observed and \code{B} is the number of
 successful null fits. Failed fits are excluded from \code{B} and reported.}
 
@@ -96,7 +100,8 @@ randomized-SVD/GEMM acceleration.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
-\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or \code{poly}.}
+\item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
+    \code{poly}.}
 
 \item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xtrain)}.}
 
@@ -105,80 +110,101 @@ randomized-SVD/GEMM acceleration.}
 \item{coef0}{Polynomial kernel offset.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
-Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
-\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit}, \code{tol}, \code{eps},
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
+    as
+\code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit},
+    \code{tol}, \code{eps},
 \code{svtol}, and \code{seed}.}
 }
 \value{
 A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
 summaries were requested. \code{metrics} is a list of complete \code{evaluate()}
-results, organized as \code{metrics$fitted} and \code{metrics$test}, with one element
+results, organized as \code{metrics$fitted} and \code{metrics$test}, with one
+    element
 per requested component count. Common fields are:
 \itemize{
 \item \code{P}: predictor loadings, with one column per latent component.
 \item \code{Q}: response loadings or response-side latent coefficients.
-\item \code{R}: predictor weights/rotations used to project new samples into the PLS
+\item \code{R}: predictor weights/rotations used to project new samples into the
+    PLS
 latent space.
-\item \code{Ttrain}: training latent scores. This is returned when the backend stores
+\item \code{Ttrain}: training latent scores. This is returned when the backend
+    stores
 scores or when they are needed for fitted values, classifiers, variance
 summaries, or compact prediction.
-\item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by
+\item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used
+    by
 PLSSVD-style compact prediction when a full coefficient array is avoided.
 \item \code{B}: regression coefficient matrix or coefficient array, when stored.
 For vector-valued \code{ncomp}, a three-dimensional array may contain the
 coefficient path for all requested component counts.
-\item \code{mX}, \code{vX}: training predictor centering and scaling values. \code{vX} is one
+\item \code{mX}, \code{vX}: training predictor centering and scaling values.
+    \code{vX} is one
 when no scaling is applied.
 \item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
 \item \code{lev}: factor levels used for classification.
-\item \code{Yfit}: fitted training responses or fitted class labels, returned when
+\item \code{Yfit}: fitted training responses or fitted class labels, returned
+    when
 \code{fit = TRUE}.
-\item \code{R2Y}: training-set coefficient of determination path when \code{fit = TRUE};
+\item \code{R2Y}: training-set coefficient of determination path when \code{fit
+    = TRUE};
 otherwise \code{NA} placeholders may be returned for compatibility. Elements
 are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
 is a dummy-response quantity, not classification accuracy.
-\item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
+\item \code{Ypred}: predictions for \code{Xtest}, returned only when
+    \code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.
-\item \code{Ypred_index}: integer class indices for classification predictions, when
+\item \code{Ypred_index}: integer class indices for classification predictions,
+    when
 available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: independent-test Q2 whose denominator uses the training-response
+\item \code{Q2Y}: independent-test Q2 whose denominator uses the
+    training-response
 mean. For factor \code{Ytest}, this is dummy-response PLS-DA Q2 relative to
 training class proportions, not classification accuracy. It is returned
 when response scores are available. Elements are named by component count.
-\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned when
+\item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned
+    when
 classification predictions are available. Elements are named by component
 count.
-\item \code{metrics}: complete \code{evaluate()} outputs. \code{definitions} records the exact
+\item \code{metrics}: complete \code{evaluate()} outputs. \code{definitions}
+    records the exact
 R2Y and Q2Y denominator conventions. \code{fitted} evaluates \code{Yfit}
-against \code{Ytrain}; \code{test} evaluates \code{Ypred} against \code{Ytest}. For
+against \code{Ytrain}; \code{test} evaluates \code{Ypred} against \code{Ytest}.
+    For
 multivariate regression, response-wise metrics are included only when
 \code{bycol = TRUE}. \code{metrics$permutation} stores permutation metrics and
 p-values when \code{perm.test = TRUE}.
 \item \code{pval}: corrected Monte Carlo permutation-test p-values by component,
 returned when \code{perm.test = TRUE}.
 \item \code{permutation}: long-format permutation table, returned when
-\code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values and the
+\code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values
+    and the
 permutation correlation used by \code{plot.permutation()}.
 \item \code{permutation_unit}, \code{permutation_group_sizes_preserved},
 \code{permutation_class_frequencies_preserved}, \code{permutation_folds},
 \code{permutation_solver_seed}, \code{permutation_requested},
-\code{permutation_completed}, \code{permutation_failed}, and \code{permutation_errors}:
+\code{permutation_completed}, \code{permutation_failed}, and
+    \code{permutation_errors}:
 the permutation contract and null-fit audit.
-\item \code{variance}, \code{variance_explained}, \code{cumulative_variance_explained},
+\item \code{variance}, \code{variance_explained},
+    \code{cumulative_variance_explained},
 \code{variance_total}, \code{variance_basis}: predictor-space variance summaries
 returned when \code{return_variance = TRUE}.
 \item \code{x_variance}, \code{x_variance_explained},
 \code{x_cumulative_variance_explained}, \code{x_variance_total}: aliases of the
 predictor-space variance summaries.
 \item \code{inner_model}: fitted inner PLS model used by OPLS.
-\item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine}, \code{xprod_mode},
+\item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine},
+    \code{xprod_mode},
 \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
-\item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}: kernelPLS-specific
+\item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}:
+    kernelPLS-specific
 kernel settings and execution metadata.
-\item \code{diagnostics}: numerical solver diagnostics. For rSVD this records the
+\item \code{diagnostics}: numerical solver diagnostics. For rSVD this records
+    the
 structural-check status, finiteness, requested and effective component
 counts and randomized controls. CPU float64 rSVD fits also record each
 case-specific residual audit, strengthened retry, and deterministic
@@ -200,7 +226,8 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
-Supplying \code{float::float32} predictors or responses requests single-precision
+Supplying \code{float::float32} predictors or responses requests
+    single-precision
 execution without silent promotion to double. Float32 is route-specific,
 however, rather than a package-wide speed or memory guarantee. Compiled CPU
 and CUDA rSVD PLS-SVD have the broadest current validation. Metal and
@@ -251,7 +278,8 @@ compact latent prediction, and matrix-free cross-covariance products. These
 are shape-dependent execution and storage choices, not a guarantee that
 every SIMPLS problem runs faster.
 
-Randomized SVD is an approximate solver. The returned \code{diagnostics} performs
+Randomized SVD is an approximate solver. The returned \code{diagnostics}
+    performs
 inexpensive structural checks for finite latent factors and the requested
 effective component count, but these checks do not establish agreement with
 a deterministic fit. IRLBA should be preferred for confirmatory inference,

@@ -44,7 +44,8 @@ threshold are ignored for relative-error metrics.}
 \item{na.rm}{Remove incomplete observations before computing metrics.}
 }
 \value{
-A list with \code{task}, \code{metrics}, \code{metric_definitions}, and optionally \code{per_response},
+A list with \code{task}, \code{metrics}, \code{metric_definitions}, and
+    optionally \code{per_response},
 \code{per_class}, \code{confusion}, and \code{topk}. A \code{notes} element is
 included only when the evaluation has an explanatory note to report.
 }

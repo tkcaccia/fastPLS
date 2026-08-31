@@ -8,8 +8,10 @@ data(colon)
 \format{
 A list with three elements:
 \describe{
-\item{\code{X}}{Numeric oligonucleotide microarray expression matrix with 62 colon tissue samples and 2000 gene-expression variables.}
-\item{\code{y}}{Two-level diagnostic factor with classes \code{"normal"} (22 samples) and \code{"tumor"} (40 samples).}
+\item{\code{X}}{Numeric oligonucleotide microarray expression matrix with 62
+    colon tissue samples and 2000 gene-expression variables.}
+\item{\code{y}}{Two-level diagnostic factor with classes \code{"normal"} (22
+    samples) and \code{"tumor"} (40 samples).}
 \item{\code{gene_names}}{Character vector with the 2000 probe/gene identifiers.}
 }
 }

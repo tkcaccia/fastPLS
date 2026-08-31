@@ -8,10 +8,16 @@ data(breast)
 \format{
 A list with four elements:
 \describe{
-\item{\code{X_train}}{Numeric mRNA expression matrix with 150 training tumour samples and 200 gene-expression variables.}
-\item{\code{y_train}}{Training molecular subtype factor with three breast-cancer classes: \code{"Basal"} (45 samples), \code{"Her2"} (30 samples), and \code{"LumA"} (75 samples).}
-\item{\code{X_test}}{Numeric mRNA expression matrix with 70 independent test tumour samples and the same 200 gene-expression variables.}
-\item{\code{y_test}}{Test molecular subtype factor with the same three classes: \code{"Basal"} (21 samples), \code{"Her2"} (14 samples), and \code{"LumA"} (35 samples).}
+\item{\code{X_train}}{Numeric mRNA expression matrix with 150 training tumour
+    samples and 200 gene-expression variables.}
+\item{\code{y_train}}{Training molecular subtype factor with three breast-cancer
+    classes: \code{"Basal"} (45 samples), \code{"Her2"} (30 samples), and
+        \code{"LumA"} (75 samples).}
+\item{\code{X_test}}{Numeric mRNA expression matrix with 70 independent test
+    tumour samples and the same 200 gene-expression variables.}
+\item{\code{y_test}}{Test molecular subtype factor with the same three classes:
+    \code{"Basal"} (21 samples), \code{"Her2"} (14 samples), and \code{"LumA"}
+        (35 samples).}
 }
 }
 \description{

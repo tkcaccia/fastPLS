@@ -7,14 +7,16 @@
 fastPLS_backend(backend = NULL)
 }
 \arguments{
-\item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
+\item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or
+    \code{"metal"}.}
 }
 \value{
 The active backend. Setting returns the previous option invisibly.
 }
 \description{
 An explicit function argument takes precedence over
-\code{options(fastPLS.backend = ...)}, then \code{FASTPLS_BACKEND}; CPU is the final
+\code{options(fastPLS.backend = ...)}, then \code{FASTPLS_BACKEND}; CPU is the
+    final
 default.
 }
 \examples{
