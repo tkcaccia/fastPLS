@@ -93,15 +93,15 @@ pls_float32_cpu_cpp <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit,
     method, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
     .Call(`_fastPLS_pls_float32_cpu_cpp`, XtrainSEXP, YtrainSEXP, ncomp,
         scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power,
-            seed)
+        seed)
 }
 
 pls_float32_labels_cpp <- function(XtrainSEXP, labels, n_classes, ncomp,
     scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power,
-        seed) {
+    seed) {
     .Call(`_fastPLS_pls_float32_labels_cpp`, XtrainSEXP, labels, n_classes,
         ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample,
-            rsvd_power, seed)
+        rsvd_power, seed)
 }
 
 float32_argmax_cpp <- function(scoresSEXP) {
@@ -207,7 +207,7 @@ pls_model2_fast_gpu_labels <- function(XtrainSEXP, y, n_classes, ncomp,
     scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model2_fast_gpu_labels`, XtrainSEXP, y, n_classes,
         ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol,
-            seed)
+        seed)
 }
 
 pls_predict <- function(model, Xtest, proj) {
@@ -256,7 +256,7 @@ single_pls_cv_cpp <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold,
     method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_single_pls_cv_cpp`, Xdata, Ydata, constrain, ncomp,
         scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power,
-            svds_tol, seed)
+        svds_tol, seed)
 }
 
 pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method,
@@ -269,15 +269,15 @@ pls_model1_rsvd_xprod_precision <- function(Xtrain, Ytrain, ncomp, scaling,
     fit, rsvd_oversample, rsvd_power, svds_tol, seed, xprod_precision) {
     .Call(`_fastPLS_pls_model1_rsvd_xprod_precision`, Xtrain, Ytrain, ncomp,
         scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed,
-            xprod_precision)
+        xprod_precision)
 }
 
 pls_model2_fast_rsvd_xprod_precision <- function(Xtrain, Ytrain, ncomp,
     scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed,
-        xprod_precision) {
+    xprod_precision) {
     .Call(`_fastPLS_pls_model2_fast_rsvd_xprod_precision`, Xtrain, Ytrain,
         ncomp, scaling, fit, rsvd_oversample, rsvd_power, svds_tol, seed,
-            xprod_precision)
+        xprod_precision)
 }
 
 pls_model1_gpu <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method,
@@ -294,21 +294,21 @@ pls_model1_gpu_implicit_xprod <- function(Xtrain, Ytrain, ncomp, scaling, fit,
 
 pls_lda_gpu_native <- function(Xtrain, Ytrain, y, Xtest, ncomp, n_classes,
     method, scaling, xprod, fit, rsvd_oversample, rsvd_power, svds_tol, seed,
-        lda_ridge) {
+    lda_ridge) {
     .Call(`_fastPLS_pls_lda_gpu_native`, Xtrain, Ytrain, y, Xtest, ncomp,
         n_classes, method, scaling, xprod, fit, rsvd_oversample, rsvd_power,
-            svds_tol, seed, lda_ridge)
+        svds_tol, seed, lda_ridge)
 }
 
 pls_cv_predict_compiled <- function(Xdata, Ydata, constrain, ncomp, scaling,
     kfold, method, backend, svd_method, rsvd_oversample, rsvd_power, svds_tol,
-        seed, classification, n_response, xprod, opls_north, return_scores,
-            class_codes, classifier, lda_ridge, store_predictions, metric_id) {
+    seed, classification, n_response, xprod, opls_north, return_scores,
+    class_codes, classifier, lda_ridge, store_predictions, metric_id) {
     .Call(`_fastPLS_pls_cv_predict_compiled`, Xdata, Ydata, constrain, ncomp,
         scaling, kfold, method, backend, svd_method, rsvd_oversample,
-            rsvd_power, svds_tol, seed, classification, n_response, xprod,
-                opls_north, return_scores, class_codes, classifier, lda_ridge,
-                    store_predictions, metric_id)
+        rsvd_power, svds_tol, seed, classification, n_response, xprod,
+        opls_north, return_scores, class_codes, classifier, lda_ridge,
+        store_predictions, metric_id)
 }
 
 fastpls_cpp_core_rsvd <- function(A, k, oversample = 20L, power = 2L,

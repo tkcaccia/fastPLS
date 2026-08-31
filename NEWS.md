@@ -1,3 +1,8 @@
+# fastPLS 0.99.31
+
+* Reformatted all R sources with four-space indentation while preserving the
+  existing compact function layout and 80-character line-width policy.
+
 # fastPLS 0.99.30
 
 * Fixed Metal PLS dispatch after helper refactoring by validating model,
