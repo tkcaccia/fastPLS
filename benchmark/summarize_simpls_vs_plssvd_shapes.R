@@ -229,7 +229,7 @@ writeLines(
     "",
     "Only the PLS family changes within each paired contrast.",
     "Fixed controls: generated X/Y, split, component count, float64 precision,",
-    "centering, rSVD oversampling=10, power=1, seed sequence, and public",
+    "centering, rSVD oversampling=32, power=5, seed sequence, and public",
     "fit-plus-predict path. CPU comparisons are interpreted within machine;",
     "absolute CPU times are not compared across Apple M3 and Chiamaka Linux.",
     "",

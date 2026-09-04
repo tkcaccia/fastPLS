@@ -10,7 +10,8 @@ ViP(model)
 \item{model}{Fitted \code{fastPLS} model.}
 }
 \value{
-Numeric matrix (single response) or list of matrices (multi-response).
+Numeric matrix (single response) or list of matrices
+(multi-response).
 }
 \description{
 Computes VIP trajectories from fitted model components.
@@ -18,7 +19,9 @@ Computes VIP trajectories from fitted model components.
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
-fit <- pls(X, y, ncomp = 1, method = "plssvd", backend = "cpu",
-            svd.method = "rsvd", return_variance = FALSE)
+fit <- pls(X, y,
+    ncomp = 1, method = "plssvd", backend = "cpu",
+    svd.method = "rsvd", return_variance = FALSE
+)
 ViP(fit)
 }

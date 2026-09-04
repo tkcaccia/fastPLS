@@ -603,8 +603,10 @@ as_task <- function(path, dataset_id, split_seed = 123L) {
       p = ncol(e$Xtrain),
       n_classes = ncol(e$Ytrain),
       preprocessing = list(
+        protocol = "fixed stored split; predictor-only water masking; full-response metrics",
         residual_water_region_ppm = c(4.6, 4.8),
-        residual_water_columns_removed = length(water_columns)
+        predictor_water_columns_zeroed = length(water_columns),
+        response_columns_evaluated = ncol(e$Ytrain)
       )
     ))
   }

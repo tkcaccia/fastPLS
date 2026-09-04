@@ -48,7 +48,14 @@ repo_root <- normalizePath(file.path(dirname(sub("^--file=", "", grep("^--file="
 
 breast_env <- new.env(parent = emptyenv())
 breast_path <- Sys.getenv("FASTPLS_BREAST_RDA", file.path(repo_root, "data", "breast.rda"))
-load(breast_path, envir = breast_env)
+if (file.exists(breast_path)) {
+  load(breast_path, envir = breast_env)
+} else {
+  utils::data("breast", package = "fastPLS", envir = breast_env)
+}
+if (!exists("breast", envir = breast_env, inherits = FALSE)) {
+  stop("The packaged breast dataset could not be loaded.", call. = FALSE)
+}
 write_dataset(
   "breast", breast_env$breast$X_train, breast_env$breast$y_train,
   breast_env$breast$X_test, breast_env$breast$y_test, 10L

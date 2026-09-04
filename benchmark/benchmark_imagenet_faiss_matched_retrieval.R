@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
-# Matched exploratory ImageNet retrieval control. Raw DINOv2, PCA scores, and
-# PLS scores use the same float32 split, cosine metric, neighbours, and FAISS
+# Matched exploratory ImageNet retrieval control. Raw DINOv2 and PLS scores
+# use the same float32 split, cosine metric, neighbours, and FAISS
 # query blocks. The pooled 1,281,167-image feature archive was randomly divided
 # into 1,000,000 development-training and 281,167 development-holdout rows with
 # seed 123. This is not the canonical ImageNet train/validation split. The
@@ -14,6 +14,10 @@ setting <- function(name, default) {
   if (nzchar(value)) value else default
 }
 
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_file <- if (length(script_arg)) sub("^--file=", "", script_arg[[1L]]) else "benchmark_imagenet_faiss_matched_retrieval.R"
+script_dir <- dirname(normalizePath(script_file, winslash = "/", mustWork = FALSE))
+
 mode <- setting("IMAGENET_RETRIEVAL_MODE", "search")
 space <- setting("IMAGENET_RETRIEVAL_SPACE", "raw")
 method <- setting("IMAGENET_RETRIEVAL_METHOD", "exact")
@@ -23,7 +27,7 @@ task_file <- path.expand(setting(
 ))
 out_dir <- path.expand(setting(
   "IMAGENET_RETRIEVAL_OUT",
-  "~/fastPLS_imagenet_faiss_matched_1m_20260725"
+  "~/fastPLS_results_0.99.39/imagenet_faiss"
 ))
 train_n <- as.integer(setting("IMAGENET_RETRIEVAL_TRAIN_N", "1000000"))
 eval_n <- as.integer(setting("IMAGENET_RETRIEVAL_EVAL_N", "281167"))
@@ -35,7 +39,7 @@ reps <- as.integer(setting("IMAGENET_RETRIEVAL_REPS", "3"))
 seed <- as.integer(setting("IMAGENET_RETRIEVAL_SEED", "123"))
 label_crossprod_source <- path.expand(setting(
   "IMAGENET_RETRIEVAL_LABEL_CPP",
-  "~/fastPLS_imagenet_faiss_matched_1m_20260725/benchmark/imagenet_label_crossprod_float32.cpp"
+  file.path(script_dir, "imagenet_label_crossprod_float32.cpp")
 ))
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -161,50 +165,6 @@ prepare_pls <- function() {
   )
 }
 
-prepare_pca <- function() {
-  stopifnot(requireNamespace("fastPLS", quietly = TRUE))
-  stopifnot(requireNamespace("Rcpp", quietly = TRUE))
-  Rcpp::sourceCpp(label_crossprod_source, rebuild = FALSE, showOutput = FALSE)
-  Xtrain <- load_train()
-  center <- imagenet_float32_column_means(Xtrain)
-  msg("Fitting float32 CUDA PCA-rSVD, n=%d, ncomp=%d", train_n, max_ncomp)
-  fit_run <- timed({
-    imagenet_center_float32_in_place(Xtrain, center)
-    fastPLS::fastsvd(
-      Xtrain,
-      ncomp = max_ncomp,
-      backend = "cuda",
-      method = "rsvd",
-      seed = seed
-    )
-  })
-  train_run <- timed(
-    fit_run$value$u[, seq_len(max_ncomp), drop = FALSE] %*%
-      float::fl(diag(fit_run$value$d[seq_len(max_ncomp)]))
-  )
-  model <- list(
-    center = float::fl(matrix(center, nrow = 1L)),
-    loadings = fit_run$value$v[, seq_len(max_ncomp), drop = FALSE],
-    singular_values = fit_run$value$d[seq_len(max_ncomp)]
-  )
-  fit_run$value$u <- NULL
-  rm(Xtrain)
-  gc()
-
-  Xtest <- load_test()
-  test_run <- timed({
-    projected <- Xtest %*% model$loadings
-    offset <- model$center %*% model$loadings
-    float_sweep(projected, offset, "-")
-  })
-  rm(Xtest)
-  gc()
-  save_preparation(
-    "pca_rsvd", model, train_run$value, test_run$value,
-    fit_run$seconds, train_run$seconds, test_run$seconds
-  )
-}
-
 weighted_vote <- function(indices, distances, labels, truth, levels) {
   codes <- as.integer(labels)
   predicted <- character(nrow(indices))
@@ -300,15 +260,14 @@ search <- function() {
     kind <- switch(
       space,
       pls = "pls_plssvd",
-      pca = "pca_rsvd",
-      stop("IMAGENET_RETRIEVAL_SPACE must be raw, pca, or pls.")
+      stop("IMAGENET_RETRIEVAL_SPACE must be raw or pls.")
     )
     paths <- score_paths(kind)
     stopifnot(all(file.exists(unlist(paths[c("train", "test", "preparation")]))))
     Xtrain <- readRDS(paths$train)[, seq_len(ncomp), drop = FALSE]
     Xtest <- readRDS(paths$test)[, seq_len(ncomp), drop = FALSE]
     preparation <- read.csv(paths$preparation, stringsAsFactors = FALSE)
-    label <- if (space == "pls") "pls_scores" else "pca_scores"
+    label <- "pls_scores"
     components <- ncomp
   }
 
@@ -383,7 +342,6 @@ set.seed(seed)
 switch(
   mode,
   prepare_pls = prepare_pls(),
-  prepare_pca = prepare_pca(),
   search = search(),
   stop("Unknown IMAGENET_RETRIEVAL_MODE.")
 )

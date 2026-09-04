@@ -4,6 +4,11 @@
 # pls::simpls.fit (de Jong SIMPLS). Deterministic IRLBA evidence and approximate
 # rSVD evidence are written to separate result tables.
 
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
+
 suppressPackageStartupMessages({
   library(fastPLS)
   library(pls)
@@ -18,6 +23,7 @@ get_arg <- function(name, default) {
 }
 
 root <- normalizePath(get_arg("root", "."), mustWork = TRUE)
+source(file.path(root, "benchmark", "nmr_protocol_helpers.R"))
 out_dir <- get_arg(
   "out",
   file.path(root, "benchmark_results", "simpls_estimator_preservation")
@@ -27,8 +33,8 @@ nmr_path <- get_arg(
   "/Users/stefano/Documents/GPUPLS/Data/NMR.RData"
 )
 quick <- identical(get_arg("quick", "false"), "true")
-rsvd_oversample <- as.integer(get_arg("rsvd-oversample", "10"))
-rsvd_power <- as.integer(get_arg("rsvd-power", "2"))
+rsvd_oversample <- as.integer(get_arg("rsvd-oversample", "32"))
+rsvd_power <- as.integer(get_arg("rsvd-power", "5"))
 rsvd_seeds <- as.integer(strsplit(
   get_arg("rsvd-seeds", "1,7,19,43,123"), ",", fixed = TRUE
 )[[1L]])
@@ -51,11 +57,11 @@ tolerance <- list(
   classification_label_agreement = 0.995,
   regression_metric_absolute_difference = 1e-4,
   classification_accuracy_absolute_difference = 0.005,
-  rsvd_prediction_relative_error = 0.05,
-  rsvd_prediction_correlation = 0.99,
-  rsvd_subspace_angle_degrees = 10,
-  rsvd_classification_label_agreement = 0.99,
-  rsvd_metric_absolute_difference = 0.01
+  rsvd_prediction_relative_error = 0.01,
+  rsvd_prediction_correlation = 0.995,
+  rsvd_subspace_angle_degrees = 0.1,
+  rsvd_classification_label_agreement = 0.995,
+  rsvd_metric_absolute_difference = 0.005
 )
 
 with_validation_env <- function(code) {
@@ -346,26 +352,14 @@ prepare_metref <- function() {
 
 prepare_nmr_subset <- function() {
   if (!file.exists(nmr_path)) return(NULL)
-  env <- new.env(parent = emptyenv())
-  load(nmr_path, envir = env)
-  required <- c("Xtrain", "Ytrain", "Xtest", "Ytest")
-  if (!all(vapply(required, exists, logical(1), envir = env, inherits = FALSE))) {
-    return(NULL)
-  }
-  xtrain <- as.matrix(env$Xtrain)
-  ytrain <- as.matrix(env$Ytrain)
-  xtest <- as.matrix(env$Xtest)
-  ytest <- as.matrix(env$Ytest)
+  protocol <- fastpls_nmr_protocol(nmr_path)
+  xtrain <- protocol$Xtrain
+  ytrain <- protocol$Ytrain
+  xtest <- protocol$Xtest
+  ytest <- protocol$Ytest
 
-  chemical_shift <- suppressWarnings(as.numeric(colnames(xtrain)))
-  eligible_x <- seq_len(ncol(xtrain))
-  if (length(chemical_shift) == ncol(xtrain) && any(is.finite(chemical_shift))) {
-    eligible_x <- eligible_x[
-      !(chemical_shift > 4.6 & chemical_shift < 4.8)
-    ]
-  }
-  x_index <- unique(round(seq(1L, length(eligible_x), length.out = 300L)))
-  x_index <- eligible_x[x_index]
+  # Retain the canonical zeroed water-region columns when subsampling predictors.
+  x_index <- unique(round(seq(1L, ncol(xtrain), length.out = 300L)))
   y_index <- unique(round(seq(1L, ncol(ytrain), length.out = 120L)))
   train_index <- seq_len(min(600L, nrow(xtrain)))
   test_index <- seq_len(min(150L, nrow(xtest)))

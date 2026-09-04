@@ -1,0 +1,4 @@
+"family","runs","successes","failures","passes_all","max_operator_relative_error","max_prediction_relative_error","min_prediction_correlation","max_coefficient_relative_error","max_predictive_score_angle_deg","max_orthogonal_score_angle_deg","min_label_agreement","max_metric_absolute_difference"
+"OPLS",6,6,0,6,3.33016720411169e-15,2.51911920020376e-12,0.999999999999999,1.11843879995185e-10,1.90909591041642e-06,1.20741826972573e-06,1,3.19216875155348e-12
+"kernelPLS_poly",6,6,0,6,6.85624568057704e-16,4.74608999142367e-15,1,1.60027142710458e-14,1.70754729250319e-06,NA,1,3.17523785042795e-13
+"kernelPLS_rbf",6,6,0,6,1.54920025901754e-15,3.75312221406843e-15,1,4.26234630939642e-15,2.09130978915187e-06,NA,1,2.66453525910038e-15

@@ -28,8 +28,8 @@ enum class Kernel {
 };
 
 struct RsvdOptions {
-  int oversample = 10;
-  int power_iters = 1;
+  int oversample = 32;
+  int power_iters = 5;
   std::uint32_t seed = 1;
 };
 

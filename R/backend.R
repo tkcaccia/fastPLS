@@ -9,19 +9,27 @@
 #' when the installed numerical library supports runtime thread control;
 #' sequential PLS deflation steps remain serial.
 #'
-#' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @return The active backend. Setting returns the previous option invisibly.
+#' @param backend Optional backend: `"cpu"`, `"cuda"`, or
+#'   `"metal"`. Setting or retrieving the session backend rejects an
+#'   unavailable accelerator immediately; fastPLS does not silently substitute
+#'   the CPU backend.
+#' @return The configured, available backend. Setting returns the previous
+#'   option invisibly.
 #' @examples
+#' old_options <- options(backend = NULL)
 #' current <- fastPLS_backend()
 #' current
-#' previous <- fastPLS_backend("cpu")
-#' fastPLS_backend(previous)
+#' fastPLS_backend("cpu")
+#' options(old_options)
 #' @export
 fastPLS_backend <- function(backend = NULL) {
     if (is.null(backend)) {
-        return(.fastpls_resolve_backend(NULL))
+        backend <- .fastpls_resolve_backend(NULL)
+        .fastpls_require_backend_available(backend, "fastPLS_backend()")
+        return(backend)
     }
     backend <- .fastpls_validate_backend(backend, "backend")
+    .fastpls_require_backend_available(backend, "fastPLS_backend()")
     old <- getOption("backend", NULL)
     options(backend = backend)
     invisible(old)
@@ -46,9 +54,9 @@ fastPLS_backend <- function(backend = NULL) {
 }
 
 .fastpls_resolve_backend <- function(backend = NULL, allow_auto = FALSE) {
-    if (!is.null(backend) && length(backend) == 1L) {
+    if (!is.null(backend)) {
         value <- tolower(as.character(backend))
-        if (allow_auto && identical(value, "auto")) {
+        if (length(value) == 1L && allow_auto && identical(value, "auto")) {
             return("auto")
         }
         return(.fastpls_validate_backend(value))
@@ -62,6 +70,52 @@ fastPLS_backend <- function(backend = NULL) {
         return(.fastpls_validate_backend(environment, "FASTPLS_BACKEND"))
     }
     "cpu"
+}
+
+.fastpls_require_prediction_backend <- function(dots, context) {
+    requested <- dots$backend %||% NULL
+    selected <- .fastpls_resolve_backend(requested, allow_auto = TRUE)
+    if (!identical(selected, "auto")) {
+        .fastpls_require_backend_available(selected, context)
+    }
+    invisible(selected)
+}
+
+.fastpls_backend_available <- function(backend) {
+    switch(
+        .fastpls_validate_backend(backend),
+        cpu = TRUE,
+        cuda = isTRUE(has_cuda()),
+        metal = isTRUE(has_metal())
+    )
+}
+
+.fastpls_require_backend_available <- function(
+    backend,
+    context = "The requested operation",
+    available = NULL
+) {
+    backend <- .fastpls_validate_backend(backend)
+    if (is.null(available)) {
+        available <- .fastpls_backend_available(backend)
+    }
+    if (isTRUE(available)) {
+        return(backend)
+    }
+    requirement <- switch(
+        backend,
+        cuda = "a CUDA-enabled fastPLS build and an available NVIDIA GPU",
+        metal = "a macOS fastPLS build with Apple Metal support"
+    )
+    stop(
+        context,
+        " requested backend='",
+        backend,
+        "', which requires ",
+        requirement,
+        ". No CPU fallback is performed.",
+        call. = FALSE
+    )
 }
 
 .fastpls_validate_cores <- function(cores) {

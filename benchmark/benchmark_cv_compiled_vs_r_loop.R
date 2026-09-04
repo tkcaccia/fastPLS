@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
-# Matched benchmark of the compiled CV engine against an explicit R fold loop.
-# Both routes fit the same fastPLS estimator on the same prespecified folds.
+# Compare the compiled CV engine with an explicit R-level fold loop. Both
+# routes fit the same fastPLS estimator on the same fixed folds and controls.
 
 options(stringsAsFactors = FALSE)
 
@@ -9,9 +9,12 @@ parse_args <- function(x = commandArgs(trailingOnly = TRUE)) {
   out <- list()
   for (item in x) {
     if (!startsWith(item, "--")) next
-    kv <- strsplit(substring(item, 3L), "=", fixed = TRUE)[[1L]]
-    out[[gsub("-", "_", kv[[1L]])]] <-
-      if (length(kv) > 1L) paste(kv[-1L], collapse = "=") else "TRUE"
+    fields <- strsplit(substring(item, 3L), "=", fixed = TRUE)[[1L]]
+    out[[gsub("-", "_", fields[[1L]])]] <- if (length(fields) > 1L) {
+      paste(fields[-1L], collapse = "=")
+    } else {
+      "TRUE"
+    }
   }
   out
 }
@@ -21,212 +24,249 @@ arg <- function(name, default = NULL) {
   value <- args[[name]]
   if (is.null(value) || !nzchar(value)) default else value
 }
+`%||%` <- function(left, right) {
+  if (is.null(left) || !length(left)) right else left
+}
+
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
+suppressPackageStartupMessages(library(fastPLS))
 
 task_path <- normalizePath(arg("task"), mustWork = TRUE)
 output_path <- arg("output", "cv_compiled_vs_r_loop.csv")
-dataset <- arg("dataset", sub("_task\\.rds$", "", basename(task_path)))
-method <- arg("method", "simpls")
-backend <- arg("backend", "cpu")
-svd_method <- arg("svd_method", "irlba")
-classifier <- arg("classifier", "argmax")
+dataset <- arg("dataset", sub("_task[.]rds$", "", basename(task_path)))
+method <- match.arg(
+  arg("method", "simpls"),
+  c("plssvd", "simpls", "opls", "kernelpls")
+)
+backend <- match.arg(arg("backend", "cpu"), c("cpu", "cuda", "metal"))
+svd_method <- match.arg(arg("svd_method", "rsvd"), c("rsvd", "irlba"))
+classifier <- match.arg(arg("classifier", "argmax"), c("argmax", "lda"))
 ncomp <- as.integer(arg("ncomp", "10"))
 kfold <- as.integer(arg("kfold", "10"))
-reps <- as.integer(arg("reps", "3"))
-replicate_start <- as.integer(arg("replicate", "1"))
+replicate_id <- as.integer(arg("replicate", "1"))
 seed <- as.integer(arg("seed", "123"))
 
-if (!method %in% c("plssvd", "simpls", "opls", "kernelpls")) {
-  stop("Unsupported method: ", method)
+if (!is.finite(ncomp) || ncomp < 1L) stop("ncomp must be positive.")
+if (!is.finite(kfold) || kfold < 2L) stop("kfold must be at least two.")
+if (backend != "cpu" && svd_method == "irlba") {
+  stop("IRLBA is available only with backend='cpu'.")
 }
-if (!backend %in% c("cpu", "cuda")) stop("backend must be cpu or cuda")
-if (!svd_method %in% c("irlba", "rsvd")) stop("svd_method must be irlba or rsvd")
-if (backend == "cuda" && svd_method != "rsvd") {
-  stop("CUDA supports rsvd only")
-}
-if (!classifier %in% c("argmax", "lda")) stop("Unsupported classifier")
+fastPLS:::.fastpls_require_backend_available(
+  backend,
+  "Compiled-versus-R-loop CV benchmark"
+)
 
-suppressPackageStartupMessages(library(fastPLS))
-if (backend == "cuda" && !isTRUE(has_cuda())) stop("CUDA is unavailable")
+as_double_matrix <- function(value) {
+  if (inherits(value, "float32")) return(float::dbl(value))
+  as.matrix(value)
+}
 
 task <- readRDS(task_path)
-X <- rbind(as.matrix(task$Xtrain), as.matrix(task$Xtest))
-classification <- identical(task$task_type, "classification") ||
-  is.factor(task$Ytrain)
+X <- rbind(
+  as_double_matrix(task$Xtrain),
+  as_double_matrix(task$Xtest)
+)
+classification <- is.factor(task$Ytrain) || is.character(task$Ytrain)
 if (classification) {
-  lev <- levels(task$Ytrain)
+  levels_ <- levels(factor(task$Ytrain))
   Y <- factor(
     c(as.character(task$Ytrain), as.character(task$Ytest)),
-    levels = lev
+    levels = levels_
   )
 } else {
-  Y <- rbind(as.matrix(task$Ytrain), as.matrix(task$Ytest))
+  Y <- rbind(
+    as_double_matrix(task$Ytrain),
+    as_double_matrix(task$Ytest)
+  )
 }
 
-make_folds <- getFromNamespace(".make_single_cv_folds", "fastPLS")
-run_compiled <- getFromNamespace(".pls_cv_compiled", "fastPLS")
-run_r_loop <- getFromNamespace(".pls_cv_via_pls", "fastPLS")
-
-# Freeze one stratified/group-compatible partition. Passing its IDs as
-# constraints forces both engines to use exactly these sample groups.
-fold_groups <- make_folds(
+fold_groups <- fastPLS:::.make_single_cv_folds(
   Ydata = if (classification) Y else Y[, 1L],
   constrain = seq_len(nrow(X)),
   kfold = kfold,
   seed = seed
 )
 
-coassignment_equal <- function(a, b) {
-  a <- as.integer(a)
-  b <- as.integer(b)
-  if (length(a) != length(b)) return(FALSE)
-  tab <- table(a, b)
-  all(rowSums(tab > 0L) == 1L) && all(colSums(tab > 0L) == 1L)
+control <- fastPLS:::.resolve_svd_control(
+  svd.method = svd_method,
+  dots = list(),
+  context = "compiled-versus-R-loop CV benchmark"
+)
+control <- fastPLS:::.apply_backend_rsvd_controls(
+  control,
+  backend,
+  "compiled-versus-R-loop CV benchmark",
+  pls_family = method,
+  classification = classification
+)
+control <- fastPLS:::.apply_fast_simpls_shape_controls(
+  control,
+  method,
+  X,
+  Y
+)
+
+common_arguments <- list(
+  Xdata = X,
+  Ydata = Y,
+  constrain = fold_groups,
+  ncomp = ncomp,
+  kfold = kfold,
+  scaling = "centering",
+  method = method,
+  svd.method = control$svd.method,
+  rsvd_oversample = control$rsvd_oversample,
+  rsvd_power = control$rsvd_power,
+  svds_tol = control$svds_tol,
+  irlba_work = control$irlba_work,
+  irlba_maxit = control$irlba_maxit,
+  irlba_tol = control$irlba_tol,
+  irlba_eps = control$irlba_eps,
+  irlba_svtol = control$irlba_svtol,
+  seed = seed,
+  classifier = classifier,
+  return_scores = TRUE,
+  store_predictions = TRUE,
+  selection_metric = if (classification) "accuracy" else "rmsd"
+)
+
+engine_call <- function(engine) {
+  arguments <- common_arguments
+  if (identical(engine, "compiled")) {
+    arguments$backend <- if (backend == "cpu") "cpp" else backend
+    return(do.call(fastPLS:::.pls_cv_compiled, arguments))
+  }
+  arguments$backend <- backend
+  do.call(fastPLS:::.pls_cv_via_pls, arguments)
 }
 
 extract_prediction <- function(result) {
-  if (classification) {
-    return(as.character(result$pred[[1L]]))
+  prediction <- result$pred
+  if (is.list(prediction) && !is.data.frame(prediction)) {
+    prediction <- prediction[[length(prediction)]]
   }
-  as.matrix(result$pred)
+  if (classification) as.character(prediction) else as.matrix(prediction)
 }
 
 extract_metric <- function(result) {
-  data.frame(
-    metric_name = as.character(result$metrics$metric_name[[1L]]),
-    metric_value = as.numeric(result$metrics$metric_value[[1L]]),
-    stringsAsFactors = FALSE
-  )
+  metrics <- result$metrics
+  if (!is.data.frame(metrics) || !nrow(metrics)) {
+    stop("CV engine returned no metric table.")
+  }
+  tail(metrics, 1L)
 }
 
-engine_call <- function(engine) {
-  if (identical(engine, "compiled")) {
-    run_compiled(
-      Xdata = X,
-      Ydata = Y,
-      constrain = fold_groups,
-      ncomp = ncomp,
-      kfold = kfold,
-      scaling = "centering",
-      method = method,
-      backend = if (backend == "cpu") "cpp" else "cuda",
-      svd.method = svd_method,
-      rsvd_oversample = 10L,
-      rsvd_power = 1L,
-      seed = seed,
-      return_scores = TRUE,
-      classifier = classifier,
-      store_predictions = TRUE,
-      selection_metric = if (classification) "accuracy" else "rmsd"
+coassignment_equal <- function(left, right) {
+  if (length(left) != length(right)) return(FALSE)
+  cross <- table(as.integer(left), as.integer(right))
+  all(rowSums(cross > 0L) == 1L) && all(colSums(cross > 0L) == 1L)
+}
+
+order <- if (replicate_id %% 2L) {
+  c("compiled", "r_loop")
+} else {
+  c("r_loop", "compiled")
+}
+results <- list()
+elapsed <- setNames(rep(NA_real_, 2L), c("compiled", "r_loop"))
+errors <- character()
+for (engine in order) {
+  gc(full = TRUE)
+  timing <- system.time({
+    results[[engine]] <- tryCatch(
+      engine_call(engine),
+      error = function(error) {
+        errors[[engine]] <<- conditionMessage(error)
+        NULL
+      }
     )
+  })
+  elapsed[[engine]] <- unname(timing[["elapsed"]])
+}
+
+base_row <- data.frame(
+  package_version = as.character(packageVersion("fastPLS")),
+  dataset = dataset,
+  task_type = if (classification) "classification" else "regression",
+  n = nrow(X),
+  p = ncol(X),
+  q = if (classification) nlevels(Y) else ncol(Y),
+  method = method,
+  backend = backend,
+  svd_method = svd_method,
+  classifier = classifier,
+  ncomp = ncomp,
+  kfold = kfold,
+  replicate = replicate_id,
+  control_profile = control$rsvd_profile %||% if (svd_method == "rsvd") {
+    "explicit"
   } else {
-    run_r_loop(
-      Xdata = X,
-      Ydata = Y,
-      constrain = fold_groups,
-      ncomp = ncomp,
-      kfold = kfold,
-      scaling = "centering",
-      method = method,
-      backend = backend,
-      svd.method = svd_method,
-      rsvd_oversample = 10L,
-      rsvd_power = 1L,
-      seed = seed,
-      classifier = classifier,
-      return_scores = TRUE,
-      store_predictions = TRUE,
-      selection_metric = if (classification) "accuracy" else "rmsd"
-    )
-  }
-}
+    "not_applicable"
+  },
+  oversample = if (svd_method == "rsvd") control$rsvd_oversample else NA,
+  power = if (svd_method == "rsvd") control$rsvd_power else NA,
+  seed = seed,
+  compiled_sec = elapsed[["compiled"]],
+  r_loop_sec = elapsed[["r_loop"]],
+  stringsAsFactors = FALSE
+)
 
-rows <- vector("list", reps)
-for (replicate_id in seq.int(replicate_start, length.out = reps)) {
-  order <- if (replicate_id %% 2L) c("compiled", "r_loop") else c("r_loop", "compiled")
-  result <- list()
-  elapsed <- numeric()
-  errors <- character()
-
-  for (engine in order) {
-    gc()
-    timing <- system.time({
-      value <- tryCatch(
-        engine_call(engine),
-        error = function(e) {
-          errors[[engine]] <<- conditionMessage(e)
-          NULL
-        }
-      )
-    })
-    result[[engine]] <- value
-    elapsed[[engine]] <- unname(timing[["elapsed"]])
-  }
-
-  if (is.null(result$compiled) || is.null(result$r_loop)) {
-    rows[[replicate_id]] <- data.frame(
-      dataset, task_type = if (classification) "classification" else "regression",
-      n = nrow(X), p = ncol(X),
-      q = if (classification) nlevels(Y) else ncol(Y),
-      method, backend, svd_method, classifier, ncomp, kfold, replicate_id,
-      compiled_sec = elapsed[["compiled"]],
-      r_loop_sec = elapsed[["r_loop"]],
-      speedup_r_loop_over_compiled = NA_real_,
-      metric_name = NA_character_,
-      compiled_metric = NA_real_,
-      r_loop_metric = NA_real_,
-      metric_abs_diff = NA_real_,
-      prediction_agreement = NA_real_,
-      prediction_correlation = NA_real_,
-      max_abs_prediction_diff = NA_real_,
-      identical_fold_partition = NA,
-      status = "failed",
-      error = paste(unname(errors), collapse = " | "),
-      stringsAsFactors = FALSE
-    )
-    next
-  }
-
-  pred_compiled <- extract_prediction(result$compiled)
-  pred_r_loop <- extract_prediction(result$r_loop)
-  metric_compiled <- extract_metric(result$compiled)
-  metric_r_loop <- extract_metric(result$r_loop)
-
+if (is.null(results$compiled) || is.null(results$r_loop)) {
+  row <- transform(
+    base_row,
+    r_loop_over_compiled = NA_real_,
+    metric_name = NA_character_,
+    compiled_metric = NA_real_,
+    r_loop_metric = NA_real_,
+    metric_abs_diff = NA_real_,
+    prediction_agreement = NA_real_,
+    prediction_correlation = NA_real_,
+    prediction_relative_error = NA_real_,
+    identical_fold_partition = NA,
+    status = "failed",
+    error = paste(unname(errors), collapse = " | ")
+  )
+} else {
+  compiled_prediction <- extract_prediction(results$compiled)
+  r_loop_prediction <- extract_prediction(results$r_loop)
+  compiled_metric <- extract_metric(results$compiled)
+  r_loop_metric <- extract_metric(results$r_loop)
   if (classification) {
-    agreement <- mean(pred_compiled == pred_r_loop, na.rm = TRUE)
-    pred_cor <- NA_real_
-    max_diff <- NA_real_
+    agreement <- mean(compiled_prediction == r_loop_prediction, na.rm = TRUE)
+    correlation <- NA_real_
+    relative_error <- NA_real_
   } else {
+    keep <- is.finite(compiled_prediction) & is.finite(r_loop_prediction)
     agreement <- NA_real_
-    keep <- is.finite(pred_compiled) & is.finite(pred_r_loop)
-    pred_cor <- if (sum(keep) > 1L) cor(pred_compiled[keep], pred_r_loop[keep]) else NA_real_
-    max_diff <- if (any(keep)) max(abs(pred_compiled[keep] - pred_r_loop[keep])) else NA_real_
+    correlation <- if (sum(keep) > 1L) {
+      cor(compiled_prediction[keep], r_loop_prediction[keep])
+    } else {
+      NA_real_
+    }
+    relative_error <- sqrt(sum(
+      (compiled_prediction[keep] - r_loop_prediction[keep])^2
+    )) / max(sqrt(sum(r_loop_prediction[keep]^2)), .Machine$double.eps)
   }
-
-  rows[[replicate_id]] <- data.frame(
-    dataset,
-    task_type = if (classification) "classification" else "regression",
-    n = nrow(X),
-    p = ncol(X),
-    q = if (classification) nlevels(Y) else ncol(Y),
-    method, backend, svd_method, classifier, ncomp, kfold, replicate_id,
-    compiled_sec = elapsed[["compiled"]],
-    r_loop_sec = elapsed[["r_loop"]],
-    speedup_r_loop_over_compiled = elapsed[["r_loop"]] / elapsed[["compiled"]],
-    metric_name = metric_compiled$metric_name,
-    compiled_metric = metric_compiled$metric_value,
-    r_loop_metric = metric_r_loop$metric_value,
-    metric_abs_diff = abs(metric_compiled$metric_value - metric_r_loop$metric_value),
-    prediction_agreement = agreement,
-    prediction_correlation = pred_cor,
-    max_abs_prediction_diff = max_diff,
-    identical_fold_partition = coassignment_equal(result$compiled$fold, result$r_loop$fold),
-    status = "success",
-    error = "",
-    stringsAsFactors = FALSE
+  row <- base_row
+  row$r_loop_over_compiled <- row$r_loop_sec / row$compiled_sec
+  row$metric_name <- as.character(compiled_metric$metric_name[[1L]])
+  row$compiled_metric <- as.numeric(compiled_metric$metric_value[[1L]])
+  row$r_loop_metric <- as.numeric(r_loop_metric$metric_value[[1L]])
+  row$metric_abs_diff <- abs(row$compiled_metric - row$r_loop_metric)
+  row$prediction_agreement <- agreement
+  row$prediction_correlation <- correlation
+  row$prediction_relative_error <- relative_error
+  row$identical_fold_partition <- coassignment_equal(
+    results$compiled$fold,
+    results$r_loop$fold
   )
+  row$status <- "success"
+  row$error <- ""
 }
 
-out <- do.call(rbind, rows)
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-write.csv(out, output_path, row.names = FALSE)
-print(out)
+write.csv(row, output_path, row.names = FALSE)
+print(row)

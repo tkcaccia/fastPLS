@@ -1,526 +1,126 @@
-# fastPLS benchmark pipelines
+# fastPLS publication benchmarks
 
-This folder contains the benchmark workflows used to evaluate `fastPLS`.
-The four main pipelines can be launched from this directory through small
-wrapper scripts.  The wrappers call the lower-level scripts in `scripts/`
-and keep the benchmark entry points visible in one place.
+This directory contains only the workflows used by the current fastPLS
+manuscript. Prepared real-data matrices are not committed. Dataset sources,
+redistribution status, and acquisition commands are documented in
+[`DATA_ACQUISITION.md`](DATA_ACQUISITION.md).
 
-`synthetic_end_to_end_example.R` is an unrestricted, compact reproduction of
-the complete analysis sequence: simulation, fixed splitting, training-only
-component/classifier selection, final fitting, held-out prediction, metric
-calculation, timing, and result export. It requires no restricted benchmark
-data and writes to `benchmark_results/synthetic_end_to_end_example/`.
+All publication runs must use the package version stated in `DESCRIPTION` and
+record effective model family, backend, precision, component count, scaling,
+classification head, rSVD oversampling, power iterations, seed, timing scope,
+and execution status. PLS-SVD and standalone `fastsvd()` use 32 oversampling
+directions and five power iterations. Accelerated SIMPLS, OPLS, and kernel-PLS
+use 32 directions and five iterations for ordinary shapes. For a massive
+cross-covariance, the profile records `oversample = 12` and `power = 2` while
+executing one newly initialized rank-one randomized direction per component.
+Results from older package
+versions are not part of the publication evidence retained in this repository.
 
-Dataset redistribution and reproducible acquisition are documented in
-[`DATA_ACQUISITION.md`](DATA_ACQUISITION.md). Run
-`Rscript benchmark/acquire_publication_datasets.R --list` to see the prepared
-object names and access classes expected by the benchmark loader. Prepared
-real-data matrices are not stored in this repository.
+## Numerical validation
 
-The submission manuscript uses a compact, authoritative evidence set.
-[`MANUSCRIPT_EVIDENCE_ARCHIVE.md`](MANUSCRIPT_EVIDENCE_ARCHIVE.md) maps each
-definitive Supplementary table to its result archive and indexes expanded
-component paths, sensitivity analyses, diagnostics, and superseded review-cycle
-material that are retained for audit but not duplicated in the Supplement.
+- `benchmark_simpls_exact_reference.R` compares SIMPLS with a dense numerical
+  reference on controlled problems.
+- `benchmark_simpls_estimator_preservation.R` tests component, coefficient,
+  score-subspace, and prediction agreement against `pls::simpls.fit()` and
+  keeps the iterative and approximate solver analyses separate.
+- `benchmark_opls_kernel_estimator_validation.R` and
+  `benchmark_opls_kernel_setting_reliability.R` validate OPLS and linear,
+  polynomial, and radial-basis kernel PLS settings.
+- `controlled_scaling/` performs multi-seed rSVD qualification and controlled
+  scaling over sample count, predictor and response dimensions, retained
+  components, requested prefixes, rank, class count, and cross-covariance
+  storage.
 
-## Run provenance
-
-Publication runs must record source provenance before computation. Use:
-
-```sh
-Rscript benchmark/write_run_provenance.R \
-  --analysis=analysis_id \
-  --output=RESULTS_DIR/run_provenance.csv \
-  --script=benchmark/the_benchmark_script.R \
-  --archive=/absolute/path/to/fastPLS_VERSION.tar.gz \
-  --data=prepared_task_identifier \
-  --split=split_identifier \
-  --seed=123
-```
-
-The record contains the package repository commit, tree, exact tag and dirty
-state; MD5 and SHA-256 script checksums; source-archive SHA-256; installed
-`fastPLS` version; reusable-core commit when a core repository is supplied;
-and data/split identifiers. The accompanying
-`run_provenance.csv.session_info.txt` captures the R environment. A package
-version is not a substitute for a Git commit, and a manuscript-generation
-commit must never be assigned retrospectively to an older result archive.
-
-Unless a sensitivity analysis explicitly states otherwise, randomized-SVD
-publication runs use `oversample = 20`, `power = 2` on CPU and CUDA. The CPU
-setting met all 585 CPU and 40 CUDA checks across five prespecified random seeds; the former
-oversampling-10 setting failed five checks and was rejected.
-Scripts must write these effective values and the seed into every result row.
-
-## Pipeline 1: real and simulated datasets
-
-Purpose: benchmark PLSSVD, SIMPLS, OPLS, and kernel-PLS on the real dataset
-panel and on simulated n/p/q sweeps.
-
-Run:
+Run the controlled audit with:
 
 ```sh
-bash benchmark/run_pipeline1_real_and_simulated.sh
+scripts/run_controlled_scaling.sh RESULTS_DIR qualification cpu,metal 3
+scripts/run_controlled_scaling.sh RESULTS_DIR qualification cuda 3
 ```
 
-Core scripts:
-
-- `benchmark/benchmark_dataset_memory_compare.R`
-- `benchmark/plot_dataset_memory_compare.R`
-- `benchmark/workflow_synthetic_variable_sweeps.sh`
-- `benchmark/benchmark_synthetic_variable_sweeps.R`
-- `benchmark/plot_synthetic_variable_sweeps.R`
-
-Default outputs:
-
-- `dataset_memory_compare_raw.csv`
-- `dataset_memory_compare_summary.csv`
-- one 4-row method plot per real dataset
-- `synthetic_variable_sweeps_raw.csv`
-- `synthetic_variable_sweeps_summary.csv`
-- simulated n/p/q sweep plots
-
-## Pipeline 2: comparison with external R packages
-
-Purpose: compare `fastPLS` against independent PLS implementations available
-in R packages on real datasets at dataset-specific component counts.
-
-Successful configurations use all requested replicates. If an attempted
-replicate ends in a timeout, process kill, package limitation, or deterministic
-error, later replicates are recorded as `skipped_after_previous_failure`
-instead of repeating the same failed computation.
-
-Run:
-
-```sh
-bash benchmark/run_pipeline2_package_comparison.sh
-```
-
-Core scripts:
-
-- `benchmark/benchmark_pls_package_comparison.R`
-- `benchmark/rearrange_pipeline2_package_tables.R`
-
-Default outputs:
-
-- `pls_package_comparison_raw.csv`
-- `pls_package_comparison_summary.csv`
-- package-comparison speed and prediction plots
-- `rearranged_tables/pipeline2_plssvd_package_wide_table.csv`
-- `rearranged_tables/pipeline2_simpls_package_wide_table.csv`
-- `rearranged_tables/pipeline2_opls_package_wide_table.csv`
-- `rearranged_tables/pipeline2_kernelpls_package_wide_table.csv`
-
-### Repeated external SIMPLS timing
-
-`benchmark/external_simpls_timing/` provides the stricter publication timing
-comparison. It separates a minimum-common-output deterministic SIMPLS kernel
-comparison from the ordinary public fit/predict workflows. Every repetition is
-run in a fresh process. The default adaptive policy uses 50 cold repetitions
-for pilot runs no longer than 0.5 s, 30 up to 2 s, 15 up to 10 s, and five for
-longer jobs. A separately labelled steady-state batch performs one untimed
-warm-up and then 10--50 measured iterations. Raw iteration times are retained;
-summaries report medians, IQRs, completed repetitions, output materialization,
-and failures.
-
-For fastPLS, benchmark-only internal instrumentation decomposes fitting into
-preprocessing/cross-covariance construction, latent-direction and deflation
-work, coefficient-path construction, fitted-value construction, C++ model
-assembly, R-wrapper overhead, and held-out prediction. The instrumentation is
-enabled only through `FASTPLS_BENCH_PHASE_TIMING` and is hidden from ordinary
-user output. Optional `reference_1`, `optimized_1`, and `optimized_4` CPU
-profiles record the loaded BLAS and both requested and runtime-reported thread
-counts. Optimized profiles fail rather than being reported if OpenBLAS or the
-requested active thread count cannot be verified.
-
-The four wide tables have datasets as columns and function/package
-implementations as rows.  Each implementation has two rows: predictive metric
-and total fitting plus prediction time.  Failed runs, timeouts, memory kills,
-and package limitations are retained in the table cells.
-
-## Pipeline 3: single fit versus 10-fold cross-validation
-
-Purpose: compare the cost of a single fit/prediction workflow with the
-compiled 10-fold cross-validation workflow. This quantifies cross-validation
-overhead relative to one fit; it is not an acceleration benchmark.
-
-Run:
-
-```sh
-bash benchmark/run_pipeline3_cv_vs_fit.sh
-```
-
-Core script:
-
-- `benchmark/benchmark_pipeline3_cv_vs_fit.R`
-
-Default outputs:
-
-- `pipeline3_cv_vs_fit_raw.csv`
-- `pipeline3_cv_vs_fit_summary.csv`
-- `pipeline3_cv_vs_fit_comparison.csv`
-- `rearranged_tables/pipeline3_plssvd_cv10_wide_table.csv`
-- `rearranged_tables/pipeline3_simpls_cv10_wide_table.csv`
-- `rearranged_tables/pipeline3_opls_cv10_wide_table.csv`
-- `rearranged_tables/pipeline3_kernelpls_cv10_wide_table.csv`
-
-For a matched acceleration benchmark, use
-`benchmark/benchmark_cv_compiled_vs_r_loop.R` through
-`scripts/run_cv_compiled_vs_r_loop_remote.sh`. It compares the compiled engine
-with an explicit R-level fold loop that calls the same `fastPLS::pls()`
-estimator on the same prespecified folds. The output records paired runtime,
-fold-partition identity, predictive metrics, and out-of-fold prediction
-agreement.
-
-## SIMPLS implementation ablation
-
-`benchmark/benchmark_simpls_multidataset_ablation.R` and
-`scripts/run_simpls_multidataset_ablation_remote.sh` isolate five execution
-optimizations in deterministic CPU SIMPLS/IRLBA: cached `X'X`, incremental
-coefficient-path updates, cached deflation products, compact prediction, and
-matrix-free cross-covariance products. Each reference/optimized configuration
-runs in a fresh R process on the same stored train/test task, seed, scaling,
-component path, and classifier.
-
-The shell driver records RSS immediately after data loading and garbage
-collection, then samples process RSS only during fitting and prediction.
-Consequently, the reported incremental peak is the fit-window peak minus the
-pre-fit baseline rather than absolute process RSS. The summarizer pairs
-replicates, verifies prediction agreement, and reports median runtime speedup,
-runtime IQR, incremental-RSS reduction, RSS IQR, and predictive-metric
-difference. Cached `X'X` is explicitly marked not applicable when its
-shape-based production condition is not met. The matrix-free route is treated
-as a memory/runtime trade-off, not assumed to be faster.
-
-Run and summarize:
-
-```sh
-bash scripts/run_simpls_multidataset_ablation_remote.sh RESULTS_DIR
-Rscript benchmark/summarize_simpls_multidataset_ablation.R RESULTS_DIR
-Rscript benchmark/plot_simpls_multidataset_ablation.R RESULTS_DIR
-```
-
-## Controlled SIMPLS scaling
-
-`benchmark/controlled_scaling/` provides a one-factor-at-a-time study of sample
-count, predictor dimension, response dimension, retained components, requested
-component prefixes, effective rank, class count, and explicit cross-covariance
-size. Every scenario has a deterministic CPU-IRLBA reference. Candidate rSVD
-routes use oversampling 20, two power iterations, and fixed seeds; the
-cross-covariance-size panel also forces explicit and matrix-free products to
-identify time and memory crossovers.
-
-The publication profile additionally contains 24 deterministic
-Latin-hypercube development cases and 16 independently generated held-out
-cases that vary sample count, predictor and response dimensions, rank,
-component count, prefix count, and class count jointly. Automatic, forced
-explicit, and forced implicit routes are compared on every case. The held-out
-summary reports numerical qualification, route-choice accuracy, and automatic
-runtime relative to the empirically faster qualified route; it therefore tests
-shape interactions rather than extrapolating from isolated one-factor values.
-
-Each fit runs in a fresh process. Fit and prediction time are recorded
-separately, while a 20-ms external sampler measures incremental host RSS and
-CUDA device memory during fitting and prediction. Numerical comparison with
-the reference occurs after the sampling window, so reading the reference does
-not contaminate candidate memory. Failed and timed-out routes retain their full
-configuration metadata.
-
-```sh
-bash scripts/run_controlled_scaling.sh RESULTS_DIR smoke cpu,metal 1
-bash scripts/run_controlled_scaling.sh RESULTS_DIR publication cpu,cuda 3
-```
-
-See `benchmark/controlled_scaling/README.md` for complete grids and outputs.
-
-## Pipeline 4: ImageNet DINOv2 SIMPLS classifier scaling
-
-Purpose: benchmark ImageNet-scale SIMPLS with randomized SVD on float32 DINOv2
-features using the native argmax and LDA classification heads. Outputs retain
-both requested and executed estimators and explicitly distinguish fully
-resident from hybrid accelerator routes.
-
-Run:
-
-```sh
-bash benchmark/run_pipeline4_imagenet_simpls_rsvd.sh
-```
-
-Core script:
-
-- `benchmark/benchmark_imagenet_simpls_rsvd_classifiers.R`
-- `benchmark/prepare_imagenet_float32_task.R`
-- `benchmark/plot_imagenet_simpls_rsvd_classifiers.R`
-
-Default outputs:
-
-- `pipeline4_imagenet_raw.csv`
-- `pipeline4_imagenet_summary.csv`
-- accuracy, runtime, host-memory, and GPU-memory plots
-- run manifest and logs
-
-## Cross-language IKPLS comparisons
-
-`benchmark/ikpls_cross_language/` contains two explicitly separated studies:
-
-- a repeated float64 CPU software comparison on Breast, MetRef, and CIFAR-100;
-- a float32 feasibility extension on the large ImageNet and extreme-response
-  NMR tasks.
-
-The large-case runner applies a configurable NMR memory guard, uses blocked
-ImageNet prediction, excludes conversion from fitting time, retains failures,
-and writes all precision, timing, metric, memory, and coefficient-storage
-metadata. IKPLS implements Improved Kernel PLS rather than de Jong SIMPLS, so
-these outputs must not be labelled estimator-equivalence evidence. See
-`benchmark/ikpls_cross_language/README.md` for commands and interpretation.
-
-Pipeline 4 expects a prepared ImageNet/DINOv2 task RDS on the remote machine.
-The path can be overridden with `TASK_RDS`.
-
-## Publication rerun
-
-`scripts/run_publication_benchmarks.sh` runs Pipelines 1-4 sequentially in an
-isolated output tree. It uses float32 for the main real, simulated, package,
-and ImageNet benchmarks; adds matched float64 runs for the precision-memory
-comparison; and retains per-stage status files so a failed optional method does
-not erase completed results. The matched precision summary only includes rows
-whose recorded execution precision equals the requested comparison precision.
-It reports both absolute peak RSS and incremental RSS above the isolated
-process baseline, together with the input-storage reduction, prediction delta,
-and execution scope. This avoids diluting the measured float32 memory benefit
-with the fixed cost of loading R and the package.
-
-The current float32 CUDA path keeps model arithmetic in float32 and accelerates
-the randomized-SVD range products and supported classifier kernels on CUDA.
-The outer PLS recurrence is still executed by the compiled host float32 core;
-therefore publication summaries describe this path as GPU-accelerated rather
-than claiming that the complete float32 fit is device-resident.
-
-`benchmark/plot_publication_backend_overview.R` converts the completed raw
-real-dataset table into estimator-matched CPU-rSVD/CUDA-rSVD manuscript panels.
-It evaluates the native argmax and LDA heads, requires matching executed
-estimators and effective component counts, and reports runtime, CUDA speedup,
-predictive deviation, and peak host memory with one shared external legend.
-
-`benchmark/benchmark_imagenet_faiss_matched_retrieval.R` is a separate external
-retrieval experiment. It compares exact FAISS search on raw DINOv2, PCA scores,
-and PLS scores while including representation fitting, held-out transformation,
-index construction, and query time. PCA is computed directly in the benchmark;
-it is not a fastPLS package function. This experiment is not part of the native
-PLS classification API.
-
-`benchmark/plot_publication_precision_overview.R` creates a compact matched
-float32/float64 figure for input storage, incremental host RSS, peak GPU memory,
-and predictive deviation.
-
-## Qualified NMR and ImageNet evidence
-
-The current manuscript controls are generated by:
-
-- `benchmark/benchmark_nmr_qualified_solver.R`
-- `scripts/run_nmr_qualified_solver_remote.sh`
-- `scripts/run_nmr_gpu_memory_probe_remote.sh`
-- `benchmark/plot_nmr_cycle80_qualified.R`
-- `benchmark/benchmark_imagenet_current_fused_lda.R`
-- `benchmark/benchmark_imagenet_float32_simpls_lda_path.R`
-- `scripts/run_imagenet_float32_simpls_lda_path_remote.sh`
-- `benchmark/plot_imagenet_cycle80_qualified.R`
-
-The NMR solver comparison fixes the data split, preprocessing, family,
-component count, float64 precision, and randomized-SVD controls. The ImageNet
-component path uses stored float32 features, label-aware responses, and blocked
-held-out top-5 prediction with online metric accumulation. This avoids
-materializing a full held-out score matrix while preserving the fitted model
-and class decisions. Both workflows record source-archive SHA-256, requested
-and executed estimators, solver controls, host RSS, device memory, and failures.
-
-## Representative NMR spectrum figure
-
-`benchmark/plot_nmr_spectrum_prediction.R` fits float32 SIMPLS with randomized
-SVD to the prepared NMR task and overlays one observed test spectrum with its
-prediction. To avoid selecting an unusually favorable example, the script uses
-the test sample whose RMSD is closest to the median test-set RMSD. It saves the
-observed and predicted spectrum, a residual panel, the plotted values, and
-metadata containing the selected sample, RMSD, correlation, and timings.
-
-`scripts/run_nmr_publication_figure_after_suite.sh` can wait for the publication
-benchmark suite to finish and then generate the NMR figure without competing
-with the benchmark for memory or compute resources.
-
-`scripts/run_backend_publication_overview_after_suite.sh` applies the same
-wait-until-complete rule to the estimator-matched backend overview.
-
-`scripts/run_precision_publication_overview_after_suite.sh` waits for the
-matched precision table and creates the float32/float64 manuscript figure.
-
-## Supplementary kernel sensitivity
-
-`benchmark/benchmark_kernel_sensitivity.R` evaluates linear, RBF, and
-polynomial kernel PLS on representative classification (MetRef and CCLE) and
-multivariate-regression (PRISM and NMR) tasks. Kernel and component settings
-are selected by five-fold cross-validation using the training data only. The
-selected configuration for each kernel family is then refitted on the full
-training set and evaluated on the unchanged test set with both CPU-rSVD and
-CUDA-rSVD. Classification uses argmax throughout so the comparison isolates
-the kernel rather than a downstream classification-head effect.
-
-The RBF search uses `0.25`, `1`, and `4` times a median-distance scale estimated
-from at most 512 training observations. Polynomial models use the same three
-scale multipliers around `1 / p`, degrees 2 and 3, and intercepts 0 and 1.
-Nonlinear kernels are deliberately not run on the sample-rich image and
-single-cell tasks because their required `n x n` Gram matrix would make those
-runs a quadratic-storage stress test rather than a useful kernel comparison.
-
-`scripts/run_kernel_sensitivity_after_suite.sh` waits for the publication
-suite, reuses its prepared task objects and package installation, records
-isolated-process runtime, peak host RSS, and PID-specific CUDA memory, and then
-runs `benchmark/plot_kernel_sensitivity.R`. Outputs include complete tuning,
-selected-configuration, raw, summary, and failure tables plus separate
-classification and regression figures whose facets share a y-axis within each
-metric row.
-
-`scripts/local_copy_publication_results_after_suite.sh` waits for the suite and
-post-processing figures, then copies publication tables and figures locally.
-It deliberately excludes task matrices, installed libraries, per-run row files,
-and memory-sampling logs.
-
-## OPLS and kernel-PLS settings
-
-New pipeline-1 rows record the OPLS total component budget, predictive
-component count, and `north`, plus the kernel family and kernel parameters for
-kernel-PLS. The principal multi-dataset benchmark prespecifies one orthogonal
-OPLS component and uses a linear kernel. Thus its kernel-PLS rows are
-linear-kernel implementation controls, not nonlinear-kernel results.
-
-`benchmark/summarize_main_benchmark_model_settings.R` reconstructs the same
-metadata for the archived selected-point benchmark. Nonlinear RBF and
-polynomial models are evaluated separately by
-`benchmark/benchmark_kernel_sensitivity.R`, with training-only selection of
-the kernel parameters and component count.
-
-## Independent OPLS and nonlinear kernel-PLS validation
-
-`benchmark/benchmark_opls_kernel_estimator_validation.R` validates
-deterministic OPLS and nonlinear RBF/polynomial kernel PLS without calling the
-fastPLS filtering or kernel-construction helpers for the reference path. The
-OPLS reference implements the Trygg-Wold orthogonal-filter equations directly,
-and the nonlinear reference independently constructs and centres the Gram
-matrices. Both references then use `pls::simpls.fit`.
-
-The fixed design covers regression and classification, `p < n`, `p > n`, an
-ill-conditioned synthetic design, gasoline spectroscopy, and breast molecular
-classification. Outputs report operator, coefficient, prediction, score
-subspace, decoded-label, predictive-metric, failure, and fixed five-fold
-component-selection agreement. Deterministic IRLBA evidence is kept separate
-from approximate rSVD workflow results.
-
-Run:
-
-```sh
-Rscript benchmark/benchmark_opls_kernel_estimator_validation.R \
-  --root=. \
-  --out=benchmark_results/opls_kernel_estimator_validation
-```
-
-The output directory contains endpoint, tolerance, failure, fold-level,
-component-path, selected-component, session, and Markdown report files.
-
-## Exact dense SIMPLS reference
-
-`benchmark/benchmark_simpls_exact_reference.R` compares the compiled SIMPLS
-execution path with an independent de Jong implementation whose direction
-solve uses base R's dense LAPACK `svd()`. This audit is intentionally separate
-from the iterative IRLBA comparison and the approximate rSVD qualification.
-The compiled candidate is forced to its audit-only dense solver; no additional
-public solver option is exposed.
-
-The fixed panel covers well-conditioned matrices, nearly tied leading singular
-values, rank-deficient predictors and responses, highly collinear predictors,
-`p < n`, `p > n`, high response dimension, dummy-response classification,
-multivariate regression, and a requested component at effective rank. Results
-are written for every component prefix and include coefficient, fitted-value,
-held-out prediction, score/loading/projection subspace, orthogonality,
-deflation, decoded-label, and convergence diagnostics. Distribution summaries
-are reported in addition to case-wise maxima.
-
-Run:
-
-```sh
-Rscript benchmark/benchmark_simpls_exact_reference.R \
-  --root=. \
-  --out=benchmark_results/simpls_exact_reference
-```
-
-The output directory contains prefix-level results, case summaries, error
-distributions, failures, parameters, and session information.
-
-## Float32 capability summary
-
-`benchmark/summarize_float32_capability.R` writes the implementation and
-validation status of each float32 method/backend combination to
-`float32_capability_table.csv`. The table separates supported execution from
-the strength of available numerical evidence and records the automatic
-shape-based warnings used by `pls()`.
-
-## Repeated outer-partition uncertainty
-
-`benchmark/benchmark_repeated_outer_selection.R` repeats training-only
-component selection and outer-test evaluation across fixed outer-partition
-seeds. It was used for representative small, medium, and large biomedical
-classification tasks and for NMR regression. The script records every
-successful or failed route, the selected component count, boundary status,
-predictive metric, and elapsed time.
-
-`benchmark/summarize_repeated_outer_selection.R` combines the dataset-level
-outputs, reports selection frequencies and predictive dispersion, and creates
-the supplementary figures. Endpoint selections are described as best within
-the evaluated grid; response-rank-constrained PLS-SVD endpoints remain marked
-as structural boundaries.
-
-## Common environment variables
-
-The launch scripts are controlled through environment variables so the same
-code can run locally or on the CUDA workstation.  Frequently used variables
-include:
-
-- `FASTPLS_BENCH_LIB`: isolated R library for benchmark package installs.
-- `FASTPLS_DATASETS`: comma-separated dataset list for pipeline 1.
-- `FASTPLS_RUN_TIMEOUT_SEC`: per-run timeout for pipeline 1.
-- `FASTPLS_PKG_COMPARE_RESULTS_DIR`: output directory for pipeline 2.
-- `FASTPLS_PIPELINE3_RESULTS_DIR`: output directory for pipeline 3.
-- `RUN_ROOT`, `TASK_RDS`, `NCOMP`, `BACKENDS`, `CLASSIFIERS`: pipeline 4 controls.
-
-Datasets are not stored in this repository.  The loaders search the configured
-benchmark data locations and stop with an explicit error if a dataset is not
-available.
-
-## Release 0.99.34 backend audit
-
-The release audit uses
-`metal_validation/run_matched_cuda_dataset_metal.R` for both accelerators. Set
-`FASTPLS_MATCHED_ACCELERATOR=cuda` or `metal`; the script selects the
-platform-appropriate process-memory command automatically and writes raw,
-summary, and paired result tables. Each campaign contains 11 prepared tasks,
-four PLS families, CPU and accelerator routes, and three isolated repetitions.
-
-`plot_cmpb_complete_accelerator_panel.R` combines the paired CUDA and Metal
-tables. The figure always reports CPU total fitting-plus-prediction time divided
-by accelerator time for every completed route. Metric differences and
-prediction agreement remain in the paired CSV files and are not used to hide
-timing cells.
-
-The accelerated SIMPLS audit additionally covers:
-
-- rank-one CPU rSVD with a preceding-direction warm start;
-- resident rank-one Metal refresh;
-- resident rank-one CUDA refresh for general workloads;
-- guarded CUDA candidate batches of at most eight directions for one-hot
-  classification with at least 5,000 training observations and 50 requested
-  components;
-- one-, two-, and four-thread OpenBLAS execution, reported as a capability test
-  rather than an assumed multicore speed-up; and
-- NMR regression at 50 and 165 components, which remains on rank-one refresh.
-
-Unconditional candidate batching is not a supported route: it changed NMR
-predictions, and the corresponding Metal prototype slowed CIFAR-100. These
-negative experiments are intentionally excluded from package dispatch.
+## Performance and memory
+
+- `run_current_component_selection.R` performs ten-fold training-only
+  component selection for all 11 non-NMR real-data tasks and each PLS family.
+  Its `selected_components.csv` output is the required component manifest for
+  the selected-backend and independent-package publication workflows;
+  inherited counts are disabled by default.
+- `run_current_component_path.R` measures predictive performance, fitting and
+  prediction time, absolute process RSS, and baseline-corrected host RSS over
+  prespecified sparse component checkpoints plus each training-selected value.
+  CPU and the requested accelerator are measured in fresh processes with five
+  repetitions; any accelerator/backend mismatch is rejected. The companion
+  `plot_current_component_path.R` creates one dataset-specific figure and a
+  component-outcome correlation table for each hardware platform.
+  `plot_combined_component_paths.R` combines the completed CUDA and Metal raw
+  tables into the 11 CPU/CUDA/Metal component-path figures used in the
+  Supplement.
+- `external_simpls_timing/` compares fixed-control float64 CPU-IRLBA SIMPLS with
+  `pls::simpls.fit()` under minimum-common-output and public-workflow
+  contracts. It records repeated cold-process and steady-state timings,
+  baseline and peak process RSS, prediction agreement, and failures.
+- `benchmark_pls_package_comparison.R` and
+  `../scripts/remote_run_pls_package_comparison.sh` compare the public SIMPLS
+  workflow with independent R implementations at the training-selected
+  SIMPLS component count. Set `FASTPLS_SELECTED_COMPONENTS_CSV` to the current
+  manifest before starting the workflow. Each method-dataset pair receives at
+  least three fresh-process runs; pairs whose first successful fit plus
+  prediction is under one second receive ten runs to stabilize sub-second
+  timing summaries.
+- `benchmark_simpls_multidataset_ablation.R` isolates cached deflation
+  products, incremental coefficients, compact prediction, conditional
+  cross-product caching, and matrix-free products.
+- `benchmark_cv_compiled_vs_r_loop.R` and
+  `../scripts/run_cv_compiled_vs_r_loop.sh` compare the compiled ten-fold
+  SIMPLS engine with an explicit R-level fold loop using identical folds,
+  estimators, automatic rSVD controls, classification heads, predictions, and
+  training-selected component counts. Unavailable accelerator requests are
+  retained as errors and are never rerouted to CPU.
+- `metal_validation/` compares matched CPU, CUDA, and Metal execution while
+  retaining prediction agreement and memory accounting.
+- `benchmark_float32_backend_agreement.R` pairs float32 and float64 results by
+  family, backend, and endpoint.
+- `backend_family_smoke.R` exercises PLS-SVD, SIMPLS, OPLS, and linear,
+  radial-basis, and polynomial kernel PLS for regression and argmax/LDA
+  classification in float64 and float32 on one explicitly selected backend.
+  It stops rather than substituting CPU when CUDA or Metal is unavailable.
+- `multicore_scaling/` measures SIMPLS/rSVD with one, two, and four verified
+  OpenBLAS threads across sample-rich, predictor-wide, and response-wide
+  controlled workloads. Five fresh-process repetitions report total fitting
+  plus prediction time, speed-up, efficiency, and prediction agreement.
+
+## Biomedical and large-scale applications
+
+- `benchmark_nmr_component_selection.R`, `benchmark_nmr_qualified_solver.R`,
+  and `benchmark_nmr_deposited_reference.R` use the
+  fixed preprocessing and split defined by
+  `nmr_protocol_helpers.R`, including predictor water-region handling,
+  training-only component selection, matched 165-component implementation
+  comparisons, per-spectrum and response-wise errors, and observed-versus-
+  predicted spectra.
+  The deposited-reference wrapper requires the separately published
+  `fastsimpls` source and does not redistribute it.
+- `benchmark_nmr_rsvd_control_sweep.R` compares explicit rSVD controls and
+  seeds with a fixed CPU-IRLBA prediction under the same NMR protocol. It is
+  the release check for the automatic massive-cross-covariance profile.
+- The ImageNet scripts assess float32 DINOv2 feature processing as an
+  exploratory foundation-model embedding stress test. The manuscript reports
+  this separately from biomedical predictive validation.
+- `ikpls_cross_language/` contains the matched cross-language comparison with
+  IKPLS, including the large float32 feasibility extension.
+
+## Provenance
+
+`write_run_provenance.R` records the package version, analysis script, dataset
+identifier, split, seed, and session information. Reader-facing manuscript and
+package documentation identify release versions and complete numerical
+controls; file checksums are not included in those documents.
+
+## Current-release result layout
+
+Only results generated with the package version in `DESCRIPTION` belong under
+`publication_results/<version>/`. The publication bundle contains compact raw
+summaries, plotted values, execution status, and session information for the
+analyses cited in the manuscript. Intermediate matrices, older release results,
+and analyses not reported in the paper are intentionally excluded from the
+repository.

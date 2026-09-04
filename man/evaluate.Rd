@@ -28,9 +28,9 @@ as classification and numeric values as regression, unless a one-hot observed
 matrix is detected.}
 
 \item{ytrain}{Optional training response for independent-test regression Q2.
-When supplied, Q2 is computed relative to the training-response mean. When
-omitted, Q2 is returned as \code{NA} rather than being silently equated with
-R2.}
+When supplied, each response is centered on its corresponding training mean
+before denominator sums are aggregated across responses. When omitted, Q2 is
+returned as \code{NA} rather than being silently equated with R2.}
 
 \item{top_k}{Integer vector of top-k classification accuracies to compute when
 \code{predicted} is a class-score matrix.}
@@ -70,9 +70,12 @@ include the main spectral prediction metrics used by Vignoli et al. (2025):
 median relative error percentage, RMSE, R2, and RPD.
 Set \code{bycol = FALSE} to return only the aggregate metrics and avoid
 calculating a separate metric vector for every response column.
-R2 uses the observed-response mean. Independent-test Q2 uses the training
-mean supplied through \code{ytrain}; if that reference is unavailable, Q2 is
-\code{NA} and \code{metric_definitions} records why it was not calculated.
+For multivariate responses, aggregate R2 centers each response column on its
+own observed mean before summing the residual and reference sums of squares.
+Independent-test Q2 analogously centers each response column on the
+corresponding training mean supplied through \code{ytrain}. If that reference
+is unavailable, Q2 is \code{NA} and \code{metric_definitions} records why it
+was not calculated.
 }
 \examples{
 evaluate(iris$Species, iris$Species)

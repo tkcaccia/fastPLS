@@ -8,9 +8,10 @@ DATASETS="${FASTPLS_EXTERNAL_TIMING_DATASETS:-metref,ccle,tcga_brca,tcga_hnsc_me
 PROFILES="${FASTPLS_EXTERNAL_TIMING_PROFILES:-estimator_kernel,complete_workflow}"
 IMPLEMENTATIONS="${FASTPLS_EXTERNAL_TIMING_IMPLEMENTATIONS:-fastpls,pls}"
 REPS="${FASTPLS_EXTERNAL_TIMING_REPS:-adaptive}"
-TIMING_MODES="${FASTPLS_EXTERNAL_TIMING_MODES:-cold_process,warm_batch}"
+TIMING_MODES="${FASTPLS_EXTERNAL_TIMING_MODES:-cold_process,steady_process_batch}"
 CPU_PROFILES="${FASTPLS_EXTERNAL_TIMING_CPU_PROFILES:-reference_1}"
 TIMEOUT_SEC="${FASTPLS_EXTERNAL_TIMING_TIMEOUT_SEC:-10000}"
+SELECTED_COMPONENTS_CSV="${FASTPLS_SELECTED_COMPONENTS_CSV:-${REPO_ROOT}/publication_results/0.99.39/current_release/component_selection/selected_components.csv}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 TIME_STYLE="linux"
@@ -32,9 +33,9 @@ timing_modes=${TIMING_MODES}
 cpu_profiles=${CPU_PROFILES}
 openblas_library=${FASTPLS_OPENBLAS_LIBRARY:-not_supplied}
 adaptive_cold_repetitions=50_if_pilot_le_0.5s;30_if_le_2s;15_if_le_10s;5_otherwise
-warm_batch_iterations=50_if_pilot_le_0.5s;30_if_le_2s;20_if_le_10s;10_otherwise
+steady_process_batch_iterations=50_if_pilot_le_0.5s;30_if_le_2s;20_if_le_10s;10_otherwise
 timeout_sec=${TIMEOUT_SEC}
-warmup=cold_process:none;warm_batch:one_untimed_complete_fit_and_prediction
+runtime_initialization=cold_process:none;steady_process_batch:one_untimed_complete_fit_and_prediction
 package_and_data_loading_timed=false
 rss_baseline=immediately_before_fit_after_gc
 rss_peak=maximum_process_rss_over_worker_lifetime
@@ -43,7 +44,8 @@ rss_increment_scope=baseline_corrected_process_increment_not_algorithmic_workspa
 precision=float64
 blas_threads=1
 split_seed=123
-fastpls_source_archive_sha256=${FASTPLS_SOURCE_ARCHIVE_SHA256:-not_recorded}
+fastpls_version=0.99.39
+selected_components_csv=${SELECTED_COMPONENTS_CSV}
 EOF
 
 annotate_resources() {
@@ -70,18 +72,29 @@ RS
 }
 
 ncomp_for_dataset() {
-  case "$1" in
-    metref) echo 22 ;;
-    ccle) echo 50 ;;
-    tcga_brca) echo 5 ;;
-    tcga_hnsc_methylation) echo 2 ;;
-    gtex_v8) echo 32 ;;
-    tcga_pan_cancer) echo 50 ;;
-    retina) echo 50 ;;
-    tabula) echo 50 ;;
-    cifar100) echo 100 ;;
-    *) echo 50 ;;
-  esac
+  Rscript - "${SELECTED_COMPONENTS_CSV}" "$1" <<'RS'
+args <- commandArgs(TRUE)
+path <- normalizePath(args[[1L]], mustWork = TRUE)
+dataset <- args[[2L]]
+selected <- read.csv(path, stringsAsFactors = FALSE)
+family_column <- if ("family" %in% names(selected)) "family" else "method"
+component_column <- if ("selected_ncomp" %in% names(selected)) {
+  "selected_ncomp"
+} else {
+  "ncomp"
+}
+hit <- selected[
+  tolower(selected$dataset) == dataset &
+    tolower(selected[[family_column]]) == "simpls",
+  component_column,
+  drop = TRUE
+]
+if (length(hit) != 1L || !is.finite(hit) || hit < 1L) {
+  stop("Missing one valid SIMPLS component selection for ", dataset,
+       call. = FALSE)
+}
+cat(as.integer(hit))
+RS
 }
 
 run_worker() {
@@ -177,13 +190,13 @@ for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
           run_worker "${dataset}" "${profile}" "${implementation}" "${ncomp}" "${cpu_profile}" cold_process "${replicate}" 1
         done
       fi
-      if printf '%s' "${TIMING_MODES}" | tr ',' '\n' | grep -qx warm_batch; then
-        warm_iterations="$(adaptive_count "${pilot_sec}" warm)"
-        run_worker "${dataset}" "${profile}" "${implementation}" "${ncomp}" "${cpu_profile}" warm_batch 1 "${warm_iterations}"
+      if printf '%s' "${TIMING_MODES}" | tr ',' '\n' | grep -qx steady_process_batch; then
+        steady_iterations="$(adaptive_count "${pilot_sec}" steady)"
+        run_worker "${dataset}" "${profile}" "${implementation}" "${ncomp}" "${cpu_profile}" steady_process_batch 1 "${steady_iterations}"
       fi
       if [ "${implementation}" = "fastpls" ]; then
-        phase_iterations="$(adaptive_count "${pilot_sec}" warm)"
-        run_worker "${dataset}" "${profile}" "${implementation}" "${ncomp}" "${cpu_profile}" warm_batch 1 "${phase_iterations}" phase_decomposition
+        phase_iterations="$(adaptive_count "${pilot_sec}" steady)"
+        run_worker "${dataset}" "${profile}" "${implementation}" "${ncomp}" "${cpu_profile}" steady_process_batch 1 "${phase_iterations}" phase_decomposition
       fi
       done
     done

@@ -1,0 +1,12 @@
+"dataset","task_type","n_train","n_test","p","q"
+"cbmc_citeseq","regression",7755,862,1000,10
+"ccle","classification",547,71,1000,18
+"cifar100","classification",50000,10000,768,100
+"gtex_v8","classification",3000,797,1000,32
+"metref","classification",773,100,375,22
+"prism","regression",479,54,1000,4686
+"retina","classification",22402,22406,50,12
+"tabula","classification",50043,50059,50,32
+"tcga_brca","classification",756,88,1000,5
+"tcga_hnsc_methylation","classification",520,58,782,2
+"tcga_pan_cancer","classification",3000,982,850,32

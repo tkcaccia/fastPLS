@@ -19,6 +19,71 @@ test_that("pls includes complete evaluate metrics for classification", {
   expect_true("lift_accuracy" %in% names(fit$metrics$test[["ncomp=1"]]$metrics))
 })
 
+test_that("float32 classification decodes fitted labels for metrics", {
+  idx <- c(1:12, 51:62, 101:112)
+  X <- float::fl(as.matrix(iris[idx, 1:4]))
+  y <- factor(iris[idx, 5])
+
+  fit <- suppressWarnings(pls(
+    X, y, X, y,
+    ncomp = 1:2,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    fit = TRUE,
+    return_variance = FALSE
+  ))
+
+  expect_length(fit$metrics$fitted, 2L)
+  expect_length(fit$metrics$test, 2L)
+  expect_true(all(vapply(fit$Yfit, is.factor, logical(1L))))
+  expect_true(all(vapply(fit$metrics$fitted, function(value) {
+    is.finite(value$metrics$accuracy[[1L]])
+  }, logical(1L))))
+})
+
+test_that("special PLS-family wrappers retain component-wise test metrics", {
+  set.seed(205)
+  X <- matrix(rnorm(48 * 7), 48, 7)
+  Y <- cbind(
+    X[, 1] - 0.3 * X[, 3] + rnorm(48, sd = 0.1),
+    X[, 2] + 0.2 * X[, 4] + rnorm(48, sd = 0.1)
+  )
+  train <- 1:36
+  test <- 37:48
+
+  configurations <- list(
+    opls = list(method = "opls", north = 1L),
+    kernel_linear = list(method = "kernelpls", kernel = "linear"),
+    kernel_rbf = list(
+      method = "kernelpls", kernel = "rbf", gamma = 1 / ncol(X)
+    ),
+    kernel_poly = list(
+      method = "kernelpls", kernel = "poly", degree = 2L, coef0 = 1
+    )
+  )
+
+  for (configuration in configurations) {
+    fit <- do.call(pls, c(list(
+      Xtrain = X[train, ], Ytrain = Y[train, ],
+      Xtest = X[test, ], Ytest = Y[test, ],
+      ncomp = 1:2,
+      backend = "cpu",
+      svd.method = "rsvd",
+      fit = TRUE,
+      return_variance = FALSE,
+      seed = 9
+    ), configuration))
+    expect_length(fit$metrics$fitted, 2L)
+    expect_length(fit$metrics$test, 2L)
+    expect_true(
+      all(vapply(fit$metrics$test, function(value) {
+        is.data.frame(value$metrics) && is.finite(value$metrics$RMSD[[1L]])
+      }, logical(1L)))
+    )
+  }
+})
+
 test_that("single and double CV expose evaluate metrics separately", {
   idx <- c(1:12, 51:62, 101:112)
   X <- as.matrix(iris[idx, 1:4])

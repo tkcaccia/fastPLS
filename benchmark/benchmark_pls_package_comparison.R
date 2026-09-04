@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
-# Compare fastPLS with independent PLS implementations from other R packages.
-# The script supports single-run execution so shell wrappers can timeout each
-# package/method independently.
+# Current-release comparison of fastPLS with independent R implementations.
+# Each package-method pair runs in an isolated process so unsupported methods,
+# timeouts, and memory failures remain explicit in the result table.
 
 options(stringsAsFactors = FALSE)
 
@@ -105,7 +105,7 @@ package_version_chr <- function(pkg) {
 load_compare_task <- function(dataset_id, split_seed) {
   path <- find_dataset_rdata(dataset_id)
   task <- as_task(path, dataset_id = dataset_id, split_seed = split_seed)
-  precision <- tolower(Sys.getenv("FASTPLS_BENCH_PRECISION", "float32"))
+  precision <- tolower(Sys.getenv("FASTPLS_BENCH_PRECISION", "float64"))
   task <- coerce_task_precision(task, precision = precision)
   if (identical(task$task_type, "classification")) {
     task$Ytrain <- droplevels(as.factor(task$Ytrain))
@@ -265,7 +265,7 @@ decode_fastpls <- function(model) {
   pred <- if (!is.null(model$Ypred)) {
     model$Ypred
   } else {
-    predict(model, task$Xtest, Ytest = task$Ytest)$Ypred
+    predict(model, task$Xtest, Ytest = task$Ytest, backend = "cpu")$Ypred
   }
   if (identical(task_type, "classification")) {
     if (is.data.frame(pred)) return(factor(pred[[ncol(pred)]], levels = levels(Ytest)))

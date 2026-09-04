@@ -7,8 +7,10 @@ test_that("fastPLS backend precedence is explicit, option, environment, CPU", {
   }, add = TRUE)
   options(backend = NULL); Sys.unsetenv("FASTPLS_BACKEND")
   expect_identical(fastPLS_backend(), "cpu")
-  Sys.setenv(FASTPLS_BACKEND = "metal"); expect_identical(fastPLS_backend(), "metal")
-  options(backend = "cuda"); expect_identical(fastPLS_backend(), "cuda")
+  Sys.setenv(FASTPLS_BACKEND = "metal")
+  expect_identical(fastPLS:::.fastpls_resolve_backend(NULL), "metal")
+  options(backend = "cuda")
+  expect_identical(fastPLS:::.fastpls_resolve_backend(NULL), "cuda")
   expect_identical(fastPLS:::.fastpls_resolve_backend("cpu"), "cpu")
   expect_error(fastPLS:::.fastpls_resolve_backend("auto"), "must be one of")
 })
@@ -22,7 +24,7 @@ test_that("generic backend option controls fastPLS and explicit values win", {
   }, add = TRUE)
   Sys.setenv(FASTPLS_BACKEND = "metal")
   options(backend = "cuda")
-  expect_identical(fastPLS_backend(), "cuda")
+  expect_identical(fastPLS:::.fastpls_resolve_backend(NULL), "cuda")
   expect_identical(fastPLS:::.fastpls_resolve_backend("cpu"), "cpu")
 })
 
@@ -61,4 +63,509 @@ test_that("public fitting functions defer omitted backends", {
   expect_null(formals(pls.single.cv)$backend)
   expect_null(formals(pls.double.cv)$backend)
   expect_null(formals(getS3method("predict", "fastPLS"))$backend)
+})
+
+test_that("backend availability guard never substitutes CPU", {
+  expect_identical(
+    fastPLS:::.fastpls_require_backend_available("cpu", available = TRUE),
+    "cpu"
+  )
+  expect_error(
+    fastPLS:::.fastpls_require_backend_available(
+      "cuda",
+      "Test operation",
+      available = FALSE
+    ),
+    "backend='cuda'.*No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::.fastpls_require_backend_available(
+      "metal",
+      "Test operation",
+      available = FALSE
+    ),
+    "backend='metal'.*No CPU fallback"
+  )
+})
+
+test_that("the backend setter rejects unavailable accelerators immediately", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  old_option <- getOption("backend", NULL)
+  on.exit(options(backend = old_option), add = TRUE)
+
+  expect_error(
+    fastPLS_backend(unavailable),
+    "No CPU fallback"
+  )
+  expect_identical(getOption("backend", NULL), old_option)
+})
+
+test_that("the backend getter rejects an unavailable configured accelerator", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  old_option <- getOption("backend", NULL)
+  on.exit(options(backend = old_option), add = TRUE)
+  options(backend = unavailable)
+
+  expect_error(fastPLS_backend(), "No CPU fallback")
+  expect_identical(getOption("backend"), unavailable)
+})
+
+test_that("native CUDA helpers do not substitute CPU", {
+  skip_if(isTRUE(has_cuda()), "CUDA is available on this test host")
+  scores <- matrix(c(-1, 0, 1, 0, 1, -1), nrow = 3)
+  labels <- c(1L, 2L, 1L)
+  components <- 1L
+
+  expect_error(
+    fastPLS:::lda_train_prefix_cuda(
+      scores, labels, 2L, components, 1e-8
+    ),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::lda_project_train_prefix_cuda(
+      scores, diag(2), c(0, 0), labels, 2L, components, 1e-8
+    ),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::truncated_svd_debug(
+      diag(3), 1L, 5L, 2L, 1L, 0, 1L, FALSE
+    ),
+    "no CPU fallback"
+  )
+  expect_error(
+    fastPLS:::fastsvd_float32_cpp(
+      float::fl(diag(3)), 1L, 1L, 2L, 2L, 1L, 1L, FALSE
+    ),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::pls_model1_gpu(
+      diag(3), matrix(1, 3, 1), 1L, 1L, FALSE, 2L, 2L, 1L, 0, 1L
+    ),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::pls_model2_fast_gpu(
+      diag(3), matrix(1, 3, 1), 1L, 1L, FALSE, 2L, 2L, 1L, 0, 1L
+    ),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastPLS:::pls_predict_flash_cuda(list(), diag(2), FALSE),
+    "No CPU fallback"
+  )
+})
+
+test_that("native Metal helpers do not substitute CPU", {
+  skip_if(isTRUE(has_metal()), "Metal is available on this test host")
+
+  expect_error(
+    fastPLS:::metal_matrix_multiply_cpp(diag(2), diag(2)),
+    "[Mm]etal.*not available|[Nn]o CPU fallback"
+  )
+  expect_error(
+    fastPLS:::fastsvd_float32_cpp(
+      float::fl(diag(3)), 1L, 2L, 2L, 2L, 1L, 1L, FALSE
+    ),
+    "No CPU fallback|Metal backend is not available"
+  )
+})
+
+test_that("each unavailable accelerator stops public operations", {
+  X <- matrix(rnorm(40), 10, 4)
+  y <- rnorm(10)
+  fit <- pls(X, y, ncomp = 1, backend = "cpu", return_variance = FALSE)
+
+  for (requested in c("cuda", "metal")) {
+    available <- if (identical(requested, "cuda")) has_cuda() else has_metal()
+    if (isTRUE(available)) {
+      next
+    }
+    expect_error(
+      pls(X, y, ncomp = 1, backend = requested),
+      "No CPU fallback",
+      info = paste("pls backend", requested)
+    )
+    expect_error(
+      fastsvd(X, ncomp = 1, backend = requested),
+      "No CPU fallback",
+      info = paste("fastsvd backend", requested)
+    )
+    expect_error(
+      predict(fit, X[1:2, , drop = FALSE], backend = requested),
+      "No CPU fallback",
+      info = paste("prediction backend", requested)
+    )
+    expect_error(
+      pls.single.cv(X, y, ncomp = 1, kfold = 2, backend = requested),
+      "No CPU fallback",
+      info = paste("single CV backend", requested)
+    )
+    expect_error(
+      pls.double.cv(
+        X,
+        y,
+        ncomp = 1,
+        kfold_inner = 2,
+        kfold_outer = 2,
+        backend = requested
+      ),
+      "No CPU fallback",
+      info = paste("double CV backend", requested)
+    )
+  }
+})
+
+test_that("unavailable configured backends stop public operations", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  old_option <- getOption("backend", NULL)
+  on.exit(options(backend = old_option), add = TRUE)
+  options(backend = unavailable)
+  X <- matrix(rnorm(40), 10, 4)
+  y <- rnorm(10)
+
+  expect_error(
+    pls(X, y, ncomp = 1),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastsvd(X, ncomp = 1),
+    "No CPU fallback"
+  )
+  expect_error(
+    pls.single.cv(X, y, ncomp = 1, kfold = 2),
+    "No CPU fallback"
+  )
+  expect_error(
+    pls.double.cv(
+      X,
+      y,
+      ncomp = 1,
+      kfold_inner = 2,
+      kfold_outer = 2
+    ),
+    "No CPU fallback"
+  )
+})
+
+test_that("backend availability is checked before input conversion", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  malformed <- list(not = "a matrix")
+  X <- matrix(rnorm(40), 10, 4)
+  y <- rnorm(10)
+  fit <- pls(X, y, ncomp = 1, backend = "cpu", return_variance = FALSE)
+
+  expect_error(
+    pls(malformed, y, ncomp = 1, backend = unavailable),
+    "No CPU fallback"
+  )
+  expect_error(
+    fastsvd(malformed, ncomp = 1, backend = unavailable),
+    "No CPU fallback"
+  )
+  expect_error(
+    predict(fit, malformed, backend = unavailable),
+    "No CPU fallback"
+  )
+})
+
+test_that("environment-selected unavailable backends stop CV", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  old_option <- getOption("backend", NULL)
+  old_env <- Sys.getenv("FASTPLS_BACKEND", unset = NA_character_)
+  on.exit({
+    options(backend = old_option)
+    if (is.na(old_env)) {
+      Sys.unsetenv("FASTPLS_BACKEND")
+    } else {
+      Sys.setenv(FASTPLS_BACKEND = old_env)
+    }
+  }, add = TRUE)
+  options(backend = NULL)
+  do.call(Sys.setenv, list(FASTPLS_BACKEND = unavailable))
+  X <- matrix(rnorm(40), 10, 4)
+  y <- rnorm(10)
+
+  expect_error(
+    pls.single.cv(X, y, ncomp = 1, kfold = 2),
+    "No CPU fallback"
+  )
+  expect_error(
+    pls.double.cv(
+      X,
+      y,
+      ncomp = 1,
+      kfold_inner = 2,
+      kfold_outer = 2
+    ),
+    "No CPU fallback"
+  )
+})
+
+test_that("prediction and CV reject unavailable accelerator requests", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  prediction_backend <- unavailable
+  X <- matrix(rnorm(60), 15, 4)
+  y <- rnorm(15)
+  fit <- pls(X, y, ncomp = 1, backend = "cpu", return_variance = FALSE)
+
+  expect_error(
+    predict(fit, X[1:2, , drop = FALSE], backend = prediction_backend),
+    "No CPU fallback"
+  )
+  expect_error(
+    pls.single.cv(X, y, ncomp = 1, kfold = 3, backend = unavailable),
+    "No CPU fallback"
+  )
+  expect_error(
+    pls.double.cv(
+      X,
+      y,
+      ncomp = 1,
+      kfold_inner = 2,
+      kfold_outer = 2,
+      backend = c("cpu", unavailable)
+    ),
+    "No CPU fallback"
+  )
+})
+
+test_that("model-aware prediction does not fall back from an unavailable backend", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  stored <- if (identical(unavailable, "cuda")) "cuda_flash" else "metal"
+  model <- list(
+    predict_backend = stored,
+    flash_svd = TRUE,
+    ncomp = 1L,
+    m = 1L
+  )
+
+  expect_error(
+    fastPLS:::.prediction_route(model, matrix(0, 1, 1), "auto", NULL),
+    "No CPU fallback"
+  )
+})
+
+test_that("family prediction wrappers reject unavailable accelerators early", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  X <- matrix(rnorm(120), 30, 4)
+  y <- rnorm(30)
+  kernel_fit <- pls(
+    X,
+    y,
+    ncomp = 1,
+    method = "kernelpls",
+    kernel = "rbf",
+    backend = "cpu",
+    return_variance = FALSE
+  )
+  opls_fit <- pls(
+    X,
+    y,
+    ncomp = 1,
+    method = "opls",
+    backend = "cpu",
+    return_variance = FALSE
+  )
+
+  expect_error(
+    predict(kernel_fit, X[1:2, , drop = FALSE], backend = unavailable),
+    "No CPU fallback"
+  )
+  expect_error(
+    predict(opls_fit, X[1:2, , drop = FALSE], backend = unavailable),
+    "No CPU fallback"
+  )
+})
+
+test_that("all public PLS families reject every unavailable accelerator", {
+  unavailable <- c(
+    if (!isTRUE(has_cuda())) "cuda",
+    if (!isTRUE(has_metal())) "metal"
+  )
+  if (!length(unavailable)) {
+    skip("Both optional accelerator backends are available")
+  }
+  X <- matrix(rnorm(72), 18, 4)
+  y_reg <- rnorm(18)
+  y_cls <- factor(rep(c("a", "b", "c"), each = 6))
+  X32 <- float::fl(X)
+  y32 <- float::fl(matrix(y_reg, ncol = 1L))
+
+  for (requested in unavailable) {
+    for (family in c("plssvd", "simpls", "opls", "kernelpls")) {
+      for (response in list(y_reg, y_cls)) {
+        expect_error(
+          pls(
+            X,
+            response,
+            ncomp = 1,
+            method = family,
+            backend = requested
+          ),
+          "No CPU fallback",
+          info = paste(requested, family, class(response)[1L])
+        )
+      }
+      expect_error(
+        pls(
+          X32,
+          y32,
+          ncomp = 1,
+          method = family,
+          backend = requested
+        ),
+        "No CPU fallback",
+        info = paste(requested, family, "float32")
+      )
+    }
+
+    expect_error(
+      pls.single.cv(
+        X,
+        y_cls,
+        ncomp = 1,
+        kfold = 2,
+        method = c("plssvd", "simpls", "opls", "kernelpls"),
+        classifier = c("argmax", "lda"),
+        backend = requested
+      ),
+      "No CPU fallback"
+    )
+    expect_error(
+      pls.double.cv(
+        X,
+        y_cls,
+        ncomp = 1,
+        kfold_inner = 2,
+        kfold_outer = 2,
+        method = c("plssvd", "simpls", "opls", "kernelpls"),
+        classifier = c("argmax", "lda"),
+        backend = requested
+      ),
+      "No CPU fallback"
+    )
+  }
+})
+
+test_that("every PLS family and classifier rejects an unavailable backend", {
+  unavailable <- if (!isTRUE(has_cuda())) {
+    "cuda"
+  } else if (!isTRUE(has_metal())) {
+    "metal"
+  } else {
+    skip("Both optional accelerator backends are available")
+  }
+  X <- matrix(rnorm(120), 30, 4)
+  regression <- rnorm(30)
+  classification <- factor(rep(c("a", "b"), each = 15))
+
+  for (method in c("plssvd", "simpls", "opls", "kernelpls")) {
+    expect_error(
+      pls(
+        X,
+        regression,
+        ncomp = 1,
+        method = method,
+        backend = unavailable,
+        kernel = "rbf",
+        return_variance = FALSE
+      ),
+      "No CPU fallback"
+    )
+    for (classifier in c("argmax", "lda")) {
+      expect_error(
+        pls(
+          X,
+          classification,
+          ncomp = 1,
+          method = method,
+          classifier = classifier,
+          backend = unavailable,
+          kernel = "rbf",
+          return_variance = FALSE
+        ),
+        "No CPU fallback"
+      )
+    }
+  }
+})
+
+test_that("internal prediction routes are converted to public backends", {
+  expect_identical(
+    fastPLS:::.model_public_backend(list(predict_backend = "cuda_flash")),
+    "cuda"
+  )
+  expect_identical(
+    fastPLS:::.model_public_backend(list(predict_backend = "float32_cuda")),
+    "cuda"
+  )
+  expect_identical(
+    fastPLS:::.model_public_backend(list(predict_backend = "metal")),
+    "metal"
+  )
+  expect_identical(
+    fastPLS:::.model_public_backend(list(predict_backend = "cpu_flash")),
+    "cpu"
+  )
+})
+
+test_that("invalid explicit backend vectors are not silently ignored", {
+  old_option <- getOption("backend", NULL)
+  on.exit(options(backend = old_option), add = TRUE)
+  options(backend = "cpu")
+  expect_error(
+    fastPLS:::.fastpls_resolve_backend(c("cuda", "cpu")),
+    "must be one of"
+  )
 })

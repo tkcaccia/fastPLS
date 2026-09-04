@@ -24,7 +24,7 @@
 ellipses.}
 
 \item{score.set}{Plot \code{train} scores, \code{test} scores, or use
-    \code{auto} to select
+\code{auto} to select
 stored training scores before test scores.}
 
 \item{ellipse}{Draw confidence ellipses when \code{TRUE}.}
@@ -46,7 +46,9 @@ it was requested during model fitting.
 }
 \examples{
 X <- as.matrix(iris[, seq_len(4)])
-fit <- pls(X, iris$Species, ncomp = 2, fit = TRUE,
-            return_variance = TRUE, seed = 1)
+fit <- pls(X, iris$Species,
+    ncomp = 2, fit = TRUE,
+    return_variance = TRUE, seed = 1
+)
 plot(fit, groups = iris$Species, ellipse = TRUE)
 }

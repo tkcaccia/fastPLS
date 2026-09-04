@@ -23,6 +23,7 @@
 ^fastPLS_[0-9].*[.]tar[.]gz$
 ^fastPLS_reference_manual_.*[.]pdf$
 ^fastPLS_vignette_.*[.]html$
+^fastPLS_vignette_.*[.]pdf$
 ^src/.*\.(o|so)$
 ^src/symbols[.]rds$
 ^src/Makevars$
@@ -45,3 +46,6 @@
 ^tools/revise_cmpb_.*[.]py$
 ^fastPLS_reference_manual_.*[.]pdf$
 ^fastPLS_vignette_.*[.]html$
+^publication_results(/|$)
+^[.]fastpls-openblas-lib(/|$)
+^[.]fastpls-metal-lib.*(/|$)

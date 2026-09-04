@@ -32,10 +32,16 @@ source(file.path(repo_root, "benchmark", "helpers_dataset_memory_compare.R"))
 dataset_id <- tolower(arg("dataset"))
 implementation <- match.arg(arg("implementation"), c("fastpls", "pls"))
 profile <- match.arg(arg("profile"), c("estimator_kernel", "complete_workflow"))
-timing_mode <- match.arg(arg("timing_mode", "cold_process"), c("cold_process", "warm_batch"))
+timing_mode <- match.arg(
+  arg("timing_mode", "cold_process"),
+  c("cold_process", "steady_process_batch")
+)
 measurement_scope <- match.arg(arg("measurement_scope", "primary"), c("primary", "phase_decomposition"))
 phase_timing_enabled <- identical(tolower(arg("phase_timing", "false")), "true")
-batch_iterations <- as.integer(arg("iterations", if (identical(timing_mode, "warm_batch")) "20" else "1"))
+batch_iterations <- as.integer(arg(
+  "iterations",
+  if (identical(timing_mode, "steady_process_batch")) "20" else "1"
+))
 if (!is.finite(batch_iterations) || batch_iterations < 1L) batch_iterations <- 1L
 if (identical(timing_mode, "cold_process")) batch_iterations <- 1L
 ncomp <- as.integer(arg("ncomp"))
@@ -72,8 +78,8 @@ Ytest <- droplevels(Ytest[keep])
 class_levels <- levels(Ytrain)
 Ydummy <- stats::model.matrix(~ Ytrain - 1)
 colnames(Ydummy) <- class_levels
-ncomp <- min(ncomp, ncol(Xtrain), nrow(Xtrain) - 1L, ncol(Ydummy) - 1L)
-if (ncomp < 1L) stop("No positive component count remains after the centered-response rank limit.")
+ncomp <- min(ncomp, ncol(Xtrain), nrow(Xtrain) - 1L)
+if (ncomp < 1L) stop("No positive component count remains for SIMPLS fitting.")
 
 elapsed <- function(expr) {
   start <- Sys.time()
@@ -214,8 +220,8 @@ fit <- prediction <- NULL
 fit_sec <- prediction_sec <- rep(NA_real_, batch_iterations)
 phase_rows <- vector("list", batch_iterations)
 
-if (identical(timing_mode, "warm_batch")) {
-  # Warm package dispatch, allocations, and accelerator/runtime state without
+if (identical(timing_mode, "steady_process_batch")) {
+  # Initialize package dispatch, allocations, and accelerator/runtime state without
   # mixing that first-call cost into steady-state iteration timings.
   warm_fit <- if (identical(implementation, "fastpls")) fit_fastpls() else fit_pls()
   invisible(if (identical(implementation, "fastpls")) predict_fastpls(warm_fit) else predict_pls(warm_fit))
@@ -314,7 +320,7 @@ row <- data.frame(
   timing_mode = timing_mode,
   measurement_scope = measurement_scope,
   phase_timing_enabled = phase_timing_enabled,
-  warmup_policy = if (identical(timing_mode, "warm_batch")) {
+  runtime_initialization_policy = if (identical(timing_mode, "steady_process_batch")) {
     "one untimed complete fit and prediction before measured iterations"
   } else {
     "none; every repetition starts in a fresh R process"

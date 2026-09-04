@@ -1,4 +1,4 @@
-# Shape-aware SIMPLS execution mapped to the de Jong update
+# Accelerated SIMPLS execution mapped to the de Jong update
 
 This executable-style pseudocode documents the deterministic SIMPLS path used
 for estimator-preservation validation. The low-rank solver supplies only the
@@ -72,8 +72,9 @@ simpls_component_path <- function(X, Y, ncomp, dominant_left) {
 Like `pls::simpls.fit`, the reference SIMPLS implementation in the `pls`
 package, one fit supplies the sequential coefficient and fitted-value path for
 components 1 through `ncomp`. fastPLS does not claim component-path generation
-itself as a novelty. Its contribution is the compiled, shape-dependent
-execution and storage layer summarized above.
+itself as a novelty. Its contribution is the compiled incremental execution,
+compact prediction, matrix-free products, and backend-specific storage layer
+summarized above.
 
 ## Cost and storage model
 
@@ -101,11 +102,24 @@ tall, sufficiently reused shapes where replacing repeated sample-space
 products can amortize that cost. Caching the deflation row product changes a
 constant factor rather than the asymptotic order.
 
-Every deflated component requests a fresh direction from the current operator.
-IRLBA starts a new rank-one iterative solve; rSVD draws a new oversampled
-Gaussian sketch using the base seed plus the zero-based component index.
-Candidate blocks, cross-component warm starts, and adaptive refresh policies
-were rejected during development and are not part of the release algorithm.
+Every deflated component requests a direction from the current operator.
+IRLBA starts a new iterative solve. On ordinary CPU, CUDA, and Metal PLS
+problems, rSVD starts a new seeded Gaussian sketch of the current deflated
+operator with 32 oversampling directions and five power iterations. Numeric
+responses with at least 64 columns and a response-to-sample ratio of at least
+0.2 use 48/6; classification with at least 32 classes and no more than 20
+samples per class uses 64/7. When the explicit predictor-response
+cross-covariance would exceed 512 MiB, the automatic massive-matrix profile
+records `oversample = 12` and `power = 2` and takes precedence over the other
+profiles. In this regime, CPU,
+CUDA, and Metal obtain each component from a newly initialized rank-one
+randomized direction; CUDA retains the sequential state on the device.
+CUDA may generate up to eight fresh candidates together for eligible large
+classification workloads. Those candidates are accepted one at a time only
+after the same sequential SIMPLS orthogonalization, score/loading, and
+deflation updates shown above. CPU supports explicit and matrix-free sketches,
+CUDA performs the large sketch products on device, and Metal performs the
+large sketch products on the GPU with the reduced QR/SVD on the host.
 
 ## Exact dense-reference audit
 

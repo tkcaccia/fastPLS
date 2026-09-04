@@ -10,9 +10,10 @@ BACKENDS="${3:-cpu}"
 REPS="${4:-3}"
 RUN_TIMEOUT_SEC="${FASTPLS_SCALING_TIMEOUT_SEC:-600}"
 LIB_LOC="${FASTPLS_SCALING_LIB:-${OUT_DIR}/Rlib}"
-ARCHIVE="${FASTPLS_SCALING_ARCHIVE:-${REPO_ROOT}/fastPLS_0.99.25.tar.gz}"
+ARCHIVE="${FASTPLS_SCALING_ARCHIVE:-${REPO_ROOT}/fastPLS_0.99.39.tar.gz}"
 CPU_PROFILE="${FASTPLS_SCALING_CPU_PROFILE:-reference_1}"
 CPU_THREADS="${FASTPLS_SCALING_THREADS:-1}"
+RESUME="${FASTPLS_SCALING_RESUME:-false}"
 
 export FASTPLS_SCALING_CPU_PROFILE="${CPU_PROFILE}"
 export FASTPLS_SCALING_THREADS="${CPU_THREADS}"
@@ -35,7 +36,7 @@ BASE_R_LIBS="$(Rscript -e 'cat(paste(.libPaths(), collapse=.Platform$path.sep))'
 export R_LIBS_USER="${LIB_LOC}${BASE_R_LIBS:+:${BASE_R_LIBS}}"
 export R_LIBS="${LIB_LOC}${BASE_R_LIBS:+:${BASE_R_LIBS}}"
 
-EXPECTED_VERSION="${FASTPLS_SCALING_EXPECTED_VERSION:-0.99.25}"
+EXPECTED_VERSION="${FASTPLS_SCALING_EXPECTED_VERSION:-0.99.39}"
 ACTUAL_VERSION="$(FASTPLS_SCALING_LIB="${LIB_LOC}" Rscript -e \
   '.libPaths(unique(c(Sys.getenv("FASTPLS_SCALING_LIB"), .libPaths()))); cat(as.character(utils::packageVersion("fastPLS")))')"
 if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
@@ -85,11 +86,17 @@ for config in "${CONFIGS[@]}"; do
   index=$((index + 1))
   run_id="$(basename "${config}" .rds)"
   result="${OUT_DIR}/rows/${run_id}.rds"
+  result_csv="${OUT_DIR}/rows/${run_id}.csv"
   pid_file="${OUT_DIR}/logs/${run_id}.pid"
   done_file="${OUT_DIR}/logs/${run_id}.measurement_done"
   sample_file="${OUT_DIR}/logs/${run_id}.samples.csv"
   stdout_file="${OUT_DIR}/logs/${run_id}.out"
   time_file="${OUT_DIR}/logs/${run_id}.time"
+  if [ "${RESUME}" = "true" ] && [ -s "${result_csv}" ]; then
+    printf '[%s] %d/%d %s [existing]\n' \
+      "$(date '+%F %T')" "${index}" "${total}" "${run_id}"
+    continue
+  fi
   rm -f "${pid_file}" "${done_file}" "${result}"
   printf '[%s] %d/%d %s\n' "$(date '+%F %T')" "${index}" "${total}" "${run_id}"
 
@@ -143,10 +150,10 @@ Rscript "${REPO_ROOT}/benchmark/controlled_scaling/summarize.R" "${OUT_DIR}"
   echo "replicates=${REPS}"
   echo "cpu_profile=${CPU_PROFILE}"
   echo "requested_blas_threads=${CPU_THREADS}"
+  echo "resume=${RESUME}"
   echo "archive=${ARCHIVE}"
   echo "expected_package_version=${EXPECTED_VERSION}"
   echo "loaded_package_version=${ACTUAL_VERSION}"
-  shasum -a 256 "${ARCHIVE}" 2>/dev/null || sha256sum "${ARCHIVE}" 2>/dev/null || true
   uname -a
   Rscript -e 'cat(R.version.string, "\n"); print(extSoftVersion())'
   nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null || true

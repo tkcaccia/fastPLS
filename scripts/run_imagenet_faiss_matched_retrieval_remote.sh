@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${IMAGENET_RETRIEVAL_ROOT:-$HOME/fastPLS_imagenet_faiss_matched_1m_20260725}"
-SCRIPT="${IMAGENET_RETRIEVAL_SCRIPT:-$ROOT/benchmark/benchmark_imagenet_faiss_matched_retrieval.R}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ROOT="${IMAGENET_RETRIEVAL_ROOT:-$HOME/fastPLS_results_0.99.39/imagenet_faiss}"
+SCRIPT="${IMAGENET_RETRIEVAL_SCRIPT:-$REPO_ROOT/benchmark/benchmark_imagenet_faiss_matched_retrieval.R}"
 FAISS_ENV="${FAISSR_ENV:-$HOME/.fastEmbedR/micromamba/envs/fastembedr-faissgpu-cuvs}"
 FAISSR_LIB="${FAISSR_LIB:-$HOME/R/faissR_imagenet_lib}"
 R_LIB="${FASTPLS_R_LIB:-$HOME/R/x86_64-pc-linux-gnu-library/4.5}"
@@ -11,7 +13,7 @@ export LD_LIBRARY_PATH="$FAISS_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export LD_PRELOAD="$FAISS_ENV/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
 export R_LIBS_USER="$FAISSR_LIB:$R_LIB"
 export IMAGENET_RETRIEVAL_OUT="$ROOT/results"
-export IMAGENET_RETRIEVAL_LABEL_CPP="$ROOT/benchmark/imagenet_label_crossprod_float32.cpp"
+export IMAGENET_RETRIEVAL_LABEL_CPP="$REPO_ROOT/benchmark/imagenet_label_crossprod_float32.cpp"
 export IMAGENET_RETRIEVAL_TRAIN_N="${IMAGENET_RETRIEVAL_TRAIN_N:-1000000}"
 export IMAGENET_RETRIEVAL_EVAL_N="${IMAGENET_RETRIEVAL_EVAL_N:-281167}"
 export IMAGENET_RETRIEVAL_MAX_NCOMP="${IMAGENET_RETRIEVAL_MAX_NCOMP:-200}"
@@ -52,11 +54,7 @@ run_mode() {
 if [[ ! -f "$ROOT/results/pls_plssvd_n${IMAGENET_RETRIEVAL_TRAIN_N}_k${IMAGENET_RETRIEVAL_MAX_NCOMP}_preparation.csv" ]]; then
   run_mode prepare_pls IMAGENET_RETRIEVAL_MODE=prepare_pls
 fi
-if [[ ! -f "$ROOT/results/pca_rsvd_n${IMAGENET_RETRIEVAL_TRAIN_N}_k${IMAGENET_RETRIEVAL_MAX_NCOMP}_preparation.csv" ]]; then
-  run_mode prepare_pca IMAGENET_RETRIEVAL_MODE=prepare_pca
-fi
-
-for space in raw pls pca; do
+for space in raw pls; do
   components="100"
   [[ "$space" == "raw" ]] || components="50 100 200"
   for ncomp in $components; do

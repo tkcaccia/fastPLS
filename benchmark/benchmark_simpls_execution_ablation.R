@@ -17,6 +17,10 @@ cifar_path <- get_arg("cifar", "/Users/stefano/Documents/GPUPLS/Data/CIFAR100.RD
 reps <- as.integer(get_arg("reps", "3"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
 suppressPackageStartupMessages(library(fastPLS))
 if (!requireNamespace("KODAMA", quietly = TRUE)) stop("KODAMA is required for MetRef.", call. = FALSE)
 
@@ -82,7 +86,12 @@ for (task in tasks) {
                        method = "simpls", backend = "cpu", svd.method = "rsvd",
                        scaling = "centering", fit = FALSE, return_variance = FALSE,
                        seed = 123)
-          prediction <- predict(model, task$Xtest, task$ytest)$Ypred[[1L]]
+          prediction <- predict(
+            model,
+            task$Xtest,
+            task$ytest,
+            backend = "cpu"
+          )$Ypred[[1L]]
         })[["elapsed"]]
         list(model = model, prediction = prediction, elapsed = elapsed)
       })

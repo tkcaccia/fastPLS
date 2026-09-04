@@ -20,13 +20,13 @@
 )
 
 \method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE,
-    ...)
+...)
 
 \method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
 \item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or
-    \code{fastPLSOpls} object.}
+\code{fastPLSOpls} object.}
 
 \item{newdata}{Numeric predictor matrix.}
 
@@ -35,11 +35,11 @@
 
 \item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
-\item{backend}{Prediction backend. \code{auto} uses FlashSVD-style
-low-rank prediction when compact factors are available and the low-rank
-application is expected to be beneficial. When omitted, the session
-\code{options(backend = ...)} value is used. For CPU prediction,
-\code{options(cores = n)} controls the thread request.}
+\item{backend}{Prediction backend: \code{"cpu"}, \code{"cuda"}, or
+\code{"metal"}.
+When omitted, the session backend setting is used. \code{"auto"} retains the
+backend stored in the fitted model. An unavailable CUDA or Metal selection
+raises an error; prediction is never silently moved to CPU.}
 
 \item{flash.block_size}{Row block size for \code{cpu_flash} prediction.}
 
@@ -51,17 +51,20 @@ lower-scoring alternatives returned in \code{Ypred_top} when \code{top > 1}.}
 reporting ImageNet-style top-5 candidate labels.}
 
 \item{raw_scores}{If \code{TRUE}, keep raw classification score cubes as
-\code{Yscore} when available.}
+\code{Yscore} when available. This can require substantial memory. With
+float32 inputs and \code{raw_scores = FALSE}, ranked prediction is evaluated in
+bounded row blocks and only the requested ranks are retained.}
 
 \item{...}{Unused.}
 }
 \value{
 A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
-    \code{Ttest}, and
-optional LDA scores for LDA classification models.
+\code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class
+outputs,
+and optional raw classification scores.
 }
 \description{
-Generates predictions for new samples from fitted PLSSVD, SIMPLS, OPLS, or
+Generates predictions for new samples from fitted PLS-SVD, SIMPLS, OPLS, or
 kernel PLS models. Stored centering, scaling, latent projections, and
 model-specific filtering are applied before producing numeric response
 predictions or classification labels.
@@ -69,8 +72,10 @@ predictions or classification labels.
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
-fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
-            svd.method = "rsvd", return_variance = FALSE)
+fit <- pls(X, y,
+    ncomp = 2, method = "simpls", backend = "cpu",
+    svd.method = "rsvd", return_variance = FALSE
+)
 pred <- predict(fit, X[seq_len(3), , drop = FALSE])
 pred$Ypred
 }

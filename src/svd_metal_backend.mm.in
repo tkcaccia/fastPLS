@@ -348,7 +348,9 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
   @autoreleasepool {
     id<MTLDevice> device = default_device();
     if (device == nil) {
-      throw std::runtime_error("metal_matrix_multiply: no Metal device available");
+      throw std::runtime_error(
+        "metal_matrix_multiply: no Metal device available; no CPU fallback is performed"
+      );
     }
 
     id<MTLCommandQueue> queue = default_command_queue();
@@ -430,7 +432,9 @@ arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
   @autoreleasepool {
     id<MTLDevice> device = default_device();
     if (device == nil) {
-      throw std::runtime_error("metal_matrix_multiply_float: no Metal device available");
+      throw std::runtime_error(
+        "metal_matrix_multiply_float: no Metal device available; no CPU fallback is performed"
+      );
     }
 
     id<MTLCommandQueue> queue = default_command_queue();
@@ -472,7 +476,9 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
   @autoreleasepool {
     id<MTLDevice> device = default_device();
     if (device == nil) {
-      throw std::runtime_error("metal_simpls_resident: no Metal device available");
+      throw std::runtime_error(
+        "metal_simpls_resident: no Metal device available; no CPU fallback is performed"
+      );
     }
     id<MTLCommandQueue> queue = default_command_queue();
     if (queue == nil) {

@@ -30,7 +30,7 @@ out_dir <- get_setting_arg(
   file.path(
     root,
     "benchmark_results",
-    "opls_kernel_setting_reliability_20260726"
+    "opls_kernel_setting_reliability"
   )
 )
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -670,7 +670,8 @@ reliability_plot <- ggplot(
     alpha = 0.75,
     size = 1.8
   ) +
-  facet_wrap(~diagnostic, scales = "free_y", ncol = 2) +
+  facet_wrap(~diagnostic, scales = "free_y", ncol = 1) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
   scale_y_log10() +
   scale_colour_manual(
     values = c(OPLS = "#0072B2", kernelPLS = "#D55E00")
@@ -687,7 +688,7 @@ reliability_plot <- ggplot(
   ) +
   theme_bw(base_size = 10) +
   theme(
-    axis.text.x = element_text(size = 7.5),
+    axis.text.x = element_text(size = 8),
     panel.grid.minor = element_blank(),
     legend.position = "bottom",
     plot.title = element_text(face = "bold")
@@ -696,8 +697,8 @@ reliability_plot <- ggplot(
 ggsave(
   file.path(out_dir, "opls_kernel_setting_reliability.png"),
   reliability_plot,
-  width = 9.2,
-  height = 6.8,
+  width = 8,
+  height = 10.5,
   units = "in",
   dpi = 320,
   bg = "white"
@@ -705,8 +706,8 @@ ggsave(
 ggsave(
   file.path(out_dir, "opls_kernel_setting_reliability.pdf"),
   reliability_plot,
-  width = 9.2,
-  height = 6.8,
+  width = 8,
+  height = 10.5,
   units = "in"
 )
 

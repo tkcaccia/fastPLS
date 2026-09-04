@@ -47,11 +47,11 @@ test_that("fastsvd maps backend and method to the intended internal SVD", {
 
   expect_error(
     fastsvd(A, ncomp = 4, backend = "cuda", method = "irlba"),
-    "only available with backend='cpu'"
+    "only available with backend='cpu'|No CPU fallback"
   )
   expect_error(
     fastsvd(A, ncomp = 4, backend = "metal", method = "irlba"),
-    "only available with backend='cpu'"
+    "only available with backend='cpu'|No CPU fallback"
   )
 })
 

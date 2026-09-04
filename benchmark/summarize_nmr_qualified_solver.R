@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Summarize the qualified NMR solver/backend campaign without copying its full
+# Summarize the current NMR solver/backend campaign without copying its full
 # prediction matrices. Run this on the machine that holds the prediction RDS
 # files, then copy the compact CSV outputs into the manuscript evidence archive.
 
@@ -25,22 +25,30 @@ arg <- function(name, default = NULL) {
 
 input_dir <- normalizePath(arg(
   "input_dir",
-  "/mnt/sata_ssd/fastPLS_cmpb_cycle79_nmr_qualified"
+  "publication_results/0.99.39/current_release/nmr"
 ), mustWork = TRUE)
 output_dir <- arg("output_dir", file.path(input_dir, "summary"))
-historical_prediction <- arg("historical_prediction", "")
+deposited_prediction <- arg("deposited_prediction", "")
+plssvd_ncomp <- as.integer(arg("plssvd_ncomp", "5"))
+simpls_ncomp <- as.integer(arg("simpls_ncomp", "50"))
+analysis_prefix <- arg("analysis_prefix", "selected")
+representative_ncomp <- if (identical(analysis_prefix, "fixed165")) {
+  165L
+} else {
+  simpls_ncomp
+}
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 routes <- data.frame(
   family = rep(c("plssvd", "simpls"), each = 3L),
   backend = rep(c("cpu", "cpu", "cuda"), 2L),
   solver = rep(c("irlba", "rsvd", "rsvd"), 2L),
-  ncomp = rep(c(5L, 50L), each = 3L),
+  ncomp = rep(c(plssvd_ncomp, simpls_ncomp), each = 3L),
   stringsAsFactors = FALSE
 )
 routes$stem <- sprintf(
-  "%s_%s_%s_k%d",
-  routes$family, routes$backend, routes$solver, routes$ncomp
+  "%s_%s_%s_%s_k%d",
+  analysis_prefix, routes$family, routes$backend, routes$solver, routes$ncomp
 )
 routes$label <- c(
   "PLS-SVD CPU IRLBA", "PLS-SVD CPU rSVD", "PLS-SVD CUDA rSVD",
@@ -55,7 +63,7 @@ required <- unlist(lapply(routes$stem, function(stem) {
 }))
 missing <- required[!file.exists(required)]
 if (length(missing)) {
-  stop("Missing qualified NMR files: ", paste(missing, collapse = ", "),
+  stop("Missing current NMR files: ", paste(missing, collapse = ", "),
        call. = FALSE)
 }
 
@@ -85,10 +93,16 @@ for (i in seq_len(nrow(routes))) {
   )
 }
 resource <- do.call(rbind, resource_rows)
-write.csv(resource, file.path(output_dir, "nmr_qualified_raw.csv"),
+write.csv(resource, file.path(output_dir, "nmr_current_raw.csv"),
           row.names = FALSE, na = "")
 
 median_summary <- do.call(rbind, lapply(split(resource, resource$label), function(x) {
+  first_value <- function(name, default = NA) {
+    if (!name %in% names(x)) return(default)
+    value <- x[[name]]
+    value <- value[!is.na(value)]
+    if (length(value)) value[[1L]] else default
+  }
   data.frame(
     label = x$label[[1L]],
     family = x$family[[1L]],
@@ -96,8 +110,20 @@ median_summary <- do.call(rbind, lapply(split(resource, resource$label), functio
     solver = x$solver[[1L]],
     precision = x$precision[[1L]],
     ncomp = x$ncomp[[1L]],
+    protocol_version = first_value("protocol_version", NA_character_),
+    canonical_input_verified =
+      first_value("canonical_input_verified", FALSE),
+    water_columns_masked = first_value("water_columns_masked", NA_integer_),
+    response_columns_scored =
+      first_value("response_columns_scored", NA_integer_),
+    control_profile = first_value("control_profile", NA_character_),
     oversample = x$oversample[[1L]],
     power = x$power[[1L]],
+    direction_rule = first_value("direction_rule", NA_character_),
+    directions_per_solve =
+      first_value("directions_per_solve", NA_integer_),
+    refresh_width = first_value("refresh_width", NA_integer_),
+    refresh_iterations = first_value("refresh_iterations", NA_integer_),
     seed = x$seed[[1L]],
     replicates = nrow(x),
     total_time_sec_median = median(x$total_time_sec),
@@ -119,7 +145,7 @@ median_summary <- do.call(rbind, lapply(split(resource, resource$label), functio
   )
 }))
 write.csv(median_summary,
-          file.path(output_dir, "nmr_qualified_summary.csv"),
+          file.path(output_dir, "nmr_current_summary.csv"),
           row.names = FALSE, na = "")
 
 agreement_rows <- list()
@@ -156,8 +182,24 @@ for (family in c("plssvd", "simpls")) {
   gc(full = TRUE)
 }
 agreement <- do.call(rbind, agreement_rows)
-write.csv(agreement, file.path(output_dir, "nmr_qualified_agreement.csv"),
+write.csv(agreement, file.path(output_dir, "nmr_current_agreement.csv"),
           row.names = FALSE, na = "")
+
+if (nzchar(deposited_prediction) && file.exists(deposited_prediction)) {
+  deposited_object <- readRDS(deposited_prediction)
+  deposited_matrix <- if (is.list(deposited_object)) {
+    deposited_object$predicted
+  } else {
+    deposited_object
+  }
+  reference_dimensions <- dim(prediction_objects[[1L]]$observed)
+  if (identical(dim(deposited_matrix), reference_dimensions)) {
+    prediction_objects[["Deposited PLS-SVD/IRLBA (165 components)"]] <- list(
+      observed = prediction_objects[[1L]]$observed,
+      predicted = deposited_matrix
+    )
+  }
+}
 
 error_rows <- list()
 response_rows <- list()
@@ -183,9 +225,9 @@ for (label in names(prediction_objects)) {
 }
 per_sample <- do.call(rbind, error_rows)
 per_response <- do.call(rbind, response_rows)
-write.csv(per_sample, file.path(output_dir, "nmr_qualified_per_sample.csv"),
+write.csv(per_sample, file.path(output_dir, "nmr_current_per_sample.csv"),
           row.names = FALSE)
-write.csv(per_response, file.path(output_dir, "nmr_qualified_per_response.csv"),
+write.csv(per_response, file.path(output_dir, "nmr_current_per_response.csv"),
           row.names = FALSE)
 
 selection_label <- "SIMPLS CUDA rSVD"
@@ -218,30 +260,13 @@ for (label in names(prediction_objects)) {
   )
 }
 
-if (nzchar(historical_prediction) && file.exists(historical_prediction)) {
-  historical <- readRDS(historical_prediction)
-  if (identical(dim(historical), dim(observed)) &&
-      identical(rownames(historical), rownames(observed))) {
-    curve <- rbind(
-      curve,
-      data.frame(
-        ppm = ppm,
-        sample_index = representative_index,
-        sample_id = curve$sample_id[[1L]],
-        series = "Deposited PLS-SVD/IRLBA (165 components)",
-        intensity = historical[representative_index, ],
-        stringsAsFactors = FALSE
-      )
-    )
-  }
-}
 write.csv(curve, file.path(output_dir, "nmr_representative_spectrum.csv"),
           row.names = FALSE)
 write.csv(
   data.frame(
     selection_rule = paste(
       "Spectrum nearest the median held-out RMSD for",
-      selection_label, "at 50 components"
+      selection_label, "at", representative_ncomp, "components"
     ),
     sample_index = representative_index,
     sample_id = curve$sample_id[[1L]],
@@ -259,10 +284,28 @@ writeLines(
     paste0("input_dir=", input_dir),
     paste0("generated=", format(Sys.time(), tz = "UTC", usetz = TRUE)),
     "comparison_scope=family, component count, split, preprocessing, precision, and prediction target held fixed",
-    "rsvd_controls=oversample 20; power iterations 2; seed 123",
-    "representative_spectrum=nearest median held-out RMSD for SIMPLS CUDA rSVD at 50 components"
+    paste0(
+      "rsvd_controls=",
+      paste(unique(with(
+        subset(median_summary, solver == "rsvd"),
+        sprintf(
+          paste0(
+            "%s/%s: profile=%s, oversample=%s, power=%s, seed=%s, ",
+            "direction=%s, directions_per_solve=%s, refresh_width=%s, ",
+            "refresh_iterations=%s"
+          ),
+          family, backend, control_profile, oversample, power, seed,
+          direction_rule, directions_per_solve, refresh_width,
+          refresh_iterations
+        )
+      )), collapse = "; ")
+    ),
+    paste0(
+      "representative_spectrum=nearest median held-out RMSD for SIMPLS CUDA ",
+      "rSVD at ", representative_ncomp, " components"
+    )
   ),
-  file.path(output_dir, "nmr_qualified_manifest.txt")
+  file.path(output_dir, "nmr_current_manifest.txt")
 )
 
 cat(normalizePath(output_dir, winslash = "/", mustWork = TRUE), "\n")

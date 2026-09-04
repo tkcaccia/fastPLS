@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
-# Reproduce the current fastPLS CUDA SIMPLS-LDA route on the stored
-# ImageNet/DINOv2 development split. Each invocation fits one component count
-# so top-5 scores never require a component-path score cube.
+# Reproduce the current fastPLS CUDA SIMPLS classification routes on the stored
+# ImageNet/DINOv2 development split. One maximal component path supplies all
+# requested prefixes for one classification head.
 
 options(stringsAsFactors = FALSE, fastPLS.fused_cuda_lda = TRUE)
 
@@ -41,9 +41,13 @@ as_double_matrix <- function(x) {
   }
   as.matrix(x)
 }
-component_value <- function(x) {
-  if (is.list(x) && !is.data.frame(x)) return(x[[1L]])
-  if (is.data.frame(x)) return(x[[1L]])
+component_value <- function(x, ncomp, index) {
+  key <- paste0("ncomp=", ncomp)
+  if (is.list(x) && !is.data.frame(x)) {
+    if (!is.null(names(x)) && key %in% names(x)) return(x[[key]])
+    return(x[[index]])
+  }
+  if (is.data.frame(x)) return(x[[key]])
   dims <- dim(x)
   if (length(dims) == 3L) return(x[, , 1L, drop = TRUE])
   if (length(dims) == 2L && ncol(x) == 1L) return(x[, 1L])
@@ -87,7 +91,6 @@ loaded_package_path <- normalizePath(
   mustWork = TRUE
 )
 loaded_package_version <- as.character(utils::packageVersion("fastPLS"))
-source_archive_sha256 <- env("SOURCE_ARCHIVE_SHA256", "")
 
 task_file <- path.expand(env(
   "TASK_RDS",
@@ -97,15 +100,27 @@ output_csv <- path.expand(env(
   "OUTPUT_CSV",
   "imagenet_current_fused_lda.csv"
 ))
-ncomp <- as.integer(env("NCOMP", "100"))
-oversample <- as.integer(env("OVERSAMPLE", "20"))
-power <- as.integer(env("POWER", "2"))
+ncomp_grid <- as.integer(strsplit(env(
+  "NCOMP_GRID", "100,200,300,400,500,600,700,800,900,1000"
+), ",", fixed = TRUE)[[1L]])
+ncomp_grid <- sort(unique(ncomp_grid[is.finite(ncomp_grid) & ncomp_grid > 0L]))
+if (!length(ncomp_grid)) stop("NCOMP_GRID must contain positive integers")
+classifier <- match.arg(env("CLASSIFIER", "lda"), c("argmax", "lda"))
+oversample_arg <- env("OVERSAMPLE", "auto")
+power_arg <- env("POWER", "auto")
+automatic_controls <- identical(oversample_arg, "auto") &&
+  identical(power_arg, "auto")
+if (xor(identical(oversample_arg, "auto"), identical(power_arg, "auto"))) {
+  stop("OVERSAMPLE and POWER must both be 'auto' or both be numeric")
+}
+oversample <- if (automatic_controls) NA_integer_ else as.integer(oversample_arg)
+power <- if (automatic_controls) NA_integer_ else as.integer(power_arg)
 seed <- as.integer(env("SEED", "123"))
 replicate_id <- as.integer(env("REPLICATE", "1"))
 precision <- match.arg(env("PRECISION", "float32"), c("float32", "float64"))
 
 dir.create(dirname(output_csv), recursive = TRUE, showWarnings = FALSE)
-row <- data.frame(
+row_template <- data.frame(
   dataset = "imagenet",
   train_n = NA_integer_,
   test_n = NA_integer_,
@@ -114,14 +129,18 @@ row <- data.frame(
   method = "simpls",
   solver = "rsvd",
   backend = "cuda",
-  classifier = "lda",
+  classifier = classifier,
   precision = precision,
-  ncomp_requested = ncomp,
+  ncomp_requested = ncomp_grid[[1L]],
   ncomp_effective = NA_integer_,
   oversample = oversample,
   power = power,
+  control_profile = if (automatic_controls) "automatic" else "explicit",
+  effective_oversample = NA_integer_,
+  effective_power = NA_integer_,
   seed = seed,
   replicate = replicate_id,
+  fit_time_sec = NA_real_,
   fit_predict_time_sec = NA_real_,
   top5_prediction_time_sec = NA_real_,
   total_time_sec = NA_real_,
@@ -154,18 +173,19 @@ row <- data.frame(
   } else {
     "cuda_fused_lda"
   },
-  audit_status = if (oversample >= 20L) {
-    "qualified_approximate_controls"
-  } else {
-    "workflow_only_controls"
-  },
+  audit_status = "approximate_workflow_result",
   loaded_package_path = loaded_package_path,
   loaded_package_version = loaded_package_version,
-  source_archive_sha256 = source_archive_sha256,
   status = "started",
   error = "",
   stringsAsFactors = FALSE
 )
+
+rows <- lapply(ncomp_grid, function(k) {
+  out <- row_template
+  out$ncomp_requested <- k
+  out
+})
 
 tryCatch({
   if (!file.exists(task_file)) stop("Task metadata not found: ", task_file)
@@ -175,10 +195,12 @@ tryCatch({
   if (!all(required %in% names(task))) {
     stop("Task metadata must contain: ", paste(required, collapse = ", "))
   }
-  row$train_n <- task$n_train
-  row$test_n <- task$n_test
-  row$p <- task$p
-  row$q <- task$n_classes
+  for (i in seq_along(rows)) {
+    rows[[i]]$train_n <- task$n_train
+    rows[[i]]$test_n <- task$n_test
+    rows[[i]]$p <- task$p
+    rows[[i]]$q <- task$n_classes
+  }
 
   stamp("Loading training matrix in ", precision)
   Xtrain_stored <- readRDS(task$Xtrain_rds)
@@ -208,41 +230,72 @@ tryCatch({
   rm(Xtest_stored)
   gc(FALSE)
 
-  row$rss_before_fit_mb <- rss_mb()
-  row$gpu_before_fit_mb <- gpu_used_mb()
+  rss_before_fit <- rss_mb()
+  gpu_before_fit <- gpu_used_mb()
   set.seed(seed)
   stamp(
-    "Fitting current CUDA SIMPLS-LDA: ncomp=", ncomp,
-    " oversample=", oversample, " power=", power
+    "Fitting current CUDA SIMPLS-", toupper(classifier),
+    ": ncomp=", paste(ncomp_grid, collapse = ","),
+    " controls=", if (automatic_controls) {
+      "public automatic"
+    } else {
+      paste0("oversample ", oversample, ", power ", power)
+    }
   )
+  fit_arguments <- list(
+    Xtrain = Xtrain,
+    Ytrain = task$Ytrain,
+    ncomp = ncomp_grid,
+    method = "simpls",
+    svd.method = "rsvd",
+    backend = "cuda",
+    classifier = classifier,
+    scaling = "centering",
+    fit = FALSE,
+    return_variance = FALSE,
+    seed = seed
+  )
+  if (!automatic_controls) {
+    fit_arguments$oversample <- oversample
+    fit_arguments$power <- power
+  }
   fit_time <- unname(system.time({
-    fit <- pls(
-      Xtrain, task$Ytrain, Xtest, task$Ytest,
-      ncomp = ncomp,
-      method = "simpls",
-      svd.method = "rsvd",
-      backend = "cuda",
-      classifier = "lda",
-      scaling = "centering",
-      fit = FALSE,
-      return_variance = FALSE,
-      oversample = oversample,
-      power = power,
-      seed = seed
-    )
+    fit <- do.call(pls, fit_arguments)
   })[["elapsed"]])
-  row$rss_after_fit_mb <- rss_mb()
-  row$gpu_after_fit_mb <- gpu_used_mb()
+  rss_after_fit <- rss_mb()
+  gpu_after_fit <- gpu_used_mb()
 
   internal <- attr(fit, "fastPLS_internal", exact = TRUE)
-  row$executed_estimator <- as.character(internal$pls_method)[1L]
-  row$prediction_backend <- as.character(internal$predict_backend)[1L]
-  row$classifier_train_backend <- as.character(fit$lda$train_backend)[1L]
-  row$model_gpu_resident <- isTRUE(internal$gpu_resident)
-  if (!identical(row$executed_estimator, "simpls")) {
+  rsvd_diagnostics <- fit$diagnostics$rsvd
+  control_profile <- if (!is.null(rsvd_diagnostics$control_profile)) {
+    as.character(rsvd_diagnostics$control_profile)[1L]
+  } else if (automatic_controls) {
+    "automatic"
+  } else {
+    "explicit"
+  }
+  effective_oversample <- if (!is.null(rsvd_diagnostics$oversample)) {
+    as.integer(rsvd_diagnostics$oversample)[1L]
+  } else {
+    oversample
+  }
+  effective_power <- if (!is.null(rsvd_diagnostics$power)) {
+    as.integer(rsvd_diagnostics$power)[1L]
+  } else {
+    power
+  }
+  executed_estimator <- as.character(internal$pls_method)[1L]
+  prediction_backend <- as.character(internal$predict_backend)[1L]
+  classifier_train_backend <- if (classifier == "lda") {
+    as.character(fit$lda$train_backend)[1L]
+  } else {
+    NA_character_
+  }
+  model_gpu_resident <- isTRUE(internal$gpu_resident)
+  if (!identical(executed_estimator, "simpls")) {
     stop(
       "Requested SIMPLS but executed estimator was ",
-      row$executed_estimator
+      executed_estimator
     )
   }
   expected_prediction_backend <- if (precision == "float32") {
@@ -250,38 +303,89 @@ tryCatch({
   } else {
     "cuda_fused_lda"
   }
-  if (!identical(row$prediction_backend, expected_prediction_backend)) {
+  if (!identical(prediction_backend, expected_prediction_backend)) {
     stop(
       "Expected ", expected_prediction_backend,
       " prediction backend but observed ",
-      row$prediction_backend
+      prediction_backend
     )
   }
 
-  stamp("Computing top-5 LDA predictions")
-  top5_time <- unname(system.time({
-    pred <- predict(fit, Xtest, top = 5L, top5 = TRUE)
-  })[["elapsed"]])
-  row$rss_after_top5_mb <- rss_mb()
-  row$gpu_after_top5_mb <- gpu_used_mb()
+  # The fitted classifier no longer needs the million-row training matrix or
+  # training scores for held-out prediction. Releasing both keeps the measured
+  # prediction stage within the same bounded-memory contract as the package.
+  rm(Xtrain)
+  fit$Ttrain <- NULL
+  fit$Yfit <- NULL
+  fit$Ypred <- NULL
+  fit$metrics <- NULL
+  fit$accuracy <- NULL
+  gc(FALSE)
+  saveRDS(
+    list(
+      package_version = loaded_package_version,
+      classifier = classifier,
+      precision = precision,
+      ncomp = ncomp_grid,
+      seed = seed,
+      fit_time_sec = fit_time,
+      fit = fit
+    ),
+    paste0(output_csv, ".fit.rds"),
+    compress = FALSE
+  )
 
-  predicted <- component_value(pred$Ypred)
-  top_labels <- component_value(pred$Ypred_top)
-  metrics <- classification_metrics(task$Ytest, predicted, top_labels)
-  row$ncomp_effective <- as.integer(internal$ncomp)[1L]
-  row$fit_predict_time_sec <- fit_time
-  row$top5_prediction_time_sec <- top5_time
-  row$total_time_sec <- fit_time + top5_time
-  row$top1_accuracy <- metrics[["top1_accuracy"]]
-  row$top5_accuracy <- metrics[["top5_accuracy"]]
-  row$balanced_accuracy <- metrics[["balanced_accuracy"]]
-  row$macro_f1 <- metrics[["macro_f1"]]
-  row$status <- "success"
+  stamp("Computing top-5 ", toupper(classifier), " predictions")
+  top5_time <- unname(system.time({
+    pred <- predict(
+      fit,
+      Xtest,
+      top = 5L,
+      top5 = TRUE,
+      backend = "cuda"
+    )
+  })[["elapsed"]])
+  rss_after_top5 <- rss_mb()
+  gpu_after_top5 <- gpu_used_mb()
+
+  effective <- as.integer(internal$ncomp)
+  for (i in seq_along(ncomp_grid)) {
+    k <- ncomp_grid[[i]]
+    predicted <- component_value(pred$Ypred, k, i)
+    top_labels <- component_value(pred$Ypred_top, k, i)
+    metrics <- classification_metrics(task$Ytest, predicted, top_labels)
+    rows[[i]]$ncomp_effective <- if (length(effective) >= i) effective[[i]] else k
+    rows[[i]]$control_profile <- control_profile
+    rows[[i]]$effective_oversample <- effective_oversample
+    rows[[i]]$effective_power <- effective_power
+    rows[[i]]$fit_time_sec <- fit_time
+    rows[[i]]$fit_predict_time_sec <- fit_time
+    rows[[i]]$top5_prediction_time_sec <- top5_time
+    rows[[i]]$total_time_sec <- fit_time + top5_time
+    rows[[i]]$top1_accuracy <- metrics[["top1_accuracy"]]
+    rows[[i]]$top5_accuracy <- metrics[["top5_accuracy"]]
+    rows[[i]]$balanced_accuracy <- metrics[["balanced_accuracy"]]
+    rows[[i]]$macro_f1 <- metrics[["macro_f1"]]
+    rows[[i]]$rss_after_fit_mb <- rss_after_fit
+    rows[[i]]$gpu_after_fit_mb <- gpu_after_fit
+    rows[[i]]$rss_before_fit_mb <- rss_before_fit
+    rows[[i]]$gpu_before_fit_mb <- gpu_before_fit
+    rows[[i]]$rss_after_top5_mb <- rss_after_top5
+    rows[[i]]$gpu_after_top5_mb <- gpu_after_top5
+    rows[[i]]$executed_estimator <- executed_estimator
+    rows[[i]]$prediction_backend <- prediction_backend
+    rows[[i]]$classifier_train_backend <- classifier_train_backend
+    rows[[i]]$model_gpu_resident <- model_gpu_resident
+    rows[[i]]$status <- "success"
+  }
 }, error = function(e) {
-  row$status <<- "failed"
-  row$error <<- conditionMessage(e)
+  for (i in seq_along(rows)) {
+    rows[[i]]$status <<- "failed"
+    rows[[i]]$error <<- conditionMessage(e)
+  }
 })
 
-write.csv(row, output_csv, row.names = FALSE, na = "")
-print(row)
-if (!identical(row$status, "success")) quit(save = "no", status = 1L)
+result <- do.call(rbind, rows)
+write.csv(result, output_csv, row.names = FALSE, na = "")
+print(result)
+if (!all(result$status == "success")) quit(save = "no", status = 1L)

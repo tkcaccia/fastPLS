@@ -8,7 +8,7 @@ test_that("independent-test Q2 uses the training-response mean", {
   result <- evaluate(observed, predicted, ytrain = training)
 
   expect_equal(result$metrics$Q2, expected)
-  expect_match(result$metric_definitions$Q2, "mean of ytrain")
+  expect_match(result$metric_definitions$Q2, "training-response mean")
   expect_false(isTRUE(all.equal(result$metrics$Q2, result$metrics$R2)))
 })
 

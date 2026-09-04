@@ -4,6 +4,11 @@
 # The reference code below does not call fastPLS filtering or kernel helpers.
 # Predictive PLS fits use pls::simpls.fit (de Jong SIMPLS).
 
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
+
 suppressPackageStartupMessages({
   library(fastPLS)
   library(pls)

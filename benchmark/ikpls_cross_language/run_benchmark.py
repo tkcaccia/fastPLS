@@ -71,7 +71,7 @@ def run_monitored(command: list[str], row_path: pathlib.Path, log_path: pathlib.
 
 
 subprocess.run(["Rscript", str(pathlib.Path(__file__).with_name("export_inputs.R")), str(INPUTS)], cwd=ROOT, check=True)
-python = "/private/tmp/fastpls_ikpls_venv/bin/python"
+python = os.environ.get("IKPLS_PYTHON", sys.executable)
 implementations = (
     ("fastPLS_irlba", ["Rscript", str(pathlib.Path(__file__).with_name("worker_fastpls.R")), None, "irlba"]),
     ("fastPLS_rsvd", ["Rscript", str(pathlib.Path(__file__).with_name("worker_fastpls.R")), None, "rsvd"]),

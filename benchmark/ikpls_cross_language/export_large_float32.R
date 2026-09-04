@@ -9,6 +9,10 @@ dataset <- args[[1L]]
 input <- normalizePath(args[[2L]], mustWork = TRUE)
 out <- args[[3L]]
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- normalizePath(
+  sub("^--file=", "", script_arg[[1L]]), mustWork = TRUE
+)
 
 write_f32 <- function(x, path) {
   con <- file(path, "wb")
@@ -35,18 +39,12 @@ write_float_bits <- function(x, path) {
 }
 
 if (dataset == "nmr") {
-  e <- new.env(parent = emptyenv())
-  load(input, envir = e)
-  needed <- c("Xtrain", "Ytrain", "Xtest", "Ytest")
-  if (!all(needed %in% ls(e))) stop("NMR archive is missing required matrices")
-  Xtrain <- e$Xtrain
-  Xtest <- e$Xtest
-  Ytrain <- e$Ytrain
-  Ytest <- e$Ytest
-  ppm <- suppressWarnings(as.numeric(colnames(Xtrain)))
-  water <- is.finite(ppm) & ppm > 4.6 & ppm < 4.8
-  Xtrain[, water] <- 0
-  Xtest[, water] <- 0
+  source(file.path(dirname(dirname(script_path)), "nmr_protocol_helpers.R"))
+  protocol <- fastpls_nmr_protocol(input)
+  Xtrain <- protocol$Xtrain
+  Xtest <- protocol$Xtest
+  Ytrain <- protocol$Ytrain
+  Ytest <- protocol$Ytest
   xmean <- colMeans(Xtrain)
   ymean <- colMeans(Ytrain)
   write_f32(sweep(Xtrain, 2L, xmean, "-"), file.path(out, "Xtrain_centered.f32"))
@@ -56,7 +54,10 @@ if (dataset == "nmr") {
   write_f32(ymean, file.path(out, "Ymean.f32"))
   meta <- data.frame(
     key = c("dataset", "n_train", "n_test", "p", "q", "precision", "water_predictors_zeroed"),
-    value = c("nmr", nrow(Xtrain), nrow(Xtest), ncol(Xtrain), ncol(Ytrain), "float32", sum(water))
+    value = c(
+      "nmr", nrow(Xtrain), nrow(Xtest), ncol(Xtrain), ncol(Ytrain),
+      "float32", protocol$metadata$water_columns_masked
+    )
   )
 } else if (dataset == "imagenet") {
   if (!requireNamespace("float", quietly = TRUE)) stop("float is required")

@@ -1,0 +1,12 @@
+"dataset","method","classifier","selected_ncomp","count","frequency"
+"gtex_v8","kernelpls","argmax",100,10,1
+"gtex_v8","opls","argmax",100,10,1
+"gtex_v8","plssvd","argmax",31,10,1
+"gtex_v8","simpls","argmax",100,10,1
+"gtex_v8","kernelpls","lda",75,3,0.3
+"gtex_v8","kernelpls","lda",100,7,0.7
+"gtex_v8","opls","lda",75,3,0.3
+"gtex_v8","opls","lda",100,7,0.7
+"gtex_v8","plssvd","lda",31,10,1
+"gtex_v8","simpls","lda",75,3,0.3
+"gtex_v8","simpls","lda",100,7,0.7

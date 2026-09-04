@@ -5,7 +5,7 @@ models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
 through `pls()`, `pls.single.cv()`, `pls.double.cv()`, and
 `fastsvd()` instead of through low-level implementation wrappers.
-The current standard pipeline compares four model families:
+The current benchmark suite compares four model families:
 
 - `plssvd`
 - `simpls`
@@ -24,6 +24,19 @@ The explicit package exports are `pls()`, `pls.single.cv()`, `pls.double.cv()`,
 `lda`. The deprecated `lda_ridge` compatibility argument is ignored and warns
 when supplied because LDA uses a fixed scale-normalized Cholesky fallback.
 
+## Installation
+
+Install the released package from Bioconductor:
+
+```r
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("fastPLS")
+```
+
+The GitHub repository contains the development source and the optional
+CUDA/Metal build instructions below.
+
 ## Bundled data
 
 The package includes two small, fixed example datasets that can be loaded with
@@ -39,15 +52,14 @@ for bundled examples are provided in the dataset help pages and in
 - `plssvd`: computes the dominant subspace of the cross-covariance
   `S = X^T Y` and reuses it for the requested component path.
 - `simpls`: accelerated sequential SIMPLS. The default rSVD route is an
-  explicitly approximate high-speed profile: CPU refreshes are warm-started
-  from the preceding accepted direction, CUDA refreshes reuse resident device
-  workspaces, and large dummy-coded classification paths refresh up to eight
-  candidates together to amortize GPU launches. Regression and smaller
-  classification tasks remain rank-one. Task-aware power iterations avoid
-  unnecessary work. Compact
+  explicitly approximate high-speed profile: ordinary CPU and Metal routes
+  generate a new oversampled sketch for each component, while CUDA can generate up to eight
+  fresh candidates together for large dummy-coded classification paths to
+  amortize GPU launches. Each candidate is accepted only after the sequential
+  SIMPLS orthogonalization and deflation update. Compact
   prediction, cached deflation products, incremental coefficient updates, and
   automatic matrix-free `xprod` further reduce computation and storage.
-  `svd.method = "irlba"` retains a closer component-wise reference route.
+  `svd.method = "irlba"` retains a fixed-control component-wise comparator.
 - `opls`: supervised orthogonal filtering followed by the selected PLS core.
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
@@ -67,15 +79,15 @@ cube does not need to be stored.
 For PLS-DA with LDA classification, the recommended high-accuracy/high-speed
 configuration is `method = "plssvd", backend = "cuda", classifier = "lda"`.
 This uses the optimized standard CUDA path for latent projection, LDA training,
-and discriminant scoring. If CUDA is unavailable, use
-`method = "plssvd", backend = "cpu", classifier = "lda"` as the compiled CPU
-fallback. An experimental fused CUDA PLS+LDA path is available with
+and discriminant scoring. On systems without CUDA, users can explicitly select
+`method = "plssvd", backend = "cpu", classifier = "lda"` for compiled CPU
+execution. An experimental fused CUDA PLS+LDA path is available with
 `FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
 rather than the default.
 
 For large classification problems, such as ImageNet-scale DINOv2 feature
 matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
-label-aware PLSSVD route when the dense one-hot response would exceed the memory
+  label-aware PLS-SVD route when the dense one-hot response would exceed the memory
 threshold. This route streams class-wise cross-products from the label vector,
 never materializes the dense `n x classes` response matrix, stores only compact
 low-rank prediction factors. The default threshold is controlled by
@@ -100,33 +112,32 @@ residuals and an omitted-direction audit. The solver strengthens the sketch
 automatically when needed. A weak spectral boundary must either agree with an
 independent strengthened sketch or recover with IRLBA; consensus and recovery
 are recorded in `diagnostics`, not hidden.
-CUDA, Metal, or float32 routes without an equivalent case certificate warn and
-are marked unverified. For confirmatory coefficient or subspace interpretation,
-use `svd.method = "irlba"` on the CPU. The validation suite classifies an rSVD fit
-as unreliable relative to a deterministic reference if prediction relative
-error exceeds 0.05, prediction correlation is below 0.99, a latent-subspace
-angle exceeds 10 degrees, classification-label agreement is below 0.99, or
-the predictive metric differs by more than 0.01.
-Direct PLS-SVD and `fastsvd()` start from the audited controls described above;
-CUDA PLS-SVD retains its wider safety floor. Accelerated SIMPLS-family rSVD is
-an explicitly approximate profile instead: it uses oversampling 10 and chooses
-two power iterations for classification or one for numeric regression. This
-profile prioritizes end-to-end speed and is not labelled estimator-equivalent
-to deterministic de Jong SIMPLS.
-The wider CUDA PLS-SVD floor met all 174
-runs in the three-seed controlled shape sweep, whereas 20/2 did not.
-With the CPU case audit and recovery enabled, the corresponding CPU sweep also
-met tolerance in all 174 runs. Across the 276 automatic CPU/CUDA routes that
-replace the former 73-failure panel, all 276 met the prespecified tolerances.
-The previous oversampling-10 setting was rejected after failing five of 255
-screening checks.
-These panel results are historical evidence rather than a universal guarantee.
-Metal remains explicitly unverified
-until a dedicated audit is completed. Explicit nonqualified overrides emit a
-warning and are recorded in model diagnostics; no hidden dataset-specific
-solver tuning is applied.
-Very small SVD inputs automatically fall back to a full dense decomposition
-inside the compiled backends when the truncated route is not meaningful, but
+CUDA, Metal, and float32 routes record their exact controls and structural
+diagnostics. The controlled validation uses matrix-shape-specific automatic
+controls and reports numerical agreement separately from successful execution.
+For confirmatory coefficient or subspace interpretation, use
+`svd.method = "irlba"` on the CPU.
+The validation suite places an rSVD fit
+outside the numerical screen relative to a matched CPU IRLBA fit if prediction
+or score relative error exceeds 0.01, the corresponding correlation is below
+0.995, a latent-subspace angle exceeds 0.1 degrees, classification-label
+agreement is below 0.995, or the predictive metric differs by more than 0.005.
+PLS-SVD and standalone `fastsvd()` use 32 oversampling directions and five
+power iterations by default. Accelerated SIMPLS, OPLS, and kernel-PLS use
+32/5 for ordinary shapes. Numeric responses with at least 64 columns and a
+response-to-sample ratio of at least 0.2 use 48/6. Classification with at least
+32 classes and no more than 20 samples per class uses 64/7. When the explicit
+predictor-response cross-covariance would exceed 512 MiB, the massive-matrix
+profile records `oversample = 12` and `power = 2`; execution advances with one
+new rank-one randomized direction per component.
+CPU, Metal, and ordinary CUDA SIMPLS-family routes use seeded sketches of the
+current deflated operator. For a massive cross-covariance, CPU, CUDA, and Metal
+use a fresh rank-one randomized direction for every component; the CUDA state
+remains device resident. Large dummy-coded
+classification can instead refresh a small candidate block. Effective
+controls are recorded in model diagnostics.
+Very small SVD inputs automatically use a full dense decomposition inside the
+selected compiled backend when the truncated route is not meaningful, but
 `exact` is no longer exposed as a user-selectable PLS benchmark option.
 
 CUDA backend:
@@ -136,7 +147,8 @@ CUDA backend:
 
 On Linux and Windows, CUDA support is optional. If the CUDA Toolkit is not
 available, the package builds CPU-only and CUDA requests give a clear runtime
-error. This CPU-only fallback is also used if an old environment has
+error without running the requested operation on CPU. A CPU-only build is also
+produced if an old environment has
 `FASTPLS_USE_CUDA = "1"` but the toolkit is missing. To force a CPU-only build
 on any machine:
 
@@ -177,6 +189,11 @@ remotes::install_github("tkcaccia/fastPLS", force = TRUE, upgrade = "never")
 After installation, `has_cuda()` reports whether the package was compiled with
 CUDA support and can see a CUDA device at runtime.
 
+Selecting or configuring `backend = "cuda"` without an available CUDA
+build/device raises an error. fastPLS never silently changes a CUDA or Metal
+request to CPU; `fastPLS_backend()` also rejects an unavailable configured
+accelerator.
+
 On macOS, the Metal backend is compiled automatically when the macOS SDK or
 system Metal frameworks are available. The CUDA message "building without
 CUDA" does not mean that Metal was disabled. A successful configuration prints
@@ -187,6 +204,9 @@ runtime device access with:
 library(fastPLS)
 has_metal()
 ```
+
+Likewise, selecting `backend = "metal"` when Metal support is unavailable raises
+an error; choose `backend = "cpu"` explicitly when CPU execution is intended.
 
 To require Metal explicitly during a GitHub installation, use:
 

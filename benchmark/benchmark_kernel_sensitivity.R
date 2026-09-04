@@ -288,7 +288,8 @@ if (identical(mode, "run_one") || identical(mode, "write_failure")) {
       pred <- predict(
         fit,
         task$Xtest,
-        top5 = identical(task$task_type, "classification")
+        top5 = identical(task$task_type, "classification"),
+        backend = backend
       )
     })[["elapsed"]]
     rss_predict <- current_process_rss_mb()

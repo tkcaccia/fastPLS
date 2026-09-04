@@ -1,9 +1,14 @@
 #!/usr/bin/env Rscript
 
-# Repeats the selected-point CUDA dataset panel on Apple CPU and Metal. The
-# benchmark uses fixed task objects, paired seeds, and identical output policy.
+# Runs the selected-component dataset panel on paired CPU/accelerator routes.
+# The benchmark uses fixed task objects, paired seeds, and identical output
+# policy; the accelerator is Metal by default and can be set to CUDA remotely.
 
 args <- commandArgs(trailingOnly = TRUE)
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
 script_arg <- commandArgs()[grep("^--file=", commandArgs())]
 script_path <- normalizePath(sub("^--file=", "", script_arg[[1L]]))
 repo_dir <- normalizePath(file.path(dirname(script_path), "..", ".."))
@@ -25,29 +30,72 @@ out_dir <- if (length(args)) args[[1L]] else file.path(
   paste0("metal_matched_cuda_datasets_", format(Sys.time(), "%Y%m%d_%H%M%S"))
 )
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+raw_path <- file.path(out_dir, paste0("matched_", accelerator, "_raw.csv"))
+summary_path <- file.path(
+  out_dir,
+  paste0("matched_", accelerator, "_summary.csv")
+)
 
-selected <- data.frame(
-  dataset = rep(c(
+expected_selected <- expand.grid(
+  dataset = c(
     "cbmc_citeseq", "ccle", "cifar100", "gtex_v8", "metref", "prism",
     "retina", "tabula", "tcga_brca", "tcga_hnsc_methylation",
     "tcga_pan_cancer"
-  ), each = 4L),
-  method = rep(c("plssvd", "simpls", "opls", "kernelpls"), 11L),
-  ncomp = c(
-    10, 50, 50, 50,
-    17, 18, 18, 18,
-    99, 200, 200, 200,
-    31, 100, 100, 100,
-    21, 100, 100, 100,
-    10, 5, 2, 5,
-    11, 50, 20, 50,
-    31, 50, 50, 50,
-    4, 10, 5, 10,
-    1, 2, 2, 2,
-    31, 100, 100, 100
   ),
+  method = c("plssvd", "simpls", "opls", "kernelpls"),
   stringsAsFactors = FALSE
 )
+expected_selected <- expected_selected[
+  order(match(expected_selected$dataset, unique(expected_selected$dataset)),
+        match(expected_selected$method,
+              c("plssvd", "simpls", "opls", "kernelpls"))),
+  ,
+  drop = FALSE
+]
+
+selection_path <- Sys.getenv("FASTPLS_SELECTED_COMPONENTS_CSV", "")
+if (nzchar(selection_path)) {
+  selection_path <- normalizePath(selection_path, mustWork = TRUE)
+  selected <- read.csv(selection_path, stringsAsFactors = FALSE)
+  if (!"method" %in% names(selected) && "family" %in% names(selected)) {
+    selected$method <- selected$family
+  }
+  if (!"ncomp" %in% names(selected) &&
+      "selected_ncomp" %in% names(selected)) {
+    selected$ncomp <- selected$selected_ncomp
+  }
+  required <- c("dataset", "method", "ncomp")
+  missing_columns <- setdiff(required, names(selected))
+  if (length(missing_columns)) {
+    stop(
+      "The selected-component table is missing: ",
+      paste(missing_columns, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  selected <- selected[required]
+  selected$dataset <- tolower(selected$dataset)
+  selected$method <- tolower(selected$method)
+  selected$ncomp <- as.integer(selected$ncomp)
+  expected_keys <- paste(expected_selected$dataset, expected_selected$method)
+  selected_keys <- paste(selected$dataset, selected$method)
+  if (anyDuplicated(selected_keys) ||
+      !setequal(selected_keys, expected_keys) ||
+      any(!is.finite(selected$ncomp)) || any(selected$ncomp < 1L)) {
+    stop(
+      "The selected-component table must contain one valid row for each of ",
+      "the 44 dataset-family combinations.",
+      call. = FALSE
+    )
+  }
+  selected <- selected[match(expected_keys, selected_keys), , drop = FALSE]
+} else {
+  stop(
+    "Set FASTPLS_SELECTED_COMPONENTS_CSV to the current training-selected ",
+    "component table. Inherited component counts are disabled by default.",
+    call. = FALSE
+  )
+}
 
 task_path <- function(dataset) {
   path <- file.path(task_root, paste0(dataset, "_task.rds"))
@@ -60,10 +108,10 @@ make_config <- function(dataset, method, ncomp, backend, replicate) {
   classification <- is.factor(task$Ytrain) || is.character(task$Ytrain)
   list(
     run_id = paste(
-      "metal_matched", dataset, method, backend, paste0("r", replicate),
+      "selected_backend", dataset, method, backend, paste0("r", replicate),
       sep = "__"
     ),
-    experiment = "metal_matched_cuda_dataset_panel",
+    experiment = "selected_component_backend_panel",
     dataset = dataset,
     task_type = if (classification) "classification" else "regression",
     method = method,
@@ -74,8 +122,8 @@ make_config <- function(dataset, method, ncomp, backend, replicate) {
     replicate = as.integer(replicate),
     seed = as.integer(1000L + replicate),
     data_seed = 777L,
-    oversample = 20L,
-    power = 2L,
+    oversample = NA_integer_,
+    power = NA_integer_,
     svd_method = "rsvd",
     task_path = task_path(dataset),
     n_train = nrow(task$Xtrain),
@@ -114,10 +162,16 @@ saveRDS(configs, file.path(out_dir, "configurations.rds"))
 
 parse_peak_rss <- function(path) {
   if (!file.exists(path)) return(NA_real_)
-  hit <- grep("maximum resident set size", readLines(path, warn = FALSE), value = TRUE)
+  lines <- readLines(path, warn = FALSE)
+  hit <- grep("maximum resident set size", tolower(lines), value = TRUE)
   if (!length(hit)) return(NA_real_)
-  bytes <- suppressWarnings(as.numeric(gsub("[^0-9]", "", tail(hit, 1L))))
-  if (is.finite(bytes)) bytes / 1024^2 else NA_real_
+  value <- suppressWarnings(as.numeric(gsub("[^0-9]", "", tail(hit, 1L))))
+  if (!is.finite(value)) return(NA_real_)
+  if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    value / 1024^2
+  } else {
+    value / 1024
+  }
 }
 
 rows <- list()
@@ -131,10 +185,19 @@ for (i in seq_along(configs)) {
   if (file.exists(result_path)) {
     existing <- readRDS(result_path)
     if (identical(existing$status[[1L]], "success")) {
+      # Successful strict dispatch cannot have changed the requested backend.
+      existing$backend_reported <- cfg$backend
       existing$peak_rss_mb <- parse_peak_rss(time_path)
       existing$incremental_peak_rss_mb <- if (
         is.finite(existing$peak_rss_mb) && is.finite(existing$baseline_rss_mb)
       ) max(0, existing$peak_rss_mb - existing$baseline_rss_mb) else NA_real_
+      existing$package_version <- as.character(packageVersion("fastPLS"))
+      saveRDS(existing, result_path)
+      write.csv(
+        existing,
+        sub("\\.rds$", ".csv", result_path),
+        row.names = FALSE
+      )
       rows[[length(rows) + 1L]] <- existing
       cat(sprintf("[%d/%d] %s [reused]\n", i, length(configs), cfg$run_id))
       next
@@ -159,7 +222,10 @@ for (i in seq_along(configs)) {
       classifier = cfg$classifier, precision = cfg$precision,
       ncomp = cfg$ncomp, n_train = cfg$n_train, n_test = cfg$n_test,
       p = cfg$p, q = cfg$q, seed = cfg$seed, replicate = cfg$replicate,
-      oversample = cfg$oversample, power = cfg$power, kernel = cfg$kernel,
+      requested_oversample = cfg$oversample,
+      requested_power = cfg$power,
+      control_profile = NA_character_,
+      oversample = NA_integer_, power = NA_integer_, kernel = cfg$kernel,
       north = cfg$north, fit_sec = NA_real_, prediction_sec = NA_real_,
       total_sec = NA_real_, baseline_rss_mb = NA_real_,
       rss_after_fit_mb = NA_real_, rss_after_prediction_mb = NA_real_,
@@ -174,13 +240,14 @@ for (i in seq_along(configs)) {
   row$incremental_peak_rss_mb <- if (
     is.finite(row$peak_rss_mb) && is.finite(row$baseline_rss_mb)
   ) max(0, row$peak_rss_mb - row$baseline_rss_mb) else NA_real_
+  row$package_version <- as.character(packageVersion("fastPLS"))
   rows[[length(rows) + 1L]] <- row
-  write.csv(do.call(rbind, rows), file.path(out_dir, "matched_metal_raw.csv"),
-            row.names = FALSE)
+  write.csv(do.call(rbind, rows), raw_path, row.names = FALSE)
   unlink(cfg_path)
 }
 
 raw <- do.call(rbind, rows)
+write.csv(raw, raw_path, row.names = FALSE)
 keys <- unique(raw[c("dataset", "method", "backend_requested")])
 summaries <- lapply(seq_len(nrow(keys)), function(i) {
   key <- keys[i, ]
@@ -191,6 +258,7 @@ summaries <- lapply(seq_len(nrow(keys)), function(i) {
   ]
   ok <- x$status == "success"
   data.frame(
+    package_version = as.character(packageVersion("fastPLS")),
     dataset = key$dataset,
     method = key$method,
     backend = key$backend_requested,
@@ -209,7 +277,7 @@ summaries <- lapply(seq_len(nrow(keys)), function(i) {
   )
 })
 summary <- do.call(rbind, summaries)
-write.csv(summary, file.path(out_dir, "matched_metal_summary.csv"), row.names = FALSE)
+write.csv(summary, summary_path, row.names = FALSE)
 
 prediction_agreement <- function(cpu, metal) {
   a <- as.vector(cpu$prediction)
@@ -236,7 +304,7 @@ pairs <- lapply(seq_len(nrow(selected)), function(i) {
     , drop = FALSE
   ]
   agreements <- vapply(1:3, function(replicate) {
-    prefix <- paste("metal_matched", dataset, method, sep = "__")
+    prefix <- paste("selected_backend", dataset, method, sep = "__")
     cpu_path <- file.path(out_dir, paste0(
       prefix, "__cpu__r", replicate, "_result_diagnostic.rds"
     ))
@@ -247,6 +315,7 @@ pairs <- lapply(seq_len(nrow(selected)), function(i) {
     prediction_agreement(readRDS(cpu_path), readRDS(accelerator_path))
   }, numeric(1))
   data.frame(
+    package_version = as.character(packageVersion("fastPLS")),
     accelerator = accelerator,
     dataset = dataset,
     method = method,

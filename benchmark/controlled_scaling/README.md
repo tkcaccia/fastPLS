@@ -14,15 +14,21 @@ holdout partition is used to report route-choice accuracy.
 The publication profile sweeps sample count, predictor dimension, response
 dimension, retained components, requested component prefixes, effective
 cross-covariance rank, class count, and explicit cross-covariance size. Every
-scenario is compared with a deterministic float64 CPU-IRLBA fit generated from
-the same synthetic matrices. Candidate runs use rSVD with oversampling 20, two
-power iterations, and fixed seeds. The explicit/implicit crossover panel forces
-both routes; all other panels test automatic routing.
+scenario is compared with a fixed-control float64 CPU-IRLBA fit generated from
+the same synthetic matrices. The explicit/implicit crossover panel forces both
+routes; all other panels test automatic routing.
 
 The rank sweep uses a noise-free low-rank response so that the rank of the
 population cross-covariance is controlled. Other regression sweeps add fixed
 Gaussian response noise, and the class-count sweep uses labels generated from
 a fixed-dimensional latent score model.
+
+Automatic routes use the public release policy: PLS-SVD uses 32 oversampling
+directions and five power iterations, ordinary SIMPLS-family problems use 32
+and five, and SIMPLS-family problems whose explicit cross-covariance would
+exceed 512 MiB use 12 and two. Forced explicit and implicit qualification
+routes use 32 directions and five iterations. Every executed control and seed
+is recorded in the raw output.
 
 Each run uses a fresh R process. Fit and prediction time are recorded
 separately. An external 20-ms sampler records process RSS and, on CUDA systems,

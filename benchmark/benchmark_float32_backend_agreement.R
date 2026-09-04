@@ -12,6 +12,11 @@ get_arg <- function(name, default) {
   sub(key, "", value[[1L]], fixed = TRUE)
 }
 
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
+
 if (!requireNamespace("fastPLS", quietly = TRUE) ||
     !requireNamespace("float", quietly = TRUE)) {
   stop("fastPLS and float must be installed.", call. = FALSE)
@@ -63,6 +68,10 @@ make_regression_task <- function() {
 }
 
 last_prediction <- function(value) {
+  if (is.data.frame(value)) {
+    if (!ncol(value)) stop("Prediction data frame has no columns.")
+    return(value[[ncol(value)]])
+  }
   if (is.list(value) && !is.data.frame(value)) {
     return(value[[length(value)]])
   }
@@ -86,7 +95,7 @@ as_numeric_prediction <- function(x) {
   as.matrix(x)
 }
 
-fit_one <- function(task, family, precision) {
+fit_one <- function(task, family, precision, classifier = "argmax", kernel = "linear") {
   Xtrain <- task$Xtrain
   Xtest <- task$Xtest
   ytrain <- task$ytrain
@@ -108,12 +117,15 @@ fit_one <- function(task, family, precision) {
       Ytest = ytest,
       ncomp = 2L,
       method = family,
+      kernel = kernel,
       backend = backend,
       svd.method = svd_method,
       scaling = "centering",
-      classifier = "argmax",
+      classifier = classifier,
       fit = TRUE,
       return_variance = FALSE,
+      oversample = 32L,
+      power = 5L,
       seed = seed
     )
   })[["elapsed"]]
@@ -124,16 +136,39 @@ fit_one <- function(task, family, precision) {
 rows <- list()
 row_id <- 1L
 for (task in list(make_classification_task(), make_regression_task())) {
-  for (family in c("plssvd", "simpls", "opls", "kernelpls")) {
+  configurations <- data.frame(
+    family = c("plssvd", "simpls", "opls", "kernelpls", "kernelpls"),
+    classifier = "argmax",
+    kernel = c("linear", "linear", "linear", "linear", "rbf"),
+    stringsAsFactors = FALSE
+  )
+  if (task$classification) {
+    configurations <- rbind(
+      configurations,
+      data.frame(
+        family = "simpls", classifier = "lda", kernel = "linear",
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  for (configuration_id in seq_len(nrow(configurations))) {
+    family <- configurations$family[[configuration_id]]
+    classifier <- configurations$classifier[[configuration_id]]
+    kernel <- configurations$kernel[[configuration_id]]
     row <- data.frame(
+      package_version = as.character(utils::packageVersion("fastPLS")),
       dataset = task$name,
       task_type = if (task$classification) "classification" else "regression",
       method = family,
+      classifier = classifier,
+      kernel = kernel,
       backend = backend,
       n_train = nrow(task$Xtrain),
       n_test = nrow(task$Xtest),
       p = ncol(task$Xtrain),
       ncomp = 2L,
+      oversample = 32L,
+      power = 5L,
       status = "skipped_backend_unavailable",
       float64_time_sec = NA_real_,
       float32_time_sec = NA_real_,
@@ -152,8 +187,8 @@ for (task in list(make_classification_task(), make_regression_task())) {
       next
     }
     result <- tryCatch({
-      double <- fit_one(task, family, "float64")
-      single <- fit_one(task, family, "float32")
+      double <- fit_one(task, family, "float64", classifier, kernel)
+      single <- fit_one(task, family, "float32", classifier, kernel)
       if (task$classification) {
         p64 <- as.character(double$prediction)
         p32 <- as.character(single$prediction)

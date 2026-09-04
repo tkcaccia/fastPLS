@@ -327,6 +327,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// float32_topk_cpp
+Rcpp::List float32_topk_cpp(SEXP scoresSEXP, int top);
+RcppExport SEXP _fastPLS_float32_topk_cpp(SEXP scoresSEXPSEXP, SEXP topSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type scoresSEXP(scoresSEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    rcpp_result_gen = Rcpp::wrap(float32_topk_cpp(scoresSEXP, top));
+    return rcpp_result_gen;
+END_RCPP
+}
 // has_cuda
 bool has_cuda();
 RcppExport SEXP _fastPLS_has_cuda() {
@@ -1074,6 +1086,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
     {"_fastPLS_pls_float32_labels_cpp", (DL_FUNC) &_fastPLS_pls_float32_labels_cpp, 12},
     {"_fastPLS_float32_argmax_cpp", (DL_FUNC) &_fastPLS_float32_argmax_cpp, 1},
+    {"_fastPLS_float32_topk_cpp", (DL_FUNC) &_fastPLS_float32_topk_cpp, 2},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},

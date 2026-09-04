@@ -39,8 +39,7 @@ variables and columns as samples.}
 
 \item{Ytrain}{Training response (numeric or factor).}
 
-\item{Xtest}{Optional test predictor matrix or
-\code{Biobase::ExpressionSet}.}
+\item{Xtest}{Optional test predictor matrix or \code{Biobase::ExpressionSet}.}
 
 \item{Ytest}{Optional test response for independent-test \code{Q2Y}, whose
 denominator uses the training-response mean.}
@@ -50,7 +49,7 @@ denominator uses the training-response mean.}
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
 \item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or
-    \code{kernelpls}.
+\code{kernelpls}.
 \code{simpls} uses the fastPLS accelerated SIMPLS core.}
 
 \item{svd.method}{SVD algorithm family. \code{rsvd} uses the native fastPLS
@@ -69,14 +68,14 @@ fallback sequence rather than a user-tuned ridge.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in \code{metrics}. The default \code{FALSE} returns only aggregate
-    metrics.}
+metrics.}
 
 \item{return_variance}{Compute predictor-space latent-variable variance
 explained. Set to \code{FALSE} for timing/memory benchmarks that do not need
 plotting variance metadata.}
 
 \item{return_loadings}{Compute and store predictor loadings \code{P}. The
-    default
+default
 is \code{FALSE} because most prediction workflows only need the projection
 weights and response-side coefficients.}
 
@@ -90,20 +89,22 @@ test-set \code{Q2Y} path is compared with the observed path.}
 
 \item{times}{Number of requested permutations. For each component, \code{pls()}
 returns \code{(b + 1) / (B + 1)}, where \code{b} is the number of successful
-    null
+null
 fits with \code{Q2Y} at least as large as observed and \code{B} is the number of
 successful null fits. Failed fits are excluded from \code{B} and reported.}
 
-\item{backend}{Implementation backend: \code{cpu} for compiled CPU, \code{cuda}
-for CUDA-native fitting, or experimental \code{metal} for Apple Metal
+\item{backend}{Implementation backend: \code{cpu} for compiled CPU,
+\code{cuda}
+for CUDA-native fitting, or \code{metal} for Apple Metal
 randomized-SVD/GEMM acceleration. When omitted, \code{options(backend = ...)}
 defines the session default. For CPU execution, \code{options(cores = n)}
-requests \code{n} BLAS/OpenMP threads.}
+requests \code{n} BLAS/OpenMP threads. Selecting unavailable CUDA or Metal
+support raises an error without a CPU fallback.}
 
 \item{north}{Number of orthogonal components removed by OPLS.}
 
 \item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
-    \code{poly}.}
+\code{poly}.}
 
 \item{gamma}{Kernel scale. Defaults internally to \code{1 / ncol(Xtrain)}.}
 
@@ -112,10 +113,10 @@ requests \code{n} BLAS/OpenMP threads.}
 \item{coef0}{Polynomial kernel offset.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
-Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
-    as
+Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}},
+such as
 \code{oversample}, \code{power}, \code{svds_tol}, \code{work}, \code{maxit},
-    \code{tol}, \code{eps},
+\code{tol}, \code{eps},
 \code{svtol}, and \code{seed}.}
 }
 \value{
@@ -123,59 +124,61 @@ A \code{fastPLS} object. The object is a list whose fields depend on the
 selected method, backend, classifier, and whether test data or optional
 summaries were requested. \code{metrics} is a list of complete \code{evaluate()}
 results, organized as \code{metrics$fitted} and \code{metrics$test}, with one
-    element
+element
 per requested component count. Common fields are:
 \itemize{
 \item \code{P}: predictor loadings, with one column per latent component.
 \item \code{Q}: response loadings or response-side latent coefficients.
-\item \code{R}: predictor weights/rotations used to project new samples into the
-    PLS
+\item \code{R}: predictor weights/rotations used to project new samples into
+the PLS
 latent space.
 \item \code{Ttrain}: training latent scores. This is returned when the backend
-    stores
+stores
 scores or when they are needed for fitted values, classifiers, variance
 summaries, or compact prediction.
 \item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used
-    by
-PLSSVD-style compact prediction when a full coefficient array is avoided.
+by
+PLS-SVD-style compact prediction when a full coefficient array is
+avoided.
 \item \code{B}: regression coefficient matrix or coefficient array, when stored.
 For vector-valued \code{ncomp}, a three-dimensional array may contain the
 coefficient path for all requested component counts.
 \item \code{mX}, \code{vX}: training predictor centering and scaling values.
-    \code{vX} is one
+\code{vX} is one
 when no scaling is applied.
 \item \code{mY}: response centering values for regression or dummy-coded PLS-DA.
 \item \code{lev}: factor levels used for classification.
 \item \code{Yfit}: fitted training responses or fitted class labels, returned
-    when
+when
 \code{fit = TRUE}.
 \item \code{R2Y}: training-set coefficient of determination path when \code{fit
-    = TRUE};
+= TRUE};
 otherwise \code{NA} placeholders may be returned for compatibility. Elements
 are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
 is a dummy-response quantity, not classification accuracy.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when
-    \code{Xtest} is supplied
+\code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.
 \item \code{Ypred_index}: integer class indices for classification predictions,
-    when
+when
 available.
 \item \code{Ttest}: test-set latent scores, returned when \code{proj = TRUE}.
-\item \code{Q2Y}: independent-test Q2 whose denominator uses the
-    training-response
-mean. For factor \code{Ytest}, this is dummy-response PLS-DA Q2 relative to
-training class proportions, not classification accuracy. It is returned
-when response scores are available. Elements are named by component count.
+\item \code{Q2Y}: independent-test Q2 whose denominator centers each response on
+its corresponding training-response mean before aggregating sums of
+squares. For factor \code{Ytest}, this is dummy-response PLS-DA Q2 relative
+to training class proportions, not classification accuracy. It is
+returned when response scores are available. Elements are named by
+component count.
 \item \code{accuracy}: decoded-label accuracy for factor \code{Ytest}, returned
-    when
+when
 classification predictions are available. Elements are named by component
 count.
 \item \code{metrics}: complete \code{evaluate()} outputs. \code{definitions}
-    records the exact
+records the exact
 R2Y and Q2Y denominator conventions. \code{fitted} evaluates \code{Yfit}
 against \code{Ytrain}; \code{test} evaluates \code{Ypred} against \code{Ytest}.
-    For
+For
 multivariate regression, response-wise metrics are included only when
 \code{bycol = TRUE}. \code{metrics$permutation} stores permutation metrics and
 p-values when \code{perm.test = TRUE}.
@@ -183,16 +186,16 @@ p-values when \code{perm.test = TRUE}.
 returned when \code{perm.test = TRUE}.
 \item \code{permutation}: long-format permutation table, returned when
 \code{perm.test = TRUE}, with observed and permuted \code{R2}/\code{Q2} values
-    and the
+and the
 permutation correlation used by \code{plot.permutation()}.
 \item \code{permutation_unit}, \code{permutation_group_sizes_preserved},
 \code{permutation_class_frequencies_preserved}, \code{permutation_folds},
 \code{permutation_solver_seed}, \code{permutation_requested},
 \code{permutation_completed}, \code{permutation_failed}, and
-    \code{permutation_errors}:
+\code{permutation_errors}:
 the permutation contract and null-fit audit.
 \item \code{variance}, \code{variance_explained},
-    \code{cumulative_variance_explained},
+\code{cumulative_variance_explained},
 \code{variance_total}, \code{variance_basis}: predictor-space variance summaries
 returned when \code{return_variance = TRUE}.
 \item \code{x_variance}, \code{x_variance_explained},
@@ -200,23 +203,21 @@ returned when \code{return_variance = TRUE}.
 predictor-space variance summaries.
 \item \code{inner_model}: fitted inner PLS model used by OPLS.
 \item \code{W_orth}, \code{P_orth}, \code{north}, \code{opls_engine},
-    \code{xprod_mode},
+\code{xprod_mode},
 \code{gpu_resident}: OPLS-specific orthogonal-component and backend metadata.
 \item \code{kernel}, \code{kernel_engine}, \code{kernel_linear_direct}:
-    kernelPLS-specific
+kernelPLS-specific
 kernel settings and execution metadata.
 \item \code{diagnostics}: numerical solver diagnostics. For rSVD this records
-    the
+the
 structural-check status, finiteness, requested and effective component
 counts and randomized controls. CPU float64 rSVD fits also record each
 case-specific residual audit, strengthened retry, and deterministic
 recovery. Panel evidence is reported separately and is not interpreted
-as general-use certification. SIMPLS-family fits additionally record whether
-the active approximate route uses CPU warm-started, resident rank-one, or
-guarded resident-batch refresh, together with retained and abandoned execution
+as general-use certification. SIMPLS-family fits additionally record
+whether the active approximate route uses a component-wise oversampled
+sketch or a CUDA candidate block, together with the active execution
 optimizations.
-Accelerator and float32 routes that do not yet expose the same certificate
-warn and are marked unverified.
 }
 
 Function settings and backend bookkeeping, such as the component grid and
@@ -224,7 +225,7 @@ resolved classifier backend, are retained internally for prediction and
 plotting but are not shown as public output fields.
 }
 \description{
-Fits PLSSVD, SIMPLS, OPLS, or kernel PLS models for regression or
+Fits PLS-SVD, SIMPLS, OPLS, or kernel PLS models for regression or
 classification using a selected CPU, CUDA, or Metal backend. The fitted
 model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
@@ -232,38 +233,28 @@ values, variance summaries, and optional classification heads.
 \details{
 The compiled CPU backend uses the BLAS/LAPACK implementation selected at
 package build time. A multithreaded BLAS can execute eligible matrix products
-on several CPU cores. Set \code{options(cores = n)} to request \code{n}
-threads. The SIMPLS deflation sequence remains serial, and additional threads
-are not guaranteed to reduce runtime.
+on several CPU cores, but the SIMPLS deflation sequence remains serial and
+additional threads are not guaranteed to reduce runtime.
 
 Supplying \code{float::float32} predictors or responses requests
-    single-precision
+single-precision
 execution without silent promotion to double. Float32 is route-specific,
-however, rather than a package-wide speed or memory guarantee. Compiled CPU
-and CUDA rSVD PLS-SVD have the broadest current validation. Metal and
-float32 IRLBA routes are experimental; accelerator OPLS and nonlinear
-kernel-PLS retain host stages; and Metal LDA uses the compiled CPU float32
+however, rather than a package-wide speed or memory guarantee. CPU, CUDA,
+and Metal rSVD PLS-SVD and SIMPLS have current route-level validation.
+Float32 IRLBA has more limited validation; accelerator OPLS and nonlinear
+kernel PLS retain host stages; and Metal LDA uses the compiled CPU float32
 discriminant solver after Metal score projection.
 
-Float64 remains the numerical reference. Raw float32 matrices require about
+Float64 remains the baseline precision. Raw float32 matrices require about
 half the input storage, but paired tests show route-dependent runtime,
 incremental host RSS, and device-memory behavior. \code{pls()} therefore warns
 for experimental, hybrid, or measured risk regimes, including
 precision-sensitive SIMPLS/kernel-PLS classification, nonlinear kernels,
 Metal execution, float32 IRLBA, and extreme multivariate responses. For
 numeric responses with at least 10,000 columns and at least 50 components,
-PLS-SVD warns about observed performance/memory risk and SIMPLS-derived
-routes warn that the validation regime failed numerically or
-computationally. Unsupported combinations stop before allocation.
-
-On Windows, \code{backend = "cpu"} and \code{svd.method = "rsvd"} use a
-portable single-precision route because the standard Windows R toolchain does
-not expose the single-precision BLAS/LAPACK symbols used by the Unix-like
-compiled kernels. This route supports PLS-SVD, SIMPLS, OPLS, linear and
-nonlinear kernel PLS, argmax, and latent-space LDA. Model factors, kernel
-matrices, LDA buffers, and predictions remain float32. Windows float32
-accelerator and IRLBA requests stop rather than silently converting to
-float64.
+PLS-SVD and SIMPLS-derived routes warn about observed performance, memory,
+or precision risk in regimes for which current validation remains limited.
+Unsupported combinations stop before allocation.
 
 For a factor response with \eqn{C} levels, centred dummy coding has rank at
 most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
@@ -273,43 +264,47 @@ PLS-SVD. If a large CUDA classification response would exceed the guarded
 dense-indicator path, SIMPLS stops with a clear error rather than silently
 substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
 
-The accelerated rSVD SIMPLS route is an explicitly approximate execution
-profile rather than an estimator-equivalent implementation of de Jong
-SIMPLS. CPU and Metal extract one direction from the current deflated
-cross-covariance at a time. CPU initializes each randomized refresh from the
-preceding accepted direction, whereas Metal draws a fresh direction in its
-resident rank-one route. CUDA also uses resident rank-one refresh for regression
-and small classification tasks. For dummy-coded classification with at least
-5,000 training samples and a requested path of at least 50 components, CUDA
-refreshes at most eight candidate directions together and consumes them
-sequentially through the supervised orthogonalization path. This guarded batch
-amortizes GPU launches on large image-embedding tasks; it is not used for
-regression or small biomedical datasets. Classification uses two power
-iterations by default; numeric regression uses one. Both use oversampling 10,
-and explicit \code{power} or \code{oversample} values override these choices.
-IRLBA keeps a fresh component-wise solve and remains the route for comparisons
-with conventional SIMPLS.
+The rSVD SIMPLS route is an approximate execution of the de Jong component
+sequence. CPU, Metal, and ordinary CUDA routes generate a fresh seeded
+sketch for each component from the current deflated cross-covariance
+operator. When the explicit
+predictor-response cross-covariance would exceed 512 MiB, CPU, CUDA, and
+Metal use a fresh seeded rank-one randomized direction for every component;
+CUDA keeps the matrices and component state resident on the device. Large
+CUDA classification workloads
+can instead refresh a small block
+of candidates, which are accepted sequentially by the standard SIMPLS
+orthogonalization and deflation updates. PLS-SVD uses 32 oversampling
+directions and five power iterations by default. For ordinary matrix shapes,
+accelerated SIMPLS, OPLS, and kernel-PLS use 32 directions and five power
+iterations. When the explicit cross-covariance exceeds 512 MiB, the
+SIMPLS-family profile records \code{oversample = 12} and \code{power = 2}; the
+executed rank-one update uses one newly initialized direction per component.
+Explicit controls supplied through \code{...} override this
+policy. \code{fastsvd()} also uses 32 oversampling directions and five power
+iterations. IRLBA remains available when a non-randomized iterative
+truncated decomposition is preferred.
 
 Like reference SIMPLS software, one fit supplies the sequential component
 path through the largest requested component count; fastPLS does not claim
-this standard path construction as a novelty. Retained optimizations include
-cached rank-one deflation products, incremental coefficient and fitted-value
+this path construction as a novelty. Additional optimizations include cached
+rank-one deflation products, incremental coefficient and fitted-value
 updates, conditional cross-product caching, compact latent prediction, and
 matrix-free cross-covariance products.
 
 Randomized SVD is an approximate solver. The returned \code{diagnostics}
-    performs
-inexpensive structural checks for finite latent factors and the requested
-effective component count, but these checks do not establish agreement with
-a deterministic fit. IRLBA should be preferred for confirmatory inference,
+performs inexpensive structural checks for finite latent factors and the
+requested effective component count. These checks do not establish agreement
+with a fixed-control fit. IRLBA should be preferred for confirmatory
+inference,
 coefficient or subspace interpretation, ill-conditioned or rank-deficient
 matrices, slowly decaying singular spectra, or whenever repeated rSVD seeds
 give materially different predictions. The package validation treats an
-rSVD approximation as failed when relative prediction error exceeds 0.05,
-prediction correlation is below 0.99, a latent-subspace angle exceeds 10
-degrees, classification-label agreement is below 0.99, or the absolute
-predictive-metric difference exceeds 0.01 relative to a deterministic
-reference.
+rSVD approximation as outside the numerical screen when relative prediction
+or score error exceeds 0.01, the corresponding correlation is below 0.995,
+a latent-subspace angle exceeds 0.1 degrees, classification-label agreement
+is below 0.995, or the absolute predictive-metric difference exceeds 0.005
+relative to a matched CPU IRLBA fit.
 
 For latent-space LDA, the pooled covariance is computed as
 \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
@@ -326,12 +321,16 @@ fallback, not a fitted hyperparameter. Prediction uses
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
-fit <- pls(X, y, ncomp = 2, method = "simpls", backend = "cpu",
-            svd.method = "rsvd", return_variance = FALSE)
+fit <- pls(X, y,
+    ncomp = 2, method = "simpls", backend = "cpu",
+    svd.method = "rsvd", return_variance = FALSE
+)
 head(predict(fit, X)$Ypred)
 
-cv <- pls.single.cv(X, y, ncomp = seq_len(2), kfold = 3, method = "simpls",
-                    backend = "cpu", svd.method = "rsvd", seed = 1)
+cv <- pls.single.cv(X, y,
+    ncomp = seq_len(2), kfold = 3, method = "simpls",
+    backend = "cpu", svd.method = "rsvd", seed = 1
+)
 fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 cv$best_ncomp
 head(fit_cv$Ypred)

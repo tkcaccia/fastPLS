@@ -18,7 +18,7 @@ if (nzchar(benchmark_library)) {
 }
 suppressPackageStartupMessages(library(fastPLS))
 expected_version <- Sys.getenv(
-  "FASTPLS_SCALING_EXPECTED_VERSION", unset = "0.99.25"
+  "FASTPLS_SCALING_EXPECTED_VERSION", unset = "0.99.39"
 )
 actual_version <- as.character(utils::packageVersion("fastPLS"))
 if (!identical(actual_version, expected_version)) {
@@ -149,6 +149,7 @@ row <- data.frame(
   fit_seed = cfg$fit_seed,
   oversample = cfg$oversample,
   power = cfg$power,
+  rsvd_control_profile = NA_character_,
   rsvd_case_audit_available = NA,
   rsvd_case_audit_certified = NA,
   rsvd_deterministic_fallbacks = NA_integer_,
@@ -157,6 +158,12 @@ row <- data.frame(
   rsvd_effective_power = NA_integer_,
   rsvd_max_triplet_residual = NA_real_,
   rsvd_max_omitted_direction_ratio = NA_real_,
+  direction_rule = NA_character_,
+  directions_per_solve = NA_integer_,
+  candidate_block_refresh = NA,
+  fresh_start = NA,
+  refresh_width = NA_integer_,
+  refresh_iterations = NA_integer_,
   baseline_rss_mb = NA_real_,
   rss_after_fit_mb = NA_real_,
   rss_after_prediction_mb = NA_real_,
@@ -206,23 +213,26 @@ tryCatch({
     )
   }
 
+  fit_arguments <- list(
+    Xtrain = task$Xtrain,
+    Ytrain = task$Ytrain,
+    ncomp = cfg$ncomp,
+    method = "simpls",
+    backend = cfg$backend,
+    svd.method = cfg$svd_method,
+    classifier = "argmax",
+    scaling = "centering",
+    fit = FALSE,
+    return_variance = FALSE,
+    return_loadings = FALSE,
+    seed = cfg$fit_seed
+  )
+  if (is.finite(cfg$oversample)) fit_arguments$oversample <- cfg$oversample
+  if (is.finite(cfg$power)) fit_arguments$power <- cfg$power
+
   row$fit_sec <- system.time({
     fit <- withCallingHandlers(
-      fastPLS::pls(
-        task$Xtrain, task$Ytrain,
-        ncomp = cfg$ncomp,
-        method = "simpls",
-        backend = cfg$backend,
-        svd.method = cfg$svd_method,
-        classifier = "argmax",
-        scaling = "centering",
-        fit = FALSE,
-        return_variance = FALSE,
-        return_loadings = FALSE,
-        oversample = cfg$oversample,
-        power = cfg$power,
-        seed = cfg$fit_seed
-      ),
+      do.call(fastPLS::pls, fit_arguments),
       warning = function(w) {
         warnings_seen <<- c(warnings_seen, conditionMessage(w))
         invokeRestart("muffleWarning")
@@ -231,23 +241,52 @@ tryCatch({
   })[["elapsed"]]
   row$rss_after_fit_mb <- rss_mb()
   row$model_size_mb <- as.numeric(object.size(fit)) / 1024^2
-  audit <- fit$diagnostics$rsvd$case_audit
+  rsvd_diagnostics <- fit$diagnostics$rsvd
+  if (!is.null(rsvd_diagnostics)) {
+    if (!is.null(rsvd_diagnostics$control_profile)) {
+      row$rsvd_control_profile <- rsvd_diagnostics$control_profile
+    }
+    if (!is.null(rsvd_diagnostics$oversample)) {
+      row$rsvd_effective_oversample <- rsvd_diagnostics$oversample
+    }
+    if (!is.null(rsvd_diagnostics$power)) {
+      row$rsvd_effective_power <- rsvd_diagnostics$power
+    }
+  }
+  audit <- rsvd_diagnostics$case_audit
   if (!is.null(audit)) {
     row$rsvd_case_audit_available <- audit$solves > 0L
-    row$rsvd_case_audit_certified <- audit$solves > 0L &&
-      audit$certified == audit$solves && audit$failures == 0L
-    row$rsvd_deterministic_fallbacks <- audit$deterministic_fallbacks
-    row$rsvd_audit_max_attempts <- audit$max_attempts
-    row$rsvd_effective_oversample <- audit$max_effective_oversample
-    row$rsvd_effective_power <- audit$max_effective_power
-    row$rsvd_max_triplet_residual <- audit$max_triplet_residual
-    row$rsvd_max_omitted_direction_ratio <- audit$max_omitted_direction_ratio
+    if (audit$solves > 0L) {
+      row$rsvd_case_audit_certified <-
+        audit$certified == audit$solves && audit$failures == 0L
+      row$rsvd_deterministic_fallbacks <- audit$deterministic_fallbacks
+      row$rsvd_audit_max_attempts <- audit$max_attempts
+      if (!is.null(audit$max_effective_oversample)) {
+        row$rsvd_effective_oversample <- audit$max_effective_oversample
+      }
+      if (!is.null(audit$max_effective_power)) {
+        row$rsvd_effective_power <- audit$max_effective_power
+      }
+      row$rsvd_max_triplet_residual <- audit$max_triplet_residual
+      row$rsvd_max_omitted_direction_ratio <-
+        audit$max_omitted_direction_ratio
+    }
+  }
+  direction <- fit$diagnostics$simpls_direction
+  if (!is.null(direction)) {
+    row$direction_rule <- direction$rule
+    row$directions_per_solve <- direction$directions_per_solve
+    row$candidate_block_refresh <- direction$candidate_block_refresh
+    row$fresh_start <- direction$fresh_start
+    row$refresh_width <- direction$refresh_width
+    row$refresh_iterations <- direction$refresh_iterations
   }
 
   row$prediction_sec <- system.time({
     pred <- predict(
       fit, task$Xtest,
-      raw_scores = identical(cfg$task_type, "classification")
+      raw_scores = identical(cfg$task_type, "classification"),
+      backend = cfg$backend
     )
   })[["elapsed"]]
   row$rss_after_prediction_mb <- rss_mb()
@@ -291,13 +330,28 @@ tryCatch({
         row$score_correlation <- agree$correlation
       }
       row$metric_absolute_difference <- abs(row$accuracy - ref$accuracy)
-      row$numerical_status <- if (is.finite(row$label_agreement) && row$label_agreement >= 0.99 && row$metric_absolute_difference <= 0.01) "within_tolerance" else "outside_tolerance"
+      score_ok <- !is.finite(row$score_relative_error) || (
+        row$score_relative_error <= 0.01 &&
+          is.finite(row$score_correlation) &&
+          row$score_correlation >= 0.995
+      )
+      row$numerical_status <- if (
+        is.finite(row$label_agreement) &&
+          row$label_agreement >= 0.995 &&
+          row$metric_absolute_difference <= 0.005 &&
+          score_ok
+      ) "within_tolerance" else "outside_tolerance"
     } else {
       agree <- numeric_agreement(artifact$prediction, ref$artifact$prediction)
       row$prediction_relative_error <- agree$relative_error
       row$prediction_correlation <- agree$correlation
       row$metric_absolute_difference <- abs(row$rmsd - ref$rmsd)
-      row$numerical_status <- if (agree$relative_error <= 0.05 && is.finite(agree$correlation) && agree$correlation >= 0.99) "within_tolerance" else "outside_tolerance"
+      row$numerical_status <- if (
+        agree$relative_error <= 0.01 &&
+          is.finite(agree$correlation) &&
+          agree$correlation >= 0.995 &&
+          row$metric_absolute_difference <= 0.005
+      ) "within_tolerance" else "outside_tolerance"
     }
   } else {
     row$numerical_status <- "reference_missing"

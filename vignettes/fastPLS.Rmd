@@ -11,6 +11,7 @@ vignette: >
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+options(width = 68)
 library(fastPLS)
 ```
 
@@ -47,48 +48,48 @@ backend is also used in a matrix-free form for selected `xprod` paths, where
 the algorithm receives functions that compute products with the cross-product
 operator rather than a precomputed dense matrix.
 
-The two solvers have different numerical roles. IRLBA is deterministic for
+The two solvers have different numerical roles. IRLBA is reproducible for
 fixed data and numerical controls and should be preferred for confirmatory
 analysis, coefficient or latent-subspace interpretation, ill-conditioned or
 rank-deficient matrices, slowly decaying singular spectra, and any analysis in
 which different rSVD seeds give materially different predictions. rSVD is an
-approximation intended primarily for speed and accelerator execution. A
-completed randomized fit is not automatically a reliable approximation.
-On CPU float64, rSVD remains the primary starting solver but is not accepted
-solely because its controls passed a historical panel. Every decomposition is
-checked using normalized left/right singular-triplet residuals and a search for
-an omitted direction. A weak boundary, defined conservatively by an estimated
-omitted-to-retained singular-value ratio above 0.95, is treated as unsafe for a
-seed-stable sequential direction. The solver retries with wider sketches and
-additional power iterations. A weak boundary is accepted only when independent
-strengthened sketches agree on the retained subspace and singular values. If
-the audit remains unresolved, CPU execution recovers that direction with
-deterministic IRLBA; accelerator routes fail or
-return an explicit unverified warning rather than silently claiming agreement.
-The fitted object's `diagnostics$rsvd$case_audit` reports the number of solves,
-retries, recoveries, residuals, and effective controls. For confirmatory work,
-comparison across seeds or a full CPU IRLBA refit remains appropriate.
+approximation intended primarily for speed and accelerator execution, and it
+is the default solver for PLS models. Standalone `fastsvd()` applies
+singular-triplet residual checks and searches for an omitted direction; its
+diagnostics report retries, residuals, and effective controls. The accelerated
+sequential PLS paths instead retain the fast component-wise execution and
+report the seed, effective controls, execution profile, finite-factor checks,
+and active direction rule. For confirmatory work, comparison across seeds or
+a CPU IRLBA refit remains appropriate.
 
-The package validation classifies an rSVD result as unreliable if any of the
-following occurs relative to the deterministic reference: relative prediction
-error above 0.05, prediction correlation below 0.99, a score, projection, or
-loading subspace angle above 10 degrees, classification-label agreement below
-0.99, or an absolute predictive-metric difference above 0.01. Increasing
+The package validation classifies an rSVD result as outside the numerical
+screen if any of the following occurs relative to a matched CPU IRLBA fit:
+relative prediction or score error above 0.01, the corresponding correlation
+below 0.995, a score, projection, or loading subspace angle above 0.1 degrees,
+classification-label agreement below 0.995, or an absolute predictive-metric
+difference above 0.005. Increasing
 `power` or `oversample` can improve a borderline rSVD approximation, but IRLBA
-is the recommended fallback when any criterion remains unsatisfied.
-For direct PLS-SVD and `fastsvd()`, CPU starts with `oversample = 20` and
-`power = 2`, then audits each randomized decomposition and strengthens or
-recovers unsafe cases. PLS-SVD on CUDA retains its wider safety floor. The
-accelerated SIMPLS-family profile follows a different objective: it uses
-oversampling 10 with two power iterations for classification and one for
-numeric regression, unless the user supplies controls explicitly. These lean
-settings are part of an approximate high-speed estimator and are not presented
-as deterministic SIMPLS equivalence.
-The release qualification combined 138 automatic CPU routes with 138 matched
-automatic CUDA routes. All 276 met the prespecified numerical tolerances; the
-CPU case audit invoked deterministic recovery where independent sketches could
-not certify a weak spectral boundary. Recovery counts and effective controls
-remain visible in model diagnostics.
+is the recommended deterministic alternative when any criterion remains
+unsatisfied.
+PLS-SVD and standalone `fastsvd()` use `oversample = 32`, `power = 5` by
+default. Accelerated SIMPLS, OPLS, and kernel-PLS use 32 oversampling
+directions and five power iterations for ordinary matrix shapes. Numeric
+responses with at least 64 columns and a response-to-sample ratio of at least
+0.2 use 48 directions and six iterations. Classification with at least 32
+classes and no more than 20 samples per class uses 64 directions and seven
+iterations. When the explicit predictor-response cross-covariance would exceed
+512 MiB, the massive-matrix profile records `oversample = 12` and `power = 2`
+while advancing with one new rank-one randomized direction per component. CPU,
+Metal, and ordinary CUDA SIMPLS-family routes
+generate a seeded sketch from the current deflated cross-covariance. On a
+massive problem, CPU, CUDA, and Metal use a fresh seeded rank-one randomized
+direction for each component; CUDA keeps the sequential state on the device.
+For large dummy-coded
+classification, CUDA can instead generate up to eight fresh candidates in one
+device operation. Candidate directions are accepted sequentially through the
+SIMPLS orthogonalization and deflation equations. The explicit and matrix-free
+routes evaluate the same cross-covariance operator without requiring a dense
+matrix.
 
 For large predictor-response cross-products, `fastPLS` can avoid forming
 `S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD
@@ -102,11 +103,11 @@ matrix in the label-aware paths.
 
 `method = "plssvd"` implements the direct PLS-SVD formulation, in which the
 dominant singular subspace of the predictor-response cross-covariance matrix is
-computed once and reused for all requested component counts. This makes PLSSVD
+computed once and reused for all requested component counts. This makes PLS-SVD
 efficient when the response rank is the limiting dimension. The implementation
 adds compact latent prediction factors: instead of always storing and applying
 a full coefficient array, prediction can be performed through low-rank factors
-based on the latent projection and response-side coefficients. PLSSVD can also
+based on the latent projection and response-side coefficients. PLS-SVD can also
 use the matrix-free `xprod` route for randomized SVD or bundled IRLBA when the
 cross-covariance matrix would be large.
 
@@ -116,17 +117,21 @@ algorithm (de Jong, 1993): each component is obtained from the current
 cross-covariance state, converted into a score and loading direction, and
 followed by SIMPLS orthogonalization and deflation. The IRLBA route retains
 this conventional component-wise interpretation, whereas the default rSVD
-route intentionally uses an approximate accelerated direction sequence.
+route approximates each direction from a newly generated randomized sketch of
+the current deflated operator.
 Like `pls::simpls.fit`, one fit provides the sequential path through all
 components up to `ncomp`; fastPLS does not claim this standard path construction
 as a novelty. Each component still uses the current deflated cross-covariance.
-CPU rSVD warm-starts its rank-one refresh from the preceding accepted
-direction. Metal and ordinary CUDA routes use resident rank-one randomized
-refreshes. For dummy-coded classification with at least 5,000 training samples
-and at least 50 requested components, CUDA refreshes up to eight candidate
-directions together and consumes them sequentially, reducing kernel-launch
-overhead without applying this approximation to regression or small biomedical
-datasets. The C++ core also caches the rank-one
+The CPU rSVD route derives a reproducible component-specific seed and generates
+a new oversampled Gaussian sketch for each component. Metal initializes one
+reproducible random sequence per fit and draws a new sketch for each component.
+CUDA generates newly initialized randomized candidates in resident device
+workspaces. For dummy-coded
+classification with at least 5,000 training samples, CUDA can generate up to
+eight new candidate directions in one device operation and consumes them
+sequentially, reducing kernel-launch overhead. This batched execution is not
+used for regression or smaller classification datasets. The C++ core
+also caches the rank-one
 deflation product, updates coefficient and fitted-value paths incrementally,
 and uses compact prediction factors. For low-dimensional high-sample problems,
 the code
@@ -146,7 +151,7 @@ filter is applied to new samples at prediction time.
 (2001). Linear kernel PLS is dispatched to the ordinary linear PLS core to avoid
 unnecessary kernel materialization. For radial-basis and polynomial kernels,
 the training kernel is centered and the selected PLS core is fitted in kernel
-space. The same user-facing `pls()` function therefore covers linear PLSSVD,
+space. The same user-facing `pls()` function therefore covers linear PLS-SVD,
 SIMPLS, OPLS, and kernel PLS while sharing the accelerated low-rank machinery.
 
 ### Classification Methods
@@ -178,22 +183,22 @@ over one thread.
 
 `backend = "cuda"` uses CUDA-native routines when the package is compiled with
 CUDA and a compatible NVIDIA runtime is available. CUDA paths perform the main
-PLSSVD and SIMPLS randomized-SVD matrix products, selected `xprod` products,
+PLS-SVD and SIMPLS randomized-SVD matrix products, selected `xprod` products,
 low-rank prediction and LDA scoring on the GPU. CUDA is
 most useful for large dense matrices, high component counts, many classes, or
 many response variables, where GPU matrix multiplication offsets transfer and
-kernel-launch overhead. Large classification paths additionally refresh up to
-eight candidate directions per CUDA launch; smaller classification and all
-regression paths use resident rank-one refresh.
+kernel-launch overhead. Each SIMPLS component uses a fresh randomized sketch
+of the current deflated operator.
 
 `backend = "metal"` provides an Apple Silicon backend. The Metal rSVD
 path offloads the large randomized-SVD matrix multiplications to Apple Metal
-Performance Shaders while keeping QR and the final small SVD on CPU. The PLS
-Metal route extends the same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS by
+Performance Shaders while keeping reduced QR and the small SVD on CPU. The PLS
+Metal route extends the same idea to PLS-SVD, SIMPLS, OPLS, and kernel PLS by
 dispatching large cross-products, score projections, deflation matrix products,
 and prediction products through Metal where implemented. Metal is intended for
-portability and exploratory acceleration on Apple hardware; CPU remains the
-most robust fallback for small examples.
+portability and exploratory acceleration on Apple hardware. Users can
+explicitly select CPU for small examples, where it is generally the most robust
+route.
 
 ## Backend and CPU Configuration
 
@@ -214,31 +219,34 @@ function argument, `options(backend = ...)`, `FASTPLS_BACKEND`, and finally
 CPU. For CPU execution, `options(cores = 4L)` requests four threads from the
 linked BLAS/OpenMP runtime. Eligible matrix operations may use these threads,
 but sequential PLS deflation remains serial and multicore acceleration depends
-on matrix shape and the installed numerical library. An explicitly requested
-`backend = "auto"` in prediction retains model-aware prediction dispatch.
+on matrix shape and the installed numerical library. Setting or retrieving an
+unavailable accelerator through `fastPLS_backend()` raises an error, as does
+the first operation that resolves an unavailable option or environment value;
+CPU is never substituted. An explicitly requested `backend = "auto"` in
+prediction retains model-aware prediction dispatch and errors if the fitted
+model requires an unavailable accelerator.
 
 ## Supported Computational Routes
 
-The terms in this table distinguish numerical evidence from implementation
-availability. `Validated` denotes a float64 CPU route covered by estimator
-tests. `Qualified approximate` denotes rSVD controls that met the stated
-multi-seed numerical tolerances, not exact estimator equivalence. `Hybrid`
-means that host and accelerator stages remain. `Experimental` denotes a
-callable route with limited validation. `Unavailable` combinations stop rather
-than silently falling back.
+The terms in this table distinguish implementation coverage and data
+residency. `Tested` denotes a route covered by fixed-seed numerical tests.
+`Approximate` identifies rSVD execution. `Hybrid` means that host and
+accelerator stages remain. `Experimental` denotes a callable route with more
+limited numerical evidence. `Unavailable` combinations stop rather than
+silently falling back.
 
-The table uses V for validated, Q for qualified approximate, H for hybrid,
-E for experimental, S for supported, and U for unavailable.
+The table uses T for tested, A for approximate, H for hybrid, E for
+experimental, S for supported, and U for unavailable.
 
 | Model or operation | CPU | CUDA | Metal |
 |---|---:|---:|---:|
-| PLS-SVD, float64 | V/Q | Q | E/H |
-| SIMPLS, float64 | V/Q | Q | E/H |
-| OPLS, float64 | V | H | E/H |
-| Linear kernel PLS, float64 | S | S | E/H |
-| Nonlinear kernel PLS | S | H | E/H |
-| Argmax PLS-DA | S | S | E |
-| Latent-space LDA | V | S | H |
+| PLS-SVD, float64 | T/A | T/A | T/A/H |
+| SIMPLS, float64 | T/A | T/A | T/A/H |
+| OPLS, float64 | T/A | T/A/H | T/A/H |
+| Linear kernel PLS, float64 | T/A | T/A | T/A/H |
+| Nonlinear kernel PLS | T/A | T/A/H | T/A/H |
+| Argmax PLS-DA | T | T | T/H |
+| Latent-space LDA | T | T | H |
 | IRLBA solver | S | U | U |
 
 Float32 support is route and platform dependent, as described in the Float32
@@ -267,6 +275,7 @@ called directly.
 | `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
+| `fastPLS_backend()` | Inspect or set the session backend. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check for Apple Metal support. |
 
@@ -367,7 +376,10 @@ ordinary prediction in `Ypred` is always the rank-1 class. When `top > 1`,
 `Ypred_top` contains the ordered candidate labels for each sample: `rank1` is
 the predicted class, `rank2` is the next most likely class, and so on. If
 available, `Ypred_top_score` contains the corresponding class scores used to
-create that ranking.
+create that ranking. For float32 models, the default `raw_scores = FALSE`
+evaluates ranked predictions in bounded row blocks and retains only the
+requested ranks. Set `raw_scores = TRUE` only when the complete class-score
+arrays are needed, because those arrays can be substantially larger.
 
 ```{r chunk-004}
 fit_cls_train_only <- pls(
@@ -426,15 +438,19 @@ labels. The confusion matrix is returned as an ordinary R table.
 eval_cls$confusion
 ```
 
+<div style="page-break-before: always;"></div>
+
 When class-score matrices are available, `evaluate()` can also report top-k
 accuracy. Top-k accuracy asks whether the true class appears anywhere among the
 first `k` ranked labels. Thus top-1 accuracy is ordinary classification
-    accuracy,
+accuracy,
 while top-5 accuracy gives credit when the correct class appears among the five
 highest-scoring alternatives.
 
 ```{r chunk-007}
-score_last <- pred_cls_later$LDA_scores[, , dim(pred_cls_later$LDA_scores)[3L]]
+score_last <- pred_cls_later$LDA_scores[
+    , , dim(pred_cls_later$LDA_scores)[3L]
+]
 
 evaluate(
     observed = Ytest_cls,
@@ -487,7 +503,8 @@ fit_cls_lda_gpu <- pls(
 )
 ```
 
-When a GPU backend is unavailable, the compiled CPU fallback is:
+An unavailable CUDA or Metal selection raises an error; fastPLS never changes
+the request silently to CPU. To run on the CPU, select it explicitly:
 
 ```{r chunk-010}
 fit_cls_lda_cpu <- pls(
@@ -497,6 +514,7 @@ fit_cls_lda_cpu <- pls(
     Ytest_cls,
     ncomp = 1:2,
     method = "plssvd",
+    backend = "cpu",
     seed = 100,
     classifier = "lda"
 )
@@ -539,7 +557,12 @@ training scores, or predict with `proj = TRUE` to store test scores. Ellipses
 be ordinary confidence ellipses or Hotelling T2 ellipses.
 
 ```{r chunk-013, fig.width = 5, fig.height = 4}
-plot(fit_cls, groups = Ytrain_cls, ellipse = TRUE, ellipse.type = "confidence")
+plot(
+    fit_cls,
+    groups = Ytrain_cls,
+    ellipse = TRUE,
+    ellipse.type = "confidence"
+)
 ```
 
 The next example uses the bundled two-class colon gene-expression data. The same
@@ -654,22 +677,24 @@ fit_reg$Q2Y
 `pls()` also accepts predictor and response matrices from the `float` package.
 Supplying a `float::float32` object requests single-precision execution; it
 does not imply that every model/backend combination is equally validated or
-fully device-resident. Compiled CPU and CUDA rSVD PLS-SVD have the broadest
-current validation. Other routes are explicitly classified as experimental or
-hybrid. Accelerator OPLS retains host orchestration, nonlinear kernel-PLS
+fully device-resident. CPU, CUDA, and Metal rSVD PLS-SVD and SIMPLS are covered
+by the current route-level panel. Other routes are classified separately by
+precision and residency. Accelerator OPLS retains host orchestration, nonlinear
+kernel PLS
 materializes and centers an \(n \times n\) Gram matrix, and Metal LDA uses the
-compiled CPU float32 discriminant solver after Metal score projection. Metal
-routes and float32 IRLBA have more limited validation than CPU/CUDA rSVD.
+compiled CPU float32 discriminant solver after Metal score projection. Float32
+IRLBA and extreme-response routes have more limited validation than the default
+rSVD PLS-SVD and SIMPLS paths.
 
-Float64 remains the numerical reference. Float32 approximately halves raw
+Float64 remains the baseline precision. Float32 approximately halves raw
 matrix storage, but paired tests show that runtime, incremental host RSS, and
 device memory may increase or decrease depending on the route. The package
-therefore warns once for experimental, hybrid, or measured risk regimes. This
+therefore warns once for hybrid or measured-risk regimes. This
 includes precision-sensitive SIMPLS and linear kernel-PLS classification,
-nonlinear kernels, Metal execution, float32 IRLBA, and multivariate regression
+nonlinear kernels, float32 IRLBA, and multivariate regression
 with at least 10,000 response columns and 50 components. In that last regime,
-PLS-SVD completed with similar error but poor time/memory behavior, whereas
-SIMPLS-derived routes failed the numerical/performance validation. Unsupported
+runtime, memory, and numerical behavior must be checked against float64 before
+the float32 result is used for scientific interpretation. Unsupported
 combinations stop before allocation and are never silently promoted to
 float64.
 
@@ -679,7 +704,7 @@ route therefore combines float-package rSVD and Cholesky operations with
 portable C++ float kernels. It supports PLS-SVD, SIMPLS, OPLS, linear and
 nonlinear kernel PLS, argmax, and latent-space LDA when `backend = "cpu"` and
 `svd.method = "rsvd"`. Model factors, LDA buffers, kernel matrices, and
-predictions remain float32, but this experimental route can be slower than the
+predictions remain float32, but this portable route can be slower than the
 native Unix-like implementation. Windows float32 accelerator requests and
 IRLBA requests stop with an unsupported-combination error rather than silently
 converting data to float64.
@@ -749,10 +774,11 @@ head(pred_reg_later$Ttest)
 
 For numeric regression, `evaluate()` reports R2, Q2, RMSD/RMSE, MAE, bias,
 median relative error percentage, RPD, and correlations. If `ytrain` is
-    supplied,
-Q2 is calculated relative to the training-set response mean, which is the
-preferred setting for independent test-set evaluation. If `ytrain` is omitted,
-Q2 is returned as `NA`; it is not silently replaced by an R2 calculation.
+supplied, Q2 is calculated relative to the training-set response mean, which
+is the preferred setting for independent test-set evaluation. For a response
+matrix, each response column is centered on its corresponding training mean
+before the denominator sums are aggregated. If `ytrain` is omitted, Q2 is
+returned as `NA`; it is not silently replaced by an R2 calculation.
 
 For wide multivariate responses, `pls()`, `pls.single.cv()`, and
 `pls.double.cv()` return aggregate evaluation metrics by default. Set
@@ -767,7 +793,10 @@ eval_reg <- evaluate(
     ytrain = Ytrain_reg
 )
 
-eval_reg
+eval_reg$task
+eval_reg$metrics
+lapply(eval_reg$metric_definitions, strwrap, width = 56)
+eval_reg$per_response
 ```
 
 ### OPLS For Regression
@@ -885,6 +914,12 @@ prediction error for multivariate regression outputs. Predictive arguments can
 also be supplied as vectors to tune a compact grid. Fold-control arguments such
 as `kfold` remain single settings for the whole CV run.
 
+For LDA classification, a rare class may be absent from an inner training
+fold. fastPLS fits LDA to the classes represented in that fold and maps the
+predictions back to the original factor levels. Held-out observations from an
+absent class are retained in the accuracy and balanced-accuracy calculations,
+although that class cannot be predicted by a model that did not observe it.
+
 ```{r chunk-026}
 cv_opt <- pls.single.cv(
     Xdata = Xreg_train,
@@ -902,10 +937,12 @@ cv_opt$best_ncomp
 
 For regression models, `R2Y`, `Q2Y`, and `RMSD` answer different questions and
 should not usually be identical. In `pls()`, `R2Y` is training-set R2 and
-independent-test `Q2Y` uses the training-response mean in its denominator. In
-`pls.single.cv()`, each held-out prediction is evaluated relative to the mean
-of its corresponding fold-training responses. `pls.double.cv()` applies the
-same rule to the outer folds. `RMSD` is also calculated
+independent-test `Q2Y` uses the training-response mean in its denominator. For
+multivariate responses, each response is centered separately before the sums
+of squares are aggregated. In `pls.single.cv()`, each held-out prediction is
+evaluated relative to the corresponding fold-training response means.
+`pls.double.cv()` applies the same rule to the outer folds. `RMSD` is also
+calculated
 from held-out predictions and is reported on the response scale, so lower values
 are better. `R2Y` is a training-set explained-variance estimate from one
 additional model fitted on the full dataset; set `fit = FALSE` to skip
@@ -1219,6 +1256,8 @@ s$d
 
 CUDA and Apple Metal are optional. Use `has_cuda()` before selecting
 `backend = "cuda"` and `has_metal()` before selecting `backend = "metal"`.
+An unavailable accelerator request stops with an informative error and is not
+redirected to CPU.
 
 ```{r chunk-038}
 has_cuda()
@@ -1310,8 +1349,8 @@ final small SVD remain on the CPU. Because matrices are copied between R and
 Metal buffers, this backend is most useful for larger matrices where the GPU
 multiplication work is large enough to dominate transfer overhead.
 
-The experimental PLS Metal backend, `pls(..., backend = "metal")`, extends the
-same idea to PLSSVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
+The PLS Metal backend, `pls(..., backend = "metal")`, extends the
+same idea to PLS-SVD, SIMPLS, OPLS, and kernel PLS. The large cross-products,
 score projections, deflation matrix products, and prediction matrix products
 are dispatched through Metal. Small decompositions, scalar reductions, and some
 kernel-centering operations remain CPU-side until dedicated Metal kernels are
@@ -1330,7 +1369,7 @@ to the PLS prediction factors exposed by `fastPLS`.
 In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
 route automatically only when the cross-product is large enough to justify it.
 
-### PLSSVD
+### PLS-SVD
 
 `method = "plssvd"` implements the direct cross-covariance SVD formulation of
 PLS, within the same broad PLS regression and PLS-DA framework described by
@@ -1338,14 +1377,14 @@ Wold, Sjostrom, and Eriksson (2001), Barker and Rayens (2003), and Boulesteix
 and Strimmer (2007). After preprocessing, the algorithm computes the dominant
 singular subspace of \(X^T Y\) and reuses that subspace to generate the
 requested component path.
-The maximum meaningful number of PLSSVD components is capped by
+The maximum meaningful number of PLS-SVD components is capped by
 `min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
 uses the valid internal rank and records the capped component count.
 
-The main innovation relative to a simple textbook PLSSVD implementation is the
+The main innovation relative to a simple textbook PLS-SVD implementation is the
 execution strategy. fastPLS can use truncated IRLBA or randomized SVD, compact
 low-rank prediction factors, CUDA-native fitting, and the matrix-free `xprod`
-route. For large classification tasks, the label-aware PLSSVD path computes
+route. For large classification tasks, the label-aware PLS-SVD path computes
 class-wise cross-products from the factor labels and avoids dense one-hot `Y`
 unless the legacy dense route is explicitly needed.
 
@@ -1358,21 +1397,25 @@ loading direction is constructed, and the cross-covariance is deflated before
 the next component.
 
 For every component, fastPLS extracts one direction from the current deflated
-cross-covariance. IRLBA performs a fresh rank-one iterative solve. The default
-rSVD route instead defines an explicitly approximate accelerated estimator.
-On CPU, the preceding accepted direction initializes the next randomized
-refresh. Metal and ordinary CUDA routes retain rank-one randomized refresh in
-persistent device workspaces. Large CUDA classification paths use the guarded
-candidate batch described above. Classification uses two power iterations by
-default, whereas numeric regression uses one. Both use oversampling 10, and
-explicit controls supplied through `...` take precedence.
+cross-covariance. IRLBA performs a new iterative solve. CPU, Metal, and
+ordinary CUDA routes use a seeded randomized sketch of the current deflated
+operator. When the explicit predictor-response cross-covariance would exceed
+512 MiB, CPU, CUDA, and Metal use a fresh seeded rank-one randomized direction
+for every component; CUDA keeps the SIMPLS state on the device.
+For large classification workloads, CUDA can instead generate a small block of
+fresh candidates and applies accepted directions one at a time through the
+standard SIMPLS orthogonalization and deflation equations. PLS-SVD uses 32
+oversampling directions and five power iterations. Accelerated SIMPLS, OPLS,
+and kernel-PLS use 32 directions and five iterations for ordinary matrix shapes;
+when the explicit cross-covariance would exceed 512 MiB, their automatic
+massive-matrix profile records `oversample = 12` and `power = 2`, while the
+executed rank-one update uses one new direction per component. Explicit controls
+supplied through `...` take precedence.
 
 The accepted direction is normalized, converted into a SIMPLS component,
-orthogonalized, and followed by SIMPLS deflation before the next refresh.
-Multi-direction candidate blocks are restricted to the large CUDA
-classification regime because applying them to multivariate regression changed
-NMR prediction. The innovation is therefore not a claim of exact de Jong
-estimator preservation: it is a
+orthogonalized, and followed by SIMPLS deflation before the next sketch. The
+innovation is therefore not a claim of exact de Jong estimator preservation:
+it is a
 backend-specialized randomized sequential estimator that trades strict
 component equivalence for lower computational cost while preserving the
 supervised deflation structure.
@@ -1383,13 +1426,15 @@ cached-deflation update computes \(v^T S\) once and applies
 \(B_a = B_{a-1} + r_a q_a^T\), and fitted values are updated similarly when
 requested. Cross-products can be cached for suitable matrix shapes, prediction
 can use compact latent factors, and matrix-free products avoid materializing a
-large cross-covariance. PLSSVD instead uses a one-shot cross-covariance SVD;
+large cross-covariance. PLS-SVD instead uses a one-shot cross-covariance SVD;
 OPLS and kernel PLS reuse the same sequential SIMPLS core where applicable.
 
 The complete component path is also a standard feature of reference SIMPLS
 software such as `pls::simpls.fit`, which returns coefficient and fitted-value
 arrays for components 1 through `ncomp`. The fastPLS contribution is therefore
-not the existence of that path, but its compiled and shape-aware execution.
+not the existence of that path, but its compiled incremental execution,
+compact prediction, matrix-free products, and backend-specific storage
+strategy.
 Incremental updates avoid rebuilding \(R_a Q_a^T\) and \(T_a Q_a^T\) from
 scratch at requested prefixes; compact prediction stores latent factors instead
 of all dense coefficient prefixes; conditional \(X^T X\) caching can benefit
@@ -1422,7 +1467,8 @@ inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
 For nonlinear kernels, the training kernel matrix is centered and the PLS model
 is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
 kernel materialization and uses the ordinary linear PLS path. Float32 nonlinear
-kernel routes remain experimental on CPU and hybrid on CUDA or Metal because
+kernel routes are validated for the tested float64 CPU settings and remain
+hybrid on CUDA or Metal because
 the explicit Gram matrix and host orchestration remain; they warn before
 fitting and do not constitute a general low-memory route.
 

@@ -1,29 +1,32 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
-REPO_ROOT="${REPO_ROOT:-$HOME/fastPLS_cmpb_cycle79}"
-FASTPLS_LIB="${FASTPLS_LIB:-$HOME/fastPLS_cmpb_cycle79/Rlib}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+RUNNER="${RUNNER:-${REPO_ROOT}/benchmark/benchmark_imagenet_current_fused_lda.R}"
+FASTPLS_LIB="${FASTPLS_LIB:-$HOME/Rlib_fastPLS_0.99.39}"
 TASK_RDS="${TASK_RDS:-$HOME/Documents/fastpls/data/imagenet_float32_seed123_train1000000_task.rds}"
-OUTPUT_DIR="${OUTPUT_DIR:-/mnt/sata_ssd/fastPLS_cmpb_cycle79_imagenet_fused_lda}"
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/fastPLS_results_0.99.39/current_release/imagenet}"
 NCOMP_GRID="${NCOMP_GRID:-100 200 300 400 500 600 700 800 900 1000}"
-OVERSAMPLE="${OVERSAMPLE:-20}"
-POWER="${POWER:-2}"
+CLASSIFIERS="${CLASSIFIERS:-argmax lda}"
+OVERSAMPLE="${OVERSAMPLE:-auto}"
+POWER="${POWER:-auto}"
 SEED="${SEED:-123}"
 PRECISION="${PRECISION:-float32}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-10000}"
-SOURCE_ARCHIVE_SHA256="${SOURCE_ARCHIVE_SHA256:-}"
 
 mkdir -p "${OUTPUT_DIR}/points"
 STATUS="${OUTPUT_DIR}/run_status.csv"
 printf '%s\n' \
-  "ncomp,exit_status,status,output_csv,time_log,gpu_log" >"${STATUS}"
+  "classifier,exit_status,status,output_csv,time_log,gpu_log" >"${STATUS}"
 
-for ncomp in ${NCOMP_GRID}; do
-  stem="imagenet_current_fused_lda_n${ncomp}"
+for classifier in ${CLASSIFIERS}; do
+  stem="imagenet_current_${classifier}_path"
   output_csv="${OUTPUT_DIR}/points/${stem}.csv"
   time_log="${OUTPUT_DIR}/points/${stem}.time"
   gpu_log="${OUTPUT_DIR}/points/${stem}_gpu_trace.csv"
-  echo "[RUN] fused CUDA SIMPLS-LDA ncomp=${ncomp} at $(date --iso-8601=seconds)"
+  rm -f "${output_csv}" "${output_csv}.fit.rds"
+  echo "[RUN] CUDA SIMPLS-${classifier} shared component path at $(date --iso-8601=seconds)"
 
   (
     printf '%s\n' "timestamp,memory_used_mb,utilization_gpu_pct"
@@ -42,15 +45,15 @@ for ncomp in ${NCOMP_GRID}; do
   FASTPLS_LIB="${FASTPLS_LIB}" \
   TASK_RDS="${TASK_RDS}" \
   OUTPUT_CSV="${output_csv}" \
-  NCOMP="${ncomp}" \
+  NCOMP_GRID="$(printf '%s' "${NCOMP_GRID}" | tr ' ' ',')" \
+  CLASSIFIER="${classifier}" \
   OVERSAMPLE="${OVERSAMPLE}" \
   POWER="${POWER}" \
   SEED="${SEED}" \
   PRECISION="${PRECISION}" \
-  SOURCE_ARCHIVE_SHA256="${SOURCE_ARCHIVE_SHA256}" \
   REPLICATE=1 \
     /usr/bin/time -v timeout --signal=TERM --kill-after=30s "${TIMEOUT_SEC}" \
-      Rscript "${REPO_ROOT}/benchmark_imagenet_current_fused_lda.R" \
+      Rscript "${RUNNER}" \
       >"${time_log}" 2>&1
   exit_status=$?
   set -e
@@ -125,7 +128,7 @@ PY
     status="failed"
   fi
   printf '%s,%s,%s,%s,%s,%s\n' \
-    "${ncomp}" "${exit_status}" "${status}" \
+    "${classifier}" "${exit_status}" "${status}" \
     "${output_csv}" "${time_log}" "${gpu_log}" >>"${STATUS}"
 done
 
@@ -135,7 +138,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-files = sorted((root / "points").glob("imagenet_current_fused_lda_n*.csv"))
+files = sorted((root / "points").glob("imagenet_current_*_path.csv"))
 rows = []
 fieldnames = None
 for path in files:
@@ -145,8 +148,44 @@ for path in files:
             fieldnames = reader.fieldnames
         rows.extend(reader)
 if fieldnames:
-    with (root / "imagenet_current_fused_lda_all.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    for filename in (
+        "imagenet_current_fused_lda_all.csv",
+        "imagenet_current_summary.csv",
+    ):
+        with (root / filename).open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+PY
+
+python3 - "${STATUS}" "${NCOMP_GRID}" "${CLASSIFIERS}" <<'PY'
+import csv
+import pathlib
+import sys
+
+status_path = pathlib.Path(sys.argv[1])
+expected_rows = len(sys.argv[2].split())
+expected_classifiers = set(sys.argv[3].split())
+with status_path.open(newline="") as handle:
+    statuses = list(csv.DictReader(handle))
+
+observed = {row["classifier"] for row in statuses}
+failures = [row for row in statuses if row.get("status") != "success"]
+if observed != expected_classifiers or failures:
+    raise SystemExit(
+        "ImageNet worker incomplete: "
+        f"expected classifiers={sorted(expected_classifiers)}, "
+        f"observed={sorted(observed)}, failures={failures}"
+    )
+
+for row in statuses:
+    output = pathlib.Path(row["output_csv"])
+    with output.open(newline="") as handle:
+        results = list(csv.DictReader(handle))
+    successful = [result for result in results if result.get("status") == "success"]
+    if len(results) != expected_rows or len(successful) != expected_rows:
+        raise SystemExit(
+            f"{row['classifier']} produced {len(successful)}/{expected_rows} "
+            "successful component rows"
+        )
 PY

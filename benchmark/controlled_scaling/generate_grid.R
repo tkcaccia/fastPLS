@@ -6,7 +6,7 @@ if (length(args) < 2L) {
 }
 
 out_dir <- normalizePath(args[[1L]], winslash = "/", mustWork = FALSE)
-profile <- match.arg(args[[2L]], c("smoke", "publication"))
+profile <- match.arg(args[[2L]], c("smoke", "qualification", "publication"))
 backends <- if (length(args) >= 3L) {
   trimws(strsplit(args[[3L]], ",", fixed = TRUE)[[1L]])
 } else {
@@ -16,7 +16,6 @@ backends <- intersect(backends[nzchar(backends)], c("cpu", "cuda", "metal"))
 if (!length(backends)) stop("No supported backend requested.", call. = FALSE)
 reps <- if (length(args) >= 4L) as.integer(args[[4L]]) else 3L
 if (!is.finite(reps) || reps < 1L) reps <- 3L
-if (identical(profile, "smoke")) reps <- 1L
 
 dir.create(file.path(out_dir, "configs"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_dir, "references"), recursive = TRUE, showWarnings = FALSE)
@@ -244,8 +243,9 @@ for (s in scenarios) {
       cfg <- c(s, r)
       cfg$replicate <- as.integer(replicate)
       cfg$fit_seed <- 123L + replicate
-      cfg$oversample <- if (identical(r$backend, "cuda")) 48L else 20L
-      cfg$power <- if (identical(r$backend, "cuda")) 4L else 2L
+      automatic_controls <- grepl("_rsvd_auto$", r$route)
+      cfg$oversample <- if (automatic_controls) NA_integer_ else 32L
+      cfg$power <- if (automatic_controls) NA_integer_ else 5L
       cfg$reference_file <- reference_file
       cfg$run_id <- paste(s$scenario_id, r$route, paste0("rep", replicate), sep = "__")
       configs[[length(configs) + 1L]] <- cfg
@@ -279,6 +279,8 @@ for (i in seq_along(configs)) {
     backend = cfg$backend,
     svd_method = cfg$svd_method,
     xprod = cfg$xprod,
+    requested_oversample = cfg$oversample,
+    requested_power = cfg$power,
     replicate = cfg$replicate,
     reference = cfg$reference,
     stringsAsFactors = FALSE
@@ -298,7 +300,10 @@ writeLines(c(
   "precision=float64",
   "method=simpls",
   "reference=cpu_irlba_explicit",
-  "rsvd_controls=cpu:oversample20/power2;cuda:oversample48/power4;metal:oversample20/power2_unqualified",
+  paste0(
+    "rsvd_controls=public automatic controls for *_rsvd_auto routes; ",
+    "oversample32/power5 for explicit and implicit qualification routes"
+  ),
   "seed_rule=data_seed fixed by scenario; fit_seed=123+replicate"
 ), file.path(out_dir, "grid_parameters.txt"))
 

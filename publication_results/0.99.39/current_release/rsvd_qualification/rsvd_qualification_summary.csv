@@ -1,0 +1,4 @@
+"backend","control_profiles","effective_controls","comparisons","comparisons_within_tolerance","max_prediction_relative_error","min_prediction_correlation","max_score_relative_error","min_label_agreement","max_metric_absolute_difference"
+"CPU","explicit;high_response_stable;ordinary_fast;sparse_high_class_stable","32/5;48/6;64/7",174,174,0.00215655705167569,0.99999767429253,0.000381999152880756,1,2.97476109301087e-05
+"CUDA","explicit;high_response_stable;ordinary_fast;sparse_high_class_stable","32/5;48/6;64/7",174,174,0.00328271991038115,0.999994611941086,0.000382242273813671,1,3.23421906587851e-05
+"Metal","explicit;high_response_stable;ordinary_fast;sparse_high_class_stable","32/5;48/6;64/7",174,174,3.87995378703943e-05,0.999999999247444,0.000389946204116181,1,4.12109292136087e-07

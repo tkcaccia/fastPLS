@@ -51,13 +51,13 @@ fit <- pls(
   return_loadings = FALSE,
   proj = FALSE,
   seed = 123L,
-  oversample = 20L,
-  power = if (identical(solver, "rsvd")) 2L else 1L
+  oversample = 32L,
+  power = if (identical(solver, "rsvd")) 5L else 1L
 )
 fit_sec <- unname(proc.time()[[3L]] - fit_start)
 
 pred_start <- proc.time()[[3L]]
-prediction <- predict(fit, Xtest)$Ypred
+prediction <- predict(fit, Xtest, backend = backend)$Ypred
 if (length(dim(prediction)) == 3L) prediction <- prediction[, , dim(prediction)[3L], drop = TRUE]
 prediction <- sweep(as.matrix(prediction), 2L, Ymean, "+")
 predicted <- max.col(prediction, ties.method = "first") - 1L
@@ -69,11 +69,14 @@ row <- data.frame(
   source_archive_sha256 = Sys.getenv("FASTPLS_SOURCE_ARCHIVE_SHA256", NA_character_),
   solver = toupper(solver), precision = "float64", replicate = replicate_id,
   n_train = n_train, n_test = n_test, p = p, q = q, ncomp = ncomp,
+  rsvd_oversample = if (identical(solver, "rsvd")) 32L else NA_integer_,
+  rsvd_power = if (identical(solver, "rsvd")) 5L else NA_integer_,
+  seed = 123L,
   fit_sec = fit_sec, prediction_sec = prediction_sec, total_sec = fit_sec + prediction_sec,
   accuracy = mean(predicted == ytest), prediction_checksum = sum(predicted * seq_along(predicted)),
   prefit_rss_mb = prefit_rss_mb,
   retained_output = "final predictions requested; compact fastPLS model retained",
-  numerical_status = if (identical(solver, "rsvd")) "approximate; release-qualified controls oversample=20, power=2, seed=123" else "deterministic reference route",
+  numerical_status = if (identical(solver, "rsvd")) "approximate; evaluated controls oversample=32, power=5, seed=123" else "fixed-control iterative comparator",
   stringsAsFactors = FALSE
 )
 utils::write.csv(row, output_csv, row.names = FALSE)

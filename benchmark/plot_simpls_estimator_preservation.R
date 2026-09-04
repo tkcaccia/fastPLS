@@ -19,14 +19,30 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
   stop("ggplot2 is required.", call. = FALSE)
 }
 
-results <- utils::read.csv(
-  file.path(in_dir, "simpls_estimator_preservation_all_endpoints.csv"),
-  stringsAsFactors = FALSE
+all_endpoints <- file.path(
+  in_dir, "simpls_estimator_preservation_all_endpoints.csv"
 )
+if (file.exists(all_endpoints)) {
+  results <- utils::read.csv(all_endpoints, stringsAsFactors = FALSE)
+} else {
+  result_files <- file.path(
+    in_dir,
+    c(
+      "simpls_estimator_preservation_irlba.csv",
+      "simpls_estimator_approximation_rsvd.csv"
+    )
+  )
+  if (!all(file.exists(result_files))) {
+    stop("Current SIMPLS validation endpoint files are missing.", call. = FALSE)
+  }
+  results <- do.call(rbind, lapply(
+    result_files, utils::read.csv, stringsAsFactors = FALSE
+  ))
+}
 results$solver_label <- factor(
   results$solver,
   levels = c("irlba", "rsvd"),
-  labels = c("Deterministic IRLBA", "Approximate rSVD")
+  labels = c("Fixed-control IRLBA", "Approximate rSVD")
 )
 results$dataset_label <- gsub("^syn_", "Synthetic: ", results$dataset)
 results$dataset_label <- gsub("_", " ", results$dataset_label)

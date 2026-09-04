@@ -69,8 +69,8 @@ Rcpp::List model_to_list(const fastpls::PlsModel<T>& model,
 // [[Rcpp::export]]
 Rcpp::List fastpls_cpp_core_rsvd(SEXP A,
                                  int k,
-                                 int oversample = 20,
-                                 int power = 2,
+                                 int oversample = 32,
+                                 int power = 5,
                                  int seed = 1,
                                  bool use_float = false) {
   if (use_float) {
@@ -100,8 +100,8 @@ Rcpp::List fastpls_cpp_core_rsvd(SEXP A,
 Rcpp::List fastpls_cpp_core_plssvd(SEXP X,
                                    SEXP Y,
                                    int ncomp,
-                                   int oversample = 20,
-                                   int power = 2,
+                                   int oversample = 32,
+                                   int power = 5,
                                    int seed = 1,
                                    bool use_float = false) {
   if (use_float) {
@@ -121,8 +121,8 @@ Rcpp::List fastpls_cpp_core_plssvd(SEXP X,
 Rcpp::List fastpls_cpp_core_simpls(SEXP X,
                                    SEXP Y,
                                    int ncomp,
-                                   int oversample = 20,
-                                   int power = 2,
+                                   int oversample = 32,
+                                   int power = 5,
                                    int seed = 1,
                                    bool use_float = false) {
   if (use_float) {

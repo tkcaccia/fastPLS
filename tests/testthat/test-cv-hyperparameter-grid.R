@@ -1,5 +1,3 @@
-library(fastPLS)
-
 test_that("pls.single.cv tunes prediction hyperparameters", {
   idx <- c(1:12, 51:62, 101:112)
   X <- as.matrix(iris[idx, 1:4])
@@ -165,7 +163,7 @@ test_that("pls refits regression models selected by pls.single.cv", {
   expect_true(any(is.finite(fit$Q2Y)))
 })
 
-test_that("OPLS component selection tolerates unavailable fitted R2 output", {
+test_that("OPLS component selection returns fitted R2 output", {
   idx <- c(1:12, 51:62, 101:112)
   X <- as.matrix(iris[idx, 1:4])
   y <- factor(iris[idx, 5])
@@ -185,6 +183,7 @@ test_that("OPLS component selection tolerates unavailable fitted R2 output", {
 
   expect_true(fit$best_ncomp %in% 1:2)
   expect_length(fit$R2Y, 2L)
-  expect_true(all(is.na(fit$R2Y)))
+  expect_true(all(is.finite(fit$R2Y)))
+  expect_length(fit$Yfit, 2L)
   expect_true(all(is.finite(fit$accuracy)))
 })

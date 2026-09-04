@@ -16,29 +16,26 @@ test prediction as the common requested output. Each method runs three times
 in a fresh process with one CPU thread. Fit time, prediction time,
 complete-process peak RSS, baseline-corrected peak RSS, and accuracy are
 retained. The fastPLS rSVD row uses the release-qualified CPU/CUDA controls
-(oversampling 20, two power iterations, seed 123) and remains labelled
+(32 oversampling directions, five power iterations, seed 123) and remains labelled
 approximate rather than estimator matched.
 
 Run from the repository root:
 
 ```sh
-FASTPLS_BENCH_LIB=/path/to/frozen/library \
-FASTPLS_SOURCE_ARCHIVE_SHA256=<sha256> \
+FASTPLS_BENCH_LIB=/path/to/current/library \
 python3 benchmark/ikpls_cross_language/run_benchmark.py /path/to/results
 ```
 
-The runner gives `FASTPLS_BENCH_LIB` precedence over its legacy temporary
-library path and records `FASTPLS_SOURCE_ARCHIVE_SHA256` in every fastPLS row.
-This prevents an arbitrary installed package from being used in release-level
-evidence.
+The runner gives `FASTPLS_BENCH_LIB` precedence over its temporary-library
+default so that every row is generated with the installed current release.
 
 The Python worker requires `ikpls==6.1.2`, NumPy, pandas, and psutil. The R
 worker requires the reviewed fastPLS release installed in the library selected
 by `R_LIBS`.
 
 `worker_ikpls_jax.py` provides a separately labelled CUDA comparison. It records
-host-to-device transfers, cold JIT compilation plus execution, warm execution,
-device prediction, and result transfer separately. This prevents warm JAX
+host-to-device transfers, cold JIT compilation plus execution, steady-state execution,
+device prediction, and result transfer separately. This prevents JAX compilation
 timings from being compared incorrectly with a first public fastPLS call.
 
 ## Large-case float32 feasibility extension
@@ -85,6 +82,6 @@ count, coefficient-tensor size, status, and failure text. The reported NMR
 50-component tensor size is analytical: `50 * 13000 * 28355 * 4` bytes, or
 68.66 GiB, before other arrays and runtime overhead.
 
-`reference_results_large_float32.csv` contains the archived Chiamaka results
-used in the manuscript. These are single-run feasibility measurements, not
-timing uncertainty estimates.
+The generated large-case table contains the current-release results used in
+the manuscript. These are single-run feasibility measurements, not timing
+uncertainty estimates.

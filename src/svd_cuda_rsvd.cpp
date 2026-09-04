@@ -131,6 +131,20 @@ void check_curand(curandStatus_t code, const char* where) {
   }
 }
 
+void reset_curand_seed(curandGenerator_t generator, unsigned int seed) {
+  check_curand(
+    curandSetPseudoRandomGeneratorSeed(
+      generator,
+      static_cast<unsigned long long>(seed)
+    ),
+    "curandSetPseudoRandomGeneratorSeed"
+  );
+  check_curand(
+    curandSetGeneratorOffset(generator, 0ULL),
+    "curandSetGeneratorOffset"
+  );
+}
+
 void check_cusolver(cusolverStatus_t code, const char* where) {
   if (code != CUSOLVER_STATUS_SUCCESS) {
     throw std::runtime_error(std::string(where) + ": cusolver call failed");
@@ -473,32 +487,21 @@ class CudaRSVDWorkspace {
     int m,
     int l,
     int k,
-    bool use_rr_warm_start,
     unsigned int seed,
     int power_iters,
     double* hSvals
   ) {
     ensure_capacity(p, m, l);
-    check_curand(
-      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)),
-      "curandSetPseudoRandomGeneratorSeed"
-    );
+    reset_curand_seed(rng_, seed);
     check_curand(
       curandGenerateNormalDouble(rng_, dY_, padded_random_elems(p, l), 0.0, 1.0),
       "curandGenerateNormalDouble(Y0)"
     );
-    if (use_rr_warm_start) {
-      check_cublas(
-        cublasDcopy(handle_, p, dRvec_, 1, dY_, 1),
-        "cublasDcopy(rr->Y0)"
-      );
-    }
-
     const double alpha = 1.0;
     const double beta = 0.0;
 
     for (int i = 0; i < power_iters; ++i) {
-      orthonormalize_qr_inplace(p, l);
+      orthonormalize_refresh_inplace(p, l);
       check_cublas(
         cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, m, l, p, &alpha, dA_, p, dY_, p, &beta, dZ_, m),
         "cublasDgemm(S^T*Y)"
@@ -509,7 +512,7 @@ class CudaRSVDWorkspace {
       );
     }
 
-    orthonormalize_qr_inplace(p, l);
+    orthonormalize_refresh_inplace(p, l);
     check_cublas(
       cublasDgemm(handle_, CUBLAS_OP_T, CUBLAS_OP_N, l, m, p, &alpha, dY_, p, dA_, p, &beta, dBsmall_, l),
       "cublasDgemm(Bsmall=Q^T*S)"
@@ -535,32 +538,21 @@ class CudaRSVDWorkspace {
     int l,
     int k,
     int prev_v_cols,
-    bool use_rr_warm_start,
     unsigned int seed,
     int power_iters,
     double* hSvals
   ) {
     ensure_matrix_free_capacity(p, m, l);
-    check_curand(
-      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)),
-      "curandSetPseudoRandomGeneratorSeed"
-    );
+    reset_curand_seed(rng_, seed);
     check_curand(
       curandGenerateNormalDouble(rng_, dY_, padded_random_elems(p, l), 0.0, 1.0),
       "curandGenerateNormalDouble(Y0_implicit)"
     );
-    if (use_rr_warm_start) {
-      check_cublas(
-        cublasDcopy(handle_, p, dRvec_, 1, dY_, 1),
-        "cublasDcopy(rr->Y0_implicit)"
-      );
-    }
-
     for (int i = 0; i < power_iters; ++i) {
       subtract_left_projection_inplace(
         p, l, prev_v_cols, dY_, "implicit_SIMPLS_project_before_power_qr"
       );
-      orthonormalize_qr_inplace(p, l);
+      orthonormalize_refresh_inplace(p, l);
       implicit_at_times_mat_deflated(
         n,
         p,
@@ -590,7 +582,7 @@ class CudaRSVDWorkspace {
       dY_,
       "implicit_SIMPLS_project_before_qr"
     );
-    orthonormalize_qr_inplace(p, l);
+    orthonormalize_refresh_inplace(p, l);
     implicit_bsmall_from_deflated_basis(
       n,
       p,
@@ -966,10 +958,7 @@ class CudaRSVDWorkspace {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
     }
 
-    check_curand(
-      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(opt.seed)),
-      "curandSetPseudoRandomGeneratorSeed"
-    );
+    reset_curand_seed(rng_, opt.seed);
     check_curand(
       curandGenerateNormalDouble(rng_, dOmega_, padded_random_elems(m, l), 0.0, 1.0),
       "curandGenerateNormalDouble(Omega)"
@@ -1150,10 +1139,7 @@ class CudaRSVDWorkspace {
     set_pls_training_matrices(Xtrain.memptr(), n, p, Ytrain.memptr(), m, fit, false);
     ensure_matrix_free_capacity(p, m, l);
 
-    check_curand(
-      curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(opt.seed)),
-      "curandSetPseudoRandomGeneratorSeed"
-    );
+    reset_curand_seed(rng_, opt.seed);
     check_curand(
       curandGenerateNormalDouble(rng_, dOmega_, padded_random_elems(m, l), 0.0, 1.0),
       "curandGenerateNormalDouble(Omega)"
@@ -1310,6 +1296,26 @@ class CudaRSVDWorkspace {
     }
 
     return out;
+  }
+
+  void orthonormalize_refresh_inplace(int m, int l) {
+    if (l == 1) {
+      double norm = 0.0;
+      check_cublas(
+        cublasDnrm2(handle_, m, dY_, 1, &norm),
+        "cublasDnrm2(rank_one_refresh)"
+      );
+      if (!std::isfinite(norm) || norm <= 0.0) {
+        throw std::runtime_error("rank-one randomized refresh has zero norm");
+      }
+      const double inverse = 1.0 / norm;
+      check_cublas(
+        cublasDscal(handle_, m, &inverse, dY_, 1),
+        "cublasDscal(rank_one_refresh)"
+      );
+      return;
+    }
+    orthonormalize_qr_inplace(m, l);
   }
 
   void orthonormalize_qr_inplace(int m, int l) {
@@ -1508,7 +1514,7 @@ class CudaRSVDWorkspace {
     const double* hA,
     int m,
     int n,
-    const double* hY0,
+    unsigned int seed,
     int l,
     int power_iters,
     double* hY
@@ -1517,7 +1523,8 @@ class CudaRSVDWorkspace {
     hOmega_host_.set_size(static_cast<arma::uword>(n), static_cast<arma::uword>(l));
 
     check_cuda(cudaMemcpy(dA_, hA, bytes_for(m, n), cudaMemcpyHostToDevice), "cudaMemcpy(A)");
-    check_cuda(cudaMemcpy(dY_, hY0, bytes_for(m, l), cudaMemcpyHostToDevice), "cudaMemcpy(Y0)");
+    reset_curand_seed(rng_, seed);
+    check_curand(curandGenerateNormalDouble(rng_, dY_, padded_random_elems(m, l), 0.0, 1.0), "curandGenerateNormalDouble(Y0)");
 
     const double alpha = 1.0;
     const double beta = 0.0;
@@ -1550,7 +1557,7 @@ class CudaRSVDWorkspace {
     const double* hA,
     int m,
     int n,
-    const double* hY0,
+    unsigned int seed,
     int l,
     int k,
     int power_iters,
@@ -1559,7 +1566,8 @@ class CudaRSVDWorkspace {
   ) {
     ensure_capacity(m, n, l);
     check_cuda(cudaMemcpy(dA_, hA, bytes_for(m, n), cudaMemcpyHostToDevice), "cudaMemcpy(A)");
-    check_cuda(cudaMemcpy(dY_, hY0, bytes_for(m, l), cudaMemcpyHostToDevice), "cudaMemcpy(Y0)");
+    reset_curand_seed(rng_, seed);
+    check_curand(curandGenerateNormalDouble(rng_, dY_, padded_random_elems(m, l), 0.0, 1.0), "curandGenerateNormalDouble(Y0)");
 
     const double alpha = 1.0;
     const double beta = 0.0;
@@ -1607,7 +1615,6 @@ class CudaRSVDWorkspace {
   void refresh_left_block_u_resident(
     int m,
     int n,
-    const double* hY0,
     int l,
     int k,
     unsigned int seed,
@@ -1616,12 +1623,8 @@ class CudaRSVDWorkspace {
     double* hSvals
   ) {
     ensure_capacity(m, n, l);
-    if (hY0 != nullptr) {
-      check_cuda(cudaMemcpy(dY_, hY0, bytes_for(m, l), cudaMemcpyHostToDevice), "cudaMemcpy(Y0)");
-    } else {
-      check_curand(curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(seed)), "curandSetPseudoRandomGeneratorSeed");
-      check_curand(curandGenerateNormalDouble(rng_, dY_, padded_random_elems(m, l), 0.0, 1.0), "curandGenerateNormalDouble(Y0)");
-    }
+    reset_curand_seed(rng_, seed);
+    check_curand(curandGenerateNormalDouble(rng_, dY_, padded_random_elems(m, l), 0.0, 1.0), "curandGenerateNormalDouble(Y0)");
 
     const double alpha = 1.0;
     const double beta = 0.0;
@@ -1680,7 +1683,7 @@ class CudaRSVDWorkspace {
     ensure_capacity(m, n, l);
     set_matrix(A.memptr(), m, n);
 
-    check_curand(curandSetPseudoRandomGeneratorSeed(rng_, static_cast<unsigned long long>(opt.seed)), "curandSetPseudoRandomGeneratorSeed");
+    reset_curand_seed(rng_, opt.seed);
     check_curand(curandGenerateNormalDouble(rng_, dOmega_, padded_random_elems(n, l), 0.0, 1.0), "curandGenerateNormalDouble(Omega)");
 
     const double alpha = 1.0;
@@ -2218,6 +2221,14 @@ class CudaFloatWorkspace {
       cublasSetStream(blas_, stream_),
       "cublasSetStream(float32 workspace)"
     );
+    check_cusolver(
+      cusolverDnCreate(&solver_),
+      "cusolverDnCreate(float32 workspace)"
+    );
+    check_cusolver(
+      cusolverDnSetStream(solver_, stream_),
+      "cusolverDnSetStream(float32 workspace)"
+    );
     ready_ = true;
   }
 
@@ -2226,11 +2237,68 @@ class CudaFloatWorkspace {
     b.reset();
     c.reset();
     z.reset();
+    tau.reset();
+    qr_work.reset();
+    info.reset();
+    if (solver_ != nullptr) cusolverDnDestroy(solver_);
     if (blas_ != nullptr) cublasDestroy(blas_);
     if (stream_ != nullptr) cudaStreamDestroy(stream_);
+    solver_ = nullptr;
     blas_ = nullptr;
     stream_ = nullptr;
     ready_ = false;
+  }
+
+  void orthonormalize(float* matrix, int rows, int cols, const char* where) {
+    if (rows < cols || cols < 1) {
+      throw std::runtime_error(std::string(where) + ": invalid QR dimensions");
+    }
+    tau.ensure(static_cast<std::size_t>(cols));
+    info.ensure(1U);
+    int lwork_geqrf = 0;
+    int lwork_orgqr = 0;
+    check_cusolver(
+      cusolverDnSgeqrf_bufferSize(
+        solver_, rows, cols, matrix, rows, &lwork_geqrf
+      ),
+      "cusolverDnSgeqrf_bufferSize(float32 rSVD)"
+    );
+    check_cusolver(
+      cusolverDnSorgqr_bufferSize(
+        solver_, rows, cols, cols, matrix, rows, tau.data(), &lwork_orgqr
+      ),
+      "cusolverDnSorgqr_bufferSize(float32 rSVD)"
+    );
+    qr_work.ensure(static_cast<std::size_t>(std::max(lwork_geqrf, lwork_orgqr)));
+    check_cusolver(
+      cusolverDnSgeqrf(
+        solver_, rows, cols, matrix, rows, tau.data(), qr_work.data(),
+        lwork_geqrf, info.data()
+      ),
+      "cusolverDnSgeqrf(float32 rSVD)"
+    );
+    int host_info = 0;
+    check_cuda(
+      cudaMemcpy(&host_info, info.data(), sizeof(int), cudaMemcpyDeviceToHost),
+      "cudaMemcpy(float32 rSVD geqrf info)"
+    );
+    if (host_info != 0) {
+      throw std::runtime_error(std::string(where) + ": float32 geqrf failed");
+    }
+    check_cusolver(
+      cusolverDnSorgqr(
+        solver_, rows, cols, cols, matrix, rows, tau.data(), qr_work.data(),
+        lwork_orgqr, info.data()
+      ),
+      "cusolverDnSorgqr(float32 rSVD)"
+    );
+    check_cuda(
+      cudaMemcpy(&host_info, info.data(), sizeof(int), cudaMemcpyDeviceToHost),
+      "cudaMemcpy(float32 rSVD orgqr info)"
+    );
+    if (host_info != 0) {
+      throw std::runtime_error(std::string(where) + ": float32 orgqr failed");
+    }
   }
 
   cudaStream_t stream() const { return stream_; }
@@ -2240,10 +2308,14 @@ class CudaFloatWorkspace {
   CudaLDADeviceBuffer<float> b;
   CudaLDADeviceBuffer<float> c;
   CudaLDADeviceBuffer<float> z;
+  CudaLDADeviceBuffer<float> tau;
+  CudaLDADeviceBuffer<float> qr_work;
+  CudaLDADeviceBuffer<int> info;
 
  private:
   cudaStream_t stream_ = nullptr;
   cublasHandle_t blas_ = nullptr;
+  cusolverDnHandle_t solver_ = nullptr;
   bool ready_ = false;
 };
 
@@ -2659,12 +2731,18 @@ void cuda_rsvd_sample_y_float(
   );
   const int q = std::max(power_iters, 0);
   for (int i = 0; i < q; ++i) {
+    ws.orthonormalize(
+      ws.c.data(), m, l, "float32 CUDA rSVD left sketch"
+    );
     check_cublas(
       cublasSgemm(
         ws.blas(), CUBLAS_OP_T, CUBLAS_OP_N, n, l, m,
         &alpha, ws.a.data(), m, ws.c.data(), m, &beta, ws.z.data(), n
       ),
       "cublasSgemm(float A^T*Y)"
+    );
+    ws.orthonormalize(
+      ws.z.data(), n, l, "float32 CUDA rSVD right sketch"
     );
     check_cublas(
       cublasSgemm(
@@ -2699,7 +2777,7 @@ void cuda_rsvd_refresh_left_block(
   const double* hA,
   int m,
   int n,
-  const double* hY0,
+  unsigned int seed,
   int l,
   int power_iters,
   double* hY
@@ -2707,14 +2785,14 @@ void cuda_rsvd_refresh_left_block(
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.refresh_left_block(hA, m, n, hY0, l, power_iters, hY);
+  g_workspace.refresh_left_block(hA, m, n, seed, l, power_iters, hY);
 }
 
 void cuda_rsvd_refresh_left_block_u(
   const double* hA,
   int m,
   int n,
-  const double* hY0,
+  unsigned int seed,
   int l,
   int k,
   int power_iters,
@@ -2724,13 +2802,12 @@ void cuda_rsvd_refresh_left_block_u(
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.refresh_left_block_u(hA, m, n, hY0, l, k, power_iters, hUblock, hSvals);
+  g_workspace.refresh_left_block_u(hA, m, n, seed, l, k, power_iters, hUblock, hSvals);
 }
 
 void cuda_rsvd_refresh_left_block_u_resident(
   int m,
   int n,
-  const double* hY0,
   int l,
   int k,
   unsigned int seed,
@@ -2741,7 +2818,7 @@ void cuda_rsvd_refresh_left_block_u_resident(
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.refresh_left_block_u_resident(m, n, hY0, l, k, seed, power_iters, hUblock, hSvals);
+  g_workspace.refresh_left_block_u_resident(m, n, l, k, seed, power_iters, hUblock, hSvals);
 }
 
 void cuda_rsvd_project_left_row(
@@ -2801,7 +2878,6 @@ void cuda_simpls_fast_refresh_block_resident(
   int m,
   int l,
   int k,
-  bool use_rr_warm_start,
   unsigned int seed,
   int power_iters,
   double* hSvals
@@ -2809,7 +2885,9 @@ void cuda_simpls_fast_refresh_block_resident(
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.simpls_fast_refresh_block_resident(p, m, l, k, use_rr_warm_start, seed, power_iters, hSvals);
+  g_workspace.simpls_fast_refresh_block_resident(
+    p, m, l, k, seed, power_iters, hSvals
+  );
 }
 
 void cuda_simpls_fast_refresh_block_implicit_resident(
@@ -2819,7 +2897,6 @@ void cuda_simpls_fast_refresh_block_implicit_resident(
   int l,
   int k,
   int prev_v_cols,
-  bool use_rr_warm_start,
   unsigned int seed,
   int power_iters,
   double* hSvals
@@ -2834,7 +2911,6 @@ void cuda_simpls_fast_refresh_block_implicit_resident(
     l,
     k,
     prev_v_cols,
-    use_rr_warm_start,
     seed,
     power_iters,
     hSvals
@@ -4653,7 +4729,7 @@ void cuda_rsvd_refresh_left_block(
   const double*,
   int,
   int,
-  const double*,
+  unsigned int,
   int,
   int,
   double*
@@ -4665,7 +4741,7 @@ void cuda_rsvd_refresh_left_block_u(
   const double*,
   int,
   int,
-  const double*,
+  unsigned int,
   int,
   int,
   int,
@@ -4678,7 +4754,6 @@ void cuda_rsvd_refresh_left_block_u(
 void cuda_rsvd_refresh_left_block_u_resident(
   int,
   int,
-  const double*,
   int,
   int,
   unsigned int,
@@ -4734,7 +4809,6 @@ void cuda_simpls_fast_refresh_block_resident(
   int,
   int,
   int,
-  bool,
   unsigned int,
   int,
   double*
@@ -4749,7 +4823,6 @@ void cuda_simpls_fast_refresh_block_implicit_resident(
   int,
   int,
   int,
-  bool,
   unsigned int,
   int,
   double*

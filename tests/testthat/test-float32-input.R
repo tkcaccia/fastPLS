@@ -15,7 +15,7 @@ expected_float32_cpu_backend <- function() {
 
 test_that("Windows float32 argmax uses the portable compiled entry point", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   scores <- float::fl(matrix(c(1, 3, 2, 4), nrow = 2L))
   expect_identical(fastPLS:::float32_argmax_cpp(scores), c(2L, 2L))
 })
@@ -48,9 +48,9 @@ test_that("portable float32 OPLS and LDA helpers retain single precision", {
   expect_length(pred$pred, nrow(X))
 })
 
-test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
+test_that("portable Windows float32 CPU implementation preserves float32 PLS data", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   set.seed(149)
   X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")]))
   y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
@@ -85,7 +85,7 @@ test_that("portable Windows float32 CPU fallback preserves float32 PLS data", {
 
 test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   set.seed(1491)
   train <- sample(seq_len(nrow(iris)), 105L)
   Xtrain <- float::fl(as.matrix(iris[train, 1:4]))
@@ -106,9 +106,9 @@ test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
   }
 })
 
-test_that("portable Windows float32 SVD fallback returns float32 vectors", {
+test_that("portable Windows float32 SVD implementation returns float32 vectors", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only fallback")
+  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   set.seed(150)
   A <- float::fl(matrix(rnorm(48), nrow = 12L))
   out <- fastPLS:::.fastsvd_float32_windows(
@@ -304,16 +304,18 @@ test_that("float32 input supports CPU IRLBA-style SVD", {
   Xreg <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")])
   Yreg <- matrix(mtcars$mpg, ncol = 1)
   idx <- sample(seq_len(nrow(Xreg)), 8)
-  fit_reg32 <- pls(
-    float::fl(Xreg[-idx, , drop = FALSE]),
-    float::fl(Yreg[-idx, , drop = FALSE]),
-    float::fl(Xreg[idx, , drop = FALSE]),
-    float::fl(Yreg[idx, , drop = FALSE]),
-    ncomp = 1:2,
-    method = "simpls",
-    backend = "cpu",
-    svd.method = "irlba",
-    return_variance = FALSE
+  fit_reg32 <- suppressWarnings(
+    pls(
+      float::fl(Xreg[-idx, , drop = FALSE]),
+      float::fl(Yreg[-idx, , drop = FALSE]),
+      float::fl(Xreg[idx, , drop = FALSE]),
+      float::fl(Yreg[idx, , drop = FALSE]),
+      ncomp = 1:2,
+      method = "simpls",
+      backend = "cpu",
+      svd.method = "irlba",
+      return_variance = FALSE
+    )
   )
 
   expect_equal(attr(fit_reg32, "fastPLS_internal")$precision, "float32")
@@ -374,10 +376,20 @@ test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
   Y_cuda <- fastPLS:::.float32_from_bits(out$Y)
   Omega <- fastPLS:::.float32_from_bits(out$Omega)
   Y_cpu <- A %*% Omega
-  Y_cpu <- A %*% (crossprod(A, Y_cpu))
+  Qy <- float::qr.Q(float::qr(Y_cpu))
+  Z_cpu <- crossprod(A, Qy)
+  Qz <- float::qr.Q(float::qr(Z_cpu))
+  Y_cpu <- A %*% Qz
 
   expect_true(inherits(Y_cuda, "float32"))
-  expect_equal(as.numeric(Y_cuda), as.numeric(Y_cpu), tolerance = 1e-4)
+  expect_true(all(is.finite(float::dbl(Y_cuda))))
+  Q_cuda <- qr.Q(qr(float::dbl(Y_cuda)))
+  Q_cpu <- qr.Q(qr(float::dbl(Y_cpu)))
+  expect_equal(
+    tcrossprod(Q_cuda),
+    tcrossprod(Q_cpu),
+    tolerance = 1e-4
+  )
 })
 
 test_that("public CUDA float32 rSVD and PLS routes work when available", {
@@ -454,11 +466,20 @@ test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
   Y_metal <- fastPLS:::.float32_from_bits(out$Y)
   Omega <- fastPLS:::.float32_from_bits(out$Omega)
   Y_cpu <- A %*% Omega
-  Y_cpu <- A %*% (crossprod(A, Y_cpu))
+  Qy <- float::qr.Q(float::qr(Y_cpu))
+  Z_cpu <- crossprod(A, Qy)
+  Qz <- float::qr.Q(float::qr(Z_cpu))
+  Y_cpu <- A %*% Qz
 
   expect_true(inherits(Y_metal, "float32"))
   expect_equal(dim(Y_metal), dim(Y_cpu))
-  expect_equal(as.numeric(Y_metal), as.numeric(Y_cpu), tolerance = 1e-3)
+  Q_metal <- qr.Q(qr(float::dbl(Y_metal)))
+  Q_cpu <- qr.Q(qr(float::dbl(Y_cpu)))
+  expect_equal(
+    tcrossprod(Q_metal),
+    tcrossprod(Q_cpu),
+    tolerance = 1e-4
+  )
 })
 
 test_that("Metal float32 IRLBA-style SVD returns a valid approximation", {
@@ -523,6 +544,73 @@ test_that("fastsvd supports public float32 Metal rSVD route", {
   expect_true(inherits(out_irlba$v, "float32"))
   expect_identical(out_irlba$precision, "float32")
   expect_true(all(is.finite(out_irlba$d)))
+})
+
+test_that("float32 accelerator rSVD remains finite for large operators", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  available <- c(
+    if (has_cuda()) "cuda",
+    if (has_metal()) "metal"
+  )
+  skip_if(!length(available), "No accelerator backend is available")
+
+  set.seed(129)
+  A <- float::fl(matrix(rnorm(128L * 96L) * 1e12, nrow = 128L))
+  for (backend in available) {
+    out <- fastsvd(
+      A,
+      ncomp = 3L,
+      backend = backend,
+      method = "rsvd",
+      oversample = 32L,
+      power = 5L,
+      seed = 129L
+    )
+    expect_equal(dim(out$u), c(128L, 3L), info = backend)
+    expect_equal(dim(out$v), c(96L, 3L), info = backend)
+    expect_true(all(is.finite(out$d)), info = backend)
+  }
+})
+
+test_that("float32 accelerator SIMPLS retains a nonempty reduced left basis", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  available <- c(
+    if (has_cuda()) "cuda",
+    if (has_metal()) "metal"
+  )
+  skip_if(!length(available), "No accelerator backend is available")
+
+  set.seed(130)
+  n_classes <- 80L
+  observations_per_class <- 3L
+  X <- float::fl(matrix(
+    rnorm(n_classes * observations_per_class * 96L),
+    nrow = n_classes * observations_per_class
+  ))
+  y <- factor(rep(seq_len(n_classes), each = observations_per_class))
+
+  for (backend in available) {
+    fit <- suppressWarnings(pls(
+      X,
+      y,
+      ncomp = 3L,
+      method = "simpls",
+      backend = backend,
+      svd.method = "rsvd",
+      classifier = "argmax",
+      oversample = 8L,
+      power = 2L,
+      fit = FALSE,
+      return_variance = FALSE,
+      seed = 130L
+    ))
+    expect_equal(dim(fit$R), c(96L, 3L), info = backend)
+    expect_equal(dim(fit$Q), c(n_classes, 3L), info = backend)
+    expect_true(all(is.finite(float::dbl(fit$R))), info = backend)
+    expect_true(all(is.finite(float::dbl(fit$Q))), info = backend)
+  }
 })
 
 test_that("pls supports float32 Metal backend when available", {
@@ -592,8 +680,59 @@ test_that("pls supports the float32 LDA classifier", {
 
   pred_lda <- predict(fit_lda, Xtest, ytest, top = 2)
   expect_true("Ypred_top" %in% names(pred_lda))
+  expect_false("LDA_scores" %in% names(pred_lda))
   expect_named(pred_lda$accuracy, c("ncomp=2", "ncomp=3"))
 
+  raw_lda <- predict(fit_lda, Xtest, raw_scores = TRUE)
+  expected_lda <- fastPLS:::.class_topk_from_score_cube(
+    raw_lda$LDA_scores,
+    fit_lda$lev,
+    attr(fit_lda, "fastPLS_internal")$ncomp,
+    top = 2L
+  )
+  expect_equal(pred_lda$Ypred, expected_lda$Ypred)
+  expect_equal(pred_lda$Ypred_top, expected_lda$Ypred_top)
+  expect_equal(pred_lda$Ypred_top_score, expected_lda$Ypred_top_score)
+
+})
+
+test_that("float32 argmax top-k uses bounded output with unchanged rankings", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(1321)
+  train <- sample(seq_len(nrow(iris)), 120)
+  Xtrain <- float::fl(as.matrix(iris[train, 1:4]))
+  Xtest <- float::fl(as.matrix(iris[-train, 1:4]))
+  ytrain <- droplevels(iris$Species[train])
+
+  fit <- pls(
+    Xtrain,
+    ytrain,
+    ncomp = 1:3,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    return_variance = FALSE,
+    seed = 19
+  )
+  blocked <- predict(fit, Xtest, top = 2L)
+  full <- predict(fit, Xtest, raw_scores = TRUE)
+  expected <- fastPLS:::.class_topk_from_score_cube(
+    full$Yscore,
+    fit$lev,
+    attr(fit, "fastPLS_internal")$ncomp,
+    top = 2L
+  )
+
+  expect_false("Yscore" %in% names(blocked))
+  expect_equal(blocked$Ypred, expected$Ypred)
+  expect_equal(blocked$Ypred_top, expected$Ypred_top)
+  expect_equal(
+    blocked$Ypred_top_score,
+    expected$Ypred_top_score,
+    tolerance = 2e-6
+  )
 })
 
 test_that("float32 OPLS supports regression, classification, and independent prediction", {
@@ -652,11 +791,13 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
   ytest <- factor(iris$Species[-train], levels = levels(ytrain))
 
   for (kernel in c("linear", "rbf", "poly")) {
-    fit32 <- pls(
-      float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
-      ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
-      svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
-      seed = 14
+    fit32 <- suppressWarnings(
+      pls(
+        float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
+        ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
+        svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+        seed = 14
+      )
     )
     fit64 <- pls(
       Xtrain, ytrain, Xtest, ytest,
@@ -683,17 +824,17 @@ test_that("float32 OPLS and kernel PLS use Metal when available", {
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
-  opls_fit <- pls(
+  opls_fit <- suppressWarnings(pls(
     X, y, X[1:12, ], y[1:12], ncomp = 2, method = "opls",
     backend = "metal", svd.method = "rsvd", classifier = "lda",
     return_variance = FALSE,
     seed = 15
-  )
-  kernel_fit <- pls(
+  ))
+  kernel_fit <- suppressWarnings(pls(
     X, y, X[1:12, ], y[1:12], ncomp = 2, method = "kernelpls",
     kernel = "rbf", backend = "metal", svd.method = "rsvd",
     classifier = "lda", return_variance = FALSE, seed = 15
-  )
+  ))
   expect_identical(attr(opls_fit, "fastPLS_internal")$precision, "float32")
   expect_identical(attr(kernel_fit, "fastPLS_internal")$precision, "float32")
   expect_match(opls_fit$opls_engine, "metal")

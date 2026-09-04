@@ -1,0 +1,21 @@
+function_package	measure	metref	ccle	tcga_brca	tcga_hnsc_methylation	gtex_v8	tcga_pan_cancer	cifar100	retina	tabula
+chemometrics: chemometrics::pls_eigen (PLS eigen)	metric	0.8200	0.6761	0.8864	1.000	0.9410	0.8819	0.8741	0.9344	0.7833
+chemometrics: chemometrics::pls_eigen (PLS eigen)	time	0.117 s	0.923 s	1.011 s	0.464 s	3.445 s	1.634 s	34.18 s	0.136 s	0.632 s
+fastPLS simpls CPU irlba	metric	0.9700	0.7183	0.8523	1.000	0.9636	0.9409	0.8912	0.9678	0.8004
+fastPLS simpls CPU irlba	time	0.089 s	0.048 s	0.028 s	0.018 s	0.993 s	0.798 s	16.30 s	0.080 s	0.342 s
+fastPLS simpls CPU irlba LDA	metric	0.9900	0.7746	0.8636	0.9828	0.9699	0.9348	0.8847	0.9691	0.8745
+fastPLS simpls CPU irlba LDA	time	0.101 s	0.056 s	0.029 s	0.020 s	1.305 s	1.031 s	23.36 s	0.090 s	0.286 s
+mdatools: mdatools::plsda or mdatools::pls (SIMPLS/PLS-DA)	metric	0.9700	0.7183	0.8523	1.000	0.9636	0.9409	killed_sig9: Package comparison run terminated by signal 9	0.9678	0.8004
+mdatools: mdatools::plsda or mdatools::pls (SIMPLS/PLS-DA)	time	1.491 s	0.738 s	0.429 s	0.145 s	25.19 s	21.11 s	killed_sig9: Package comparison run terminated by signal 9	3.300 s	20.21 s
+mixOmics: mixOmics::plsda (PLS-DA)	metric	0.9700	0.7183	0.8523	1.000	0.9636	0.9409	killed_timeout: Package comparison run exceeded timeout	0.9678	killed_timeout: Package comparison run exceeded timeout
+mixOmics: mixOmics::plsda (PLS-DA)	time	35.09 s	1.031 s	0.288 s	0.034 s	3337.0 s	3821.7 s	killed_timeout: Package comparison run exceeded timeout	4972.1 s	killed_timeout: Package comparison run exceeded timeout
+pcv: pcv:::simpls (SIMPLS)	metric	0.9700	0.7183	0.8523	1.000	0.9636	0.9409	0.8912	0.9678	0.8004
+pcv: pcv:::simpls (SIMPLS)	time	0.198 s	0.255 s	0.236 s	0.097 s	2.981 s	2.434 s	48.19 s	0.199 s	0.917 s
+pls: pls::simpls.fit (SIMPLS)	metric	0.9700	0.7183	0.8523	1.000	0.9636	0.9409	killed_sig9: Package comparison run terminated by signal 9	0.9678	0.8004
+pls: pls::simpls.fit (SIMPLS)	time	0.257 s	0.057 s	0.027 s	0.013 s	2.860 s	2.474 s	killed_sig9: Package comparison run terminated by signal 9	0.423 s	2.584 s
+plsdepot: plsdepot::simpls (SIMPLS)	metric	0.8400	0.7465	0.8750	1.000	0.9385	0.8849	0.8704	0.9487	0.7834
+plsdepot: plsdepot::simpls (SIMPLS)	time	1.234 s	2.939 s	2.204 s	0.555 s	38.00 s	33.76 s	2096.0 s	0.753 s	4.775 s
+plsgenomics: plsgenomics::pls.lda (PLS-LDA)	metric	0.9900	0.7746	0.8636	0.9828	0.9699	0.9348	0.8847	0.9691	0.8745
+plsgenomics: plsgenomics::pls.lda (PLS-LDA)	time	0.194 s	0.065 s	0.024 s	0.011 s	2.261 s	1.912 s	51.20 s	0.449 s	1.773 s
+spls: spls::splsda (sPLS-DA)	metric	0.9800	0.6901	0.8409	0.9483	0.9737	0.9185	killed_sig9: Package comparison run terminated by signal 9	0.9688	0.8717
+spls: spls::splsda (sPLS-DA)	time	9.140 s	0.991 s	0.204 s	0.024 s	147.2 s	115.1 s	killed_sig9: Package comparison run terminated by signal 9	5.383 s	52.35 s

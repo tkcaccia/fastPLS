@@ -1,17 +1,29 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.35
-Date: 2026-08-31
-Authors@R: c(person("Stefano", "Cacciatore", role = c("aut", "cre"),email = "tkcaccia@gmail.com", comment = c(ORCID = "0000-0001-7052-7156")),
-                person("Dupe", "Ojo", role = "aut",email = "dupe.ojo@icgeb.org", comment = c(ORCID = "0000-0002-5301-8592")),
-                person("Leonardo", "Tenori", role = "aut",email = "tenori@cerm.unifi.it", comment = c(ORCID = "0000-0001-6438-059X")),
-                person("Alessia", "Vignoli", role = "aut",email = "vignoli@cerm.unifi.it", comment = c(ORCID = "0000-0003-4038-6596")))
-Author: Stefano Cacciatore [aut, cre] (<https://orcid.org/0000-0001-7052-7156>),
-    Dupe Ojo [aut] (<https://orcid.org/0000-0002-5301-8592>),
-    Leonardo Tenori [aut] (<https://orcid.org/0000-0001-6438-059X>),
-    Alessia Vignoli [aut] (<https://orcid.org/0000-0003-4038-6596>)
-Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
+Version: 0.99.39
+Date: 2026-09-03
+Authors@R: c(
+    person(
+        "Stefano", "Cacciatore", role = c("aut", "cre"),
+        email = "tkcaccia@gmail.com",
+        comment = c(ORCID = "0000-0001-7052-7156")
+    ),
+    person(
+        "Dupe", "Ojo", role = "aut", email = "dupe.ojo@icgeb.org",
+        comment = c(ORCID = "0000-0002-5301-8592")
+    ),
+    person(
+        "Leonardo", "Tenori", role = "aut",
+        email = "tenori@cerm.unifi.it",
+        comment = c(ORCID = "0000-0001-6438-059X")
+    ),
+    person(
+        "Alessia", "Vignoli", role = "aut",
+        email = "vignoli@cerm.unifi.it",
+        comment = c(ORCID = "0000-0003-4038-6596")
+    )
+    )
 Description: Fast implementations of partial least squares models for
     high-dimensional regression and classification. The package provides
     compiled implementations of PLS-SVD, SIMPLS, OPLS and kernel PLS, together
@@ -37,4 +49,4 @@ NeedsCompilation: yes
 Config/testthat/edition: 3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0

@@ -5,24 +5,52 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-RESULTS_DIR="${FASTPLS_PKG_COMPARE_RESULTS_DIR:-${REPO_ROOT}/benchmark_results_pls_package_comparison}"
+RESULTS_DIR="${FASTPLS_PKG_COMPARE_RESULTS_DIR:-${REPO_ROOT}/publication_results/0.99.39/current_release/r_package_panel}"
 LIB_LOC="${FASTPLS_BENCH_LIB:-}"
 
 # Real-dataset package comparison.  ImageNet is opt-in because several
 # independent R PLS packages materialize dense workspaces and are not practical
 # on that dataset; set FASTPLS_PKG_COMPARE_INCLUDE_IMAGENET=true to include it.
-DATASETS="${FASTPLS_PKG_COMPARE_DATASETS:-metref,ccle,tcga_brca,tcga_hnsc_methylation,gtex_v8,tcga_pan_cancer,retina,tabula,cifar100,prism,nmr,cbmc_citeseq}"
+DATASETS="${FASTPLS_PKG_COMPARE_DATASETS:-metref,ccle,tcga_brca,tcga_hnsc_methylation,gtex_v8,tcga_pan_cancer,retina,tabula,cifar100}"
 if [ "${FASTPLS_PKG_COMPARE_INCLUDE_IMAGENET:-false}" = "true" ]; then
   DATASETS="${DATASETS},imagenet"
 fi
 
 REPS="${FASTPLS_PKG_COMPARE_REPS:-3}"
+SHORT_REPS="${FASTPLS_PKG_COMPARE_SHORT_REPS:-10}"
+SHORT_THRESHOLD_MS="${FASTPLS_PKG_COMPARE_SHORT_THRESHOLD_MS:-1000}"
 TIMEOUT_SEC="${FASTPLS_PKG_COMPARE_TIMEOUT_SEC:-10000}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-METHOD_FILTER="${FASTPLS_PKG_COMPARE_METHODS:-}"
-PRECISION="${FASTPLS_BENCH_PRECISION:-float32}"
+METHOD_FILTER="${FASTPLS_PKG_COMPARE_METHODS:-fastPLS_simpls_cpu_irlba,fastPLS_simpls_cpu_irlba_lda,pls_simpls_fit,plsgenomics_pls_lda,mdatools_plsda_or_pls,plsdepot_simpls,pcv_simpls,chemometrics_pls_eigen,mixOmics_plsda,spls_splsda}"
+PRECISION="${FASTPLS_BENCH_PRECISION:-float64}"
+SELECTED_COMPONENTS_CSV="${FASTPLS_SELECTED_COMPONENTS_CSV:-}"
+
+case "${REPS}:${SHORT_REPS}" in
+  *[!0-9:]*|:*|*:)
+    echo "FASTPLS_PKG_COMPARE_REPS and FASTPLS_PKG_COMPARE_SHORT_REPS must be positive integers." >&2
+    exit 1
+    ;;
+esac
+if [ "${REPS}" -lt 1 ] || [ "${SHORT_REPS}" -lt 1 ]; then
+  echo "Benchmark repetition counts must be at least one." >&2
+  exit 1
+fi
+if [ "${SHORT_REPS}" -lt "${REPS}" ]; then
+  SHORT_REPS="${REPS}"
+fi
+
+if [ -n "${SELECTED_COMPONENTS_CSV}" ]; then
+  if [ ! -s "${SELECTED_COMPONENTS_CSV}" ]; then
+    echo "FASTPLS_SELECTED_COMPONENTS_CSV does not exist or is empty: ${SELECTED_COMPONENTS_CSV}" >&2
+    exit 1
+  fi
+else
+  echo "Set FASTPLS_SELECTED_COMPONENTS_CSV to the current training-selected component table." >&2
+  echo "Inherited component counts are not supported by this publication workflow." >&2
+  exit 1
+fi
 
 mkdir -p "${RESULTS_DIR}/run_rows" "${RESULTS_DIR}/logs"
 
@@ -149,23 +177,18 @@ PY
 }
 
 ncomp_for_dataset() {
-  case "$1" in
-    metref) echo "${FASTPLS_PKG_COMPARE_METREF_NCOMP:-22}" ;;
-    cbmc_citeseq) echo "${FASTPLS_PKG_COMPARE_CBMC_CITESEQ_NCOMP:-50}" ;;
-    ccle) echo "${FASTPLS_PKG_COMPARE_CCLE_NCOMP:-50}" ;;
-    cifar100) echo "${FASTPLS_PKG_COMPARE_CIFAR100_NCOMP:-100}" ;;
-    gtex_v8) echo "${FASTPLS_PKG_COMPARE_GTEX_V8_NCOMP:-32}" ;;
-    imagenet) echo "${FASTPLS_PKG_COMPARE_IMAGENET_NCOMP:-100}" ;;
-    nmr) echo "${FASTPLS_PKG_COMPARE_NMR_NCOMP:-50}" ;;
-    prism) echo "${FASTPLS_PKG_COMPARE_PRISM_NCOMP:-5}" ;;
-    retina) echo "${FASTPLS_PKG_COMPARE_RETINA_NCOMP:-50}" ;;
-    singlecell) echo "${FASTPLS_PKG_COMPARE_SINGLECELL_NCOMP:-50}" ;;
-    tabula) echo "${FASTPLS_PKG_COMPARE_TABULA_NCOMP:-50}" ;;
-    tcga_brca) echo "${FASTPLS_PKG_COMPARE_TCGA_BRCA_NCOMP:-5}" ;;
-    tcga_hnsc_methylation) echo "${FASTPLS_PKG_COMPARE_TCGA_HNSC_METHYLATION_NCOMP:-2}" ;;
-    tcga_pan_cancer) echo "${FASTPLS_PKG_COMPARE_TCGA_PAN_CANCER_NCOMP:-50}" ;;
-    *) echo "${FASTPLS_PKG_COMPARE_NCOMP:-50}" ;;
-  esac
+  Rscript -e '
+    x <- read.csv(commandArgs(TRUE)[1], stringsAsFactors = FALSE)
+    dataset <- commandArgs(TRUE)[2]
+    family_column <- if ("family" %in% names(x)) "family" else "method"
+    component_column <- if ("selected_ncomp" %in% names(x)) "selected_ncomp" else "ncomp"
+    hit <- x[x$dataset == dataset & x[[family_column]] == "simpls", , drop = FALSE]
+    if (nrow(hit) != 1L || !is.finite(hit[[component_column]][[1L]]) ||
+        hit[[component_column]][[1L]] < 1L) {
+      stop("Expected one valid SIMPLS component count for ", dataset)
+    }
+    cat(as.integer(hit[[component_column]][[1L]]))
+  ' "${SELECTED_COMPONENTS_CSV}" "$1"
 }
 
 method_selected() {
@@ -174,6 +197,24 @@ method_selected() {
     return 0
   fi
   printf '%s' "${METHOD_FILTER}" | tr ',' '\n' | grep -qx "${method_id}"
+}
+
+row_runtime_ms() {
+  local row_csv="$1"
+  "${PYTHON_BIN}" - "${row_csv}" <<'PY'
+import csv, math, os, sys
+
+path = sys.argv[1]
+if not os.path.exists(path) or os.path.getsize(path) == 0:
+    print("nan")
+    raise SystemExit(0)
+rows = list(csv.DictReader(open(path, newline="")))
+try:
+    value = float(rows[0].get("total_runtime_ms", "nan"))
+except (IndexError, TypeError, ValueError):
+    value = float("nan")
+print(value if math.isfinite(value) else "nan")
+PY
 }
 
 for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
@@ -189,7 +230,8 @@ for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
       continue
     fi
     rep_id=1
-    while [ "${rep_id}" -le "${REPS}" ]; do
+    target_reps="${REPS}"
+    while [ "${rep_id}" -le "${target_reps}" ]; do
       run_id="${dataset}__${method_id}__n${ncomp}__rep${rep_id}"
       row_csv="${RESULTS_DIR}/run_rows/${run_id}.csv"
       stdout_log="${RESULTS_DIR}/logs/${run_id}.stdout.log"
@@ -237,13 +279,29 @@ for dataset in $(printf '%s' "${DATASETS}" | tr ',' ' '); do
       recorded_status="$(row_status "${row_csv}")"
       case "${recorded_status}" in
         ok)
+          if [ "${rep_id}" -eq 1 ]; then
+            runtime_ms="$(row_runtime_ms "${row_csv}")"
+            if "${PYTHON_BIN}" - "${runtime_ms}" "${SHORT_THRESHOLD_MS}" <<'PY'
+import math, sys
+
+try:
+    runtime = float(sys.argv[1])
+    threshold = float(sys.argv[2])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if math.isfinite(runtime) and runtime < threshold else 1)
+PY
+            then
+              target_reps="${SHORT_REPS}"
+            fi
+          fi
           ;;
         *)
           next_rep=$((rep_id + 1))
-          if [ "${next_rep}" -le "${REPS}" ]; then
+          if [ "${next_rep}" -le "${target_reps}" ]; then
             record_skipped_replicates \
               "${row_csv}" "${dataset}" "${method_id}" "${ncomp}" \
-              "${next_rep}" "${REPS}"
+              "${next_rep}" "${target_reps}"
           fi
           break
           ;;

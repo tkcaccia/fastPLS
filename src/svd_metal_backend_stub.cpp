@@ -4,6 +4,17 @@
 
 namespace fastpls_svd {
 
+namespace {
+
+[[noreturn]] void throw_metal_unavailable() {
+  throw std::runtime_error(
+    "Metal backend is only available on macOS builds with Apple Metal support; "
+    "no CPU fallback is performed"
+  );
+}
+
+} // namespace
+
 bool has_metal_backend() {
   return false;
 }
@@ -11,7 +22,7 @@ bool has_metal_backend() {
 arma::mat metal_matrix_multiply(const arma::mat& A, const arma::mat& B) {
   (void) A;
   (void) B;
-  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+  throw_metal_unavailable();
 }
 
 arma::mat metal_matrix_multiply(const arma::mat& A,
@@ -22,7 +33,7 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
   (void) B;
   (void) transpose_left;
   (void) transpose_right;
-  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+  throw_metal_unavailable();
 }
 
 arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
@@ -33,13 +44,13 @@ arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
   (void) B;
   (void) transpose_left;
   (void) transpose_right;
-  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+  throw_metal_unavailable();
 }
 
 arma::mat metal_crossprod(const arma::mat& A, const arma::mat& B) {
   (void) A;
   (void) B;
-  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+  throw_metal_unavailable();
 }
 
 Rcpp::List metal_simpls_resident(const arma::mat& X,
@@ -52,7 +63,7 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
   (void) ncomp;
   (void) power_iters;
   (void) seed;
-  throw std::runtime_error("Metal backend is only available on macOS builds with Apple Metal support");
+  throw_metal_unavailable();
 }
 
 } // namespace fastpls_svd

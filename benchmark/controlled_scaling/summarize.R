@@ -14,6 +14,54 @@ row_list <- lapply(row_list, function(x) {
 })
 raw <- do.call(rbind, row_list)
 raw <- raw[order(raw$factor_name, raw$factor_value, raw$route, raw$replicate), ]
+direction_fields <- c(
+  "direction_rule", "directions_per_solve", "candidate_block_refresh",
+  "fresh_start", "refresh_width", "refresh_iterations"
+)
+for (field in setdiff(direction_fields, names(raw))) raw[[field]] <- NA
+direction_for_row <- function(row) {
+  randomized <- identical(row$svd_method[[1L]], "rsvd")
+  classification <- identical(row$task_type[[1L]], "classification")
+  response_dimension <- if (classification) row$class_count[[1L]] else row$q[[1L]]
+  batched <- randomized && classification && identical(row$backend[[1L]], "cuda") &&
+    row$n_train[[1L]] >= 5000L && response_dimension > 1L &&
+    response_dimension <= 2048L &&
+    as.double(row$n_train[[1L]]) * as.double(row$p[[1L]]) *
+      as.double(response_dimension) >= 5e8 && row$max_ncomp[[1L]] >= 4L
+  rank_one <- randomized && identical(row$backend[[1L]], "cuda") && !batched &&
+    as.double(row$p[[1L]]) * as.double(response_dimension) * 8 > 512 * 1024^2
+  list(
+    rule = if (batched) {
+      "fresh_cuda_candidate_block"
+    } else if (rank_one) {
+      "fresh_cuda_rank_one_refresh"
+    } else if (randomized) {
+      "fresh_oversampled_sketch_per_component"
+    } else {
+      "fresh_per_component"
+    },
+    directions_per_solve = if (batched) 8L else 1L,
+    candidate_block_refresh = batched,
+    fresh_start = TRUE,
+    refresh_width = if (rank_one) 1L else NA_integer_,
+    refresh_iterations = if (rank_one) 2L else NA_integer_
+  )
+}
+for (index in seq_len(nrow(raw))) {
+  if (!is.na(raw$direction_rule[[index]]) || raw$status[[index]] != "success") {
+    next
+  }
+  direction <- direction_for_row(raw[index, , drop = FALSE])
+  raw$direction_rule[[index]] <- direction$rule
+  raw$directions_per_solve[[index]] <- direction$directions_per_solve
+  raw$candidate_block_refresh[[index]] <- direction$candidate_block_refresh
+  raw$fresh_start[[index]] <- direction$fresh_start
+  raw$refresh_width[[index]] <- direction$refresh_width
+  raw$refresh_iterations[[index]] <- direction$refresh_iterations
+}
+deterministic_fresh <- raw$status == "success" &
+  raw$direction_rule == "fresh_per_component"
+raw$fresh_start[deterministic_fresh] <- TRUE
 write.csv(raw, file.path(out_dir, "controlled_scaling_raw.csv"), row.names = FALSE)
 
 ok <- raw[raw$status == "success", , drop = FALSE]
@@ -37,6 +85,17 @@ summary <- do.call(rbind, lapply(groups, function(x) data.frame(
   svd_method = x$svd_method[1L],
   xprod_requested = x$xprod_requested[1L],
   xprod_used = collapse_unique(x$xprod_used),
+  requested_oversample = med(x$oversample),
+  requested_power = med(x$power),
+  rsvd_control_profile = collapse_unique(x$rsvd_control_profile),
+  direction_rule = collapse_unique(x$direction_rule),
+  directions_per_solve = med(x$directions_per_solve),
+  candidate_block_refresh = collapse_unique(x$candidate_block_refresh),
+  fresh_start = collapse_unique(x$fresh_start),
+  refresh_width = med(x$refresh_width),
+  refresh_iterations = med(x$refresh_iterations),
+  effective_oversample = med(x$rsvd_effective_oversample),
+  effective_power = med(x$rsvd_effective_power),
   n_train = x$n_train[1L], n_test = x$n_test[1L], p = x$p[1L], q = x$q[1L],
   class_count = x$class_count[1L], latent_rank = x$latent_rank[1L],
   max_ncomp = x$max_ncomp[1L], requested_prefixes = x$requested_prefixes[1L],
@@ -266,7 +325,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   ggsave(file.path(out_dir, "controlled_scaling_memory.pdf"), p_mem, width = 8.2, height = 7)
 
   p_num <- ggplot(plot_data[plot_data$task_type == "regression", ], aes(factor_value, median_prediction_relative_error, color = route, group = route)) +
-    geom_hline(yintercept = 0.05, linetype = 2, color = "black") + geom_line() + geom_point() +
+    geom_hline(yintercept = 0.01, linetype = 2, color = "black") + geom_line() + geom_point() +
     facet_wrap(~ factor_name, scales = "free_x", ncol = 3) + scale_x_log10() + scale_y_log10() +
     scale_color_manual(values = route_cols) + labs(x = "Swept factor value", y = "Relative prediction error", color = "Route") + theme_pub
   ggsave(file.path(out_dir, "controlled_scaling_numerical_error.pdf"), p_num, width = 8.2, height = 7)

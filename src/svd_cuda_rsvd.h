@@ -152,7 +152,7 @@ void cuda_rsvd_refresh_left_block(
   const double* hA,
   int m,
   int n,
-  const double* hY0,
+  unsigned int seed,
   int l,
   int power_iters,
   double* hY
@@ -161,7 +161,7 @@ void cuda_rsvd_refresh_left_block_u(
   const double* hA,
   int m,
   int n,
-  const double* hY0,
+  unsigned int seed,
   int l,
   int k,
   int power_iters,
@@ -171,7 +171,6 @@ void cuda_rsvd_refresh_left_block_u(
 void cuda_rsvd_refresh_left_block_u_resident(
   int m,
   int n,
-  const double* hY0,
   int l,
   int k,
   unsigned int seed,
@@ -212,7 +211,6 @@ void cuda_simpls_fast_refresh_block_resident(
   int m,
   int l,
   int k,
-  bool use_rr_warm_start,
   unsigned int seed,
   int power_iters,
   double* hSvals = nullptr
@@ -224,7 +222,6 @@ void cuda_simpls_fast_refresh_block_implicit_resident(
   int l,
   int k,
   int prev_v_cols,
-  bool use_rr_warm_start,
   unsigned int seed,
   int power_iters,
   double* hSvals = nullptr

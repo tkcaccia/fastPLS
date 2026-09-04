@@ -4,8 +4,6 @@ The matched retrieval benchmark is an exploratory computational stress test,
 not an evaluation on the canonical ImageNet training/validation split.
 
 - Source archive: `imagenet_float32.RData`
-- Source SHA-256:
-  `b85fa6bdf7414216cf3f8f03c7d6862f881f1d8f61f61c85e2b6074f9bd5e2eb`
 - Samples: 1,281,167
 - Features: 1,024 precomputed DINOv2 embedding values
 - Classes: 1,000
@@ -15,8 +13,6 @@ not an evaluation on the canonical ImageNet training/validation split.
   complementary 281,167 indices as the development holdout
 - Training/holdout overlap: 0
 - Union of training and holdout indices: 1,281,167
-- Task metadata SHA-256:
-  `f58ba6a2193c7f78a29d96a42b766d325852400a74a73a2b3be9251464655935`
 - Task preparation time: `2026-07-22 17:04:41 SAST`
 
 The exported feature archive contains the 1,281,167 pooled observations but

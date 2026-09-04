@@ -204,12 +204,13 @@ for (method in methods) {
   for (classifier in endpoints) {
     for (outer_index in seq_along(outer_seeds)) {
       outer_seed <- outer_seeds[[outer_index]]
-      already_done <- nrow(existing) &&
-        existing$method == method &&
-        existing$classifier == classifier &&
-        existing$outer_seed == outer_seed &&
-        existing$status == "ok"
-      if (any(already_done)) next
+      already_done <- nrow(existing) > 0L && any(
+        existing$method == method &
+          existing$classifier == classifier &
+          existing$outer_seed == outer_seed &
+          existing$status == "ok"
+      )
+      if (isTRUE(already_done)) next
 
       split <- outer_partition(outer_seed)
       train <- split$train
@@ -259,9 +260,7 @@ for (method in methods) {
             kernel = "linear",
             classifier = if (classification) classifier else "argmax",
             fit = FALSE,
-            selection_metric = if (classification) "accuracy" else "rmsd",
-            oversample = 10L,
-            power = 2L
+            selection_metric = if (classification) "accuracy" else "rmsd"
           ),
           error = function(e) {
             selection_error <<- conditionMessage(e)
@@ -290,9 +289,7 @@ for (method in methods) {
               kernel = "linear",
               fit = FALSE,
               return_variance = FALSE,
-              seed = fit_seed,
-              oversample = 10L,
-              power = 2L
+              seed = fit_seed
             ),
             error = function(e) {
               fit_error <<- conditionMessage(e)
@@ -426,6 +423,7 @@ write.csv(
 writeLines(
   c(
     sprintf("dataset: %s", dataset),
+    sprintf("fastPLS_version: %s", as.character(packageVersion("fastPLS"))),
     sprintf("source: %s", normalizePath(data_path, winslash = "/", mustWork = TRUE)),
     sprintf("n_total: %d", nrow(X)),
     sprintf("p: %d", ncol(X)),
@@ -436,6 +434,7 @@ writeLines(
     sprintf("classifiers: %s", paste(classifiers, collapse = ",")),
     sprintf("backend: %s", backend),
     sprintf("svd_method: %s", svd_method),
+    "rsvd_controls: automatic public defaults selected from each training-fold shape",
     sprintf("inner_seed: %d", inner_seed),
     sprintf("fit_seed: %d", fit_seed),
     "selection wording: best within the evaluated grid; boundary selections are not called optimal"

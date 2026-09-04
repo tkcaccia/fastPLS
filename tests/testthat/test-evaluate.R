@@ -46,6 +46,23 @@ test_that("evaluate computes regression and spectral metrics", {
   expect_false("notes" %in% names(res))
 })
 
+test_that("multivariate R2 and Q2 use response-specific reference means", {
+  observed <- cbind(c(1, 2, 3), c(101, 102, 103))
+  predicted <- observed + 1
+  training <- cbind(c(0, 1, 2), c(100, 101, 102))
+
+  result <- evaluate(observed, predicted, ytrain = training)
+  expected_r2 <- 1 - sum((observed - predicted)^2) /
+    sum(sweep(observed, 2L, colMeans(observed), "-")^2)
+  expected_q2 <- 1 - sum((observed - predicted)^2) /
+    sum(sweep(observed, 2L, colMeans(training), "-")^2)
+
+  expect_equal(result$metrics$R2, expected_r2)
+  expect_equal(result$metrics$Q2, expected_q2)
+  expect_equal(result$metrics$Q2, 0.4)
+  expect_match(result$metric_definitions$Q2, "each response")
+})
+
 test_that("evaluate can omit response-wise regression metrics", {
   observed <- matrix(c(1, 2, 3, 2, 4, 6), nrow = 3, ncol = 2)
   predicted <- observed + 0.1

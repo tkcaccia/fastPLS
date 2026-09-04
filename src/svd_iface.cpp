@@ -57,7 +57,10 @@ SVDResult raw_rsvd(const Mat& A, int k, const SVDOptions& opt, Backend backend) 
 #ifdef FASTPLS_HAS_CUDA
     return truncated_svd_cuda_rsvd(A, k, opt);
 #else
-    throw std::runtime_error("CUDA backend requested but fastPLS was built without CUDA support");
+    throw std::runtime_error(
+      "CUDA backend requested but fastPLS was built without CUDA support; "
+      "no CPU fallback is performed"
+    );
 #endif
   }
   return truncated_svd_cpu_rsvd(A, k, opt);
@@ -370,6 +373,12 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
   if (k < 1) {
     throw std::runtime_error("truncated_svd: k must be >= 1");
   }
+  if (backend == Backend::CUDA && !has_cuda_backend()) {
+    throw std::runtime_error(
+      "CUDA backend requested but no CUDA device is available; "
+      "no CPU fallback is performed"
+    );
+  }
 
   const arma::uword min_dim = std::min(A.n_rows, A.n_cols);
   const bool force_exact = opt.use_full_svd && opt.method != Method::IRLBA;
@@ -399,14 +408,22 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
   if (backend == Backend::CUDA) {
 #ifdef FASTPLS_HAS_CUDA
     if (opt.method == Method::IRLBA) {
-      return truncated_svd_cpu_irlba(A, k, opt);
+      throw std::runtime_error(
+        "IRLBA is not available on the CUDA backend; no CPU fallback is performed"
+      );
     }
     if (opt.method != Method::RSVD) {
-      return truncated_svd_cpu_exact(A, k, opt);
+      throw std::runtime_error(
+        "the requested SVD method is not available on the CUDA backend; "
+        "no CPU fallback is performed"
+      );
     }
     return audited_rsvd(A, k, opt, backend);
 #else
-    throw std::runtime_error("CUDA backend requested but fastPLS was built without CUDA support");
+    throw std::runtime_error(
+      "CUDA backend requested but fastPLS was built without CUDA support; "
+      "no CPU fallback is performed"
+    );
 #endif
   }
 

@@ -2,8 +2,7 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 root <- if (length(args)) path.expand(args[[1L]]) else file.path(
-  "benchmark_results", "manuscript_revision_cycle66_20260726",
-  "repeated_outer"
+  "benchmark_results", "release_0.99.39", "repeated_outer"
 )
 out_dir <- if (length(args) > 1L) path.expand(args[[2L]]) else dirname(root)
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -52,12 +51,8 @@ raw$upper_grid_rank_constrained <- ifelse(
   raw$upper_grid_rank_constrained
 )
 
-# Prefer corrected reruns, then designated final runs, when a smoke test or
-# earlier run shares the same dataset/method/classifier/seed.
-priority <- 2L * grepl("corrected", raw$source_file, fixed = TRUE) +
-  grepl("final", raw$source_file, fixed = TRUE)
 raw <- raw[order(
-  raw$dataset, raw$method, raw$classifier, raw$outer_seed, priority
+  raw$dataset, raw$method, raw$classifier, raw$outer_seed
 ), ]
 raw <- raw[!duplicated(
   raw[c("dataset", "method", "classifier", "outer_seed")],

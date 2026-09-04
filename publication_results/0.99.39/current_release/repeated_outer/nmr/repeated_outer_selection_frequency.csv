@@ -1,0 +1,5 @@
+"dataset","method","classifier","selected_ncomp","count","frequency"
+"nmr","plssvd","regression",50,3,0.6
+"nmr","plssvd","regression",100,2,0.4
+"nmr","simpls","regression",50,4,0.8
+"nmr","simpls","regression",75,1,0.2

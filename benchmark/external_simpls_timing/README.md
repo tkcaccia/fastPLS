@@ -11,9 +11,11 @@ This benchmark separates two questions that must not share the same label.
    object and final held-out predictions. The larger objects produced by the
    default workflows are measured rather than normalized away.
 
-Every repetition starts in a fresh R process. Package loading and data loading
-occur before the timed fit. There is no numerical warm-up. The train/test split, component
-count, float64 precision, one effective BLAS thread, and 10,000-second timeout
+Every cold repetition starts in a fresh R process. Package loading and data
+loading occur before the timed fit. The steady-process profile performs one
+untimed fit and prediction to initialize only package/runtime state; it never
+reuses fitted-model or direction state. The train/test split, component count,
+float64 precision, one effective BLAS thread, and 10,000-second timeout
 are common. Fit, prediction, total time, returned-object sizes, accuracy,
 warnings, failures, and the number of completed repetitions are retained.
 

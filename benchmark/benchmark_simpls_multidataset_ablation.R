@@ -167,7 +167,7 @@ tryCatch({
     )
   })[["elapsed"]])
   predict_time <- unname(system.time({
-    prediction_fit <- predict(model, Xtest, Ytest)
+    prediction_fit <- predict(model, Xtest, Ytest, backend = "cpu")
     prediction <- extract_prediction(
       prediction_fit,
       nrow(Xtest),

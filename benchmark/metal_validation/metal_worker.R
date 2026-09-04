@@ -1,5 +1,10 @@
 #!/usr/bin/env Rscript
 
+benchmark_lib <- Sys.getenv("FASTPLS_BENCH_LIB", "")
+if (nzchar(benchmark_lib)) {
+  .libPaths(unique(c(benchmark_lib, .libPaths())))
+}
+
 suppressPackageStartupMessages({
   library(fastPLS)
 })
@@ -208,8 +213,16 @@ result_template <- function(cfg) {
     q = NA_integer_,
     seed = cfg$seed,
     replicate = cfg$replicate,
-    oversample = cfg$oversample,
-    power = cfg$power,
+    requested_oversample = cfg$oversample,
+    requested_power = cfg$power,
+    control_profile = NA_character_,
+    oversample = NA_integer_,
+    power = NA_integer_,
+    direction_rule = NA_character_,
+    directions_per_solve = NA_integer_,
+    refresh_width = NA_integer_,
+    refresh_iterations = NA_integer_,
+    fresh_start = NA,
     kernel = cfg$kernel,
     north = cfg$north,
     fit_sec = NA_real_,
@@ -251,40 +264,69 @@ tryCatch({
   }
   out$baseline_rss_mb <- rss_mb()
 
+  fit_arguments <- list(
+    Xtrain = task$Xtrain,
+    Ytrain = task$Ytrain,
+    ncomp = cfg$ncomp,
+    scaling = cfg$scaling,
+    method = cfg$method,
+    svd.method = cfg$svd_method,
+    classifier = cfg$classifier,
+    backend = cfg$backend,
+    north = cfg$north,
+    kernel = cfg$kernel,
+    gamma = cfg$gamma,
+    degree = cfg$degree,
+    coef0 = cfg$coef0,
+    fit = FALSE,
+    return_variance = FALSE,
+    return_loadings = isTRUE(cfg$save_diagnostics),
+    seed = cfg$seed
+  )
+  if (is.finite(cfg$oversample)) fit_arguments$oversample <- cfg$oversample
+  if (is.finite(cfg$power)) fit_arguments$power <- cfg$power
+
   fit_elapsed <- system.time({
     fit <- withCallingHandlers(
-      fastPLS::pls(
-        Xtrain = task$Xtrain,
-        Ytrain = task$Ytrain,
-        ncomp = cfg$ncomp,
-        scaling = cfg$scaling,
-        method = cfg$method,
-        svd.method = cfg$svd_method,
-        classifier = cfg$classifier,
-        backend = cfg$backend,
-        north = cfg$north,
-        kernel = cfg$kernel,
-        gamma = cfg$gamma,
-        degree = cfg$degree,
-        coef0 = cfg$coef0,
-        fit = FALSE,
-        return_variance = FALSE,
-        return_loadings = isTRUE(cfg$save_diagnostics),
-        oversample = cfg$oversample,
-        power = cfg$power,
-        seed = cfg$seed
-      ),
+      do.call(fastPLS::pls, fit_arguments),
       warning = function(w) {
         warnings_seen <<- c(warnings_seen, conditionMessage(w))
         invokeRestart("muffleWarning")
       }
     )
   })[["elapsed"]]
+  rsvd_diagnostics <- fit$diagnostics$rsvd
+  if (!is.null(rsvd_diagnostics)) {
+    if (!is.null(rsvd_diagnostics$control_profile)) {
+      out$control_profile <- rsvd_diagnostics$control_profile
+    }
+    if (!is.null(rsvd_diagnostics$oversample)) {
+      out$oversample <- rsvd_diagnostics$oversample
+    }
+    if (!is.null(rsvd_diagnostics$power)) {
+      out$power <- rsvd_diagnostics$power
+    }
+  }
+  direction_diagnostics <- fit$diagnostics$simpls_direction
+  if (!is.null(direction_diagnostics)) {
+    out$direction_rule <- direction_diagnostics$rule %||% NA_character_
+    out$directions_per_solve <-
+      direction_diagnostics$directions_per_solve %||% NA_integer_
+    out$refresh_width <- direction_diagnostics$refresh_width %||% NA_integer_
+    out$refresh_iterations <-
+      direction_diagnostics$refresh_iterations %||% NA_integer_
+    out$fresh_start <- direction_diagnostics$fresh_start %||% NA
+  }
   out$rss_after_fit_mb <- rss_mb()
 
   pred_elapsed <- system.time({
     pred <- withCallingHandlers(
-      predict(fit, task$Xtest, Ytest = task$Ytest),
+      predict(
+        fit,
+        task$Xtest,
+        Ytest = task$Ytest,
+        backend = cfg$backend
+      ),
       warning = function(w) {
         warnings_seen <<- c(warnings_seen, conditionMessage(w))
         invokeRestart("muffleWarning")
@@ -301,16 +343,10 @@ tryCatch({
     as.numeric(pred_vec)
   }
   internal <- attr(fit, "fastPLS_internal")
-  backend_reported <- fit$backend
-  if (is.null(backend_reported) && !is.null(fit$inner_model$backend)) {
-    backend_reported <- fit$inner_model$backend
-  }
-
-  out$backend_reported <- if (length(backend_reported)) {
-    as.character(backend_reported[[1L]])
-  } else {
-    NA_character_
-  }
+  # A successful explicit request proves execution on this backend: public
+  # dispatch errors when CUDA or Metal is unavailable and never changes it to
+  # CPU. The model intentionally does not expose input settings as fields.
+  out$backend_reported <- cfg$backend
   out$prediction_backend <- if (!is.null(internal$predict_backend)) {
     as.character(internal$predict_backend)
   } else {

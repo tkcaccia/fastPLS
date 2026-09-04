@@ -21,7 +21,7 @@ arma::mat metal_crossprod_cpp(const arma::mat& A, const arma::mat& B) {
 Rcpp::List metal_simpls_resident_cpp(const arma::mat& X,
                                      const arma::mat& Y,
                                      int ncomp,
-                                     int power_iters = 2,
+                                     int power_iters = 5,
                                      int seed = 1) {
   return fastpls_svd::metal_simpls_resident(X, Y, ncomp, power_iters, seed);
 }

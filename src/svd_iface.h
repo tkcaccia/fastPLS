@@ -52,8 +52,8 @@ enum class Method {
 
 struct SVDOptions {
   Method method = Method::EXACT;
-  int oversample = 20;
-  int power_iters = 1;
+  int oversample = 32;
+  int power_iters = 5;
   unsigned int seed = 1;
   double svds_tol = 0.0;
   bool left_only = false;

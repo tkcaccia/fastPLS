@@ -1,5 +1,3 @@
-library(fastPLS)
-
 test_that("pls defaults to randomized SVD", {
   set.seed(42)
   X <- matrix(rnorm(70 * 18), nrow = 70, ncol = 18)
@@ -190,8 +188,8 @@ test_that("CPU FlashSVD prediction is the default for compiled PLS", {
       method = method,
       backend = "cpp",
       svd.method = "cpu_rsvd",
-      rsvd_oversample = 8L,
-      rsvd_power = 1L,
+      rsvd_oversample = 32L,
+      rsvd_power = 5L,
       seed = 17L
     )
     flash <- pls(
@@ -201,8 +199,8 @@ test_that("CPU FlashSVD prediction is the default for compiled PLS", {
       method = method,
       backend = "cpp",
       svd.method = "cpu_rsvd",
-      rsvd_oversample = 8L,
-      rsvd_power = 1L,
+      rsvd_oversample = 32L,
+      rsvd_power = 5L,
       seed = 17L
     )
     pred_ref <- predict(ref, X[idx, , drop = FALSE], backend = "cpu")
@@ -304,7 +302,7 @@ test_that("accelerated SIMPLS preserves prediction despite coefficient changes",
   )
   approximate <- pls(
     X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", oversample = 20L, power = 2L, seed = 204L,
+    svd.method = "rsvd", oversample = 20L, power = 5L, seed = 204L,
     fit = TRUE, return_variance = FALSE
   )
 

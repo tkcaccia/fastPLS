@@ -1,0 +1,9 @@
+key	value
+dataset	metref
+n_train	773
+n_test	100
+p	375
+q	22
+ncomp	22
+precision	float64
+preprocessing	training-column centering applied once before both implementations

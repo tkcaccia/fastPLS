@@ -61,8 +61,8 @@ make_config <- function(shape_name, shape, method, backend, replicate) {
     replicate = as.integer(replicate),
     seed = seed,
     data_seed = 777L,
-    oversample = 10L,
-    power = 2L,
+    oversample = 32L,
+    power = 5L,
     svd_method = "rsvd",
     task_path = NULL,
     n_train = as.integer(shape[["n_train"]]),
@@ -177,8 +177,9 @@ for (index in seq_along(runs)) {
   time_path <- file.path(out_dir, paste0(config$run_id, ".time"))
   saveRDS(config, config_path)
 
+  time_flag <- if (identical(Sys.info()[["sysname"]], "Darwin")) "-l" else "-v"
   command_args <- c(
-    "300s", "/usr/bin/time", "-v",
+    "300s", "/usr/bin/time", time_flag,
     file.path(R.home("bin"), "Rscript"),
     worker, config_path, result_path
   )
@@ -212,6 +213,9 @@ for (index in seq_along(runs)) {
 
 raw <- do.call(rbind, rows)
 success <- raw[raw$status == "success" & is.finite(raw$total_sec), , drop = FALSE]
+if (!nrow(success)) {
+  stop("No matched shape run completed; inspect per-run output files.", call. = FALSE)
+}
 keys <- c("dataset", "method", "backend_requested")
 groups <- split(success, interaction(success[keys], drop = TRUE))
 summary_rows <- lapply(groups, function(x) {
@@ -323,8 +327,8 @@ writeLines(
     paste("backends:", paste(backends, collapse = ",")),
     "precision: float64",
     "svd.method: rsvd",
-    "oversample: 10",
-    "power: 1",
+    "oversample: 32",
+    "power: 5",
     "data_seed: 777",
     "rsvd_seeds: 101/102/103",
     "replicates: 3",

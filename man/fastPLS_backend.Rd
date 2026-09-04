@@ -8,10 +8,13 @@ fastPLS_backend(backend = NULL)
 }
 \arguments{
 \item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or
-\code{"metal"}.}
+\code{"metal"}. Setting or retrieving the session backend rejects an
+unavailable accelerator immediately; fastPLS does not silently substitute
+the CPU backend.}
 }
 \value{
-The active backend. Setting returns the previous option invisibly.
+The configured, available backend. Setting returns the previous
+option invisibly.
 }
 \description{
 An explicit function argument takes precedence over
@@ -25,8 +28,9 @@ when the installed numerical library supports runtime thread control;
 sequential PLS deflation steps remain serial.
 }
 \examples{
+old_options <- options(backend = NULL)
 current <- fastPLS_backend()
 current
-previous <- fastPLS_backend("cpu")
-fastPLS_backend(previous)
+fastPLS_backend("cpu")
+options(old_options)
 }
