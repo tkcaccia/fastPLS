@@ -1,2 +1,0 @@
-"selected_ncomp","minimum_mean_ncomp","one_se_threshold","eligible_ncomp","selection_rule","lower_boundary_selected","upper_boundary_selected","largest_tested_ncomp","last_relative_improvement","n_splits_requested","n_splits_successful"
-50,50,0.000960446198724475,"50,75,100","smallest component count within one standard error of the minimum mean validation RMSD",FALSE,FALSE,300,-0.00976911854915634,5,5

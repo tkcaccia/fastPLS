@@ -1,9 +1,0 @@
-key	value
-dataset	breast
-n_train	150
-n_test	70
-p	200
-q	3
-ncomp	10
-precision	float64
-preprocessing	training-column centering applied once before both implementations

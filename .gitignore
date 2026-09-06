@@ -15,29 +15,13 @@ src/symbols.rds
 src/Makevars
 src/svd_metal_backend.mm
 *_results/
-# Keep only compact benchmark tables in Git. Generated matrices, fitted objects,
-# figures, worker logs, copied data, and installed libraries remain local.
-!publication_results/
-publication_results/**
-!publication_results/**/
-!publication_results/**/*.tsv
-!publication_results/**/*summary*.csv
-!publication_results/**/*manifest*.csv
-!publication_results/**/*raw.csv
-!publication_results/**/*paired*.csv
-!publication_results/**/*failure*.csv
-!publication_results/**/*validation*.csv
-!publication_results/**/*result_table*.csv
-!publication_results/**/*selection*.csv
-!publication_results/**/*qualification*.csv
-!publication_results/**/*comparison*.csv
-!publication_results/**/*agreement*.csv
-!publication_results/**/*concordance*.csv
-!publication_results/**/*timing*.csv
-!publication_results/**/*memory*.csv
+# Generated evidence remains local until it is frozen in a separate results
+# repository. The installable package repository never tracks benchmark output.
+publication_results/
 nvidia_*_results/
 .bench-lib*/
 .fastpls-*-lib*/
+.metal-audit-lib*/
 benchmark/results/
 benchmark_results*/
 package_check_artifacts*/
@@ -46,8 +30,5 @@ publication_release_*/
 fastPLS.BiocCheck/
 ..Rcheck/
 output/
-scripts/*cycle*.py
-tools/*cycle*.py
-tools/__pycache__/
 __pycache__/
 *.pyc

@@ -256,46 +256,14 @@ All lower-level C++, CUDA, OPLS, kernel PLS, SVD-dispatch, and KODAMA-oriented
 helpers are internal implementation details. Benchmarks should use the same
 public API as package users.
 
-## Reproducible Benchmark Pipeline
+## Reproducible Benchmarks
 
-The standard real-dataset benchmark is:
-
-```sh
-scripts/remote_run_dataset_memory_compare.sh
-```
-
-It writes one raw row per run and regenerates 4x4 plots with:
-
-- columns: `plssvd`, `simpls`, `opls`, `kernelpls`
-- rows: total time, predictive metric, peak host RSS, peak GPU memory
-- color: SVD/backend (`irlba`, `rsvd_cpu`, `rsvd_cuda`, `pls_pkg`)
-- line type: prediction rule (`argmax`, `LDA`)
-
-The standard simulated variable-sweep benchmark is:
-
-```sh
-benchmark/workflow_synthetic_variable_sweeps.sh
-```
-
-or directly:
-
-```sh
-Rscript benchmark/benchmark_synthetic_variable_sweeps.R
-Rscript benchmark/plot_synthetic_variable_sweeps.R <results_dir>
-```
-
-Important environment controls:
-
-- `FASTPLS_RUN_TIMEOUT_SEC`: per-run timeout for real datasets.
-- `FASTPLS_COMPARE_REPS`: number of replicates for real datasets.
-- `FASTPLS_STORE_B`: `auto`, `always`, or `never`.
-- `FASTPLS_STORE_B_MAX_MB`: automatic coefficient-cube storage threshold.
-- `FASTPLS_SYNTH_VAR_TIMEOUT_SEC`: per-run timeout for simulated sweeps.
-- `FASTPLS_SYNTH_VAR_MAX_HOST_RSS_MB`: RAM cap for simulated sweeps.
-
-By default, simulated sweeps vary sample size, predictor dimension, and response
-dimension/classes. Noise sweeps are not part of the standard simulated
-benchmark.
+Benchmark runners, numerical-validation studies, and the code that generates
+manuscript tables and figures are maintained in the separate
+`tkcaccia/fastPLS-extra` repository. This repository contains only the
+installable package, its tests, and user documentation. Generated benchmark
+results are not tracked here; a frozen evidence archive will be published
+separately for the manuscript release.
 
 ## References
 

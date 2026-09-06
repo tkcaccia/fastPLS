@@ -1,8 +1,0 @@
-"diagnostic","threshold"
-"operator_relative_error",1e-10
-"prediction_relative_error",1e-04
-"coefficient_relative_error",0.001
-"max_predictive_score_angle_deg",0.1
-"max_orthogonal_score_angle_deg",0.1
-"classification_label_disagreement",0.005
-"metric_absolute_difference",0.005
