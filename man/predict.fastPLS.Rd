@@ -32,9 +32,10 @@ training.}
 Operation-split Metal models predict on CPU because their retained
 matrices are host-accessible; Metal is used for fitting sample-matrix
 products.
-When omitted, the session backend setting is used. \code{"auto"} retains the
-backend stored in the fitted model. An unavailable CUDA or Metal selection
-raises an error; prediction is never silently moved to CPU.}
+When omitted, an explicit session backend setting is used; otherwise the
+backend stored in the fitted model is retained. \code{"auto"} always retains
+the fitted backend. An unavailable CUDA or Metal selection raises an error;
+prediction is never silently moved to CPU.}
 
 \item{n.cores}{Number of CPU cores requested for compiled host operations.
 An explicit value takes precedence over \code{options(n.cores = ...)}.

@@ -17,6 +17,14 @@ test_that("Metal keeps fixed operation ownership for large regression shapes", {
         )
         expect_identical(fit$diagnostics$residency$component_updates, "cpu")
         expect_match(fit$diagnostics$residency$cross_products, "Metal")
+        expect_match(
+            fit$diagnostics$metal_operation_split$batched_sequences,
+            "one Metal command buffer"
+        )
+        expect_match(
+            fit$diagnostics$metal_operation_split$batched_sequences,
+            "CPU centering correction"
+        )
         expect_equal(dim(fit$Ttrain), c(n, 5L), info = method)
         expect_true(all(is.finite(fit$R2Y)), info = method)
 

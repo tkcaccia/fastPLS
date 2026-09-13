@@ -60,7 +60,9 @@ at the corresponding numerical rank and report the effective counts.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
+\item{fit}{Return fitted values, training scores, and \code{R2Y} when
+\code{TRUE}. The default \code{FALSE} keeps only the compact state required for
+prediction and avoids materializing training-only outputs.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in \code{metrics}. The default \code{FALSE} returns only aggregate metrics.}
@@ -129,12 +131,10 @@ per requested component count. Common fields are:
 \item \code{Q}: response loadings or response-side latent coefficients.
 \item \code{R}: predictor weights/rotations used to project new samples into the PLS
 latent space.
-\item \code{Ttrain}: training latent scores. Resident CUDA fits materialize this
-host-side matrix only when \code{fit = TRUE}; with \code{fit = FALSE}, CUDA scores
-remain on the device only as long as required to prepare compact
-prediction or LDA state. Operation-split Metal fits use host-accessible
-scores for the CPU component of the calculation. Compiled
-cross-validation continues to return its documented score outputs.
+\item \code{Ttrain}: training latent scores when \code{fit = TRUE}. With
+\code{fit = FALSE}, classification routes retain only the compact state needed
+for prediction or LDA fitting and do not return the full training-score matrix.
+Compiled cross-validation continues to return its documented score outputs.
 \item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by
 PLS-SVD-style compact prediction when a full coefficient array is
 avoided.
@@ -227,7 +227,9 @@ fit.
 Base R numeric matrices use float64. Supplying \code{float::float32} predictors
 or numeric responses requests float32 execution without silent promotion.
 CUDA supports float32 and float64. The Apple Metal route requires float32
-and divides work between CPU code and persistent Metal workspaces.
+and divides work between CPU code and persistent Metal workspaces. Consecutive
+products in the implicit transpose cross-covariance operator share one Metal
+command buffer and synchronize before the CPU response-centering correction.
 Unsupported backend and precision combinations stop rather than silently
 falling back to CPU.
 

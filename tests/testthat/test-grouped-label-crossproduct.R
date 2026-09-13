@@ -101,6 +101,33 @@ test_that("compact float32 class prediction matches retained-score paths", {
                 lapply(compact, as.character),
                 lapply(retained, as.character)
             )
+            if (identical(classifier, "lda")) {
+                portable <- fastPLS:::.fastpls_restore_internal_output_fields(
+                    fit
+                )
+                scores <- fastPLS:::.float32_train_scores(
+                    portable, predictors
+                )
+                components <- as.integer(portable$ncomp)
+                portable$lda$models <-
+                    fastPLS:::.float32_portable_lda_train_prefix(
+                        scores, as.integer(labels), nlevels(labels),
+                        components
+                    )
+                names(portable$lda$models) <- as.character(components)
+                portable$lda$train_backend <- "float32_portable_lda"
+                compact_portable <- predict(
+                    portable, predictors, backend = "cpu"
+                )$Ypred
+                retained_portable <- predict(
+                    portable, predictors, backend = "cpu",
+                    raw_scores = TRUE
+                )$Ypred
+                expect_identical(
+                    lapply(compact_portable, as.character),
+                    lapply(retained_portable, as.character)
+                )
+            }
         }
     }
 })

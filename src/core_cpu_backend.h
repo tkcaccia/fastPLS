@@ -67,6 +67,14 @@ class CpuLinearAlgebraF32 {
   bool symmetric_eigen(core::Matrix<float>& matrix,
                        std::vector<float>& eigenvalues) const;
 
+  bool cholesky_solve(core::ConstMatrixView<float> matrix,
+                      core::ConstMatrixView<float> right,
+                      core::Matrix<float>& solution) const;
+
+  bool general_solve(core::ConstMatrixView<float> matrix,
+                     core::ConstMatrixView<float> right,
+                     core::Matrix<float>& solution) const;
+
   bool svd_economy(core::ConstMatrixView<float> input,
                    bool left_only,
                    core::Matrix<float>& u,
@@ -98,6 +106,14 @@ class CpuLinearAlgebraF64 {
 
   bool symmetric_eigen(core::Matrix<double>& matrix,
                        std::vector<double>& eigenvalues) const;
+
+  bool cholesky_solve(core::ConstMatrixView<double> matrix,
+                      core::ConstMatrixView<double> right,
+                      core::Matrix<double>& solution) const;
+
+  bool general_solve(core::ConstMatrixView<double> matrix,
+                     core::ConstMatrixView<double> right,
+                     core::Matrix<double>& solution) const;
 
   bool svd_economy(core::ConstMatrixView<double> input,
                    bool left_only,

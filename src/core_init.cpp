@@ -80,6 +80,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_kernel_matrix_cpp, 6),
   FASTPLS_CALL(_fastPLS_center_kernel_test_cpp, 3),
   FASTPLS_CALL(_fastPLS_opls_filter_core_cpp, 4),
+  FASTPLS_CALL(_fastPLS_opls_filter_rsvd_core_cpp, 7),
   FASTPLS_CALL(_fastPLS_opls_filter_labels_core_cpp, 5),
   FASTPLS_CALL(_fastPLS_opls_filter_float32_core_cpp, 7),
   FASTPLS_CALL(_fastPLS_opls_filter_float32_labels_core_cpp, 5),
@@ -94,7 +95,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_pls_class_predict_topk_core_cpp, 5),
   FASTPLS_CALL(_fastPLS_pls_float32_class_predict_compact_cpp, 4),
   FASTPLS_CALL(_fastPLS_lda_project_train_prefix_float32_cpp, 5),
-  FASTPLS_CALL(_fastPLS_pls_float32_labels_backend_core_cpp, 12),
+  FASTPLS_CALL(_fastPLS_pls_float32_labels_backend_core_cpp, 13),
   {nullptr, nullptr, 0}
 };
 

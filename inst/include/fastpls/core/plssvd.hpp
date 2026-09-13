@@ -20,6 +20,20 @@ struct PlssvdControls {
   RsvdControls rsvd;
 };
 
+inline bool plssvd_prefer_predictor_gram(
+    std::size_t samples, std::size_t predictors, std::size_t components) {
+  if (samples == 0 || predictors == 0 || components == 0) return false;
+  const long double n = static_cast<long double>(samples);
+  const long double p = static_cast<long double>(predictors);
+  const long double k = static_cast<long double>(components);
+  const long double predictor_gram_storage = p * p;
+  const long double score_storage = n * k;
+  const long double predictor_gram_work = n * p * p + p * p * k;
+  const long double score_gram_work = n * p * k + n * k * k;
+  return predictor_gram_storage <= score_storage &&
+    predictor_gram_work <= score_gram_work;
+}
+
 inline std::size_t plssvd_retained_components(
     const int* components, std::size_t count, std::size_t rank_bound) {
   if (components == nullptr || count == 0 || rank_bound == 0) {
@@ -47,6 +61,7 @@ struct PlssvdModel {
   Matrix<T> weights;
   Matrix<T> response_loadings;
   Matrix<T> scores;
+  Matrix<T> score_gram;
   std::vector<Matrix<T>> latent_coefficients;
   std::vector<Matrix<T>> prediction_weights;
   std::vector<T> singular_values;
@@ -59,7 +74,8 @@ PlssvdModel<T> assemble_plssvd_model(
     ConstMatrixView<T> predictors, std::size_t response_count,
     const int* components, std::size_t component_count,
     SingularTriplets<T>& decomposition, Backend& backend,
-    ConstMatrixView<T> predictor_gram = ConstMatrixView<T>()) {
+    ConstMatrixView<T> predictor_gram = ConstMatrixView<T>(),
+    bool retain_scores = true) {
   const std::size_t predictor_count = predictor_gram.empty() ?
     predictors.columns() : predictor_gram.rows();
   if (predictor_count == 0 || response_count == 0 || components == nullptr ||
@@ -115,14 +131,33 @@ PlssvdModel<T> assemble_plssvd_model(
         "fastPLS PLS-SVD requires predictors or their Gram matrix"
       );
     }
-    model.scores.resize(predictors.rows(), retained);
-    backend.gemm(
-      predictors, model.weights.view(), false, false, model.scores.view()
-    );
-    backend.gemm(
-      model.scores.view(), model.scores.view(), true, false,
-      full_gram.view()
-    );
+    if (!retain_scores && plssvd_prefer_predictor_gram(
+          predictors.rows(), predictors.columns(), retained)) {
+      Matrix<T> computed_predictor_gram(
+        predictors.columns(), predictors.columns()
+      );
+      backend.self_gram(
+        predictors, true, computed_predictor_gram.view(), true
+      );
+      Matrix<T> gram_weights(predictors.columns(), retained);
+      backend.gemm(
+        computed_predictor_gram.view(), model.weights.view(), false, false,
+        gram_weights.view()
+      );
+      backend.gemm(
+        model.weights.view(), gram_weights.view(), true, false,
+        full_gram.view()
+      );
+    } else {
+      model.scores.resize(predictors.rows(), retained);
+      backend.gemm(
+        predictors, model.weights.view(), false, false, model.scores.view()
+      );
+      backend.gemm(
+        model.scores.view(), model.scores.view(), true, false,
+        full_gram.view()
+      );
+    }
   } else {
     Matrix<T> gram_weights(predictor_count, retained);
     backend.gemm(
@@ -134,6 +169,7 @@ PlssvdModel<T> assemble_plssvd_model(
       full_gram.view()
     );
   }
+  model.score_gram = full_gram;
 
   model.latent_coefficients.reserve(component_count);
   model.prediction_weights.reserve(component_count);
@@ -148,7 +184,9 @@ PlssvdModel<T> assemble_plssvd_model(
       }
     }
     Matrix<T> latent;
-    if (!solve_symmetric_system(gram.view(), diagonal.view(), latent)) {
+    if (!backend.cholesky_solve(
+          gram.view(), diagonal.view(), latent) &&
+        !backend.general_solve(gram.view(), diagonal.view(), latent)) {
       throw std::runtime_error("fastPLS PLS-SVD latent solve failed");
     }
     Matrix<T> weights(count, response_count);
@@ -189,7 +227,7 @@ PlssvdModel<T> fit_plssvd_from_moments(
   );
   return assemble_plssvd_model<T>(
     ConstMatrixView<T>(), crosscov.columns(), components, component_count,
-    decomposition, backend, predictor_gram
+    decomposition, backend, predictor_gram, false
   );
 }
 
@@ -197,7 +235,8 @@ template<class T, class Backend>
 PlssvdModel<T> fit_plssvd_preprocessed(
     ConstMatrixView<T> predictors, ConstMatrixView<T> crosscov,
     const int* components, std::size_t component_count,
-    const PlssvdControls& controls, Backend& backend) {
+    const PlssvdControls& controls, Backend& backend,
+    bool retain_scores = true) {
   if (predictors.empty() || crosscov.empty() || components == nullptr ||
       component_count == 0 || crosscov.rows() != predictors.columns()) {
     throw std::invalid_argument(
@@ -215,7 +254,7 @@ PlssvdModel<T> fit_plssvd_preprocessed(
   );
   return assemble_plssvd_model(
     predictors, crosscov.columns(), components, component_count,
-    decomposition, backend
+    decomposition, backend, ConstMatrixView<T>(), retain_scores
   );
 }
 
@@ -251,10 +290,11 @@ template<class T, class Backend>
 PlssvdModel<T> fit_plssvd_preprocessed(
     MatrixView<T> predictors, MatrixView<T> crosscov,
     const int* components, std::size_t component_count,
-    const PlssvdControls& controls, Backend& backend) {
+    const PlssvdControls& controls, Backend& backend,
+    bool retain_scores = true) {
   return fit_plssvd_preprocessed(
     ConstMatrixView<T>(predictors), ConstMatrixView<T>(crosscov), components,
-    component_count, controls, backend
+    component_count, controls, backend, retain_scores
   );
 }
 

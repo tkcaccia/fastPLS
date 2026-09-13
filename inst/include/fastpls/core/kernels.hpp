@@ -17,6 +17,14 @@ namespace core {
 enum class KernelType { linear = 1, radial_basis = 2, polynomial = 3 };
 
 template<class T>
+inline void compensated_add(T value, T& sum, T& correction) {
+  const T adjusted = value - correction;
+  const T updated = sum + adjusted;
+  correction = (updated - sum) - adjusted;
+  sum = updated;
+}
+
+template<class T>
 void kernel_from_dots(ConstMatrixView<T> left,
                       ConstMatrixView<T> right,
                       MatrixView<T> dots,
@@ -44,12 +52,20 @@ void kernel_from_dots(ConstMatrixView<T> left,
 
   std::vector<T> left_norm(left.rows(), T(0));
   std::vector<T> right_norm(right.rows(), T(0));
+  std::vector<T> left_correction(left.rows(), T(0));
+  std::vector<T> right_correction(right.rows(), T(0));
   for (std::size_t feature = 0; feature < left.columns(); ++feature) {
     for (std::size_t row = 0; row < left.rows(); ++row) {
-      left_norm[row] += left(row, feature) * left(row, feature);
+      compensated_add(
+        left(row, feature) * left(row, feature),
+        left_norm[row], left_correction[row]
+      );
     }
     for (std::size_t row = 0; row < right.rows(); ++row) {
-      right_norm[row] += right(row, feature) * right(row, feature);
+      compensated_add(
+        right(row, feature) * right(row, feature),
+        right_norm[row], right_correction[row]
+      );
     }
   }
   const T tolerance = std::is_same<T, float>::value ? T(1e-5) : T(1e-10);
@@ -133,14 +149,21 @@ KernelCentering<T> center_kernel_train(MatrixView<T> kernel) {
   KernelCentering<T> result;
   result.column_means.assign(kernel.columns(), T(0));
   std::vector<T> row_means(kernel.rows(), T(0));
+  std::vector<T> row_corrections(kernel.rows(), T(0));
+  T grand_correction = T(0);
   for (std::size_t column = 0; column < kernel.columns(); ++column) {
+    T column_correction = T(0);
     for (std::size_t row = 0; row < kernel.rows(); ++row) {
       const T value = kernel(row, column);
-      result.column_means[column] += value;
-      row_means[row] += value;
+      compensated_add(
+        value, result.column_means[column], column_correction
+      );
+      compensated_add(value, row_means[row], row_corrections[row]);
     }
     result.column_means[column] /= static_cast<T>(kernel.rows());
-    result.grand_mean += result.column_means[column];
+    compensated_add(
+      result.column_means[column], result.grand_mean, grand_correction
+    );
   }
   result.grand_mean /= static_cast<T>(kernel.columns());
   for (T& value : row_means) value /= static_cast<T>(kernel.columns());
@@ -166,8 +189,9 @@ void center_kernel_test(MatrixView<T> kernel,
   }
   for (std::size_t row = 0; row < kernel.rows(); ++row) {
     T row_mean = T(0);
+    T row_correction = T(0);
     for (std::size_t column = 0; column < kernel.columns(); ++column) {
-      row_mean += kernel(row, column);
+      compensated_add(kernel(row, column), row_mean, row_correction);
     }
     row_mean /= static_cast<T>(kernel.columns());
     for (std::size_t column = 0; column < kernel.columns(); ++column) {

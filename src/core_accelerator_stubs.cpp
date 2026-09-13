@@ -75,6 +75,25 @@ bool metal_core_gemm_accumulate_into_f32(
   return false;
 }
 
+void* metal_crosscov_transpose_workspace_create_f32(
+    fastpls::core::ConstMatrixView<float>,
+    fastpls::core::ConstMatrixView<float>) {
+  throw std::runtime_error(
+    "Metal backend requested but this fastPLS build has no Metal support"
+  );
+}
+
+void metal_crosscov_transpose_workspace_destroy_f32(void*) noexcept {}
+
+bool metal_crosscov_transpose_apply_f32(
+    void*, fastpls::core::ConstMatrixView<float>,
+    fastpls::core::MatrixView<float>,
+    fastpls::core::MatrixView<float>) {
+  throw std::runtime_error(
+    "Metal backend requested but this fastPLS build has no Metal support"
+  );
+}
+
 bool metal_core_rank1_subtract_f32(
     fastpls::core::MatrixView<float>,
     fastpls::core::ConstMatrixView<float>,

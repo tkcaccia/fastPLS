@@ -222,7 +222,6 @@ test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
 
 test_that("portable Windows float32 SVD implementation returns float32 vectors", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   set.seed(150)
   A <- float::fl(matrix(rnorm(48), nrow = 12L))
   out <- fastPLS:::.fastsvd_float32_windows(
@@ -365,6 +364,64 @@ test_that("float32 label-aware products match dense one-hot fitting", {
   }
 })
 
+test_that("float32 SIMPLS borrowed moments remain numerically concordant", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(152)
+  n <- 400L
+  X <- float::fl(matrix(rnorm(n * 24L), n, 24L))
+  y <- factor(sample(letters[1:5], n, replace = TRUE))
+  dense_y <- float::fl(fastPLS:::transformy(as.integer(y)))
+
+  compact <- fastPLS:::pls_float32_labels_backend_core_cpp(
+    X, as.integer(y), nlevels(y), c(10L, 20L), 2L, TRUE,
+    3L, 20L, 2L, 152L, 0L
+  )
+  dense <- fastPLS:::pls_float32_matrix_backend_core_cpp(
+    X, dense_y, c(10L, 20L), 2L, TRUE,
+    3L, 20L, 2L, 152L, 0L
+  )
+
+  expect_identical(
+    compact$xprod_mode, "float32_borrowed_label_moments_blocked"
+  )
+  compact_scores <- float::dbl(
+    fastPLS:::.float32_from_bits(compact$Ttrain)
+  )
+  projection <- float::dbl(fastPLS:::.float32_from_bits(compact$R))
+  center <- float::dbl(fastPLS:::.float32_from_bits(compact$mX))
+  scale <- float::dbl(fastPLS:::.float32_from_bits(compact$vX))
+  standardized <- sweep(float::dbl(X), 2L, center, "-")
+  standardized <- sweep(standardized, 2L, scale, "/")
+  expect_equal(compact_scores, standardized %*% projection, tolerance = 2e-5)
+  for (index in seq_along(compact$Yfit)) {
+    compact_fit <- float::dbl(
+      fastPLS:::.float32_from_bits(compact$Yfit[[index]])
+    )
+    dense_fit <- float::dbl(
+      fastPLS:::.float32_from_bits(dense$Yfit[[index]])
+    )
+    # OpenBLAS and Accelerate accumulate the equivalent float32 moment and
+    # materialized paths in different orders; preserve predictions while
+    # bounding the resulting dummy-response score difference.
+    expect_lte(max(abs(compact_fit - dense_fit)), 1e-2)
+    expect_gte(
+      mean(max.col(compact_fit) == max.col(dense_fit)),
+      0.99
+    )
+  }
+  expect_lte(max(abs(compact$R2Y - dense$R2Y)), 2e-5)
+
+  public <- pls(
+    X, y, ncomp = c(10L, 20L), method = "simpls",
+    scaling = "autoscaling", classifier = "lda", fit = TRUE,
+    backend = "cpu", seed = 152L
+  )
+  expect_identical(public$lda$train_backend, "float32_cpp_projected_lda")
+  expect_s4_class(public$Ttrain, "float32")
+  expect_equal(dim(public$Ttrain), c(n, 20L))
+})
+
 test_that("dependency-free float32 PLS-SVD preserves compact predictions", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
@@ -450,7 +507,7 @@ test_that("float32 classification avoids fitted and double-score work by default
   ))
 
   expect_null(fit$Yfit)
-  expect_identical(fit$xprod_mode, "float32_label_class_sums_blocked")
+  expect_identical(fit$xprod_mode, "float32_borrowed_label_moments_blocked")
   pred <- predict(fit, X)
   expect_true(is.factor(pred$Ypred[["ncomp=4"]]))
 
@@ -762,17 +819,33 @@ test_that("pls supports the float32 LDA classifier", {
   expect_equal(attr(fit_lda, "fastPLS_internal")$classification_rule, "lda_cpp")
   expect_true(all(vapply(fit_lda$Ypred, is.factor, logical(1))))
   expect_named(fit_lda$accuracy, c("ncomp=2", "ncomp=3"))
-  expect_true(inherits(fit_lda$Ttrain, "float32"))
-  expect_equal(dim(fit_lda$Ttrain), c(nrow(Xtrain), 3L))
+  expect_null(fit_lda$Ttrain)
 
-  Xscaled <- sweep(float::dbl(Xtrain), 2L, as.numeric(float::dbl(fit_lda$mX)), "-")
-  Xscaled <- sweep(Xscaled, 2L, as.numeric(float::dbl(fit_lda$vX)), "/")
-  expected_scores <- Xscaled %*% float::dbl(fit_lda$R)
+  fit_lda_scores <- pls(
+    Xtrain,
+    ytrain,
+    ncomp = 2:3,
+    method = "simpls",
+    backend = "cpu",
+    classifier = "lda",
+    fit = TRUE,
+    return_variance = FALSE
+  )
+  expect_true(inherits(fit_lda_scores$Ttrain, "float32"))
+  expect_equal(dim(fit_lda_scores$Ttrain), c(nrow(Xtrain), 3L))
+
+  Xscaled <- sweep(float::dbl(Xtrain), 2L,
+    as.numeric(float::dbl(fit_lda_scores$mX)), "-")
+  Xscaled <- sweep(Xscaled, 2L,
+    as.numeric(float::dbl(fit_lda_scores$vX)), "/")
+  expected_scores <- Xscaled %*% float::dbl(fit_lda_scores$R)
   expect_equal(
-    unname(float::dbl(fit_lda$Ttrain)),
+    unname(float::dbl(fit_lda_scores$Ttrain)),
     unname(expected_scores),
     tolerance = 2e-4
   )
+  predicted_with_scores <- predict(fit_lda_scores, Xtest)
+  expect_identical(predicted_with_scores$Ypred, fit_lda$Ypred)
 
   pred_lda <- predict(fit_lda, Xtest, ytest, top = 2)
   expect_true("Ypred_top" %in% names(pred_lda))
@@ -926,6 +999,9 @@ test_that("Metal operation split supports OPLS and nonlinear kernel PLS", {
       fit$diagnostics$residency$route,
       "CPU/Metal hybrid (operation split)"
     )
+    if (identical(arguments$method, "opls")) {
+      expect_identical(fit$opls_filter_engine, "float32_cpu")
+    }
   }
 })
 

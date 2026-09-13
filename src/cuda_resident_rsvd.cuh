@@ -19,7 +19,10 @@ inline void require_random(curandStatus_t s) {
 }
 template<class T> inline void configure_blas_math(cublasHandle_t) {}
 template<> inline void configure_blas_math<float>(cublasHandle_t handle) {
-    require_blas(cublasSetMathMode(handle,CUBLAS_TF32_TENSOR_OP_MATH));
+    // Float32 routes must perform float32 multiplication, not TF32 tensor-core
+    // multiplication with a reduced mantissa. This keeps CUDA numerically
+    // comparable with the CPU and Metal float32 implementations.
+    require_blas(cublasSetMathMode(handle,CUBLAS_PEDANTIC_MATH));
 }
 template<class T> struct Decomposition;
 #define FASTPLS_DEVICE_DECOMPOSITION(T,P,NORMAL) \

@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Stefano Cacciatore
 #include "core_cpu_backend.h"
 
+#include <fastpls/core/linalg.hpp>
+
 #include <R_ext/Lapack.h>
 #include <R_ext/RS.h>
 
@@ -35,6 +37,12 @@ void F77_NAME(sgesdd)(const char*, const La_INT*, const La_INT*, float*,
                       const La_INT*, float*, float*, const La_INT*, float*,
                       const La_INT*, float*, const La_INT*, La_INT*, La_INT*
                       FCLEN);
+void F77_NAME(spotrf)(const char*, const La_INT*, float*, const La_INT*,
+                      La_INT* FCLEN);
+void F77_NAME(spotrs)(const char*, const La_INT*, const La_INT*, const float*,
+                      const La_INT*, float*, const La_INT*, La_INT* FCLEN);
+void F77_NAME(sgesv)(const La_INT*, const La_INT*, float*, const La_INT*,
+                     La_INT*, float*, const La_INT*, La_INT*);
 }
 #endif
 
@@ -392,6 +400,72 @@ bool CpuLinearAlgebraF32::symmetric_eigen(
   return info == 0;
 #else
   return portable_symmetric_eigen(matrix, eigenvalues);
+#endif
+}
+
+bool CpuLinearAlgebraF32::cholesky_solve(
+    core::ConstMatrixView<float> matrix,
+    core::ConstMatrixView<float> right,
+    core::Matrix<float>& solution) const {
+  if (matrix.rows() != matrix.columns() || right.rows() != matrix.rows()) {
+    throw std::invalid_argument(
+      "fastPLS float32 Cholesky-solve dimensions are inconsistent"
+    );
+  }
+#if defined(FASTPLS_HAS_F32_LAPACK)
+  const La_INT n = lapack_dimension(matrix.rows(), "Cholesky solve");
+  const La_INT nrhs = lapack_dimension(right.columns(), "Cholesky solve");
+  if (n == 0) {
+    solution.resize(0, right.columns());
+    return true;
+  }
+  const La_INT lda = std::max<La_INT>(1, n);
+  const La_INT ldb = std::max<La_INT>(1, n);
+  core::Matrix<float> factor = contiguous_copy(matrix);
+  solution = contiguous_copy(right);
+  const char lower = 'L';
+  La_INT info = 0;
+  F77_CALL(spotrf)(&lower, &n, factor.data(), &lda, &info FCONE);
+  if (info != 0) return false;
+  F77_CALL(spotrs)(
+    &lower, &n, &nrhs, factor.data(), &lda, solution.data(), &ldb,
+    &info FCONE
+  );
+  return info == 0;
+#else
+  return core::cholesky_solve(matrix, right, solution);
+#endif
+}
+
+bool CpuLinearAlgebraF32::general_solve(
+    core::ConstMatrixView<float> matrix,
+    core::ConstMatrixView<float> right,
+    core::Matrix<float>& solution) const {
+  if (matrix.rows() != matrix.columns() || right.rows() != matrix.rows()) {
+    throw std::invalid_argument(
+      "fastPLS float32 linear-solve dimensions are inconsistent"
+    );
+  }
+#if defined(FASTPLS_HAS_F32_LAPACK)
+  const La_INT n = lapack_dimension(matrix.rows(), "linear solve");
+  const La_INT nrhs = lapack_dimension(right.columns(), "linear solve");
+  if (n == 0) {
+    solution.resize(0, right.columns());
+    return true;
+  }
+  const La_INT lda = std::max<La_INT>(1, n);
+  const La_INT ldb = std::max<La_INT>(1, n);
+  core::Matrix<float> factor = contiguous_copy(matrix);
+  solution = contiguous_copy(right);
+  std::vector<La_INT> pivots(static_cast<std::size_t>(n));
+  La_INT info = 0;
+  F77_CALL(sgesv)(
+    &n, &nrhs, factor.data(), &lda, pivots.data(), solution.data(), &ldb,
+    &info
+  );
+  return info == 0;
+#else
+  return core::pivoted_solve(matrix, right, solution);
 #endif
 }
 

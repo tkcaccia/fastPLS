@@ -50,9 +50,10 @@ test_that("CV uses selection as its public tuning argument", {
 })
 
 test_that("prediction block sizing is internal", {
-  expect_false("flash.block_size" %in% names(formals(predict.fastPLS)))
-  expect_false("top5" %in% names(formals(predict.fastPLS)))
-  expect_null(formals(predict.fastPLS)$top)
+  predict_fastpls <- getS3method("predict", "fastPLS")
+  expect_false("flash.block_size" %in% names(formals(predict_fastpls)))
+  expect_false("top5" %in% names(formals(predict_fastpls)))
+  expect_null(formals(predict_fastpls)$top)
 
   X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
   fit <- pls(X, mtcars$mpg, ncomp = 2, backend = "cpu")

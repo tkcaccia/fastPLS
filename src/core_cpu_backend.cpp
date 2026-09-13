@@ -225,6 +225,13 @@ bool use_symmetric_kernel(std::size_t dimension, std::size_t rank,
   }
   return dimension >= 768;
 #else
+  // OpenBLAS SGEMM is faster for tall, narrow float32 cross-products, while
+  // SSYRK wins once the retained predictor dimension is moderately wide.
+#if !defined(_WIN32)
+  if constexpr (std::is_same<T, float>::value) {
+    if (transpose_input && dimension < 128) return false;
+  }
+#endif
   // Avoid multithreaded SYRK launch overhead only for truly tiny products.
 #if defined(_WIN32)
   if constexpr (std::is_same<T, float>::value) {

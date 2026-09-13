@@ -592,7 +592,7 @@ std::vector<LdaModel<T>> train_lda_from_predictor_moments(
   );
   return train_lda_prefixes_from_moments<T>(
     score_gram.view(), class_score_sums.view(), class_counts.data(),
-    class_counts.size(), sample_count, components, prefix_count
+    class_counts.size(), sample_count, components, prefix_count, backend
   );
 }
 

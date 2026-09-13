@@ -128,6 +128,21 @@ fastpls::core::Matrix<float> download(const MetalMatrix& source) {
   return result;
 }
 
+void download_into(const MetalMatrix& source,
+                   fastpls::core::MatrixView<float> destination) {
+  if (source.columns != destination.rows() ||
+      source.rows != destination.columns()) {
+    throw std::invalid_argument("Metal download dimensions differ");
+  }
+  const char* base = static_cast<const char*>([source.buffer contents]);
+  for (std::size_t column = 0; column < destination.columns(); ++column) {
+    const void* input = base + column * source.row_bytes;
+    float* output = destination.data() +
+      column * destination.leading_dimension();
+    std::memcpy(output, input, destination.rows() * sizeof(float));
+  }
+}
+
 MetalMatrix stage_or_wrap(fastpls::core::ConstMatrixView<float> source) {
   if (can_wrap_shared(source)) return wrap_shared(source);
   MetalMatrix result = allocate_matrix(source.columns(), source.rows());
@@ -297,6 +312,82 @@ class SampleGramWorkspace {
   MPSMatrixMultiplication* forward = nil;
   MPSMatrixMultiplication* sample_product = nil;
   MPSMatrixMultiplication* reverse = nil;
+};
+
+class CrosscovTransposeWorkspace {
+ public:
+  CrosscovTransposeWorkspace(
+      fastpls::core::ConstMatrixView<float> predictors,
+      fastpls::core::ConstMatrixView<float> responses)
+      : n(predictors.rows()), p(predictors.columns()),
+        q(responses.columns()), predictors(stage_or_wrap(predictors)),
+        responses(stage_or_wrap(responses)) {
+    if (responses.rows() != n || n == 0 || p == 0 || q == 0) {
+      throw std::invalid_argument(
+        "Metal cross-covariance workspace dimensions differ"
+      );
+    }
+    predictor_matrix = mps_matrix(this->predictors);
+    response_matrix = mps_matrix(this->responses);
+    if (predictor_matrix == nil || response_matrix == nil) {
+      throw std::runtime_error(
+        "Metal failed to create cross-covariance matrix objects"
+      );
+    }
+  }
+
+  void configure(std::size_t columns) {
+    if (columns == active_columns) return;
+    right = allocate_matrix(columns, p);
+    intermediate = allocate_matrix(columns, n);
+    output = allocate_matrix(columns, q);
+    right_matrix = mps_matrix(right);
+    intermediate_matrix = mps_matrix(intermediate);
+    output_matrix = mps_matrix(output);
+    predictor_product = [[MPSMatrixMultiplication alloc]
+      initWithDevice:metal_device()
+      transposeLeft:NO
+      transposeRight:NO
+      resultRows:columns
+      resultColumns:n
+      interiorColumns:p
+      alpha:1.0
+      beta:0.0];
+    response_product = [[MPSMatrixMultiplication alloc]
+      initWithDevice:metal_device()
+      transposeLeft:NO
+      transposeRight:YES
+      resultRows:columns
+      resultColumns:q
+      interiorColumns:n
+      alpha:1.0
+      beta:0.0];
+    if (right_matrix == nil || intermediate_matrix == nil ||
+        output_matrix == nil || predictor_product == nil ||
+        response_product == nil) {
+      throw std::runtime_error(
+        "Metal failed to configure cross-covariance multiplication"
+      );
+    }
+    active_columns = columns;
+  }
+
+  std::size_t n;
+  std::size_t p;
+  std::size_t q;
+  std::size_t active_columns = 0;
+  MetalMatrix predictors;
+  MetalMatrix responses;
+  MetalMatrix right;
+  MetalMatrix intermediate;
+  MetalMatrix output;
+  MPSMatrix* predictor_matrix = nil;
+  MPSMatrix* response_matrix = nil;
+  MPSMatrix* right_matrix = nil;
+  MPSMatrix* intermediate_matrix = nil;
+  MPSMatrix* output_matrix = nil;
+  MPSMatrixMultiplication* predictor_product = nil;
+  MPSMatrixMultiplication* response_product = nil;
 };
 
 }  // namespace
@@ -482,6 +573,72 @@ bool metal_core_gemm_accumulate_into_f32(
   return metal_core_gemm_into_f32_impl(
     left, right, transpose_left, transpose_right, output, 1.0f
   );
+}
+
+void* metal_crosscov_transpose_workspace_create_f32(
+    fastpls::core::ConstMatrixView<float> predictors,
+    fastpls::core::ConstMatrixView<float> responses) {
+  if (!has_metal_backend()) {
+    throw std::runtime_error(
+      "Metal is unavailable; no CPU fallback is performed"
+    );
+  }
+  @autoreleasepool {
+    return new CrosscovTransposeWorkspace(predictors, responses);
+  }
+}
+
+void metal_crosscov_transpose_workspace_destroy_f32(
+    void* workspace) noexcept {
+  if (workspace == nullptr) return;
+  @autoreleasepool {
+    delete static_cast<CrosscovTransposeWorkspace*>(workspace);
+  }
+}
+
+bool metal_crosscov_transpose_apply_f32(
+    void* opaque_workspace,
+    fastpls::core::ConstMatrixView<float> right,
+    fastpls::core::MatrixView<float> intermediate,
+    fastpls::core::MatrixView<float> output) {
+  auto* workspace =
+    static_cast<CrosscovTransposeWorkspace*>(opaque_workspace);
+  if (workspace == nullptr || right.rows() != workspace->p ||
+      intermediate.rows() != workspace->n ||
+      output.rows() != workspace->q || right.columns() == 0 ||
+      intermediate.columns() != right.columns() ||
+      output.columns() != right.columns()) {
+    throw std::invalid_argument(
+      "Metal cross-covariance transpose dimensions differ"
+    );
+  }
+  @autoreleasepool {
+    workspace->configure(right.columns());
+    upload(right, workspace->right);
+    id<MTLCommandBuffer> command = [metal_queue() commandBuffer];
+    if (command == nil) {
+      throw std::runtime_error("Metal failed to create a command buffer");
+    }
+    [workspace->predictor_product encodeToCommandBuffer:command
+      leftMatrix:workspace->right_matrix
+      rightMatrix:workspace->predictor_matrix
+      resultMatrix:workspace->intermediate_matrix];
+    [workspace->response_product encodeToCommandBuffer:command
+      leftMatrix:workspace->intermediate_matrix
+      rightMatrix:workspace->response_matrix
+      resultMatrix:workspace->output_matrix];
+    [command commit];
+    [command waitUntilCompleted];
+    if ([command error] != nil) {
+      throw std::runtime_error(
+        std::string("Metal cross-covariance transpose failed: ") +
+        [[[command error] localizedDescription] UTF8String]
+      );
+    }
+    download_into(workspace->intermediate, intermediate);
+    download_into(workspace->output, output);
+  }
+  return true;
 }
 
 bool metal_core_rank1_subtract_f32(

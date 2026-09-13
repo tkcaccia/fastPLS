@@ -234,7 +234,11 @@ assembly, LDA, and prediction. Persistent Metal workspaces perform fitting
 products involving the training sample matrix. These include explicit
 cross-covariance formation,
 fused score/loading products, and randomized range-finder products when the
-cross-covariance is represented implicitly. The smaller cross-covariance and
+cross-covariance is represented implicitly. In the transpose part of that
+implicit operator, consecutive products `X V` and `Y^T (X V)` share one Metal
+command buffer and one final synchronization before the CPU applies the
+response-centering correction. Reusable buffers and Metal matrix objects are
+retained for this sequence during the fit. The smaller cross-covariance and
 component-state operations remain on the CPU. This mathematical assignment is
 fixed and does not switch according to dataset dimensions.
 The route requires Metal support and float32 input and never silently converts
@@ -1437,9 +1441,12 @@ SIMPLS, OPLS, and kernel PLS with Metal Performance Shaders. It returns
 host-accessible model factors and always uses a
 fixed mathematical division: Metal performs fitting products involving the
 training sample matrix, including explicit cross-covariance formation, fused
-score/loading products, and implicit randomized range-finder products; CPU code performs the
-reduced decomposition, sequential PLS algebra, LDA, prediction, and model
-assembly. Dataset dimensions never select a complete CPU or Metal route. The
+score/loading products, and implicit randomized range-finder products. Where
+the implicit transpose operator requires consecutive `X V` and `Y^T (X V)`
+products, both are encoded in one command buffer and synchronized once before
+the CPU response-centering correction. CPU code performs the reduced
+decomposition, sequential PLS algebra, LDA, prediction, and model assembly.
+Dataset dimensions never select a complete CPU or Metal route. The
 executed path, storage decision, and randomized controls are reported in
 `diagnostics$metal_operation_split`. Ordinary R double matrices produce an
 explicit error rather than silently falling back to the CPU; use `float::fl()`

@@ -98,6 +98,7 @@ LabelCrossprodResult<T> scaled_label_crossprod_impl(
   }
   LabelCrossprodResult<T> result;
   result.crossprod.resize(predictors.columns(), class_count);
+  result.class_predictor_sums.resize(predictors.columns(), class_count);
   result.predictor_center.assign(predictors.columns(), T(0));
   result.predictor_scale.assign(predictors.columns(), T(1));
   result.response_mean.assign(class_count, T(0));
@@ -125,13 +126,20 @@ LabelCrossprodResult<T> scaled_label_crossprod_impl(
   std::vector<T> class_sums(class_count);
   for (std::size_t predictor = 0;
        predictor < predictors.columns(); ++predictor) {
+    std::fill(class_sums.begin(), class_sums.end(), T(0));
+    T total = T(0);
     if (scaling != PredictorScaling::none) {
       T sum = T(0);
       T sum_squares = T(0);
       for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
         const T value = predictors(sample, predictor);
         sum += value;
-        sum_squares += value * value;
+        if (scaling == PredictorScaling::autoscaling) {
+          sum_squares += value * value;
+        }
+        if (form_crossprod) {
+          class_sums[static_cast<std::size_t>(labels[sample])] += value;
+        }
       }
       result.predictor_center[predictor] =
         sum / static_cast<T>(predictors.rows());
@@ -150,31 +158,38 @@ LabelCrossprodResult<T> scaled_label_crossprod_impl(
         }
         result.predictor_scale[predictor] = standard_deviation;
       }
-    }
-
-    if (scaling == PredictorScaling::none && !form_crossprod) {
-      continue;
-    }
-    std::fill(class_sums.begin(), class_sums.end(), T(0));
-    T total = T(0);
-    for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
-      const std::size_t label = static_cast<std::size_t>(labels[sample]);
-      const T standardized =
-        (predictors(sample, predictor) -
-         result.predictor_center[predictor]) /
-        result.predictor_scale[predictor];
-      if (scaled_predictors != nullptr &&
-          scaling != PredictorScaling::none) {
-        scaled_predictors[sample + predictor * scaled_leading_dimension] =
-          standardized;
+      if (scaled_predictors != nullptr) {
+        const T center = result.predictor_center[predictor];
+        const T scale = result.predictor_scale[predictor];
+        for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+          scaled_predictors[sample + predictor * scaled_leading_dimension] =
+            (predictors(sample, predictor) - center) / scale;
+        }
       }
       if (form_crossprod) {
-        class_sums[label] += standardized;
-        total += standardized;
+        const T center = result.predictor_center[predictor];
+        const T scale = result.predictor_scale[predictor];
+        total = (sum - static_cast<T>(predictors.rows()) * center) / scale;
+        for (std::size_t response = 0; response < class_count; ++response) {
+          class_sums[response] =
+            (class_sums[response] - result.class_counts[response] * center) /
+            scale;
+        }
       }
+    } else if (form_crossprod) {
+      for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+        const std::size_t label = static_cast<std::size_t>(labels[sample]);
+        const T value = predictors(sample, predictor);
+        class_sums[label] += value;
+        total += value;
+      }
+    } else {
+      continue;
     }
     if (form_crossprod) {
       for (std::size_t response = 0; response < class_count; ++response) {
+        result.class_predictor_sums(predictor, response) =
+          class_sums[response];
         result.crossprod(predictor, response) = class_sums[response] -
           total * result.response_mean[response];
       }
@@ -270,6 +285,8 @@ bool label_crossprod_from_runs(
        predictor < predictors.columns(); ++predictor) {
     T total = T(0);
     for (std::size_t response = 0; response < class_count; ++response) {
+      result.class_predictor_sums(predictor, response) =
+        result.crossprod(predictor, response);
       total += result.crossprod(predictor, response);
     }
     for (std::size_t response = 0; response < class_count; ++response) {
@@ -316,6 +333,13 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
     MatrixView<T> predictors, const Label* labels,
     std::size_t label_count, std::size_t class_count,
     PredictorScaling scaling, Backend& backend) {
+  if (scaling != PredictorScaling::none) {
+    return scaled_label_crossprod_impl(
+      ConstMatrixView<T>(predictors), predictors.data(),
+      predictors.leading_dimension(), labels, label_count, class_count,
+      scaling, true
+    );
+  }
   auto result = scaled_label_crossprod_impl(
     ConstMatrixView<T>(predictors), predictors.data(),
     predictors.leading_dimension(), labels, label_count, class_count, scaling,
@@ -324,15 +348,9 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
   if (!label_crossprod_from_runs(
       ConstMatrixView<T>(predictors), labels, label_count, class_count,
       result, backend)) {
-    // The predictor buffer is already centered/scaled; only the class sums
-    // may be recomputed here, otherwise preprocessing statistics are lost.
-    std::vector<T> center_offset(class_count);
-    for (std::size_t response = 0; response < class_count; ++response) {
-      center_offset[response] = -result.response_mean[response];
-    }
-    centered_label_crossprod(
-      ConstMatrixView<T>(predictors), labels, label_count,
-      center_offset.data(), class_count, result.crossprod.view()
+    return scaled_label_crossprod(
+      ConstMatrixView<T>(predictors), labels, label_count, class_count,
+      scaling
     );
   }
   return result;

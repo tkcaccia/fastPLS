@@ -15,6 +15,14 @@
 namespace fastpls_device {
 
 template<class T>
+__device__ inline void compensated_device_add(T value,T& sum,T& correction) {
+    const T adjusted=value-correction;
+    const T updated=sum+adjusted;
+    correction=(updated-sum)-adjusted;
+    sum=updated;
+}
+
+template<class T>
 __global__ void opls_difference(T* out,const T* loading,const T* weight,
                                 const T* ratio,int size) {
     for(int i=blockIdx.x*blockDim.x+threadIdx.x;i<size;
@@ -44,10 +52,10 @@ __global__ void row_squared_norms(const T* x,int rows,int columns,T* norms) {
     const int row=blockIdx.x;
     if(row>=rows)return;
     __shared__ T partial[256];
-    T sum=0;
+    T sum=0,correction=0;
     for(int column=threadIdx.x;column<columns;column+=blockDim.x) {
         const T value=x[row+size_t(column)*rows];
-        sum+=value*value;
+        compensated_device_add(value*value,sum,correction);
     }
     partial[threadIdx.x]=sum;
     __syncthreads();
@@ -85,9 +93,9 @@ __global__ void column_means(const T* matrix,int rows,int columns,T* means) {
     const int column=blockIdx.x;
     if(column>=columns)return;
     __shared__ T partial[256];
-    T sum=0;
+    T sum=0,correction=0;
     for(int row=threadIdx.x;row<rows;row+=blockDim.x)
-        sum+=matrix[row+size_t(column)*rows];
+        compensated_device_add(matrix[row+size_t(column)*rows],sum,correction);
     partial[threadIdx.x]=sum;
     __syncthreads();
     for(int step=128;step;step/=2) {
@@ -100,8 +108,9 @@ __global__ void column_means(const T* matrix,int rows,int columns,T* means) {
 template<class T>
 __global__ void vector_mean(const T* values,int size,T* result) {
     __shared__ T partial[256];
-    T sum=0;
-    for(int i=threadIdx.x;i<size;i+=blockDim.x)sum+=values[i];
+    T sum=0,correction=0;
+    for(int i=threadIdx.x;i<size;i+=blockDim.x)
+        compensated_device_add(values[i],sum,correction);
     partial[threadIdx.x]=sum;
     __syncthreads();
     for(int step=128;step;step/=2) {
@@ -127,9 +136,9 @@ __global__ void row_means(const T* matrix,int rows,int columns,T* means) {
     const int row=blockIdx.x;
     if(row>=rows)return;
     __shared__ T partial[256];
-    T sum=0;
+    T sum=0,correction=0;
     for(int column=threadIdx.x;column<columns;column+=blockDim.x)
-        sum+=matrix[row+size_t(column)*rows];
+        compensated_device_add(matrix[row+size_t(column)*rows],sum,correction);
     partial[threadIdx.x]=sum;
     __syncthreads();
     for(int step=128;step;step/=2) {

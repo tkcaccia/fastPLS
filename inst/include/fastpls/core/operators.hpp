@@ -12,6 +12,43 @@
 namespace fastpls {
 namespace core {
 
+namespace detail {
+
+template<class Backend, class T>
+auto prepare_centered_crosscov(
+    Backend& backend, ConstMatrixView<T> predictors,
+    ConstMatrixView<T> responses, int)
+    -> decltype(backend.prepare_centered_crosscov(predictors, responses),
+                void()) {
+  backend.prepare_centered_crosscov(predictors, responses);
+}
+
+template<class Backend, class T>
+void prepare_centered_crosscov(
+    Backend&, ConstMatrixView<T>, ConstMatrixView<T>, long) {}
+
+template<class Backend, class T>
+auto centered_crosscov_transpose(
+    Backend& backend, ConstMatrixView<T> predictors,
+    ConstMatrixView<T> responses, ConstMatrixView<T> right,
+    MatrixView<T> intermediate, MatrixView<T> output, int)
+    -> decltype(backend.centered_crosscov_transpose(
+                  predictors, responses, right, intermediate, output),
+                bool()) {
+  return backend.centered_crosscov_transpose(
+    predictors, responses, right, intermediate, output
+  );
+}
+
+template<class Backend, class T>
+bool centered_crosscov_transpose(
+    Backend&, ConstMatrixView<T>, ConstMatrixView<T>, ConstMatrixView<T>,
+    MatrixView<T>, MatrixView<T>, long) {
+  return false;
+}
+
+}  // namespace detail
+
 template<class T, class Backend>
 class ExplicitOperator {
  public:
@@ -75,6 +112,9 @@ class CenteredCrosscovOperator {
         "fastPLS centered cross-covariance operator dimensions are invalid"
       );
     }
+    detail::prepare_centered_crosscov(
+      backend_, predictors_, responses_, 0
+    );
   }
 
   std::size_t rows() const noexcept { return predictors_.columns(); }
@@ -99,12 +139,17 @@ class CenteredCrosscovOperator {
     }
     intermediate_.resize(predictors_.rows(), right.columns());
     if (transpose) {
-      backend_.gemm(
-        predictors_, right, false, false, intermediate_.view()
-      );
-      backend_.gemm(
-        responses_, intermediate_.view(), true, false, output
-      );
+      if (!detail::centered_crosscov_transpose(
+            backend_, predictors_, responses_, right,
+            intermediate_.view(), output, 0
+          )) {
+        backend_.gemm(
+          predictors_, right, false, false, intermediate_.view()
+        );
+        backend_.gemm(
+          responses_, intermediate_.view(), true, false, output
+        );
+      }
       for (std::size_t column = 0; column < output.columns(); ++column) {
         T sum = T(0);
         for (std::size_t row = 0; row < intermediate_.rows(); ++row) {

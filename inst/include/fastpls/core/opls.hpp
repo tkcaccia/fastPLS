@@ -138,7 +138,6 @@ OplsFilter<T> fit_preprocessed_filter_inplace(
   Matrix<T> orthogonal_weight;
   Matrix<T> orthogonal_score;
   Matrix<T> orthogonal_loading;
-  Matrix<T> correction;
 
   for (std::size_t component = 0; component < components; ++component) {
     if (component > 0) {
@@ -197,15 +196,15 @@ OplsFilter<T> fit_preprocessed_filter_inplace(
         orthogonal_loading(row, 0);
     }
 
-    correction.resize(predictors.rows(), predictors.columns());
-    backend.gemm(
-      orthogonal_score.view(), orthogonal_loading.view(), false, true,
-      correction.view()
-    );
-    const std::size_t predictor_size =
-      predictors.rows() * predictors.columns();
-    for (std::size_t index = 0; index < predictor_size; ++index) {
-      predictors.data()[index] -= correction.data()[index];
+    // Apply the rank-one deflation directly in column-major order. Building
+    // an n-by-p correction matrix doubles memory traffic and can add several
+    // gigabytes of avoidable workspace for large sample matrices.
+    for (std::size_t column = 0; column < predictors.columns(); ++column) {
+      const T loading_value = orthogonal_loading(column, 0);
+      T* values = predictors.data() + column * predictors.leading_dimension();
+      for (std::size_t row = 0; row < predictors.rows(); ++row) {
+        values[row] -= orthogonal_score(row, 0) * loading_value;
+      }
     }
     ++model.completed_components;
   }

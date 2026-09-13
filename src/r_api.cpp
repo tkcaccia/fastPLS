@@ -113,6 +113,36 @@ fastpls::core::Matrix<float> float_matrix_from_s4_allow_empty(
   return float_matrix_from_s4_impl(object, name, true);
 }
 
+fastpls::core::ConstMatrixView<float> float_matrix_view_from_s4(
+    SEXP object, const char* name) {
+  if (!Rf_isS4(object) || !Rf_inherits(object, "float32")) {
+    throw std::invalid_argument(std::string(name) + " must be a float32 matrix");
+  }
+  const SEXP data_symbol = Rf_install("Data");
+  if (!R_has_slot(object, data_symbol)) {
+    throw std::invalid_argument(
+      std::string(name) + " does not contain a float32 Data slot"
+    );
+  }
+  const SEXP bits = R_do_slot(object, data_symbol);
+  const SEXP dimensions = Rf_getAttrib(bits, R_DimSymbol);
+  if (TYPEOF(bits) != INTSXP || TYPEOF(dimensions) != INTSXP ||
+      XLENGTH(dimensions) != 2 || INTEGER(dimensions)[0] < 1 ||
+      INTEGER(dimensions)[1] < 1) {
+    throw std::invalid_argument(
+      std::string(name) + " must be a non-empty float32 matrix"
+    );
+  }
+  static_assert(sizeof(float) == sizeof(int),
+                "float32 bridge requires 32-bit float and int storage");
+  return fastpls::core::make_const_view(
+    reinterpret_cast<const float*>(INTEGER(bits)),
+    static_cast<std::size_t>(INTEGER(dimensions)[0]),
+    static_cast<std::size_t>(INTEGER(dimensions)[1]),
+    static_cast<std::size_t>(INTEGER(dimensions)[0])
+  );
+}
+
 fastpls::core::Matrix<float> float_matrix_from_bits(SEXP object,
                                                     const char* name) {
   if (!Rf_isMatrix(object) || TYPEOF(object) != INTSXP) {
@@ -133,6 +163,14 @@ fastpls::core::Matrix<float> float_matrix_from_bits(SEXP object,
     values.data(), INTEGER(object), values.size() * sizeof(float)
   );
   return values;
+}
+
+fastpls::core::Matrix<float> float_matrix_from_storage(SEXP object,
+                                                       const char* name) {
+  if (Rf_isS4(object) && Rf_inherits(object, "float32")) {
+    return float_matrix_from_s4(object, name);
+  }
+  return float_matrix_from_bits(object, name);
 }
 
 SEXP list_element(SEXP object, const char* name) {
@@ -434,6 +472,9 @@ class RoutedLinearAlgebraF32 {
 
   ~RoutedLinearAlgebraF32() {
     fastpls_svd::cuda_core_workspace_destroy_f32(cuda_workspace_);
+    fastpls_svd::metal_crosscov_transpose_workspace_destroy_f32(
+      metal_crosscov_transpose_workspace_
+    );
     fastpls_svd::metal_sample_gram_workspace_destroy_f32(
       metal_sample_gram_workspace_
     );
@@ -454,9 +495,49 @@ class RoutedLinearAlgebraF32 {
       metal_sample_gram_workspace_
     );
     metal_sample_gram_workspace_ = nullptr;
+    fastpls_svd::metal_crosscov_transpose_workspace_destroy_f32(
+      metal_crosscov_transpose_workspace_
+    );
+    metal_crosscov_transpose_workspace_ = nullptr;
     training_rows_ = training_rows;
     training_columns_ = training_columns;
     response_columns_ = response_columns;
+  }
+
+  void prepare_centered_crosscov(
+      fastpls::core::ConstMatrixView<float>,
+      fastpls::core::ConstMatrixView<float>) {
+    if (backend_ != 2) return;
+    fastpls_svd::metal_crosscov_transpose_workspace_destroy_f32(
+      metal_crosscov_transpose_workspace_
+    );
+    metal_crosscov_transpose_workspace_ = nullptr;
+  }
+
+  bool centered_crosscov_transpose(
+      fastpls::core::ConstMatrixView<float> predictors,
+      fastpls::core::ConstMatrixView<float> responses,
+      fastpls::core::ConstMatrixView<float> right,
+      fastpls::core::MatrixView<float> intermediate,
+      fastpls::core::MatrixView<float> output) const {
+    if (backend_ != 2 || right.columns() == 1) return false;
+    if (predictors.rows() != training_rows_ ||
+        predictors.columns() != training_columns_ ||
+        responses.rows() != training_rows_ ||
+        responses.columns() != response_columns_) {
+      throw std::invalid_argument(
+        "Metal cross-covariance workspace does not match the configured problem"
+      );
+    }
+    if (metal_crosscov_transpose_workspace_ == nullptr) {
+      metal_crosscov_transpose_workspace_ =
+        fastpls_svd::metal_crosscov_transpose_workspace_create_f32(
+          predictors, responses
+        );
+    }
+    return fastpls_svd::metal_crosscov_transpose_apply_f32(
+      metal_crosscov_transpose_workspace_, right, intermediate, output
+    );
   }
 
   void gemm(fastpls::core::ConstMatrixView<float> left,
@@ -598,6 +679,18 @@ class RoutedLinearAlgebraF32 {
     return host_.symmetric_eigen(matrix, eigenvalues);
   }
 
+  bool cholesky_solve(fastpls::core::ConstMatrixView<float> matrix,
+                      fastpls::core::ConstMatrixView<float> right,
+                      fastpls::core::Matrix<float>& solution) const {
+    return host_.cholesky_solve(matrix, right, solution);
+  }
+
+  bool general_solve(fastpls::core::ConstMatrixView<float> matrix,
+                     fastpls::core::ConstMatrixView<float> right,
+                     fastpls::core::Matrix<float>& solution) const {
+    return host_.general_solve(matrix, right, solution);
+  }
+
   bool svd_economy(fastpls::core::ConstMatrixView<float> input,
                    bool left_only, fastpls::core::Matrix<float>& u,
                    std::vector<float>& singular_values,
@@ -653,6 +746,7 @@ class RoutedLinearAlgebraF32 {
   std::size_t training_columns_;
   std::size_t response_columns_;
   mutable void* cuda_workspace_ = nullptr;
+  mutable void* metal_crosscov_transpose_workspace_ = nullptr;
   mutable void* metal_sample_gram_workspace_ = nullptr;
   fastpls::runtime::CpuLinearAlgebraF32 host_;
 };
@@ -797,9 +891,10 @@ std::vector<fastpls::core::LdaModel<double>> train_double_lda(
   fastpls::runtime::cpu_gemm_f64(
     retained_scores, retained_scores, true, false, gram.view()
   );
+  fastpls::runtime::CpuLinearAlgebraF64 backend;
   return fastpls::core::train_lda_prefixes_from_moments<double>(
     gram.view(), class_sums.view(), counts.data(), counts.size(),
-    scores.rows(), components, component_count
+    scores.rows(), components, component_count, backend
   );
 }
 
@@ -1086,7 +1181,8 @@ SEXP fit_plssvd_core_prepared(
     const Prepared& prepared, std::size_t response_rank_cap,
     SEXP components, bool fitted, bool store_scores, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
-    Metric metric, bool array_paths = false) {
+    Metric metric, bool array_paths = false,
+    bool attach_score_gram = false) {
   ProtectStack protect;
   SEXP effective = capped_plssvd_components(
     components, predictors.rows(), predictors.columns(), response_rank_cap,
@@ -1098,13 +1194,23 @@ SEXP fit_plssvd_core_prepared(
   controls.rsvd.seed = seed;
   const auto model = fastpls::core::fit_plssvd_preprocessed<T>(
     predictors, prepared.crossprod.view(), INTEGER(effective),
-    static_cast<std::size_t>(XLENGTH(effective)), controls, backend
+    static_cast<std::size_t>(XLENGTH(effective)), controls, backend,
+    fitted || store_scores
   );
-  return serialize_plssvd_core_model(
+  SEXP output = protect.add(serialize_plssvd_core_model(
     model, predictors, prepared, effective, fitted, store_scores, xprod_mode,
     backend,
     metric, array_paths
-  );
+  ));
+  if constexpr (std::is_same<T, float>::value) {
+    if (attach_score_gram) {
+      SEXP score_gram = protect.add(core_matrix(model.score_gram));
+      Rf_setAttrib(
+        output, Rf_install("fastPLS_score_gram"), score_gram
+      );
+    }
+  }
+  return output;
 }
 
 template<class T, class Backend>
@@ -1114,7 +1220,7 @@ SEXP fit_plssvd_label_core_prepared(
     const std::vector<std::size_t>& labels, int class_count,
     SEXP components, bool fitted, bool store_scores, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend) {
-  return fit_plssvd_core_prepared(
+  SEXP output = PROTECT(fit_plssvd_core_prepared(
     predictors, prepared, static_cast<std::size_t>(class_count - 1),
     components, fitted, store_scores, oversample, power, seed, xprod_mode,
     backend,
@@ -1123,8 +1229,14 @@ SEXP fit_plssvd_label_core_prepared(
         labels.data(), labels.size(), prepared.response_mean.data(),
         static_cast<std::size_t>(class_count), values
       );
-    }
+    }, false, true
+  ));
+  SEXP class_sums = PROTECT(core_matrix(prepared.class_predictor_sums));
+  Rf_setAttrib(
+    output, Rf_install("fastPLS_class_predictor_sums"), class_sums
   );
+  UNPROTECT(2);
+  return output;
 }
 
 template<class T, class Backend>
@@ -1167,11 +1279,17 @@ fastpls::core::SimplsControls simpls_controls(
   const int minimum_components = environment_integer(
     "FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024
   );
+  const bool minimum_components_explicit =
+    std::getenv("FASTPLS_FAST_CROSSPROD_MIN_NCOMP") != nullptr;
   const int minimum_ratio = environment_integer(
     "FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024
   );
+  const bool component_work_justifies_cache =
+    components >= static_cast<std::size_t>(minimum_components) ||
+    (!minimum_components_explicit &&
+      predictors <= 5 * std::max<std::size_t>(components, 1));
   controls.cache_predictor_crossprod =
-    components >= static_cast<std::size_t>(minimum_components) &&
+    component_work_justifies_cache &&
     predictors <= samples &&
     samples >= predictors * static_cast<std::size_t>(minimum_ratio) &&
     predictors <= static_cast<std::size_t>(maximum_predictors);
@@ -1316,7 +1434,7 @@ SEXP fit_simpls_core_prepared(
     unsigned int seed, const char* xprod_mode, Backend& backend,
     Metric metric, bool array_paths = false,
     bool reorthogonalize_scores = false,
-    bool classification = false) {
+    bool classification = false, bool store_score_moments = false) {
   ProtectStack protect;
   int maximum_components = 1;
   SEXP effective_components = capped_simpls_components(
@@ -1332,6 +1450,8 @@ SEXP fit_simpls_core_prepared(
   );
   controls.reorthogonalize = reorthogonalize_scores;
   controls.store_scores = fitted || store_scores;
+  controls.store_score_moments = classification &&
+    (store_scores || store_score_moments);
   fastpls::core::SimplsWorkspace<T> workspace;
   const auto model = fastpls::core::fit_simpls_preprocessed<T>(
     predictors, prepared.crossprod.view(), controls, backend, workspace
@@ -1341,10 +1461,19 @@ SEXP fit_simpls_core_prepared(
       "fastPLS core SIMPLS returned fewer components than requested"
     );
   }
-  return serialize_simpls_core_model(
+  SEXP output = protect.add(serialize_simpls_core_model(
     model, predictors, prepared, effective_components, fitted,
     controls.store_scores, xprod_mode, backend, metric, controls, array_paths
-  );
+  ));
+  if constexpr (std::is_same<T, float>::value) {
+    if (classification) {
+      SEXP score_gram = protect.add(core_matrix(model.score_gram));
+      Rf_setAttrib(
+        output, Rf_install("fastPLS_score_gram"), score_gram
+      );
+    }
+  }
+  return output;
 }
 
 template<class T, class Backend>
@@ -1354,8 +1483,9 @@ SEXP fit_simpls_label_core_prepared(
     const std::vector<std::size_t>& labels, int class_count,
     SEXP components, bool fitted, bool store_scores,
     int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend) {
-  return fit_simpls_core_prepared(
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool store_score_moments = false) {
+  SEXP output = PROTECT(fit_simpls_core_prepared(
     predictors, prepared, components, fitted, store_scores,
     oversample, power, seed,
     xprod_mode, backend,
@@ -1364,8 +1494,14 @@ SEXP fit_simpls_label_core_prepared(
         labels.data(), labels.size(), prepared.response_mean.data(),
         static_cast<std::size_t>(class_count), values
       );
-    }, false, false, true
+    }, false, false, true, store_score_moments
+  ));
+  SEXP class_sums = PROTECT(core_matrix(prepared.class_predictor_sums));
+  Rf_setAttrib(
+    output, Rf_install("fastPLS_class_predictor_sums"), class_sums
   );
+  UNPROTECT(2);
+  return output;
 }
 
 template<class T, class Backend>
@@ -1374,7 +1510,8 @@ SEXP fit_simpls_label_core(
     const std::vector<std::size_t>& labels, int class_count,
     SEXP components, int scaling, bool fitted, bool store_scores,
     int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend) {
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool store_score_moments = false) {
   const auto prepared = fastpls::core::prepare_scaled_label_crossprod(
     predictors.view(), labels.data(), labels.size(),
     static_cast<std::size_t>(class_count),
@@ -1383,8 +1520,187 @@ SEXP fit_simpls_label_core(
   return fit_simpls_label_core_prepared(
     fastpls::core::ConstMatrixView<T>(predictors.view()), prepared, labels,
     class_count, components, fitted, store_scores, oversample, power, seed,
-    xprod_mode, backend
+    xprod_mode, backend, store_score_moments
   );
+}
+
+template<class T>
+void standardize_predictor_gram(
+    fastpls::core::MatrixView<T> gram, std::size_t sample_count,
+    const std::vector<T>& center, const std::vector<T>& scale,
+    fastpls::core::PredictorScaling scaling) {
+  if (scaling == fastpls::core::PredictorScaling::none) return;
+  if (gram.rows() != gram.columns() || gram.rows() != center.size() ||
+      center.size() != scale.size()) {
+    throw std::invalid_argument(
+      "fastPLS predictor Gram preprocessing dimensions are invalid"
+    );
+  }
+  const T samples = static_cast<T>(sample_count);
+  for (std::size_t column = 0; column < gram.columns(); ++column) {
+    for (std::size_t row = 0; row < gram.rows(); ++row) {
+      gram(row, column) =
+        (gram(row, column) - samples * center[row] * center[column]) /
+        (scale[row] * scale[column]);
+    }
+  }
+}
+
+template<class T, class Backend>
+void materialize_standardized_scores(
+    fastpls::core::ConstMatrixView<T> predictors,
+    const std::vector<T>& center, const std::vector<T>& scale,
+    fastpls::core::ConstMatrixView<T> weights,
+    fastpls::core::Matrix<T>& scores, Backend& backend) {
+  if (predictors.empty() || weights.empty() ||
+      predictors.columns() != weights.rows() ||
+      center.size() != predictors.columns() ||
+      scale.size() != predictors.columns()) {
+    throw std::invalid_argument(
+      "fastPLS score materialization dimensions are invalid"
+    );
+  }
+  fastpls::core::Matrix<T> scaled_weights(
+    weights.rows(), weights.columns()
+  );
+  std::vector<T> offsets(weights.columns(), T(0));
+  for (std::size_t component = 0;
+       component < weights.columns(); ++component) {
+    for (std::size_t predictor = 0;
+         predictor < weights.rows(); ++predictor) {
+      const T divisor = scale[predictor];
+      if (!std::isfinite(divisor) || divisor == T(0)) {
+        throw std::invalid_argument(
+          "fastPLS score materialization contains an invalid scale"
+        );
+      }
+      const T value = weights(predictor, component) / divisor;
+      scaled_weights(predictor, component) = value;
+      offsets[component] += center[predictor] * value;
+    }
+  }
+  scores.resize(predictors.rows(), weights.columns());
+  backend.gemm(
+    predictors, scaled_weights.view(), false, false, scores.view()
+  );
+  for (std::size_t component = 0;
+       component < scores.columns(); ++component) {
+    for (std::size_t sample = 0; sample < scores.rows(); ++sample) {
+      scores(sample, component) -= offsets[component];
+    }
+  }
+}
+
+template<class Backend>
+SEXP fit_float32_label_moments(
+    fastpls::core::ConstMatrixView<float> predictors,
+    const std::vector<std::size_t>& labels, int class_count, SEXP components,
+    int scaling, bool fitted, bool store_scores, int method, int oversample,
+    int power, unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool store_score_moments = false) {
+  ProtectStack protect;
+  const auto scaling_mode =
+    static_cast<fastpls::core::PredictorScaling>(scaling);
+  const auto prepared = fastpls::core::scaled_label_crossprod(
+    predictors, labels.data(), labels.size(),
+    static_cast<std::size_t>(class_count), scaling_mode
+  );
+  fastpls::core::Matrix<float> predictor_gram(
+    predictors.columns(), predictors.columns()
+  );
+  backend.self_gram(
+    predictors, true, predictor_gram.view(), true
+  );
+  standardize_predictor_gram(
+    predictor_gram.view(), predictors.rows(), prepared.predictor_center,
+    prepared.predictor_scale, scaling_mode
+  );
+  const auto metric = [&](fastpls::core::ConstMatrixView<float> values) {
+    return fastpls::core::dummy_response_r2(
+      labels.data(), labels.size(), prepared.response_mean.data(),
+      static_cast<std::size_t>(class_count), values
+    );
+  };
+
+  if (method == 1) {
+    SEXP effective = capped_plssvd_components(
+      components, predictors.rows(), predictors.columns(),
+      static_cast<std::size_t>(class_count - 1), protect
+    );
+    fastpls::core::PlssvdControls controls;
+    controls.rsvd.oversample = oversample;
+    controls.rsvd.power = power;
+    controls.rsvd.seed = seed;
+    auto model = fastpls::core::fit_plssvd_from_moments<float>(
+      predictor_gram.view(), prepared.crossprod.view(), INTEGER(effective),
+      static_cast<std::size_t>(XLENGTH(effective)), controls, backend
+    );
+    if (fitted || store_scores) {
+      materialize_standardized_scores<float>(
+        predictors, prepared.predictor_center, prepared.predictor_scale,
+        model.weights.view(), model.scores, backend
+      );
+    }
+    SEXP output = protect.add(serialize_plssvd_core_model(
+      model, predictors, prepared, effective, fitted, store_scores,
+      xprod_mode, backend, metric
+    ));
+    SEXP score_gram = protect.add(core_matrix(model.score_gram));
+    Rf_setAttrib(output, Rf_install("fastPLS_score_gram"), score_gram);
+    SEXP class_sums = protect.add(core_matrix(
+      prepared.class_predictor_sums
+    ));
+    Rf_setAttrib(
+      output, Rf_install("fastPLS_class_predictor_sums"), class_sums
+    );
+    return output;
+  }
+
+  int maximum_components = 1;
+  SEXP effective = capped_simpls_components(
+    components, predictors.rows(), predictors.columns(), maximum_components,
+    protect
+  );
+  auto controls = simpls_controls(
+    predictors.rows(), predictors.columns(), prepared.response_mean.size(),
+    static_cast<std::size_t>(maximum_components), true,
+    oversample, power, seed
+  );
+  controls.cache_predictor_crossprod = true;
+  controls.reorthogonalize = false;
+  controls.store_scores = false;
+  controls.store_score_moments = store_scores || store_score_moments;
+  fastpls::core::SimplsWorkspace<float> workspace;
+  workspace.predictor_crossprod = std::move(predictor_gram);
+  workspace.predictor_crossprod_preloaded = true;
+  auto model = fastpls::core::fit_simpls_preprocessed<float>(
+    fastpls::core::ConstMatrixView<float>(), prepared.crossprod.view(),
+    controls, backend, workspace, predictors.rows()
+  );
+  if (model.completed_components < controls.components) {
+    throw std::runtime_error(
+      "fastPLS core SIMPLS returned fewer components than requested"
+    );
+  }
+  if (fitted || store_scores) {
+    materialize_standardized_scores<float>(
+      predictors, prepared.predictor_center, prepared.predictor_scale,
+      model.weights.view(), model.scores, backend
+    );
+  }
+  SEXP output = protect.add(serialize_simpls_core_model(
+    model, predictors, prepared, effective, fitted, store_scores,
+    xprod_mode, backend, metric, controls
+  ));
+  SEXP score_gram = protect.add(core_matrix(model.score_gram));
+  Rf_setAttrib(output, Rf_install("fastPLS_score_gram"), score_gram);
+  SEXP class_sums = protect.add(core_matrix(
+    prepared.class_predictor_sums
+  ));
+  Rf_setAttrib(
+    output, Rf_install("fastPLS_class_predictor_sums"), class_sums
+  );
+  return output;
 }
 
 template<class T, class Backend>
@@ -4315,10 +4631,11 @@ extern "C" SEXP _fastPLS_lda_train_prefix_float32_cpp(
         class_sums(class_index, component) += values(row, component);
       }
     }
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
     const auto models = fastpls::core::train_lda_prefixes_from_moments<float>(
       gram.view(), class_sums.view(), counts.data(), counts.size(),
       values.rows(), INTEGER(components),
-      static_cast<std::size_t>(XLENGTH(components))
+      static_cast<std::size_t>(XLENGTH(components)), backend
     );
     return float_lda_models(models, INTEGER(components));
   } catch (const std::exception& exception) {
@@ -4345,7 +4662,7 @@ extern "C" SEXP _fastPLS_lda_project_train_prefix_float32_cpp(
         "projected float32 PLS-LDA requires at least two classes"
       );
     }
-    const auto x = float_matrix_from_s4(predictors, "Xtrain");
+    const auto x = float_matrix_view_from_s4(predictors, "Xtrain");
     const auto projection = float_matrix_from_s4(
       list_element(model, "R"), "model$R"
     );
@@ -4374,66 +4691,130 @@ extern "C" SEXP _fastPLS_lda_project_train_prefix_float32_cpp(
       maximum = std::max(maximum, static_cast<std::size_t>(count));
     }
 
-    fastpls::core::Matrix<float> scaled_projection(x.columns(), maximum);
-    std::vector<float> offset(maximum, 0.0f);
-    for (std::size_t component = 0; component < maximum; ++component) {
-      for (std::size_t predictor = 0; predictor < x.columns(); ++predictor) {
-        const float divisor = scale.data()[predictor];
-        if (!std::isfinite(divisor) || divisor == 0.0f) {
-          throw std::invalid_argument(
-            "projected float32 PLS-LDA contains an invalid predictor scale"
-          );
-        }
-        const float weight = projection(predictor, component) / divisor;
-        scaled_projection(predictor, component) = weight;
-        offset[component] += center.data()[predictor] * weight;
-      }
-    }
-    fastpls::core::Matrix<float> scores(x.rows(), maximum);
-    fastpls::runtime::cpu_gemm_f32(
-      x.view(), scaled_projection.view(), false, false, scores.view()
+    fastpls::core::Matrix<float> class_predictor_sums;
+    const SEXP stored_class_sums = Rf_getAttrib(
+      model, Rf_install("fastPLS_class_predictor_sums")
     );
-    for (std::size_t component = 0; component < maximum; ++component) {
-      for (std::size_t row = 0; row < scores.rows(); ++row) {
-        scores(row, component) -= offset[component];
+    const bool reuse_class_sums = TYPEOF(stored_class_sums) == INTSXP &&
+      Rf_isMatrix(stored_class_sums);
+    if (reuse_class_sums) {
+      class_predictor_sums = float_matrix_from_bits(
+        stored_class_sums, "model class predictor sums"
+      );
+      if (class_predictor_sums.rows() != x.columns() ||
+          class_predictor_sums.columns() !=
+            static_cast<std::size_t>(classes)) {
+        throw std::invalid_argument(
+          "stored class predictor sums have inconsistent dimensions"
+        );
       }
+    } else {
+      class_predictor_sums.resize(
+        x.columns(), static_cast<std::size_t>(classes)
+      );
     }
-
-    fastpls::core::Matrix<float> gram(maximum, maximum);
-    fastpls::runtime::cpu_crossprod_f32(scores.view(), gram.view());
-    fastpls::core::Matrix<float> class_sums(
-      static_cast<std::size_t>(classes), maximum
-    );
     std::vector<float> counts(static_cast<std::size_t>(classes), 0.0f);
-    for (std::size_t row = 0; row < scores.rows(); ++row) {
+    for (std::size_t row = 0; row < x.rows(); ++row) {
       const int encoded = INTEGER(labels)[row] - 1;
       if (encoded < 0 || encoded >= classes) {
         throw std::invalid_argument(
           "projected float32 PLS-LDA labels must be encoded as 1..n_classes"
         );
       }
-      const std::size_t class_index = static_cast<std::size_t>(encoded);
-      counts[class_index] += 1.0f;
-      for (std::size_t component = 0; component < maximum; ++component) {
-        class_sums(class_index, component) += scores(row, component);
+      counts[static_cast<std::size_t>(encoded)] += 1.0f;
+    }
+    for (std::size_t predictor = 0;
+         predictor < x.columns() && !reuse_class_sums; ++predictor) {
+      const float divisor = scale.data()[predictor];
+      if (!std::isfinite(divisor) || divisor == 0.0f) {
+        throw std::invalid_argument(
+          "projected float32 PLS-LDA contains an invalid predictor scale"
+        );
+      }
+      for (std::size_t row = 0; row < x.rows(); ++row) {
+        const std::size_t class_index = static_cast<std::size_t>(
+          INTEGER(labels)[row] - 1
+        );
+        class_predictor_sums(predictor, class_index) += x(row, predictor);
+      }
+      for (std::size_t class_index = 0;
+           class_index < static_cast<std::size_t>(classes); ++class_index) {
+        class_predictor_sums(predictor, class_index) =
+          (class_predictor_sums(predictor, class_index) -
+           counts[class_index] * center.data()[predictor]) / divisor;
       }
     }
+    fastpls::core::Matrix<float> gram(maximum, maximum);
+    const SEXP stored_score_gram = Rf_getAttrib(
+      model, Rf_install("fastPLS_score_gram")
+    );
+    if (TYPEOF(stored_score_gram) == INTSXP &&
+        Rf_isMatrix(stored_score_gram)) {
+      const auto complete_gram = float_matrix_from_bits(
+        stored_score_gram, "model score Gram"
+      );
+      if (complete_gram.rows() < maximum ||
+          complete_gram.columns() < maximum) {
+        throw std::invalid_argument(
+          "stored PLS score Gram has inconsistent dimensions"
+        );
+      }
+      for (std::size_t column = 0; column < maximum; ++column) {
+        for (std::size_t row = 0; row < maximum; ++row) {
+          gram(row, column) = complete_gram(row, column);
+        }
+      }
+    } else {
+      fastpls::core::Matrix<float> predictor_gram(
+        x.columns(), x.columns()
+      );
+      fastpls::runtime::cpu_self_gram_f32(
+        x, true, predictor_gram.view(), true
+      );
+      std::vector<float> center_values(
+        center.data(), center.data() + center.size()
+      );
+      std::vector<float> scale_values(
+        scale.data(), scale.data() + scale.size()
+      );
+      standardize_predictor_gram(
+        predictor_gram.view(), x.rows(), center_values, scale_values,
+        fastpls::core::PredictorScaling::autoscaling
+      );
+      fastpls::core::Matrix<float> gram_projection(
+        x.columns(), maximum
+      );
+      fastpls::runtime::cpu_gemm_f32(
+        predictor_gram.view(), projection.view(), false, false,
+        gram_projection.view()
+      );
+      fastpls::runtime::cpu_gemm_f32(
+        projection.view(), gram_projection.view(), true, false, gram.view()
+      );
+    }
+    fastpls::core::Matrix<float> class_sums(
+      static_cast<std::size_t>(classes), maximum
+    );
+    fastpls::runtime::cpu_gemm_f32(
+      class_predictor_sums.view(), projection.view(), true, false,
+      class_sums.view()
+    );
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
     const auto models = fastpls::core::train_lda_prefixes_from_moments<float>(
       gram.view(), class_sums.view(), counts.data(), counts.size(),
-      scores.rows(), INTEGER(components),
-      static_cast<std::size_t>(XLENGTH(components))
+      x.rows(), INTEGER(components),
+      static_cast<std::size_t>(XLENGTH(components)), backend
     );
     ProtectStack protect;
     SEXP output = protect.add(Rf_allocVector(VECSXP, 2));
     SEXP fitted = protect.add(float_lda_models(
       models, INTEGER(components)
     ));
-    SEXP retained_scores = protect.add(float_bits_matrix(scores));
     SEXP names = protect.add(Rf_allocVector(STRSXP, 2));
     SET_STRING_ELT(names, 0, Rf_mkChar("models"));
     SET_STRING_ELT(names, 1, Rf_mkChar("Ttrain"));
     SET_VECTOR_ELT(output, 0, fitted);
-    SET_VECTOR_ELT(output, 1, retained_scores);
+    SET_VECTOR_ELT(output, 1, R_NilValue);
     Rf_setAttrib(output, R_NamesSymbol, names);
     return output;
   });
@@ -4984,6 +5365,47 @@ extern "C" SEXP _fastPLS_opls_filter_core_cpp(
     const auto filter = fastpls::core::fit_opls_filter(
       std::move(x), y.view(), static_cast<std::size_t>(component_count),
       static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return serialize_opls_filter<double>(
+      filter, [](const fastpls::core::Matrix<double>& value) {
+        return numeric_matrix(value);
+      }
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_opls_filter_rsvd_core_cpp(
+    SEXP predictors, SEXP responses, SEXP north, SEXP scaling,
+    SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("standalone-core rSVD OPLS filtering", [&] {
+    fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
+      predictors, "Xtrain"
+    );
+    const fastpls::core::Matrix<double> y = numeric_matrix_from_sexp(
+      responses, "Ytrain"
+    );
+    const int component_count = Rf_asInteger(north);
+    const int scaling_code = Rf_asInteger(scaling);
+    const int oversample_count = Rf_asInteger(oversample);
+    const int power_count = Rf_asInteger(power);
+    const int seed_value = Rf_asInteger(seed);
+    if (x.rows() != y.rows() || component_count < 0 ||
+        scaling_code < 1 || scaling_code > 3 || oversample_count < 0 ||
+        power_count < 0 || seed_value == NA_INTEGER) {
+      throw std::invalid_argument(
+        "standalone-core rSVD OPLS controls are invalid"
+      );
+    }
+    fastpls::core::RsvdControls controls;
+    controls.oversample = oversample_count;
+    controls.power = power_count;
+    controls.seed = static_cast<unsigned int>(seed_value);
+    controls.left_only = true;
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto filter = fastpls::core::fit_opls_filter_rsvd(
+      std::move(x), y.view(), static_cast<std::size_t>(component_count),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), controls,
+      backend
     );
     return serialize_opls_filter<double>(
       filter, [](const fastpls::core::Matrix<double>& value) {
@@ -5903,7 +6325,9 @@ extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
     const std::size_t predictor_count = static_cast<std::size_t>(
       INTEGER(input_dimensions)[1]
     );
-    const int* input_bits = INTEGER(bits);
+    const float* input_values = reinterpret_cast<const float*>(INTEGER(bits));
+    static_assert(sizeof(float) == sizeof(int),
+                  "float32 bridge requires 32-bit float and int storage");
 
     const auto projection = float_matrix_from_s4(
       list_element(model, "R"), "model$R"
@@ -5966,7 +6390,7 @@ extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
             "compact float32 LDA model is missing a component prefix"
           );
         }
-        const auto linear = float_matrix_from_bits(
+        const auto linear = float_matrix_from_storage(
           list_element(fitted, "linear"), "LDA linear coefficients"
         );
         weights[index].resize(linear.columns(), linear.rows());
@@ -5978,7 +6402,7 @@ extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
               linear(class_index, component);
           }
         }
-        const auto intercept = float_matrix_from_bits(
+        const auto intercept = float_matrix_from_storage(
           list_element(fitted, "constants"), "LDA constants"
         );
         constants[index].assign(
@@ -6032,6 +6456,70 @@ extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
       }
     }
 
+    bool direct_prediction = false;
+    fastpls::core::Matrix<float> direct_weights;
+    std::vector<float> direct_offsets;
+    fastpls::core::Matrix<float> scaled_projection;
+    std::vector<float> score_offsets;
+    if (prefix_count == 1) {
+      const std::size_t retained = static_cast<std::size_t>(
+        INTEGER(components)[0]
+      );
+      const long double latent_work =
+        static_cast<long double>(sample_count) * retained *
+        static_cast<long double>(predictor_count + class_count);
+      const long double direct_work =
+        static_cast<long double>(sample_count) * predictor_count *
+          class_count +
+        static_cast<long double>(predictor_count) * retained * class_count;
+      direct_prediction = direct_work < 0.95L * latent_work;
+      if (direct_prediction) {
+        direct_weights.resize(predictor_count, class_count);
+        const auto projection_prefix = fastpls::core::make_const_view(
+          projection.data(), projection.rows(), retained,
+          projection.rows()
+        );
+        fastpls::runtime::cpu_gemm_f32(
+          projection_prefix, weights[0].view(), false, false,
+          direct_weights.view()
+        );
+        direct_offsets.resize(class_count);
+        const float* base_offset = lda == TRUE ? constants[0].data() :
+          response_mean_matrix.data();
+        std::copy(
+          base_offset, base_offset + class_count, direct_offsets.begin()
+        );
+        for (std::size_t predictor = 0;
+             predictor < predictor_count; ++predictor) {
+          const float inverse_scale = 1.0f / scale_matrix.data()[predictor];
+          const float centered = center_matrix.data()[predictor] *
+            inverse_scale;
+          for (std::size_t response = 0;
+               response < class_count; ++response) {
+            const float original = direct_weights(predictor, response);
+            direct_offsets[response] -= centered * original;
+            direct_weights(predictor, response) = original * inverse_scale;
+          }
+        }
+      }
+    }
+    if (!direct_prediction) {
+      scaled_projection.resize(projection.rows(), projection.columns());
+      score_offsets.assign(projection.columns(), 0.0f);
+      for (std::size_t predictor = 0;
+           predictor < predictor_count; ++predictor) {
+        const float inverse_scale = 1.0f / scale_matrix.data()[predictor];
+        const float centered = center_matrix.data()[predictor] *
+          inverse_scale;
+        for (std::size_t component = 0;
+             component < projection.columns(); ++component) {
+          const float original = projection(predictor, component);
+          scaled_projection(predictor, component) = original * inverse_scale;
+          score_offsets[component] += centered * original;
+        }
+      }
+    }
+
     SEXP output = protect.add(Rf_allocMatrix(
       INTSXP, static_cast<int>(sample_count), static_cast<int>(prefix_count)
     ));
@@ -6042,35 +6530,44 @@ extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
     for (std::size_t start = 0; start < sample_count;
          start += rows_per_block) {
       const std::size_t count = std::min(rows_per_block, sample_count - start);
-      fastpls::core::Matrix<float> block(count, predictor_count);
-      for (std::size_t column = 0; column < predictor_count; ++column) {
-        std::memcpy(
-          block.data() + column * count,
-          input_bits + column * sample_count + start,
-          count * sizeof(float)
+      const auto block = fastpls::core::make_const_view(
+        input_values + start, count, predictor_count, sample_count
+      );
+      fastpls::core::Matrix<float> scores;
+      if (!direct_prediction) {
+        scores.resize(count, projection.columns());
+        backend.gemm(
+          block, scaled_projection.view(), false, false, scores.view()
         );
-        const float location = center_matrix.data()[column];
-        const float divisor = scale_matrix.data()[column];
-        for (std::size_t row = 0; row < count; ++row) {
-          block(row, column) = (block(row, column) - location) / divisor;
+        for (std::size_t component = 0;
+             component < scores.columns(); ++component) {
+          for (std::size_t row = 0; row < scores.rows(); ++row) {
+            scores(row, component) -= score_offsets[component];
+          }
         }
       }
-      fastpls::core::Matrix<float> scores(count, projection.columns());
-      backend.gemm(block.view(), projection.view(), false, false, scores.view());
       for (std::size_t index = 0; index < prefix_count; ++index) {
         const std::size_t retained = static_cast<std::size_t>(
           INTEGER(components)[index]
         );
-        const auto score_prefix = fastpls::core::make_const_view(
-          scores.data(), count, retained, scores.rows()
-        );
         fastpls::core::Matrix<float> discriminants(count, class_count);
-        backend.gemm(
-          score_prefix, weights[index].view(), false, false,
-          discriminants.view()
-        );
-        const float* offset = lda == TRUE ? constants[index].data() :
-          response_mean_matrix.data();
+        if (direct_prediction) {
+          backend.gemm(
+            block, direct_weights.view(), false, false,
+            discriminants.view()
+          );
+        } else {
+          const auto score_prefix = fastpls::core::make_const_view(
+            scores.data(), count, retained, scores.rows()
+          );
+          backend.gemm(
+            score_prefix, weights[index].view(), false, false,
+            discriminants.view()
+          );
+        }
+        const float* offset = direct_prediction ? direct_offsets.data() :
+          (lda == TRUE ? constants[index].data() :
+           response_mean_matrix.data());
         for (std::size_t response = 0; response < class_count; ++response) {
           for (std::size_t row = 0; row < count; ++row) {
             discriminants(row, response) += offset[response];
@@ -6093,8 +6590,8 @@ namespace {
 SEXP fit_float32_labels_core(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
     SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
-    SEXP power, SEXP seed, int backend_code, const char* plssvd_route,
-    const char* simpls_route) {
+    SEXP power, SEXP seed, SEXP store_score_moments, int backend_code,
+    const char* plssvd_route, const char* simpls_route) {
   return translate_exceptions("float32 core PLS fitting", [&] {
     if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
         XLENGTH(components) < 1) {
@@ -6102,28 +6599,67 @@ SEXP fit_float32_labels_core(
         "float32 core PLS requires integer labels and component counts"
       );
     }
-    fastpls::core::Matrix<float> x =
-      float_matrix_from_s4(predictors, "Xtrain");
+    const auto x_view = float_matrix_view_from_s4(predictors, "Xtrain");
     const int classes = Rf_asInteger(class_count);
     RoutedLinearAlgebraF32 backend(
-      backend_code, x.rows(), x.columns(),
+      backend_code, x_view.rows(), x_view.columns(),
       classes > 0 ? static_cast<std::size_t>(classes) : 0
     );
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
     const int store_scores_code = Rf_asLogical(store_scores);
+    const int store_score_moments_code = Rf_asLogical(store_score_moments);
     const int method_code = Rf_asInteger(method);
     if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
         fit_code == NA_LOGICAL || store_scores_code == NA_LOGICAL ||
+        store_score_moments_code == NA_LOGICAL ||
         (method_code != 1 && method_code != 3) ||
-        XLENGTH(labels) != static_cast<R_xlen_t>(x.rows())) {
+        XLENGTH(labels) != static_cast<R_xlen_t>(x_view.rows())) {
       throw std::invalid_argument(
         "float32 core PLS training dimensions or controls are invalid"
       );
     }
     const auto encoded = encoded_class_labels(
-      labels, x.rows(), classes, "float32 core PLS"
+      labels, x_view.rows(), classes, "float32 core PLS"
     );
+    std::size_t retained = 0;
+    for (R_xlen_t index = 0; index < XLENGTH(components); ++index) {
+      const int requested = INTEGER(components)[index];
+      if (requested == NA_INTEGER || requested < 1) {
+        throw std::invalid_argument(
+          "float32 core PLS component counts must be positive"
+        );
+      }
+      retained = std::max(retained, static_cast<std::size_t>(requested));
+    }
+    retained = std::min({
+      retained, x_view.columns(), std::max<std::size_t>(x_view.rows() - 1, 1),
+      method_code == 1 ? static_cast<std::size_t>(classes - 1) : retained
+    });
+    const auto route_controls = simpls_controls(
+      x_view.rows(), x_view.columns(), static_cast<std::size_t>(classes),
+      retained, true, Rf_asInteger(oversample), Rf_asInteger(power),
+      static_cast<unsigned int>(Rf_asInteger(seed))
+    );
+    const bool use_borrowed_moments = method_code == 3 ?
+      route_controls.cache_predictor_crossprod :
+      fit_code == 0 && store_scores_code == 0 &&
+        fastpls::core::plssvd_prefer_predictor_gram(
+          x_view.rows(), x_view.columns(), retained
+        );
+    if (use_borrowed_moments) {
+      return fit_float32_label_moments(
+        x_view, encoded, classes, components, scaling_code,
+        fit_code != 0, store_scores_code != 0,
+        method_code, Rf_asInteger(oversample), Rf_asInteger(power),
+        static_cast<unsigned int>(Rf_asInteger(seed)),
+        method_code == 1 ? "float32_borrowed_label_moments" :
+          "float32_borrowed_label_moments_blocked",
+        backend, store_score_moments_code != 0
+      );
+    }
+    fastpls::core::Matrix<float> x =
+      float_matrix_from_s4(predictors, "Xtrain");
     if (method_code == 1) {
       return fit_plssvd_label_core(
         x, encoded, classes, components, scaling_code, fit_code,
@@ -6143,7 +6679,7 @@ SEXP fit_float32_labels_core(
       classes, components, fit_code, store_scores_code,
       Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
-      simpls_route, backend
+      simpls_route, backend, store_score_moments_code != 0
     );
   });
 }
@@ -6153,7 +6689,7 @@ SEXP fit_float32_labels_core(
 extern "C" SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
     SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
-    SEXP power, SEXP seed, SEXP backend) {
+    SEXP power, SEXP seed, SEXP backend, SEXP store_score_moments) {
   const int backend_code = Rf_asInteger(backend);
   if (backend_code < 0 || backend_code > 2 || backend_code == NA_INTEGER) {
     Rf_error("float32 PLS backend must be CPU, CUDA, or Metal");
@@ -6168,7 +6704,8 @@ extern "C" SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
     "float32_metal_hybrid_label_class_sums_blocked";
   return fit_float32_labels_core(
     predictors, labels, class_count, components, scaling, fit, store_scores,
-    method, oversample, power, seed, backend_code, plssvd_route,
+    method, oversample, power, seed, store_score_moments, backend_code,
+    plssvd_route,
     simpls_route
   );
 }

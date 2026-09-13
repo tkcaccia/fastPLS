@@ -1,4 +1,28 @@
+# fastPLS 0.99.66
+
+* Fixed portable Windows float32 rSVD by routing QR and reduced SVD through
+  the compiled float32 core rather than unsupported base-R coercion of
+  `float32` S4 matrices.
+
+* Fixed compact float32 LDA prediction on portable Windows builds so both
+  native bit matrices and `float32` S4 coefficient storage are accepted.
+
+* Reduced temporary score and response materialization in label-aware PLS-SVD,
+  SIMPLS, OPLS, and kernel-PLS classification paths while preserving public
+  predictions and requested component prefixes.
+
+* Added persistent operation-level workspaces and reduced synchronization for
+  eligible Metal matrix-product sequences without changing the documented
+  CPU/Metal operation split.
+
 # fastPLS 0.99.65
+
+* Reduced synchronization in the float32 Metal implicit cross-covariance
+  transpose operator. Consecutive `X V` and `Y^T (X V)` products now share one
+  command buffer and persistent per-fit matrix workspaces, with one wait before
+  the existing CPU response-centering correction. The general synchronous
+  matrix-product interface and the mathematical CPU/Metal operation split are
+  unchanged.
 
 * Replaced the repository README with a focused installation guide for macOS,
   Windows, Ubuntu, and Fedora. The guide documents platform toolchains,

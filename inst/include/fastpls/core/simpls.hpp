@@ -25,6 +25,7 @@ struct SimplsControls {
   bool cache_predictor_crossprod = false;
   bool reorthogonalize = true;
   bool store_scores = true;
+  bool store_score_moments = false;
   bool use_right_gram = true;
   bool rank_one_operator_direction = false;
   bool batch_candidate_geometry = false;
@@ -67,6 +68,7 @@ struct SimplsModel {
   Matrix<T> response_loadings;
   Matrix<T> deflation_basis;
   Matrix<T> scores;
+  Matrix<T> score_gram;
   std::size_t completed_components = 0;
   SimplsTiming timing;
 };
@@ -240,6 +242,29 @@ bool refresh_directions(ConstMatrixView<T> crosscov,
     retained + static_cast<std::size_t>(std::max(controls.oversample, 0))
   );
   if (retained == 0 || width == 0) return false;
+
+  if (use_right_gram && right_gram.rows() <= 64) {
+    copy_matrix(right_gram, workspace.reduced_gram);
+    std::vector<T> eigenvalues;
+    if (!backend.symmetric_eigen(workspace.reduced_gram, eigenvalues)) {
+      return false;
+    }
+    const std::size_t available = std::min(retained, eigenvalues.size());
+    workspace.reverse_basis.resize(right_gram.rows(), available);
+    for (std::size_t column = 0; column < available; ++column) {
+      const std::size_t source = eigenvalues.size() - 1 - column;
+      for (std::size_t row = 0; row < right_gram.rows(); ++row) {
+        workspace.reverse_basis(row, column) =
+          workspace.reduced_gram(row, source);
+      }
+    }
+    directions.resize(crosscov.rows(), available);
+    backend.gemm(
+      crosscov, workspace.reverse_basis.view(), false, false,
+      directions.view()
+    );
+    return true;
+  }
 
   std::mt19937 generator(controls.seed);
   std::normal_distribution<T> normal(T(0), T(1));
@@ -515,6 +540,13 @@ SimplsModel<T> fit_simpls_preprocessed(
   model.deflation_basis.resize(p, maximum);
   const bool retain_scores = controls.store_scores ||
     controls.reorthogonalize;
+  const bool retain_score_moments = controls.store_score_moments;
+  if (retain_score_moments) {
+    model.score_gram.resize(maximum, maximum);
+  }
+  const bool defer_score_materialization =
+    controls.cache_predictor_crossprod && controls.store_scores &&
+    !controls.reorthogonalize && !moments_only;
   if (retain_scores) model.scores.resize(n, maximum);
   simpls_detail::copy_matrix(initial_crosscov, workspace.crosscov);
 
@@ -546,6 +578,7 @@ SimplsModel<T> fit_simpls_preprocessed(
 
   std::size_t component = 0;
   while (component < maximum) {
+    const std::size_t block_start = component;
     const auto direction_started = Clock::now();
     const std::size_t block = std::min({
       std::max<std::size_t>(controls.maximum_block, 1),
@@ -597,6 +630,7 @@ SimplsModel<T> fit_simpls_preprocessed(
 
       workspace.score.resize(n, 1);
       workspace.predictor_loading.resize(p, 1);
+      T score_norm = T(0);
       if (controls.cache_predictor_crossprod) {
         backend.gemm(
           workspace.predictor_crossprod.view(), direction.view(),
@@ -610,12 +644,12 @@ SimplsModel<T> fit_simpls_preprocessed(
           stopped = true;
           break;
         }
-        const T score_norm = std::sqrt(norm_squared);
+        score_norm = std::sqrt(norm_squared);
         simpls_detail::scale(direction.view(), score_norm);
         simpls_detail::scale(
           workspace.predictor_loading.view(), score_norm
         );
-        if (retain_scores) {
+        if (retain_scores && !defer_score_materialization) {
           backend.gemm(
             predictors, direction.view(), false, false,
             workspace.score.view()
@@ -643,7 +677,7 @@ SimplsModel<T> fit_simpls_preprocessed(
             workspace.correction
           );
         }
-        const T score_norm = simpls_detail::norm(
+        score_norm = simpls_detail::norm(
           ConstMatrixView<T>(workspace.score.view())
         );
         if (!std::isfinite(score_norm) || score_norm <= T(0)) {
@@ -666,6 +700,22 @@ SimplsModel<T> fit_simpls_preprocessed(
             predictors, workspace.score.view(), true, false,
             workspace.predictor_loading.view()
           );
+        }
+      }
+
+      if (retain_score_moments) {
+        model.score_gram(component, component) = T(1);
+      }
+      if (retain_score_moments && !controls.reorthogonalize) {
+        for (std::size_t previous = block_start;
+             previous < component; ++previous) {
+          T value = T(0);
+          for (std::size_t predictor = 0; predictor < p; ++predictor) {
+            value += model.weights(predictor, previous) *
+              workspace.predictor_loading(predictor, 0);
+          }
+          model.score_gram(previous, component) = value;
+          model.score_gram(component, previous) = value;
         }
       }
 
@@ -743,7 +793,7 @@ SimplsModel<T> fit_simpls_preprocessed(
         ConstMatrixView<T>(workspace.deflation_direction.view()), 0,
         model.deflation_basis.view(), component
       );
-      if (retain_scores) {
+      if (retain_scores && !defer_score_materialization) {
         simpls_detail::copy_column(
           ConstMatrixView<T>(workspace.score.view()), 0,
           model.scores.view(), component
@@ -755,6 +805,16 @@ SimplsModel<T> fit_simpls_preprocessed(
       ).count();
     }
     if (stopped) break;
+  }
+  if (defer_score_materialization && model.completed_components > 0) {
+    ConstMatrixView<T> weights(
+      model.weights.data(), model.weights.rows(), model.completed_components,
+      model.weights.rows()
+    );
+    model.scores.resize(n, model.completed_components);
+    backend.gemm(
+      predictors, weights, false, false, model.scores.view()
+    );
   }
   model.timing.total = std::chrono::duration<double>(
     Clock::now() - started

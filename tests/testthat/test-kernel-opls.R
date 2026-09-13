@@ -147,6 +147,35 @@ test_that("standalone OPLS fitting is deterministic", {
   }
 })
 
+test_that("double response-wide OPLS uses the seeded rSVD filter", {
+  set.seed(2211)
+  X <- matrix(rnorm(80 * 14), 80, 14)
+  Y <- matrix(rnorm(80 * 120), 80, 120)
+  controls <- list(
+    north = 1L, scaling = 1L, oversample = 20L, power = 2L, seed = 71L
+  )
+
+  direct <- fastPLS:::opls_filter_rsvd_core_cpp(
+    X, Y, controls$north, controls$scaling, controls$oversample,
+    controls$power, controls$seed
+  )
+  repeated <- fastPLS:::opls_filter_rsvd_core_cpp(
+    X, Y, controls$north, controls$scaling, controls$oversample,
+    controls$power, controls$seed
+  )
+  fit <- pls(
+    X, Y, ncomp = 2L, method = "opls", backend = "cpu",
+    north = controls$north, rsvd_oversample = controls$oversample,
+    rsvd_power = controls$power, seed = controls$seed,
+    return_variance = FALSE
+  )
+
+  expect_equal(direct, repeated, tolerance = 0)
+  expect_equal(fit$W_orth, direct$W_orth, tolerance = 0)
+  expect_equal(fit$P_orth, direct$P_orth, tolerance = 0)
+  expect_true(all(is.finite(fit$inner_model$R)))
+})
+
 test_that("routed float32 OPLS preserves core dense and label products", {
   set.seed(812)
   X <- matrix(rnorm(120 * 18), 120, 18)

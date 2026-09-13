@@ -58,6 +58,22 @@ bool metal_core_gemm_accumulate_into_f32(
   fastpls::core::MatrixView<float> output
 );
 
+void* metal_crosscov_transpose_workspace_create_f32(
+  fastpls::core::ConstMatrixView<float> predictors,
+  fastpls::core::ConstMatrixView<float> responses
+);
+
+void metal_crosscov_transpose_workspace_destroy_f32(
+  void* workspace
+) noexcept;
+
+bool metal_crosscov_transpose_apply_f32(
+  void* workspace,
+  fastpls::core::ConstMatrixView<float> right,
+  fastpls::core::MatrixView<float> intermediate,
+  fastpls::core::MatrixView<float> output
+);
+
 bool metal_core_rank1_subtract_f32(
   fastpls::core::MatrixView<float> target,
   fastpls::core::ConstMatrixView<float> column,
