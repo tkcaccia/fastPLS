@@ -25,6 +25,11 @@ release compiled for the target architecture rather than a generic portable
 binary. After installation, use fastPLS::fastPLS_blas() to verify the selected
 CPU library.
 
+On Windows ARM64, do not point OPENBLAS_ROOT at an x86-64 Rtools or MSYS2
+installation. The configuration rejects a cross-architecture archive. If no
+ARM64 OpenBLAS development archive is available, leave FASTPLS_USE_OPENBLAS at
+its default auto setting to use the BLAS/LAPACK supplied by the ARM64 R build.
+
 CUDA installation
 -----------------
 
@@ -56,9 +61,11 @@ After installation, run `fastPLS::has_metal()`. It returns TRUE only when the
 package was compiled with Metal and the current R process can access a Metal
 device. Set FASTPLS_USE_METAL=0 only to disable Metal deliberately.
 
-Bioconductor GPU builds
------------------------
+CRAN and hosted build services
+------------------------------
 
-The package declares optional GPU reliance. Bioconductor builders without GPU
-support should build and test the CPU implementation, while GPU-aware builders
-can exercise CUDA tests when the required hardware and libraries are available.
+Binary packages contain only the capabilities present on the service that built
+them. A CPU-only CRAN build remains fully functional. Users who require CUDA,
+Metal, or a particular OpenBLAS installation should compile the source package
+on the target computer and verify the result with `fastPLS_blas()`, `has_cuda()`
+and `has_metal()`.

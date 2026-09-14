@@ -34,6 +34,14 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/fastpls_coreConfig.cmake"
   DESTINATION "${FASTPLS_CONFIG_DIR}")
 
 if(BUILD_TESTING)
+  # Core tests use assert-based numerical checks. Keep them active when a
+  # consumer configures the test suite with CMAKE_BUILD_TYPE=Release.
+  if(MSVC)
+    add_compile_options(/UNDEBUG)
+  else()
+    add_compile_options(-UNDEBUG)
+  endif()
+
   add_executable(test_core_classification tests/test_core_classification.cpp)
   target_link_libraries(test_core_classification PRIVATE fastpls_core)
   add_test(NAME core_classification COMMAND test_core_classification)

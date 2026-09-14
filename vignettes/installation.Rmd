@@ -1,0 +1,326 @@
+---
+title: "Installing fastPLS"
+output: BiocStyle::html_document
+vignette: >
+    %\VignetteIndexEntry{Installing fastPLS}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## Installation model
+
+`fastPLS` always contains a compiled CPU implementation. Apple Metal and
+NVIDIA CUDA are optional backends selected while the package is compiled.
+The package does not download CUDA, OpenBLAS, or other native libraries after
+installation. This avoids changing an installed package's native dependencies
+and ensures that every linked library matches the operating system and CPU
+architecture.
+
+The default source-build policy is:
+
+* macOS uses Apple Accelerate and enables Metal when its system frameworks are
+    available;
+* Linux and Windows use OpenBLAS when a compatible installation is found and
+    otherwise use the BLAS/LAPACK supplied by R;
+* Linux and Windows x86-64 enable CUDA when a compatible CUDA Toolkit is found;
+* unavailable accelerators are omitted from the build, while the CPU backend
+    remains available.
+
+Backend availability is established at installation time. Requesting an
+accelerator that was not compiled and is not available produces an error;
+fastPLS does not silently run the operation on the CPU.
+
+## Standard installation
+
+Install the released package from CRAN:
+
+```{r cran-install, eval = FALSE}
+install.packages("fastPLS")
+```
+
+The development version can be installed from GitHub. Use a fresh R session
+when replacing an existing installation.
+
+```{r github-install, eval = FALSE}
+install.packages("remotes")
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    upgrade = "never",
+    force = TRUE,
+    build_vignettes = TRUE
+)
+```
+
+Binary packages contain only the capabilities compiled by their builder. To
+enable a locally installed CUDA Toolkit or Apple Metal, install fastPLS from
+source on that computer.
+
+## macOS
+
+Install Apple's command-line developer tools before compiling from source:
+
+```{sh macos-tools, eval = FALSE}
+xcode-select --install
+```
+
+Apple Accelerate supplies the CPU BLAS/LAPACK implementation. A separate
+OpenBLAS installation is neither required nor recommended for ordinary macOS
+use. Metal is enabled automatically when its frameworks are available.
+
+```{r macos-install, eval = FALSE}
+Sys.setenv(FASTPLS_USE_METAL = "1")
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    force = TRUE,
+    upgrade = "never",
+    build_vignettes = TRUE
+)
+```
+
+Setting `FASTPLS_USE_METAL=1` makes a missing Metal toolchain an installation
+error. Omit it to use automatic detection, or set it to `0` for a CPU-only
+build.
+
+## Ubuntu and Debian
+
+Install the compiler toolchain and OpenBLAS development files before building
+fastPLS:
+
+```{sh ubuntu-dependencies, eval = FALSE}
+sudo apt update
+sudo apt install build-essential gfortran pkg-config libopenblas-dev
+```
+
+The following setting requires OpenBLAS and prevents an unnoticed fallback to
+R's BLAS/LAPACK:
+
+```{r linux-openblas, eval = FALSE}
+Sys.setenv(FASTPLS_USE_OPENBLAS = "1")
+install.packages("fastPLS", type = "source")
+```
+
+## Fedora
+
+Install the corresponding Fedora development packages:
+
+```{sh fedora-dependencies, eval = FALSE}
+sudo dnf install gcc gcc-c++ gcc-gfortran make pkgconf-pkg-config \
+    openblas-devel
+```
+
+Then install fastPLS from source with `FASTPLS_USE_OPENBLAS=1`, as shown for
+Ubuntu.
+
+## Windows x86-64
+
+Install the Rtools release matching the installed R version. A standard source
+installation works without a separate OpenBLAS installation and uses the
+BLAS/LAPACK supplied by R when OpenBLAS is unavailable.
+
+For faster CPU execution, install an x86-64 OpenBLAS development archive. For
+example, OpenBLAS can be installed from an MSYS2 UCRT64 terminal:
+
+```{sh windows-openblas, eval = FALSE}
+pacman -S --needed mingw-w64-ucrt-x86_64-openblas
+```
+
+Point the package configuration to that prefix:
+
+```{r windows-openblas-install, eval = FALSE}
+Sys.setenv(
+    FASTPLS_USE_OPENBLAS = "1",
+    OPENBLAS_ROOT = "C:/msys64/ucrt64"
+)
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    force = TRUE,
+    upgrade = "never",
+    build_vignettes = TRUE
+)
+```
+
+## Windows ARM64
+
+Every linked static library must be compiled for ARM64. Do not set
+`OPENBLAS_ROOT` to an x86-64 Rtools or MSYS2 directory. fastPLS checks the
+target architecture and rejects incompatible OpenBLAS archives rather than
+allowing the linker to combine x86-64 and ARM64 objects.
+
+When a compatible ARM64 OpenBLAS installation is unavailable, retain the
+default automatic policy:
+
+```{r windows-arm64, eval = FALSE}
+Sys.unsetenv(c("OPENBLAS_ROOT", "FASTPLS_USE_OPENBLAS"))
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    force = TRUE,
+    upgrade = "never",
+    build_vignettes = TRUE
+)
+```
+
+This builds the CPU backend with R's BLAS/LAPACK and portable float32 kernels.
+The current Windows CUDA build requires the x86-64 NVIDIA toolkit and is not
+enabled for Windows ARM64.
+
+## NVIDIA CUDA on Linux or Windows x86-64
+
+A CUDA-capable NVIDIA driver alone is not sufficient to compile fastPLS. The
+CUDA Toolkit, including `nvcc`, headers, cuBLAS, cuSOLVER, cuRAND, and runtime
+libraries, must be installed before the R package. cuDNN is not required.
+
+If CUDA is installed in a standard location, the default `auto` policy detects
+it. For a reproducible source build, provide the toolkit location and require
+CUDA explicitly:
+
+```{r cuda-install, eval = FALSE}
+Sys.setenv(
+    FASTPLS_USE_CUDA = "1",
+    FASTPLS_REQUIRE_CUDA = "1",
+    CUDA_ROOT = "/usr/local/cuda"
+)
+install.packages("fastPLS", type = "source")
+```
+
+On Windows x86-64, `CUDA_ROOT` typically resembles:
+
+```{r cuda-windows, eval = FALSE}
+Sys.setenv(
+    CUDA_ROOT = paste0(
+        "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/",
+        "v12.6"
+    )
+)
+```
+
+Use a toolkit version supported by the installed NVIDIA driver. The package
+configuration reports whether CUDA was compiled or omitted.
+
+## Verify the installed capabilities
+
+Restart R after installation, load fastPLS, and inspect the compiled CPU
+library and accelerator capabilities:
+
+```{r verify-installation, eval = FALSE}
+library(fastPLS)
+
+fastPLS_blas()
+has_cuda()
+has_metal()
+packageVersion("fastPLS")
+```
+
+Expected CPU-library values are `"Accelerate"`, `"OpenBLAS"`, and
+`"R BLAS/LAPACK"`. Performance analyses on Linux or Windows that require
+OpenBLAS should proceed only when `fastPLS_blas()` returns `"OpenBLAS"`.
+
+Test the selected runtime backend with a small deterministic fit:
+
+```{r verify-fit, eval = FALSE}
+X <- as.matrix(iris[, 1:4])
+y <- iris$Species
+
+fit <- pls(X, y, ncomp = 1:2, backend = "cpu", seed = 11)
+stopifnot(length(fit$Yfit) == 2L)
+
+if (has_cuda()) {
+    fit_cuda <- pls(X, y, ncomp = 1:2, backend = "cuda", seed = 11)
+}
+
+if (has_metal()) {
+    fit_metal <- pls(X, y, ncomp = 1:2, backend = "metal", seed = 11)
+}
+```
+
+## Runtime backend and CPU-core selection
+
+Installation determines which backends exist. A function argument selects a
+backend for one operation, while session options establish defaults:
+
+```{r backend-options, eval = FALSE}
+options(backend = "cpu", n.cores = 4L)
+
+fit <- pls(X, y, ncomp = 1:2)
+fit_one_core <- pls(X, y, ncomp = 1:2, n.cores = 1L)
+```
+
+An explicit `backend` or `n.cores` argument overrides the corresponding option.
+The `FASTPLS_BACKEND` environment variable is consulted only when no explicit
+argument or `options(backend=...)` value is present. CPU remains the default.
+
+## Build-time environment variables
+
+| Variable | Values | Purpose |
+|:--|:--|:--|
+| `FASTPLS_USE_OPENBLAS` | `auto`, `0`, `1` | OpenBLAS policy. |
+| `OPENBLAS_ROOT` | directory | OpenBLAS installation prefix. |
+| `FASTPLS_USE_CUDA` | `auto`, `0`, `1` | Detect, disable, or request CUDA. |
+| `FASTPLS_REQUIRE_CUDA` | `0`, `1` | Require CUDA. |
+| `CUDA_ROOT`, `CUDA_PATH` | directory | CUDA Toolkit installation prefix. |
+| `FASTPLS_USE_METAL` | `auto`, `0`, `1` | Metal policy. |
+
+Set these variables before installing the package. Changing them afterward
+does not add a backend to an already compiled package.
+
+## Troubleshooting
+
+### The package is already in use
+
+Windows cannot replace a loaded DLL. Restart R without loading fastPLS, then
+reinstall it.
+
+### An x64 library is linked into an ARM64 build
+
+Remove stale `OPENBLAS_ROOT`, `R_TOOLS_SOFT`, and CUDA settings, restart R, and
+install again. The configuration output should report `target architecture
+aarch64` and must not name an x86-64 OpenBLAS archive.
+
+```{r clear-windows-architecture-settings, eval = FALSE}
+Sys.unsetenv(c(
+    "OPENBLAS_ROOT",
+    "R_TOOLS_SOFT",
+    "CUDA_ROOT",
+    "CUDA_PATH"
+))
+```
+
+### CUDA or Metal is unavailable after installation
+
+`has_cuda()` and `has_metal()` describe the installed package and current
+hardware. Install the required toolkit first and rebuild from source. Use
+`FASTPLS_REQUIRE_CUDA=1` or `FASTPLS_USE_METAL=1` when an unavailable
+accelerator should stop installation rather than produce a CPU-capable build.
+
+### The vignette is not found after a GitHub installation
+
+GitHub source installations may omit built vignettes unless requested. Install
+with `build_vignettes=TRUE`, then use:
+
+```{r open-vignettes, eval = FALSE}
+vignette("installation", package = "fastPLS")
+vignette("fastPLS", package = "fastPLS")
+```
+
+### Record a reproducible installation
+
+Retain the package installation output and record the resulting environment:
+
+```{r reproducibility, eval = FALSE}
+fastPLS_blas()
+has_cuda()
+has_metal()
+```
+
+For benchmark reports, also record compiler versions, OpenBLAS or Accelerate,
+CUDA toolkit and driver versions, requested CPU thread count, operating system,
+and CPU/GPU hardware.
+
+## Session information
+
+```{r session-information}
+sessionInfo()
+```

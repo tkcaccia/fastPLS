@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 template<class T>
@@ -22,6 +23,47 @@ class ReferenceBackend {
     fastpls::core::reference_gemm(
       left, right, transpose_left, transpose_right, output
     );
+  }
+
+  void self_gram(fastpls::core::ConstMatrixView<T> input,
+                 bool transpose_input,
+                 fastpls::core::MatrixView<T> output,
+                 bool full_output) {
+    const std::size_t size = transpose_input ?
+      input.columns() : input.rows();
+    const std::size_t inner = transpose_input ?
+      input.rows() : input.columns();
+    if (output.rows() != size || output.columns() != size) {
+      throw std::invalid_argument(
+        "fastPLS self-Gram dimensions are inconsistent"
+      );
+    }
+    for (std::size_t column = 0; column < size; ++column) {
+      for (std::size_t row = column; row < size; ++row) {
+        T value = T(0);
+        for (std::size_t index = 0; index < inner; ++index) {
+          const T row_value = transpose_input ?
+            input(index, row) : input(row, index);
+          const T column_value = transpose_input ?
+            input(index, column) : input(column, index);
+          value += row_value * column_value;
+        }
+        output(row, column) = value;
+        if (full_output && row != column) output(column, row) = value;
+      }
+    }
+  }
+
+  bool cholesky_solve(fastpls::core::ConstMatrixView<T> matrix,
+                      fastpls::core::ConstMatrixView<T> right,
+                      fastpls::core::Matrix<T>& solution) {
+    return fastpls::core::cholesky_solve(matrix, right, solution);
+  }
+
+  bool general_solve(fastpls::core::ConstMatrixView<T> matrix,
+                     fastpls::core::ConstMatrixView<T> right,
+                     fastpls::core::Matrix<T>& solution) {
+    return fastpls::core::pivoted_solve(matrix, right, solution);
   }
 
   bool qr_economy(fastpls::core::ConstMatrixView<T> input,

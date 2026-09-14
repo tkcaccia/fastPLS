@@ -52,3 +52,4 @@
 ^[.]fastpls-openblas-lib(/|$)
 ^[.]fastpls-metal-lib.*(/|$)
 ^[.]fastpls-metal-current-lib(/|$)
+^cran-comments[.]md$

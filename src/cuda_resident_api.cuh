@@ -870,7 +870,15 @@ void resident_pls_cv_regression(
         const size_t crosscov_bytes=crosscov_elements*sizeof(T);
         size_t free_bytes=0,total_bytes=0;
         require_cuda(cudaMemGetInfo(&free_bytes,&total_bytes));
-        bool share_crosscov=ReuseCrosscov&&crosscov_bytes<=free_bytes/4;
+        // Reusing an explicit fold cross-covariance is beneficial only while
+        // the product remains modest. Very wide responses use the same
+        // implicit operator as a single fit; otherwise CV allocates two huge
+        // p-by-q buffers and repeatedly updates them for every fold.
+        constexpr size_t maximum_cached_crosscov =
+            size_t(512) * 1024 * 1024;
+        bool share_crosscov=ReuseCrosscov&&
+            crosscov_bytes<=maximum_cached_crosscov&&
+            crosscov_bytes<=free_bytes/4;
         if(share_crosscov) {
             cudaError_t first=cudaMalloc(&full_crosscov,crosscov_bytes);
             cudaError_t second=first==cudaSuccess?
@@ -892,14 +900,20 @@ void resident_pls_cv_regression(
         std::vector<double> counts(static_cast<size_t>(prefix_count),0.0);
         std::vector<double> fold_training_ss(
             static_cast<size_t>(prefix_count),0.0);
+        std::vector<char> heldout_flag(static_cast<size_t>(n),0);
+        std::vector<int> training;
+        training.reserve(static_cast<size_t>(maximum_train));
+        std::vector<T> host_predictions;
+        if(store_predictions)host_predictions.resize(
+            size_t(maximum_test)*q*prefix_count);
+        std::vector<T> host_metric(size_t(3)*q*prefix_count);
 
         for(int fold=0;fold<fold_count;++fold) {
             const auto& heldout=test_rows[static_cast<size_t>(fold)];
             if(heldout.empty()) {status[fold]=2;continue;}
-            std::vector<char> heldout_flag(static_cast<size_t>(n),0);
+            std::fill(heldout_flag.begin(),heldout_flag.end(),0);
             for(const int row:heldout)heldout_flag[static_cast<size_t>(row)]=1;
-            std::vector<int> training;
-            training.reserve(static_cast<size_t>(n)-heldout.size());
+            training.clear();
             for(int row=0;row<n;++row)
                 if(!heldout_flag[static_cast<size_t>(row)])training.push_back(row);
             const int train_n=static_cast<int>(training.size());
@@ -954,10 +968,6 @@ void resident_pls_cv_regression(
                 model.standardize_device(test_x,test_n);
                 model.project_standardized_device(
                     test_x,test_n,maximum_prefix,test_scores);
-                std::vector<T> host_predictions;
-                if(store_predictions)host_predictions.resize(
-                    size_t(test_n)*q*prefix_count);
-                std::vector<T> host_metric(size_t(3)*q*prefix_count);
                 for(int prefix_index=0;prefix_index<prefix_count;++prefix_index) {
                     model.predict_projected_device(
                         test_scores,test_n,prefixes[prefix_index],predictions);

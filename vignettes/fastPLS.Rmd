@@ -177,7 +177,10 @@ datasets, low-dimensional problems, and machines without GPU support.
 The CPU kernels use Apple Accelerate by default on macOS. Linux and Windows
 prefer OpenBLAS when configuration finds it through `OPENBLAS_ROOT`,
 `pkg-config`, or Rtools; otherwise the package uses the BLAS/LAPACK supplied by
-R. Set `FASTPLS_USE_OPENBLAS=1` before installation to require OpenBLAS.
+R. OpenBLAS must match the target architecture: in particular, a Windows ARM64
+build rejects x86-64 archives and uses R's BLAS/LAPACK when no matching ARM64
+OpenBLAS is available. Set `FASTPLS_USE_OPENBLAS=1` before installation to
+require OpenBLAS.
 `fastPLS_blas()` reports the library selected when the installed package was
 compiled. Linux and Windows performance benchmarks should proceed only when
 this function returns `"OpenBLAS"`.

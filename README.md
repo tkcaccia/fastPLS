@@ -1,10 +1,25 @@
 # fastPLS
 
 `fastPLS` provides compiled partial least-squares methods for regression and
-classification. This page covers installation from GitHub on macOS, Windows,
-Ubuntu, and Fedora. The package vignette documents models and usage.
+classification. This page covers installation from CRAN and GitHub on macOS,
+Windows, Ubuntu, and Fedora. The package vignette documents models and usage.
 
-## R package installer
+After installation, open the complete platform and accelerator guide with
+`vignette("installation", package = "fastPLS")`.
+
+## Install from CRAN
+
+Install the released package with:
+
+```r
+install.packages("fastPLS")
+```
+
+CRAN binary packages contain the capabilities available on the corresponding
+build service. Compile from source on the target computer when a local CUDA
+Toolkit, Apple Metal, or a specific OpenBLAS installation must be enabled.
+
+## Install from GitHub
 
 Install `remotes` once if it is not already available:
 
@@ -12,8 +27,8 @@ Install `remotes` once if it is not already available:
 install.packages("remotes")
 ```
 
-After installing the operating-system requirements below, install fastPLS in a
-fresh R session:
+After installing the operating-system requirements below, install the
+development version in a fresh R session:
 
 ```r
 remotes::install_github(
@@ -130,6 +145,11 @@ remotes::install_github(
 
 Restart R before reinstalling an existing Windows build because Windows cannot
 replace a package DLL while it is loaded.
+
+Windows ARM64 builds must use libraries compiled for ARM64. The configuration
+rejects x86-64 OpenBLAS and CUDA libraries instead of attempting to link them.
+When a matching ARM64 OpenBLAS installation is unavailable, the default
+`FASTPLS_USE_OPENBLAS=auto` setting uses the BLAS/LAPACK supplied by R.
 
 ## Verify the installation
 

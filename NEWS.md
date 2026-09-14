@@ -1,3 +1,14 @@
+# fastPLS 0.3
+
+* Added a dedicated installation vignette with platform-specific source-build
+  instructions for macOS, Ubuntu/Debian, Fedora, Windows x86-64, Windows
+  ARM64, CUDA, Metal, OpenBLAS, capability verification, and troubleshooting.
+
+* Made Windows OpenBLAS discovery target-architecture aware. ARM64 builds no
+  longer select x86-64 Rtools archives and instead use a matching ARM64
+  OpenBLAS or the R-supplied BLAS/LAPACK fallback. CUDA x86-64 libraries are
+  likewise excluded from Windows ARM64 builds.
+
 # fastPLS 0.99.67
 
 * Made the sufficient-statistics cross-validation parity test robust to

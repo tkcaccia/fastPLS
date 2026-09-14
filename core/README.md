@@ -17,10 +17,11 @@ The headers implement:
 - fold construction, compiled cross-validation, and summary statistics.
 
 Numerically intensive operations are supplied through a small backend concept:
-matrix multiplication, economy QR, symmetric eigendecomposition, and economy
-SVD. The R package provides CPU BLAS/LAPACK, CUDA, and Metal adapters privately.
-This keeps third-party libraries out of the standalone ABI while allowing
-platform-specific acceleration.
+matrix multiplication, symmetric self-Gram products, economy QR, symmetric
+eigendecomposition, Cholesky and pivoted linear solves, and economy SVD. The R
+package provides CPU BLAS/LAPACK, CUDA, and Metal adapters privately. This keeps
+third-party libraries out of the standalone ABI while allowing platform-specific
+acceleration.
 
 ## Build and test
 
