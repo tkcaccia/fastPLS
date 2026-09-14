@@ -1,3 +1,16 @@
+# fastPLS 0.99.67
+
+* Made the sufficient-statistics cross-validation parity test robust to
+  harmless last-digit differences in floating-point reductions across BLAS
+  implementations.
+
+* Added standard roxygen version metadata and corrected source and vignette
+  formatting reported by `BiocCheck()`.
+
+* Corrected the installation guide to describe OpenBLAS as an optional,
+  recommended CPU library on Linux and Windows, including explicit controls
+  for requiring it or selecting the R-supplied BLAS/LAPACK libraries.
+
 # fastPLS 0.99.66
 
 * Fixed portable Windows float32 rSVD by routing QR and reduced SVD through

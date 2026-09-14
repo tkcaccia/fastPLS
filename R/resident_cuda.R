@@ -12,7 +12,11 @@
 }
 
 .resident_cuda_summary <- function(x, precision) {
-    if (identical(precision, "float32")) float::dbl(.float32_from_bits(x)) else x
+    if (identical(precision, "float32")) {
+        float::dbl(.float32_from_bits(x))
+    } else {
+        x
+    }
 }
 
 .resident_cuda_cv_classification_path <- function(object, newdata) {
@@ -62,7 +66,9 @@
     ncomp <- as.integer(object$ncomp)
     component_names <- paste0("ncomp=", ncomp)
     classification <- isTRUE(object$classification)
-    lda <- as.integer(classification && .is_lda_classifier(object$classification_rule))
+    lda <- as.integer(
+        classification && .is_lda_classifier(object$classification_rule)
+    )
     top <- min(as.integer(top), if (classification) length(object$lev) else 1L)
     result <- list()
     if (classification && isTRUE(include_classes)) {
@@ -84,10 +90,15 @@
         result$Ypred_index <- matrix(ranked[, 1L, ], nrow(x), length(ncomp),
             dimnames = list(NULL, component_names))
         if (top > 1L) {
-            result$Ypred_top <- stats::setNames(lapply(seq_along(ncomp), function(j) {
-                matrix(object$lev[ranked[, , j]], nrow(x), top,
-                    dimnames = list(NULL, paste0("rank", seq_len(top))))
-            }), component_names)
+            ranked_predictions <- lapply(seq_along(ncomp), function(j) {
+                matrix(
+                    object$lev[ranked[, , j]], nrow(x), top,
+                    dimnames = list(NULL, paste0("rank", seq_len(top)))
+                )
+            })
+            result$Ypred_top <- stats::setNames(
+                ranked_predictions, component_names
+            )
         }
     }
     if (!classification || raw_scores) {
@@ -104,18 +115,40 @@
         if (identical(precision, "double")) {
             responses <- array(unlist(responses, use.names = FALSE),
                 c(nrow(x), object$m, length(ncomp)),
-                dimnames = list(NULL, if (classification) object$lev else NULL, component_names))
+                dimnames = list(
+                    NULL,
+                    if (classification) object$lev else NULL,
+                    component_names
+                )
+            )
         }
-        result[[if (!classification) "Ypred" else if (lda == 1L) "LDA_scores" else "Ypred_scores"]] <- responses
+        response_name <- if (!classification) {
+            "Ypred"
+        } else if (lda == 1L) {
+            "LDA_scores"
+        } else {
+            "Ypred_scores"
+        }
+        result[[response_name]] <- responses
     }
     if (proj) {
         result$Ttest <- .resident_cuda_output(
             cuda_resident_project_cpp(state, x, max(ncomp)), precision)
     }
     if (!is.null(Ytest)) {
-        labels <- if (classification) match(as.character(Ytest), object$lev) else NULL
-        if (classification && anyNA(labels)) stop("Ytest contains unknown class labels.", call. = FALSE)
-        response <- if (classification) NULL else .resident_cuda_input(Ytest, precision, "Ytest")
+        labels <- if (classification) {
+            match(as.character(Ytest), object$lev)
+        } else {
+            NULL
+        }
+        if (classification && anyNA(labels)) {
+            stop("Ytest contains unknown class labels.", call. = FALSE)
+        }
+        response <- if (classification) {
+            NULL
+        } else {
+            .resident_cuda_input(Ytest, precision, "Ytest")
+        }
         sums <- lapply(ncomp, function(a) {
             .resident_cuda_summary(cuda_resident_response_sums_cpp(state, x,
                 response, labels, a), precision)
@@ -125,10 +158,18 @@
             if (denominator > 0) 1 - sum(s[1L, ]) / denominator else NA_real_
         }, numeric(1))
         if (classification) {
-            result$accuracy <- vapply(result$Ypred, function(y) mean(y == Ytest), numeric(1))
+            result$accuracy <- vapply(
+                result$Ypred,
+                function(y) mean(y == Ytest),
+                numeric(1)
+            )
             if (top > 1L) {
-                result$top_k_accuracy <- vapply(result$Ypred_top,
-                    function(y) mean(rowSums(y == as.character(Ytest)) > 0L), numeric(1))
+                top_accuracy <- function(y) {
+                    mean(rowSums(y == as.character(Ytest)) > 0L)
+                }
+                result$top_k_accuracy <- vapply(
+                    result$Ypred_top, top_accuracy, numeric(1)
+                )
             }
         }
     }
@@ -138,7 +179,11 @@
 .pls_fit_resident_cuda <- function(context, config) {
     .fastpls_require_backend_available("cuda", "Resident CUDA fitting")
     if (isTRUE(config$perm.test)) {
-        stop("Permutation testing is not yet connected to resident CUDA fitting. No CPU fallback is performed.", call. = FALSE)
+        stop(
+            "Permutation testing is not yet connected to resident CUDA ",
+            "fitting. No CPU fallback is performed.",
+            call. = FALSE
+        )
     }
     ctl <- context$control
     precision <- if (context$float32) "float32" else "double"
@@ -210,7 +255,8 @@
     model <- c(fields, list(resident_state = state, ncomp = ncomp,
         p = ncol(x), m = q, lev = levels, precision = precision,
         resident_backend = "cuda", gpu_resident = TRUE,
-        classification = classification, classification_rule = context$classifier,
+        classification = classification,
+        classification_rule = context$classifier,
         pls_method = context$method, predict_backend = "cuda_resident",
         B_stored = FALSE, compact_prediction = TRUE, predict_latent_ok = TRUE,
         R2Y = rep(NA_real_, length(ncomp))))
@@ -246,12 +292,23 @@
         total <- utils::tail(ss, 1L)
         component_ss <- utils::head(ss, -1L)
         if (is.finite(total) && total > 0) {
-            model$variance <- .fastpls_named_components(component_ss / max(1L, nrow(x) - 1L), "LV")
-            model$variance_explained <- .fastpls_named_components(component_ss / total, "LV")
-            model$cumulative_variance_explained <- cumsum(model$variance_explained)
+            denominator <- max(1L, nrow(x) - 1L)
+            model$variance <- .fastpls_named_components(
+                component_ss / denominator, "LV"
+            )
+            model$variance_explained <- .fastpls_named_components(
+                component_ss / total, "LV"
+            )
+            model$cumulative_variance_explained <- cumsum(
+                model$variance_explained
+            )
             model$variance_total <- total / max(1L, nrow(x) - 1L)
             model$variance_basis <- "X"
-            for (name in c("variance", "variance_explained", "cumulative_variance_explained", "variance_total")) {
+            variance_fields <- c(
+                "variance", "variance_explained",
+                "cumulative_variance_explained", "variance_total"
+            )
+            for (name in variance_fields) {
                 model[[paste0("x_", name)]] <- model[[name]]
             }
         }
@@ -268,7 +325,9 @@
         model$R2Y <- fitted$Q2Y
     }
     if (!is.null(context$Xtest)) {
-        predicted <- .resident_cuda_predict(model, context$Xtest, context$Ytest, proj = config$proj)
+        predicted <- .resident_cuda_predict(
+            model, context$Xtest, context$Ytest, proj = config$proj
+        )
         model[names(predicted)] <- predicted
     }
     model

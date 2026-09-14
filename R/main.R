@@ -5296,7 +5296,8 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
     top <- .resolve_top_k(top)
     if (!isTRUE(object$classification) && top_requested) {
         warning(
-            "top is ignored for regression models; ranked classes are available only for classification.",
+            "top is ignored for regression models; ranked classes are ",
+            "available only for classification.",
             call. = FALSE
         )
     }
@@ -5314,7 +5315,8 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
         if (!compatible) {
             stop(
                 "This model retains ", resident_backend,
-                " device state; prediction requires the same backend. No CPU fallback is performed.",
+                " device state; prediction requires the same backend. ",
+                "No CPU fallback is performed.",
                 call. = FALSE
             )
         }
@@ -5910,7 +5912,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     )
     if (!metric %in% valid) {
         stop(
-            "Unknown selection metric. See ?pls.single.cv for the task-specific choices.",
+            "Unknown selection metric. See ?pls.single.cv for the ",
+            "task-specific choices.",
             call. = FALSE
         )
     }
@@ -6267,7 +6270,9 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         rmsd = cv_res$RMSD,
         NULL
     )
-    if (!is.null(native_values) && length(native_values) == length(cv_res$ncomp) &&
+    native_metric_available <- !is.null(native_values) &&
+        length(native_values) == length(cv_res$ncomp)
+    if (native_metric_available &&
         any(is.finite(native_values))) {
         return(.cv_metric_frame(
             as.numeric(native_values),
@@ -7771,7 +7776,10 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     left_only
 ) {
     if (!identical(method, "cpu_rsvd")) {
-        stop("Standalone fastsvd() supports backend = 'cpu' only.", call. = FALSE)
+        stop(
+            "Standalone fastsvd() supports backend = 'cpu' only.",
+            call. = FALSE
+        )
     }
     elapsed <- system.time({
         output <- fastsvd_core_cpp(
@@ -9077,10 +9085,14 @@ plot.permutation <- function(
                     "cached_rank_one_deflation_product",
                     "persistent_device_workspace",
                     "compact_prediction",
-                    if (isTRUE(model$resident_controls$implicit_crosscovariance)) {
+                    if (isTRUE(
+                        model$resident_controls$implicit_crosscovariance
+                    )) {
                         "implicit_projected_crosscovariance"
                     },
-                    if (isTRUE(model$resident_controls$predictor_crossprod_cache)) {
+                    if (isTRUE(
+                        model$resident_controls$predictor_crossprod_cache
+                    )) {
                         "cached_predictor_crossproduct"
                     },
                     paste0(
@@ -9271,7 +9283,9 @@ plot.permutation <- function(
     )
     X <- as.matrix(context$Xtrain)
     method_id <- .normalize_pls_method(context$method)
-    compact_labels <- (is.factor(context$Ytrain) || is.character(context$Ytrain)) &&
+    classification_labels <- is.factor(context$Ytrain) ||
+        is.character(context$Ytrain)
+    compact_labels <- classification_labels &&
         method_id %in% c(1L, 3L) && !isTRUE(config$perm.test)
     response <- .prepare_response(
         context$Ytrain,
@@ -9598,7 +9612,9 @@ plot.permutation <- function(
     if (identical(context$backend, "metal")) {
         if (!isTRUE(context$float32)) {
             stop(
-                "Apple Metal does not provide native float64 arithmetic. Use float32 input or another backend; no CPU fallback is performed.",
+                "Apple Metal does not provide native float64 arithmetic. ",
+                "Use float32 input or another backend; no CPU fallback ",
+                "is performed.",
                 call. = FALSE
             )
         }
@@ -9798,9 +9814,11 @@ plot.permutation <- function(
 #'     CPU decomposition also records its residual audit, strengthened retries,
 #'     and any deterministic recovery; other routes state explicitly that a
 #'     case audit is unavailable. Panel evidence is reported separately and is
-#'     not interpreted as general-use certification. SIMPLS-family fits also record
+#'     not interpreted as general-use certification. SIMPLS-family fits also
+#'     record
 #'     whether the active approximate route uses a component-wise oversampled
-#'     sketch or an eligible CPU/CUDA/Metal candidate block, together with the active execution
+#'     sketch or an eligible CPU/CUDA/Metal candidate block, together with the
+#'     active execution
 #'     optimizations.
 #'
 #'   Function settings and backend bookkeeping, such as the component grid and
@@ -12438,7 +12456,8 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     observed_labels <- .evaluate_class_labels(observed, levels_ref)
     if (nrow(ranked) != length(observed_labels)) {
         stop(
-            "observed and ranked predictions must have the same number of samples.",
+            "observed and ranked predictions must have the same number of ",
+            "samples.",
             call. = FALSE
         )
     }

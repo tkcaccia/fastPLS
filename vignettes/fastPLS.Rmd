@@ -111,7 +111,8 @@ route generates candidates from a newly randomized sketch at each refresh of
 the current deflated operator; a refresh can supply one or several candidates.
 Like `pls::simpls.fit`, one fit provides the sequential path through all
 components up to `ncomp`; fastPLS does not claim this standard path construction
-as a novelty. Cross-covariance deflation is updated after each accepted component.
+as a novelty. Cross-covariance deflation is updated after each accepted
+component.
 The component-wise CPU rSVD route derives a reproducible component-specific seed
 and generates a new Gaussian sketch at each refresh. Metal initializes one
 reproducible random sequence per fit and draws a new sketch for each component.
@@ -300,7 +301,8 @@ explicit host/device hybrid, and U for unavailable.
 Float32 support is route and platform dependent, as described in the Float32
 Input section. CUDA uses a device-native route, whereas Metal uses the fixed
 CPU/Metal operation split. Metal float64 requests stop because the hardware
-does not provide native double-precision arithmetic. Nonlinear kernel workloads that
+does not provide native double-precision arithmetic. Nonlinear kernel workloads
+that
 exceed the guarded device-memory budget stop before allocation and never fall
 back to another method or backend.
 

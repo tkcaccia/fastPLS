@@ -42,8 +42,13 @@ test_that("fold sufficient statistics preserve grouped SIMPLS CV", {
         cached <- run(TRUE, classifier)
         expect_identical(cached$fold, ordinary$fold)
         expect_identical(cached$best_ncomp, ordinary$best_ncomp)
-        expect_equal(cached$best_metric_value, ordinary$best_metric_value,
-            tolerance = 1e-12)
+        # BLAS implementations may accumulate fold reductions in a different
+        # order, so require numerical rather than bitwise identity here.
+        expect_equal(
+            cached$best_metric_value,
+            ordinary$best_metric_value,
+            tolerance = 1e-10
+        )
         expect_identical(
             lapply(cached$pred, as.character),
             lapply(ordinary$pred, as.character)
