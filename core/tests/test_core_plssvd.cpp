@@ -81,6 +81,30 @@ void check_plssvd() {
       model.singular_values[index]) / scale <
       (std::is_same<T, float>::value ? T(2e-4) : T(2e-10)));
   }
+
+  fastpls::core::Matrix<T> centered_y(shifted_y.rows(), shifted_y.columns());
+  for (std::size_t column = 0; column < centered_y.columns(); ++column) {
+    for (std::size_t row = 0; row < centered_y.rows(); ++row) {
+      centered_y(row, column) = shifted_y(row, column) - response_mean[column];
+    }
+  }
+  fastpls::core::Matrix<T> response_gram(centered_y.rows(), centered_y.rows());
+  backend.gemm(
+    centered_y.view(), centered_y.view(), false, true,
+    response_gram.view()
+  );
+  fastpls::core::OperatorRsvdWorkspace<T> sample_gram_workspace;
+  const auto sample_gram_model = fastpls::core::fit_plssvd_operator<T>(
+    x.view(), op, components, 2, controls, backend, sample_gram_workspace,
+    response_gram.view()
+  );
+  assert(sample_gram_model.completed_components == model.completed_components);
+  fastpls::core::Matrix<T> sample_gram_prediction(8, 2);
+  backend.gemm(
+    sample_gram_model.scores.view(),
+    sample_gram_model.prediction_weights[1].view(), false, false,
+    sample_gram_prediction.view()
+  );
   fastpls::core::Matrix<T> implicit_prediction(8, 2);
   backend.gemm(
     implicit_model.scores.view(),
@@ -100,6 +124,9 @@ void check_plssvd() {
       error += difference * difference;
       assert(std::abs(prediction(row, column) -
         implicit_prediction(row, column)) <
+        (std::is_same<T, float>::value ? T(2e-4) : T(2e-10)));
+      assert(std::abs(prediction(row, column) -
+        sample_gram_prediction(row, column)) <
         (std::is_same<T, float>::value ? T(2e-4) : T(2e-10)));
     }
   }

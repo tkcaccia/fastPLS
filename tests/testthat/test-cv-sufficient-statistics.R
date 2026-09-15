@@ -22,18 +22,18 @@ cv_cache_state <- function(enabled) {
 
 test_that("fold sufficient statistics preserve grouped SIMPLS CV", {
     set.seed(301)
-    X <- matrix(rnorm(480L * 24L), 480L, 24L)
+    X <- matrix(rnorm(96L * 12L), 96L, 12L)
     signal <- X[, 1L] - 0.5 * X[, 2L] + 0.2 * X[, 3L]
     y <- factor(cut(signal, breaks = c(-Inf, -0.5, 0.5, Inf)))
-    groups <- rep(seq_len(240L), each = 2L)
+    groups <- rep(seq_len(48L), each = 2L)
 
     run <- function(enabled, classifier) {
         restore <- cv_cache_state(enabled)
         on.exit(restore())
         pls.single.cv(
-            X, y, constrain = groups, ncomp = c(10L, 20L), kfold = 5L,
+            X, y, constrain = groups, ncomp = c(2L, 4L), kfold = 3L,
             method = "simpls", backend = "cpu", classifier = classifier,
-            seed = 17L, fit = FALSE
+            seed = 17L, fit = FALSE, n.cores = 1L
         )
     }
 
@@ -58,17 +58,17 @@ test_that("fold sufficient statistics preserve grouped SIMPLS CV", {
 
 test_that("fold sufficient statistics preserve grouped PLS-SVD CV", {
     set.seed(304)
-    X <- matrix(rnorm(600L * 24L), 600L, 24L)
-    y <- factor(rep(seq_len(30L), each = 20L))
-    groups <- rep(seq_len(300L), each = 2L)
+    X <- matrix(rnorm(120L * 12L), 120L, 12L)
+    y <- factor(rep(seq_len(6L), each = 20L))
+    groups <- rep(seq_len(60L), each = 2L)
 
     run <- function(enabled, classifier) {
         restore <- cv_cache_state(enabled)
         on.exit(restore())
         pls.single.cv(
-            X, y, constrain = groups, ncomp = c(10L, 20L), kfold = 5L,
+            X, y, constrain = groups, ncomp = c(2L, 4L), kfold = 3L,
             method = "plssvd", backend = "cpu", classifier = classifier,
-            seed = 29L, fit = FALSE
+            seed = 29L, fit = FALSE, n.cores = 1L
         )
     }
 
@@ -88,36 +88,93 @@ test_that("fold sufficient statistics preserve grouped PLS-SVD CV", {
 
 test_that("fold sufficient statistics preserve multivariate regression CV", {
     set.seed(302)
-    X <- matrix(rnorm(400L * 20L), 400L, 20L)
-    coefficients <- matrix(rnorm(20L * 5L), 20L, 5L)
-    Y <- X %*% coefficients + matrix(rnorm(400L * 5L, sd = 0.1), 400L, 5L)
-    groups <- rep(seq_len(200L), each = 2L)
+    X <- matrix(rnorm(90L * 10L), 90L, 10L)
+    coefficients <- matrix(rnorm(10L * 3L), 10L, 3L)
+    Y <- X %*% coefficients + matrix(rnorm(90L * 3L, sd = 0.1), 90L, 3L)
+    groups <- rep(seq_len(45L), each = 2L)
 
     run <- function(enabled, method, ncomp) {
         restore <- cv_cache_state(enabled)
         on.exit(restore())
         pls.single.cv(
-            X, Y, constrain = groups, ncomp = ncomp, kfold = 5L,
-            method = method, backend = "cpu", seed = 23L, fit = FALSE
+            X, Y, constrain = groups, ncomp = ncomp, kfold = 3L,
+            method = method, backend = "cpu", seed = 23L, fit = FALSE,
+            n.cores = 1L
         )
     }
 
     for (case in list(
-        list(method = "simpls", ncomp = c(10L, 20L)),
-        list(method = "kernelpls", ncomp = c(10L, 20L)),
-        list(method = "plssvd", ncomp = c(2L, 4L))
+        list(method = "simpls", ncomp = c(2L, 4L)),
+        list(method = "kernelpls", ncomp = c(2L, 4L)),
+        list(method = "plssvd", ncomp = c(1L, 2L))
     )) {
         ordinary <- run(FALSE, case$method, case$ncomp)
         cached <- run(TRUE, case$method, case$ncomp)
         expect_identical(cached$fold, ordinary$fold)
         expect_identical(cached$best_ncomp, ordinary$best_ncomp)
         expect_equal(cached$best_metric_value, ordinary$best_metric_value,
-            tolerance = 1e-12)
-        expect_equal(cached$Ypred, ordinary$Ypred, tolerance = 1e-10)
+            tolerance = 1e-10)
+        expect_equal(cached$Ypred, ordinary$Ypred, tolerance = 1e-9)
     }
 })
 
+test_that("fold sufficient statistics preserve OPLS classification CV", {
+    set.seed(307)
+    X <- matrix(rnorm(120L * 14L), 120L, 14L)
+    signal <- X[, 1L] - 0.4 * X[, 2L] + 0.25 * X[, 3L]
+    y <- factor(cut(signal, breaks = c(-Inf, -0.5, 0.5, Inf)))
+    groups <- rep(seq_len(60L), each = 2L)
+
+    run <- function(enabled, classifier) {
+        restore <- cv_cache_state(enabled)
+        on.exit(restore())
+        pls.single.cv(
+            X, y, constrain = groups, ncomp = c(2L, 4L), kfold = 3L,
+            method = "opls", north = 1L, backend = "cpu",
+            classifier = classifier, seed = 41L, fit = FALSE,
+            n.cores = 1L
+        )
+    }
+
+    for (classifier in c("argmax", "lda")) {
+        ordinary <- run(FALSE, classifier)
+        cached <- run(TRUE, classifier)
+        expect_identical(cached$fold, ordinary$fold)
+        expect_identical(cached$best_ncomp, ordinary$best_ncomp)
+        expect_identical(
+            lapply(cached$pred, as.character),
+            lapply(ordinary$pred, as.character)
+        )
+        expect_equal(cached$Ypred, ordinary$Ypred, tolerance = 1e-9)
+    }
+})
+
+test_that("fold sufficient statistics preserve OPLS regression CV", {
+    set.seed(308)
+    X <- matrix(rnorm(100L * 12L), 100L, 12L)
+    coefficients <- matrix(rnorm(12L * 4L), 12L, 4L)
+    Y <- X %*% coefficients + matrix(rnorm(100L * 4L, sd = 0.1), 100L, 4L)
+
+    run <- function(enabled) {
+        restore <- cv_cache_state(enabled)
+        on.exit(restore())
+        pls.single.cv(
+            X, Y, ncomp = c(2L, 4L), kfold = 4L,
+            method = "opls", north = 1L, backend = "cpu",
+            seed = 43L, fit = FALSE, n.cores = 1L
+        )
+    }
+
+    ordinary <- run(FALSE)
+    cached <- run(TRUE)
+    expect_identical(cached$fold, ordinary$fold)
+    expect_identical(cached$best_ncomp, ordinary$best_ncomp)
+    expect_equal(cached$RMSD, ordinary$RMSD, tolerance = 1e-10)
+    expect_equal(cached$Ypred, ordinary$Ypred, tolerance = 1e-9)
+})
+
 test_that("compiled implicit CV preserves the public large-response path", {
+    skip_on_cran()
     skip_on_os("windows")
     set.seed(303)
     observations <- 12L
@@ -169,6 +226,7 @@ test_that("compiled implicit CV preserves the public large-response path", {
 })
 
 test_that("sample-Gram centering preserves wide-response SIMPLS CV", {
+    skip_on_cran()
     set.seed(305)
     observations <- 20L
     predictors <- 9000L

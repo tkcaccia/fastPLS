@@ -1,6 +1,6 @@
 ---
 title: "Installing fastPLS"
-output: BiocStyle::html_document
+output: rmarkdown::html_vignette
 vignette: >
     %\VignetteIndexEntry{Installing fastPLS}
     %\VignetteEngine{knitr::rmarkdown}

@@ -53,3 +53,4 @@
 ^[.]fastpls-metal-lib.*(/|$)
 ^[.]fastpls-metal-current-lib(/|$)
 ^cran-comments[.]md$
+^data-raw(/|$)

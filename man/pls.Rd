@@ -31,15 +31,13 @@ pls(
 )
 }
 \arguments{
-\item{Xtrain}{Numeric training predictor matrix, a \code{float::float32}
-predictor matrix for the supported float32 route, or a
-\code{Biobase::ExpressionSet}. ExpressionSet assay rows are treated as
-variables and columns as samples.}
+\item{Xtrain}{Numeric training predictor matrix or a \code{float::float32}
+predictor matrix for the supported float32 route.}
 
 \item{Ytrain}{Training response. Use a numeric vector/matrix for regression
 or factor/character class labels for classification.}
 
-\item{Xtest}{Optional test predictor matrix or \code{Biobase::ExpressionSet}.}
+\item{Xtest}{Optional test predictor matrix.}
 
 \item{Ytest}{Optional test response for independent-test \code{Q2Y}, whose
 denominator uses the training-response mean. Classification labels may

@@ -1,6 +1,6 @@
 ---
 title: "fastPLS: Mathematical Methods, Implementations, and User Guide"
-output: BiocStyle::html_document
+output: rmarkdown::html_vignette
 header-includes:
     - \usepackage{array}
 vignette: >
@@ -331,31 +331,26 @@ called directly.
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check for Apple Metal support. |
 
-### Bioconductor Data Containers
+### Package Example Data
 
-`pls()` and `predict()` accept a `Biobase::ExpressionSet` directly. Expression
-measurements are stored as variables by samples in an `ExpressionSet`, so
-fastPLS transposes the assay internally to its samples-by-variables layout.
-The following example predicts the case-control phenotype in the Biobase
-example data while keeping the test samples separate from model fitting.
+The package includes `fastpls_example`, a deterministic synthetic biomedical
+classification dataset with a fixed training and test split. It is suitable
+for reproducing the complete fit, prediction, evaluation, and plotting
+workflow without downloading external data.
 
-```{r biobase-expression-set}
-data("sample.ExpressionSet", package = "Biobase")
-y_bioc <- factor(Biobase::pData(sample.ExpressionSet)$type)
-
-set.seed(42)
-test_bioc <- sample(seq_len(ncol(sample.ExpressionSet)), 8)
-fit_bioc <- pls(
-    sample.ExpressionSet[, -test_bioc],
-    y_bioc[-test_bioc],
-    sample.ExpressionSet[, test_bioc],
-    y_bioc[test_bioc],
+```{r package-example-data}
+data("fastpls_example", package = "fastPLS")
+fit_example <- pls(
+    fastpls_example$X_train,
+    fastpls_example$y_train,
+    fastpls_example$X_test,
+    fastpls_example$y_test,
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
     seed = 42
 )
-fit_bioc$accuracy
+fit_example$accuracy
 ```
 
 ### Choosing a Starting Model
@@ -385,8 +380,8 @@ PLS-DA response encoding internally and returns predicted class labels.
 The `classifier` argument is used only for this type of task and selects the
 classification head: `argmax` or `lda`. These options are not
 regression models and are not used for numeric responses. The examples in this
-section use `iris` for compact multiclass classification and
-`sample.ExpressionSet` from Biobase for a biomedical two-class score plot.
+section use `iris` for compact multiclass classification and the bundled
+`fastpls_example` data for a biomedical-style two-class score plot.
 
 ```{r chunk-002}
 set.seed(100)
@@ -621,22 +616,21 @@ plot(
 )
 ```
 
-The next example uses the two-class gene-expression data from the Biobase
-`sample.ExpressionSet` object introduced above. The same `plot()` call works for
-`method = "plssvd"`, `"simpls"`, `"opls"`, and `"kernelpls"`.
+The next example uses the bundled two-class data introduced above. The same
+`plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
+`"kernelpls"`.
 
-```{r biobase-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
-X_two <- t(Biobase::exprs(sample.ExpressionSet))
-y_two <- factor(Biobase::pData(sample.ExpressionSet)$type)
-train_two <- setdiff(seq_along(y_two), test_bioc)
+```{r package-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
+X_two <- fastpls_example$X_train
+y_two <- fastpls_example$y_train
 fit_two <- pls(
-    X_two[train_two, , drop = FALSE], y_two[train_two],
-    X_two[test_bioc, , drop = FALSE], y_two[test_bioc],
+    X_two, y_two,
+    fastpls_example$X_test, fastpls_example$y_test,
     ncomp = 1:2, fit = TRUE, proj = TRUE, seed = 200
 )
 
-plot(fit_two, score.set = "train", groups = y_two[train_two],
-        ellipse = TRUE, main = "Biobase expression data")
+plot(fit_two, score.set = "train", groups = y_two,
+        ellipse = TRUE, main = "Synthetic biomedical example")
 ```
 
 The second score-plot example fits OPLS to the three-class `iris` split defined

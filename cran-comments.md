@@ -4,7 +4,9 @@ This is an update of fastPLS from CRAN version 0.2 to version 0.3.
 
 The release replaces the former Rcpp/RcppArmadillo implementation with the
 package's compiled C++17 core and expands the public methods, validation,
-float32 support, and optional accelerator routes.
+float32 support, and optional accelerator routes. The release has no
+Bioconductor package dependency; its examples and vignettes use base R data
+and a package-owned synthetic dataset.
 
 The package license has changed from GPL-3 to MIT. The package authors own the
 new implementation and have agreed to distribute it under the MIT license.

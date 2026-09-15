@@ -3575,15 +3575,8 @@ print.fastPLS <- function(x, ...) {
 }
 
 .fastpls_predictor_input <- function(x, label = "predictor input") {
-    direct_class <- attr(x, "class", exact = TRUE)
-    is_float_storage <- any(direct_class %in% "float32")
-    is_expression_set <- any(direct_class %in% "ExpressionSet") ||
-        (isS4(x) && !is_float_storage && methods::is(x, "ExpressionSet"))
-    if (is_expression_set) {
-        x <- t(Biobase::exprs(x))
-    }
     if (is.null(dim(x)) || length(dim(x)) != 2L) {
-        stop(label, " must be a matrix-like object or a Biobase ExpressionSet")
+        stop(label, " must be a matrix-like object")
     }
     x
 }
@@ -6525,6 +6518,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
 .cuda_resident_cv_route <- function(
     backend,
     method,
+    kernel,
     classification,
     observations,
     responses,
@@ -6533,19 +6527,11 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     if (!identical(backend, "cuda")) {
         return(FALSE)
     }
-    if (identical(method, "simpls")) {
+    if (method %in% c("simpls", "plssvd") ||
+        (identical(method, "kernelpls") && identical(kernel, "linear"))) {
         return(TRUE)
     }
-    if (!identical(method, "plssvd") || isTRUE(classification)) {
-        return(FALSE)
-    }
-
-    # Retaining the complete response on the device pays off when repeated
-    # fold-local transfers would move a large multivariate response. Smaller
-    # responses keep the lower-overhead fold-local path.
-    response_bytes <- as.double(observations) * as.double(responses) *
-        as.double(element_bytes)
-    response_bytes >= 64 * 1024^2
+    FALSE
 }
 
 .compiled_cv_call <- function(context, controls) {
@@ -6556,6 +6542,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     cuda_resident_route <- .cuda_resident_cv_route(
         backend = context$backend,
         method = context$method,
+        kernel = context$kernel,
         classification = context$response$classification,
         observations = nrow(context$X),
         responses = context$response$backend_responses,
@@ -6564,17 +6551,25 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     implicit_crosscovariance_bytes <-
         as.double(ncol(context$X)) *
         as.double(context$response$backend_responses) * element_bytes
+    opls_sample_gram_route <-
+        !identical(context$method, "opls") ||
+        (context$response$backend_responses > nrow(context$X) &&
+            as.double(nrow(context$X))^2 * element_bytes <= 256 * 1024^2)
     compiled_implicit_route <-
         context$backend %in% c("cpp", "metal") &&
-        context$method %in% c("plssvd", "simpls") &&
+        context$method %in% c("plssvd", "simpls", "opls") &&
         isTRUE(context$xprod) &&
         implicit_crosscovariance_bytes > 512 * 1024^2 &&
+        opls_sample_gram_route &&
         (!identical(context$backend, "metal") || isTRUE(context$float32))
-    core_route <- (context$backend %in% c("cpp", "metal") &&
+    compiled_explicit_route <-
+        context$backend %in% c("cpp", "metal") &&
         context$method %in% c("plssvd", "simpls", "opls", "kernelpls") &&
-        !isTRUE(context$xprod) &&
-        (!identical(context$backend, "metal") || isTRUE(context$float32))) ||
-        cuda_resident_route || compiled_implicit_route
+        (!isTRUE(context$xprod) ||
+            implicit_crosscovariance_bytes <= 512 * 1024^2) &&
+        (!identical(context$backend, "metal") || isTRUE(context$float32))
+    core_route <- compiled_explicit_route || cuda_resident_route ||
+        compiled_implicit_route
     if (core_route) {
         labels <- if (context$response$classification) {
             as.integer(context$response$matrix[, 1L])
@@ -9670,13 +9665,11 @@ plot.permutation <- function(
 #'   Cholesky solves. Regularization increases through a fixed internal sequence
 #'   only when factorization fails and is not user-tuned.
 #'
-#' @param Xtrain Numeric training predictor matrix, a `float::float32`
-#'   predictor matrix for the supported float32 route, or a
-#'   `Biobase::ExpressionSet`. ExpressionSet assay rows are treated as
-#'   variables and columns as samples.
+#' @param Xtrain Numeric training predictor matrix or a `float::float32`
+#'   predictor matrix for the supported float32 route.
 #' @param Ytrain Training response. Use a numeric vector/matrix for regression
 #'   or factor/character class labels for classification.
-#' @param Xtest Optional test predictor matrix or `Biobase::ExpressionSet`.
+#' @param Xtest Optional test predictor matrix.
 #' @param Ytest Optional test response for independent-test `Q2Y`, whose
 #'   denominator uses the training-response mean. Classification labels may
 #'   contain classes absent from the training data; such classes cannot be
@@ -10741,6 +10734,7 @@ keep <- c("scaling", "method", "backend", "classifier")
     resident_cuda_cv <- .cuda_resident_cv_route(
         backend = context$backend,
         method = context$config$method,
+        kernel = context$config$kernel,
         classification = context$classification,
         observations = nrow(context$X),
         responses = response_count,

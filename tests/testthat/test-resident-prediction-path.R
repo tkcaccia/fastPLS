@@ -185,13 +185,15 @@ test_that("resident CUDA regression CV is deterministic", {
     expect_identical(resident$residency$fallback, "none")
 })
 
-test_that("PLS-SVD CUDA CV residency is limited to wide regression", {
+test_that("PLS-SVD CUDA CV keeps folds resident for every response shape", {
     route <- fastPLS:::.cuda_resident_cv_route
-    expect_true(route("cuda", "simpls", TRUE, 100L, 3L, 4L))
-    expect_false(route("cuda", "plssvd", TRUE, 1000000L, 1000L, 4L))
-    expect_false(route("cuda", "plssvd", FALSE, 1000L, 100L, 4L))
-    expect_true(route("cuda", "plssvd", FALSE, 1200L, 28355L, 4L))
-    expect_false(route("cpu", "plssvd", FALSE, 1200L, 28355L, 4L))
+    expect_true(route("cuda", "simpls", "linear", TRUE, 100L, 3L, 4L))
+    expect_true(route("cuda", "plssvd", "linear", TRUE, 1000000L, 1000L, 4L))
+    expect_true(route("cuda", "plssvd", "linear", FALSE, 1000L, 100L, 4L))
+    expect_true(route("cuda", "plssvd", "linear", FALSE, 1200L, 28355L, 4L))
+    expect_true(route("cuda", "kernelpls", "linear", TRUE, 100L, 3L, 4L))
+    expect_false(route("cuda", "kernelpls", "rbf", TRUE, 100L, 3L, 4L))
+    expect_false(route("cpu", "plssvd", "linear", FALSE, 1200L, 28355L, 4L))
 })
 
 test_that("resident PLS-SVD CUDA CV kernels are deterministic", {

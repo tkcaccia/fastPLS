@@ -42,8 +42,8 @@ SystemRequirements: Optional OpenBLAS development libraries for faster CPU
     acceleration; optional Apple Metal framework on macOS for Metal
     acceleration. CPU-only builds do not require GPU software.
 Depends: R (>= 4.6.0)
-Imports: Biobase, methods, float
-Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
+Imports: methods, float
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3

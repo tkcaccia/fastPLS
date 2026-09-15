@@ -71,10 +71,81 @@ void check_label_filter() {
   }
 }
 
+template<class T>
+void check_operator_filter() {
+  fastpls::core::Matrix<T> predictors(36, 7);
+  fastpls::core::Matrix<T> responses(36, 11);
+  for (std::size_t row = 0; row < predictors.rows(); ++row) {
+    for (std::size_t column = 0; column < predictors.columns(); ++column) {
+      predictors(row, column) = static_cast<T>(
+        1.5 + std::sin(0.07 * (row + 1) * (column + 2))
+      );
+    }
+    for (std::size_t column = 0; column < responses.columns(); ++column) {
+      responses(row, column) = static_cast<T>(
+        predictors(row, column % predictors.columns()) +
+        0.2 * std::cos(0.11 * (row + 3) * (column + 1))
+      );
+    }
+  }
+
+  ReferenceBackend<T> backend;
+  fastpls::core::RsvdControls controls;
+  controls.oversample = 6;
+  controls.power = 7;
+  controls.seed = 19;
+  controls.left_only = true;
+  const auto dense = fastpls::core::fit_opls_filter_rsvd<T>(
+    predictors, fastpls::core::ConstMatrixView<T>(responses.view()), 1,
+    fastpls::core::PredictorScaling::autoscaling, controls, backend
+  );
+
+  auto standardized = predictors;
+  const auto prepared = fastpls::core::prepare_scaled_dense_operator<T>(
+    standardized.view(), fastpls::core::ConstMatrixView<T>(responses.view()),
+    fastpls::core::PredictorScaling::autoscaling, backend
+  );
+  fastpls::core::Matrix<T> centered(
+    responses.rows(), responses.columns()
+  );
+  for (std::size_t column = 0; column < responses.columns(); ++column) {
+    for (std::size_t row = 0; row < responses.rows(); ++row) {
+      centered(row, column) = responses(row, column) -
+        prepared.response_mean[column];
+    }
+  }
+  fastpls::core::Matrix<T> sample_gram(
+    responses.rows(), responses.rows()
+  );
+  backend.gemm(
+    centered.view(), centered.view(), false, true, sample_gram.view()
+  );
+  fastpls::core::OperatorRsvdWorkspace<T> workspace;
+  const auto matrix_free = fastpls::core::fit_opls_filter_operator<T>(
+    std::move(standardized), responses.view(),
+    prepared.response_mean.data(), prepared.response_mean.size(), 1,
+    controls, backend, sample_gram.view(), workspace
+  );
+  assert(matrix_free.completed_components == 1);
+  const T tolerance = std::is_same<T, float>::value ? T(2e-3) : T(2e-8);
+  T squared_difference = T(0);
+  T squared_reference = T(0);
+  for (std::size_t index = 0; index < dense.predictors.size(); ++index) {
+    const T difference =
+      matrix_free.predictors.data()[index] - dense.predictors.data()[index];
+    squared_difference += difference * difference;
+    squared_reference += dense.predictors.data()[index] *
+      dense.predictors.data()[index];
+  }
+  assert(std::sqrt(squared_difference / squared_reference) < tolerance);
+}
+
 int main() {
   check_dense_filter<float>();
   check_dense_filter<double>();
   check_label_filter<float>();
   check_label_filter<double>();
+  check_operator_filter<float>();
+  check_operator_filter<double>();
   return 0;
 }

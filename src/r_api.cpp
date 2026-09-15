@@ -483,6 +483,10 @@ class RoutedLinearAlgebraF32 {
   RoutedLinearAlgebraF32(const RoutedLinearAlgebraF32&) = delete;
   RoutedLinearAlgebraF32& operator=(const RoutedLinearAlgebraF32&) = delete;
 
+  int accelerator_backend_code() const {
+    return backend_;
+  }
+
   void configure_problem(const std::size_t training_rows,
                          const std::size_t training_columns,
                          const std::size_t response_columns) {

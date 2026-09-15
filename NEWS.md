@@ -1,5 +1,25 @@
 # fastPLS 0.3
 
+* Reduced single and nested cross-validation overhead without changing their
+  public arguments or statistical procedure. Classification folds now reuse
+  label sufficient statistics, large LDA score paths use compiled matrix
+  multiplication, fold metrics are accumulated while predictions are resident,
+  and training indices are materialized only for routes that require them.
+
+* Accelerated OPLS single and nested cross-validation with task-aware compiled
+  routes. OpenBLAS classification uses direct compact class products, while
+  regression and eligible accelerator routes reuse fold sufficient statistics
+  and predictor moments. The public fold assignments, component path,
+  predictions, metrics, and API are unchanged.
+
+* Routed CUDA PLS-SVD and linear kernel-PLS cross-validation through the same
+  resident compiled workflow used by CUDA SIMPLS, avoiding repeated fold-level
+  transfers without changing the requested family or kernel.
+
+* Removed the Biobase and BiocStyle dependencies. The vignettes now use a
+  documented, package-owned synthetic biomedical example and the standard
+  `rmarkdown::html_vignette` format.
+
 * Added a dedicated installation vignette with platform-specific source-build
   instructions for macOS, Ubuntu/Debian, Fedora, Windows x86-64, Windows
   ARM64, CUDA, Metal, OpenBLAS, capability verification, and troubleshooting.
