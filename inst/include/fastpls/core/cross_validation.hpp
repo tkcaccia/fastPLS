@@ -59,6 +59,8 @@ struct ClassificationCvResult {
   Matrix<double> fold_training_r2;
   Matrix<int> predictions;
   std::vector<Matrix<T>> scores;
+  std::vector<Matrix<T>> lda_discriminant_scores;
+  Matrix<int> fold_effective_components;
   std::size_t best_index = 0;
   int best_component = 0;
 };
@@ -1443,7 +1445,7 @@ std::vector<int> lda_predictions(ConstMatrixView<T> scores,
                                  const LdaModel<T>& model,
                                  const std::vector<int>& active,
                                  Backend& backend) {
-  if (scores.empty() || scores.columns() != model.linear.columns() ||
+  if (scores.rows() == 0 || scores.columns() != model.linear.columns() ||
       model.linear.rows() != model.constants.size() ||
       model.linear.rows() != active.size()) {
     throw std::invalid_argument(
@@ -1469,6 +1471,35 @@ std::vector<int> lda_predictions(ConstMatrixView<T> scores,
   return predicted_classes<T>(
     ConstMatrixView<T>(discriminants.view()), active
   );
+}
+
+template<class T, class Backend>
+Matrix<T> lda_discriminant_scores(ConstMatrixView<T> scores,
+                                  const LdaModel<T>& model,
+                                  Backend& backend) {
+  if (scores.rows() == 0 || scores.columns() != model.linear.columns() ||
+      model.linear.rows() != model.constants.size()) {
+    throw std::invalid_argument(
+      "cross-validation LDA prediction dimensions are invalid"
+    );
+  }
+  const long double work = static_cast<long double>(scores.rows()) *
+    scores.columns() * model.linear.rows();
+  if (scores.columns() == 0 || work < 1.0e6L) {
+    return lda_scores<T>(scores, model);
+  }
+  Matrix<T> discriminants(scores.rows(), model.linear.rows());
+  backend.gemm(
+    scores, model.linear.view(), false, true, discriminants.view()
+  );
+  for (std::size_t class_index = 0;
+       class_index < discriminants.columns(); ++class_index) {
+    const T constant = model.constants[class_index];
+    for (std::size_t row = 0; row < discriminants.rows(); ++row) {
+      discriminants(row, class_index) += constant;
+    }
+  }
+  return discriminants;
 }
 
 template<class T>
@@ -1753,7 +1784,25 @@ ClassificationCvResult<T> cross_validate_classification(
     for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
       result.scores.emplace_back(predictors.rows(), class_count);
     }
+    if (head == ClassificationHead::lda) {
+      result.lda_discriminant_scores.reserve(prefix_count);
+      const T floor = std::log(std::numeric_limits<T>::min());
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        result.lda_discriminant_scores.emplace_back(
+          predictors.rows(), class_count
+        );
+        std::fill_n(
+          result.lda_discriminant_scores.back().data(),
+          result.lda_discriminant_scores.back().size(), floor
+        );
+      }
+    }
   }
+  result.fold_effective_components.resize(partitions.size(), prefix_count);
+  std::fill_n(
+    result.fold_effective_components.data(),
+    result.fold_effective_components.size(), 0
+  );
   if (calculate_training_r2) {
     result.fold_training_r2.resize(partitions.size(), prefix_count);
     std::fill_n(
@@ -1852,6 +1901,11 @@ ClassificationCvResult<T> cross_validate_classification(
             result.scores[prefix](
               row, static_cast<std::size_t>(fallback - 1)
             ) = T(1);
+            if (head == ClassificationHead::lda) {
+              result.lda_discriminant_scores[prefix](
+                row, static_cast<std::size_t>(fallback - 1)
+              ) = T(0);
+            }
           }
         }
         for (const std::size_t row : partition.test) {
@@ -1994,15 +2048,33 @@ ClassificationCvResult<T> cross_validate_classification(
     if (family == LinearPlsFamily::plssvd) {
       PlssvdControls controls = plssvd_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
+      const std::size_t fold_rank_bound = std::min(
+        prepared.crossprod.rows(), active.size() - 1
+      );
+      std::vector<int> fold_components(prefix_count);
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        fold_components[prefix] = static_cast<int>(std::min(
+          static_cast<std::size_t>(components[prefix]), fold_rank_bound
+        ));
+      }
       auto model = moments_only_plssvd ?
         fit_plssvd_from_moments<T>(
           shared_simpls_workspace.predictor_crossprod.view(),
-          prepared.crossprod.view(), components, prefix_count,
+          prepared.crossprod.view(), fold_components.data(), prefix_count,
           controls, backend
         ) : fit_plssvd_preprocessed<T>(
-          train.view(), prepared.crossprod.view(), components, prefix_count,
-          controls, backend
+          train.view(), prepared.crossprod.view(), fold_components.data(),
+          prefix_count, controls, backend
         );
+      std::vector<int> effective_components(prefix_count);
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        effective_components[prefix] = static_cast<int>(std::min(
+          static_cast<std::size_t>(fold_components[prefix]),
+          model.completed_components
+        ));
+        result.fold_effective_components(fold, prefix) =
+          effective_components[prefix];
+      }
       std::vector<LdaModel<T>> lda_models;
       Matrix<T> test_scores = cv_detail::project_scores<T>(
         ConstMatrixView<T>(test.view()),
@@ -2010,11 +2082,17 @@ ClassificationCvResult<T> cross_validate_classification(
         model.completed_components, backend
       );
       if (head == ClassificationHead::lda) {
-        if (moments_only_plssvd) {
+        if (model.completed_components == 0) {
+          const auto prior = lda_prior_only_model<T>(
+            prepared.class_counts, partition.training_size
+          );
+          lda_models.assign(prefix_count, prior);
+        } else if (moments_only_plssvd) {
           lda_models = cv_detail::train_lda_from_predictor_moments<T>(
             model, shared_simpls_workspace.predictor_crossprod.view(),
             prepared.class_predictor_sums.view(), prepared.class_counts,
-            partition.training_size, components, prefix_count, backend
+            partition.training_size, effective_components.data(),
+            prefix_count, backend
           );
         } else {
           std::vector<int> lda_labels(compact.size());
@@ -2023,7 +2101,7 @@ ClassificationCvResult<T> cross_validate_classification(
           }
           lda_models = train_lda_prefixes(
             model.scores.view(), lda_labels.data(), lda_labels.size(),
-            active.size(), components, prefix_count
+            active.size(), effective_components.data(), prefix_count
           );
         }
       }
@@ -2041,13 +2119,25 @@ ClassificationCvResult<T> cross_validate_classification(
         }
         std::vector<int> predicted;
         if (head == ClassificationHead::lda) {
+          const std::size_t effective = static_cast<std::size_t>(
+            effective_components[prefix]
+          );
           ConstMatrixView<T> score_prefix(
             test_scores.data(), test_scores.rows(),
-            static_cast<std::size_t>(components[prefix]), test_scores.rows()
+            effective, test_scores.rows()
           );
-          predicted = cv_detail::lda_predictions<T>(
-            score_prefix, lda_models[prefix], active, backend
+          const auto discriminants = cv_detail::lda_discriminant_scores<T>(
+            score_prefix, lda_models[prefix], backend
           );
+          predicted = cv_detail::predicted_classes<T>(
+            discriminants.view(), active
+          );
+          if (store_scores) {
+            cv_detail::store_active_scores<T>(
+              result.lda_discriminant_scores[prefix], partition.test,
+              discriminants.view(), active
+            );
+          }
         } else {
           const auto scores = cv_detail::predict_plssvd_from_scores<T>(
             model, test_scores.view(), prefix,
@@ -2103,17 +2193,33 @@ ClassificationCvResult<T> cross_validate_classification(
         shared_simpls_workspace,
         moments_only_predictive ? partition.training_size : 0
       );
+      std::vector<int> effective_components(prefix_count);
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        effective_components[prefix] = static_cast<int>(std::min(
+          static_cast<std::size_t>(components[prefix]),
+          model.completed_components
+        ));
+        result.fold_effective_components(fold, prefix) =
+          effective_components[prefix];
+      }
       std::vector<LdaModel<T>> lda_models;
       Matrix<T> test_scores = cv_detail::project_scores<T>(
         ConstMatrixView<T>(test.view()),
         ConstMatrixView<T>(model.weights.view()),
         model.completed_components, backend
       );
-      if (head == ClassificationHead::lda && moments_only_predictive) {
+      if (head == ClassificationHead::lda &&
+          model.completed_components == 0) {
+        const auto prior = lda_prior_only_model<T>(
+          prepared.class_counts, partition.training_size
+        );
+        lda_models.assign(prefix_count, prior);
+      } else if (head == ClassificationHead::lda && moments_only_predictive) {
         lda_models = cv_detail::train_lda_from_predictor_moments<T>(
           model, shared_simpls_workspace.predictor_crossprod.view(),
           prepared.class_predictor_sums.view(), prepared.class_counts,
-          partition.training_size, components, prefix_count, backend
+          partition.training_size, effective_components.data(),
+          prefix_count, backend
         );
       } else if (head == ClassificationHead::lda) {
         std::vector<int> lda_labels(compact.size());
@@ -2122,7 +2228,7 @@ ClassificationCvResult<T> cross_validate_classification(
         }
         lda_models = train_lda_prefixes(
           model.scores.view(), lda_labels.data(), lda_labels.size(),
-          active.size(), components, prefix_count
+          active.size(), effective_components.data(), prefix_count
         );
       }
       const bool need_response_scores =
@@ -2140,23 +2246,26 @@ ClassificationCvResult<T> cross_validate_classification(
       Matrix<T> training_prediction_contribution;
       std::size_t previous_training_component = 0;
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
-        const std::size_t requested = static_cast<std::size_t>(
-          components[prefix]
+        const std::size_t effective = static_cast<std::size_t>(
+          effective_components[prefix]
         );
-        if (need_response_scores) {
+        if (need_response_scores && effective > previous_component) {
           cv_detail::update_simpls_prediction_from_scores<T>(
-            model, test_scores.view(), previous_component, requested,
+            model, test_scores.view(), previous_component, effective,
             response_scores.view(), prediction_contribution, backend
           );
-          previous_component = requested;
+          previous_component = effective;
         }
-        if (calculate_training_r2) {
+        if (calculate_training_r2 &&
+            effective > previous_training_component) {
           cv_detail::update_simpls_prediction_from_scores<T>(
             model, model.scores.view(), previous_training_component,
-            requested, training_response_scores.view(),
+            effective, training_response_scores.view(),
             training_prediction_contribution, backend
           );
-          previous_training_component = requested;
+          previous_training_component = effective;
+        }
+        if (calculate_training_r2) {
           Matrix<T> centered_fit(
             training_response_scores.rows(), training_response_scores.columns()
           );
@@ -2176,11 +2285,20 @@ ClassificationCvResult<T> cross_validate_classification(
         if (head == ClassificationHead::lda) {
           ConstMatrixView<T> score_prefix(
             test_scores.data(), test_scores.rows(),
-            requested, test_scores.rows()
+            effective, test_scores.rows()
           );
-          predicted = cv_detail::lda_predictions<T>(
-            score_prefix, lda_models[prefix], active, backend
+          const auto discriminants = cv_detail::lda_discriminant_scores<T>(
+            score_prefix, lda_models[prefix], backend
           );
+          predicted = cv_detail::predicted_classes<T>(
+            discriminants.view(), active
+          );
+          if (store_scores) {
+            cv_detail::store_active_scores<T>(
+              result.lda_discriminant_scores[prefix], partition.test,
+              discriminants.view(), active
+            );
+          }
         } else {
           predicted = cv_detail::store_scores_and_predict_classes<T>(
             store_scores ? &result.scores[prefix] : nullptr,
@@ -2210,6 +2328,10 @@ ClassificationCvResult<T> cross_validate_classification(
             predicted[i] == labels[partition.test[i]] ? 1.0 : 0.0;
           totals[prefix] += 1.0;
         }
+      }
+      if (model.completed_components == 0) {
+        result.status[fold] = 5;
+        continue;
       }
     } else {
       throw std::invalid_argument(

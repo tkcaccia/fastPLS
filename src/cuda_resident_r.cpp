@@ -519,6 +519,10 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   int protected_count = 0;
   SEXP status = PROTECT(Rf_allocVector(INTSXP, fold_count));
   ++protected_count;
+  SEXP effective_components = PROTECT(Rf_allocMatrix(
+    INTSXP, fold_count, prefix_count
+  ));
+  ++protected_count;
   SEXP metric = PROTECT(Rf_allocVector(REALSXP, prefix_count));
   ++protected_count;
   SEXP predictions = R_NilValue;
@@ -529,6 +533,9 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   SEXP score_array = R_NilValue;
   std::vector<float> float_scores;
   void* score_output = nullptr;
+  SEXP lda_score_array = R_NilValue;
+  std::vector<float> float_lda_scores;
+  void* lda_score_output = nullptr;
   if (retain_scores) {
     score_array = PROTECT(allocate_array3(
       REALSXP, x.rows, classes, prefix_count
@@ -542,6 +549,20 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
     } else {
       score_output = REAL(score_array);
     }
+    if (lda == 1) {
+      lda_score_array = PROTECT(allocate_array3(
+        REALSXP, x.rows, classes, prefix_count
+      ));
+      ++protected_count;
+      if (precision == 32) {
+        float_lda_scores.resize(
+          static_cast<std::size_t>(x.rows) * classes * prefix_count
+        );
+        lda_score_output = float_lda_scores.data();
+      } else {
+        lda_score_output = REAL(lda_score_array);
+      }
+    }
   }
   char error[1024] = {};
   const auto runner = method == 1 ?
@@ -553,7 +574,8 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
       extra, iterations, random_seed, retain_predictions ? 1 : 0,
       retain_scores ? 1 : 0,
       retain_predictions ? INTEGER(predictions) : nullptr, score_output,
-      INTEGER(status), REAL(metric), error, sizeof(error))) {
+      lda_score_output, INTEGER(effective_components), INTEGER(status),
+      REAL(metric), error, sizeof(error))) {
     UNPROTECT(protected_count);
     Rf_error("%s", error);
   }
@@ -562,6 +584,13 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
       float_scores.begin(), float_scores.end(), REAL(score_array),
       [](float value) { return static_cast<double>(value); }
     );
+    if (lda == 1) {
+      std::transform(
+        float_lda_scores.begin(), float_lda_scores.end(),
+        REAL(lda_score_array),
+        [](float value) { return static_cast<double>(value); }
+      );
+    }
   }
   SEXP q2_values = R_NilValue;
   if (retain_scores) {
@@ -571,15 +600,16 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
     ++protected_count;
   }
   const int selected = best_metric_index(REAL(metric), prefix_count, false);
-  SEXP output = PROTECT(Rf_allocVector(VECSXP, 9));
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 11));
   ++protected_count;
-  SEXP names = PROTECT(Rf_allocVector(STRSXP, 9));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 11));
   ++protected_count;
-  const char* const field_names[9] = {
+  const char* const field_names[11] = {
     "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred",
-    "Q2Y", "native_best_index", "native_best_ncomp"
+    "Q2Y", "native_best_index", "native_best_ncomp", "effective_ncomp",
+    "lda_scores"
   };
-  for (int index = 0; index < 9; ++index) {
+  for (int index = 0; index < 11; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, folds);
@@ -593,6 +623,8 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(
     INTEGER(components)[selected]
   ));
+  SET_VECTOR_ELT(output, 9, effective_components);
+  SET_VECTOR_ELT(output, 10, lda_score_array);
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(protected_count);
   return output;

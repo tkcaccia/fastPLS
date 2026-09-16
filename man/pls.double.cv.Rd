@@ -58,7 +58,10 @@ bounded-block route is approximate rather than classical de Jong SIMPLS.}
 \code{metal}. Multiple values are tuned in the inner loop. Metal requires
 float32 input and Apple Metal. R validates the request and constructs a
 reproducible grouped-fold plan. CPU and Metal use the compiled nested-CV
-coordinator for fold loops, fitting, prediction, and metric accumulation.
+coordinator for fold loops, fitting, prediction, and metric accumulation
+when selection uses accuracy, balanced accuracy or macro recall, Q2Y, or
+regression RMSD. Other selection metrics use R-level outer coordination
+around compiled single-CV and fitting kernels.
 CUDA uses the R coordinator around CUDA-native single-CV and outer-fit
 kernels; supported CUDA fits do not substitute a CPU estimator. Metal uses
 the same fixed operation split as \code{pls()}. When omitted,
@@ -156,8 +159,9 @@ the exact R2Y and Q2Y denominator conventions.
 \item \code{results}: list with one element per repeated run. Each run stores
 \code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
 each outer fold, fold-level \code{best_parameters}, compact inner-CV metric
-summaries in \code{inner}, run-level \code{metric_name} and \code{metric_value}, and the
-default \code{backend} and \code{method}.
+summaries in \code{inner}, selected outer-fold \code{effective_ncomp}, run-level
+\code{metric_name} and \code{metric_value}, and the default \code{backend} and \code{method}.
+Each inner summary contains its fold-by-prefix \code{effective_ncomp} matrix.
 \item \code{Ypred}: final cross-validated predictions. For classification, repeated
 runs are combined by voting; for regression, numeric predictions are
 averaged across runs.
@@ -217,11 +221,15 @@ be predicted in that fold; its held-out observations remain in the
 reported metrics. With CUDA, nested outer/inner orchestration remains in R,
 while each supported single-CV and outer fit uses its native CUDA route.
 Unsupported accelerator requests fail explicitly and never fall back to
-CPU. For regression, a fold that estimates fewer latent components than
-requested uses its available component prefix. Higher requested prefixes
-repeat the last estimable prediction; if no component is estimable, the
-prediction is the fold-training response mean. Inner tuning paths retain
-one result for every requested component count.
+CPU. In either task, a fold that estimates fewer latent components than
+requested uses its available component prefix, and higher requested
+prefixes repeat its last estimable prediction and metric. A zero-component
+regression fold predicts its training-response mean. A zero-component LDA
+fold uses empirical training-class priors and finite log-prior scores; a
+single-class training fold predicts its represented class. Inner tuning
+paths retain every requested component and record fold-level effective
+counts. Ties are resolved in favor of the earliest, and therefore lowest,
+requested component count.
 }
 \examples{
 idx <- c(seq_len(10), 51:60, 101:110)

@@ -902,6 +902,17 @@ preprocessing, seeds, and model fitting remain unchanged. Aggregate regression
 metrics are computed directly from the native out-of-fold predictions before
 those predictions are formatted for R.
 
+On CPU and Metal, the complete nested coordinator is compiled when inner
+selection uses accuracy, balanced accuracy (or its identical macro-recall
+definition), dummy-response Q2Y, or regression RMSD/Q2Y. Other documented
+criteria, such as macro F1, MAE, RPD, or correlation, retain R-level outer
+coordination around compiled single-CV and fitting kernels because their full
+metric paths are assembled by `evaluate()`. CUDA likewise uses R-level nested
+coordination around its native CUDA kernels. These routes return the same
+documented fold structure, but the fully compiled coordinator avoids repeated
+R calls and model-object assembly and is therefore preferable when its metric
+matches the scientific objective.
+
 ### Ordinary k-fold CV
 
 In ordinary k-fold CV, samples are split directly into `kfold` folds. The
@@ -1005,6 +1016,15 @@ assemble eligible PLS-SVD folds through the fold-specific predictor Gram and
 class cross-product, without materializing the training-score matrix. On the
 Metal route, small reduced products are evaluated with Accelerate while the
 large sample-matrix products assigned to Metal remain on the GPU.
+
+Some grouped or highly imbalanced folds have lower effective rank than the
+requested component path. In that case, fastPLS fits only the estimable score
+prefix and repeats its prediction and metric for larger requested counts. The
+requested path is preserved, while `effective_ncomp` records the prefix used in
+each fold. For LDA, a fold with no estimable PLS direction uses its empirical
+training-class priors and finite log-prior scores; a training fold containing
+one class predicts that class. These fallbacks are reported through the fold
+`status` field rather than surfacing as a matrix-dimension error.
 
 ```{r chunk-026}
 cv_opt <- pls.single.cv(
@@ -1226,12 +1246,13 @@ report performance, producing optimistic accuracy or Q2 estimates. In the
 terminology of Szymanska et al. (2012), the inner CV loop (`CV1`) is used to
 optimize model complexity, such as the number of latent variables, whereas the
 outer CV loop (`CV2`) holds out samples that are not used during optimization
-    and
-therefore provides the performance estimate of the complete modelling strategy.
+and therefore provides the performance estimate of the complete modelling
+strategy.
 In `fastPLS`, `pls.double.cv()` follows this idea using a reproducible grouped-
-fold plan constructed in R. CPU and Metal use a compiled coordinator for inner
-selection, outer refitting, prediction, and metric accumulation. CUDA uses an R
-coordinator around native CUDA single-CV and outer-fit kernels. Both
+fold plan constructed in R. For the eligible selection criteria described
+above, CPU and Metal use a compiled coordinator for inner selection, outer
+refitting, prediction, and metric accumulation. CUDA uses an R coordinator
+around native CUDA single-CV and outer-fit kernels. Both
 `kfold_inner` and `kfold_outer` can be ordinary fold counts or `"loocv"`, and
 both respect `constrain`.
 
@@ -1240,9 +1261,13 @@ cv_double <- pls.double.cv(
     Xdata = Xtrain,
     Ydata = Ytrain_cls,
     constrain = patient_id,
-    ncomp = 1:2,
+    ncomp = 1:3,
     kfold_inner = 3,
     kfold_outer = 3,
+    method = "simpls",
+    classifier = "lda",
+    selection = "balanced_accuracy",
+    backend = "cpu",
     seed = 104
 )
 
@@ -1250,10 +1275,23 @@ data.frame(
     selected_ncomp_mode = cv_double$bcomp,
     outer_metric = cv_double$metric_name,
     outer_accuracy = cv_double$accuracy,
+    outer_balanced_accuracy = cv_double$balanced_accuracy,
     outer_Q2Y = cv_double$Q2Y,
     outer_R2Y = cv_double$R2Y
 )
+
+data.frame(
+    outer_fold = seq_along(cv_double$results[[1]]$best_ncomp),
+    inner_selected_ncomp = cv_double$results[[1]]$best_ncomp
+)
 ```
+
+Here, all rows from one illustrative patient remain together in both loops.
+For each outer fold, the inner loop selects the component count by balanced
+accuracy and the selected LDA model predicts samples that were not involved in
+that choice. Component counts may therefore differ among outer folds;
+`bcomp` reports their most frequent value, while `balanced_accuracy` and
+`Ypred` summarize the outer held-out predictions.
 
 The same interface can tune more than the component count. In this example the
 inner loop chooses the best combination of `ncomp`, `kernel`, and `gamma` for

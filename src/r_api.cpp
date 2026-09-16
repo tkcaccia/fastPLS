@@ -291,6 +291,14 @@ SEXP numeric_matrix_cast(const fastpls::core::Matrix<T>& values) {
   return result;
 }
 
+SEXP integer_matrix(const fastpls::core::Matrix<int>& values) {
+  SEXP result = Rf_allocMatrix(
+    INTSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
+  );
+  std::copy(values.data(), values.data() + values.size(), INTEGER(result));
+  return result;
+}
+
 template<class T>
 SEXP numeric_vector(const std::vector<T>& values) {
   SEXP result = Rf_allocVector(REALSXP, values.size());
@@ -1978,13 +1986,14 @@ SEXP classification_cv_result(
     orthogonal_components, kernel_controls
   );
 
-  SEXP output = protect.add(Rf_allocVector(VECSXP, 9));
-  SEXP names = protect.add(Rf_allocVector(STRSXP, 9));
-  const char* field_names[9] = {
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 11));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 11));
+  const char* field_names[11] = {
     "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred",
-    "Q2Y", "native_best_index", "native_best_ncomp"
+    "Q2Y", "native_best_index", "native_best_ncomp",
+    "effective_ncomp", "lda_scores"
   };
-  for (int index = 0; index < 9; ++index) {
+  for (int index = 0; index < 11; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
@@ -2015,6 +2024,17 @@ SEXP classification_cv_result(
     static_cast<int>(result.best_index + 1)
   ));
   SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(result.best_component));
+  SET_VECTOR_ELT(output, 9, integer_matrix(
+    result.fold_effective_components
+  ));
+  SET_VECTOR_ELT(
+    output, 10,
+    retain_scores == TRUE && !result.lda_discriminant_scores.empty() ?
+      core_matrix_cube(
+        result.lda_discriminant_scores, predictors.rows(),
+        static_cast<std::size_t>(classes), false, false
+      ) : R_NilValue
+  );
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
 }
@@ -2292,6 +2312,9 @@ SEXP nested_classification_result(
     }
     std::vector<int> prediction(samples, NA_INTEGER);
     std::vector<int> best_components(static_cast<std::size_t>(outer_count));
+    std::vector<int> best_effective_components(
+      static_cast<std::size_t>(outer_count)
+    );
     std::vector<double> fold_q2(static_cast<std::size_t>(outer_count), NA_REAL);
     std::vector<double> fold_r2(static_cast<std::size_t>(outer_count), NA_REAL);
     SEXP inner_objects = protect.add(Rf_allocVector(VECSXP, outer_count));
@@ -2373,10 +2396,12 @@ SEXP nested_classification_result(
         fold_r2[static_cast<std::size_t>(fold - 1)] =
           outer_result.fold_training_r2(0, 0);
       }
+      best_effective_components[static_cast<std::size_t>(fold - 1)] =
+        outer_result.fold_effective_components(0, 0);
 
       SEXP inner_object = named_list(protect, {
         "ncomp", "metric_value", "Q2Y", "best_ncomp", "best_index",
-        "selection_metric"
+        "selection_metric", "effective_ncomp"
       });
       SET_VECTOR_ELT(inner_object, 0, component_values);
       SET_VECTOR_ELT(inner_object, 1, numeric_vector(selection_values));
@@ -2386,6 +2411,9 @@ SEXP nested_classification_result(
       const char* inner_metric_name = selection_metric == 2 ?
         "balanced_accuracy" : selection_metric == 3 ? "q2" : "accuracy";
       SET_VECTOR_ELT(inner_object, 5, Rf_mkString(inner_metric_name));
+      SET_VECTOR_ELT(inner_object, 6, integer_matrix(
+        inner_result.fold_effective_components
+      ));
       SET_VECTOR_ELT(inner_objects, fold - 1, inner_object);
       SEXP parameters = named_list(protect, {"ncomp"});
       SET_VECTOR_ELT(parameters, 0, Rf_ScalarInteger(selected_component));
@@ -2424,7 +2452,8 @@ SEXP nested_classification_result(
     SEXP run_object = named_list(protect, {
       "Ypred", "pred", "fold", "best_ncomp", "best_parameters", "inner",
       "metric_name", "metric_value", "accuracy", "balanced_accuracy",
-      "Q2Y", "R2Y", "RMSD", "fold_Q2Y", "fold_R2Y"
+      "Q2Y", "R2Y", "RMSD", "fold_Q2Y", "fold_R2Y",
+      "effective_ncomp"
     });
     SEXP prediction_object = protect.add(integer_predictions(prediction));
     SET_VECTOR_ELT(run_object, 0, prediction_object);
@@ -2449,6 +2478,9 @@ SEXP nested_classification_result(
     SET_VECTOR_ELT(run_object, 12, Rf_ScalarReal(NA_REAL));
     SET_VECTOR_ELT(run_object, 13, numeric_vector(fold_q2));
     SET_VECTOR_ELT(run_object, 14, numeric_vector(fold_r2));
+    SET_VECTOR_ELT(
+      run_object, 15, integer_predictions(best_effective_components)
+    );
     SET_VECTOR_ELT(run_results, run, run_object);
   }
   std::vector<double> votes(samples * class_count, 0.0);

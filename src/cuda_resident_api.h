@@ -16,7 +16,8 @@ int fastpls_resident_simpls_cv_classification(
     int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
     int lda,int oversample,int power,unsigned long long seed,
     int store_predictions,int store_scores,int* predictions,void* scores,
-    int* status,double* metrics,char* error,size_t error_capacity);
+    void* lda_scores,int* effective_components,int* status,double* metrics,
+    char* error,size_t error_capacity);
 int fastpls_resident_simpls_cv_regression(
     const void* predictors,const void* responses,const int* folds,
     int precision,int n,int p,int q,const int* prefixes,int prefix_count,
@@ -29,7 +30,8 @@ int fastpls_resident_plssvd_cv_classification(
     int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
     int lda,int oversample,int power,unsigned long long seed,
     int store_predictions,int store_scores,int* predictions,void* scores,
-    int* status,double* metrics,char* error,size_t error_capacity);
+    void* lda_scores,int* effective_components,int* status,double* metrics,
+    char* error,size_t error_capacity);
 int fastpls_resident_plssvd_cv_regression(
     const void* predictors,const void* responses,const int* folds,
     int precision,int n,int p,int q,const int* prefixes,int prefix_count,

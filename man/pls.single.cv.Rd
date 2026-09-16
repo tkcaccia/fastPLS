@@ -157,6 +157,14 @@ not on the decoded class labels.
 \item \code{pred}: decoded cross-validated predictions when predictions are
 stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
+\item \code{lda_scores}: held-out LDA discriminant-score array when LDA scores
+are stored.
+\item \code{effective_ncomp}: integer matrix with one row per fold and one
+column per requested component count. Each entry is the estimable prefix
+used in that fold. Zero identifies the class-prior fallback.
+\item \code{status}: fold status vector. Status 1 is a regular fit, 4 is a
+single-class training-fold fallback, and 5 is a zero-direction class-prior
+fallback.
 \item \code{metrics}: complete \code{evaluate()} outputs. \code{cross_validated} contains
 one result per requested component count from held-out predictions and
 \code{fitted} contains full-data fit results when \code{fit = TRUE}. For multivariate
@@ -193,11 +201,16 @@ component count. For sufficiently tall SIMPLS classification problems,
 full-data predictor and class moments are calculated once and each fold's
 training moments are obtained by subtracting its held-out contribution.
 The fold-specific centering, scaling, PLS fit, LDA fit, and predictions
-remain independent. For regression, a fold that estimates fewer latent
-components than requested uses its available component prefix. Higher
-requested prefixes repeat the last estimable prediction; if no component is
-estimable, the prediction is the fold-training response mean. The returned
-path still contains one result for every requested component count.
+remain independent. In either task, a fold that estimates fewer latent
+components than requested uses its available component prefix, and higher
+requested prefixes repeat the last estimable prediction and metric. In
+regression, a zero-component fold predicts its training-response mean. In
+LDA classification, a zero-component fold uses the empirical training-class
+priors and finite log-prior discriminant scores; a single-class training
+fold predicts its represented class. The \code{effective_ncomp} matrix records
+the component count used for every fold and requested prefix, while
+\code{status} identifies regular, zero-direction, and single-class folds. The
+returned tuning path always retains every requested component count.
 }
 \examples{
 idx <- c(seq_len(12), 51:62, 101:112)

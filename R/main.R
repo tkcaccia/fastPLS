@@ -6057,8 +6057,14 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
 .cv_normalize_training_summary <- function(output, ncomp) {
     if (is.null(output$R2Y) || !length(output$R2Y)) {
         output$R2Y <- rep(NA_real_, length(ncomp))
-    } else if (length(output$R2Y) != length(ncomp)) {
-        output$R2Y <- rep_len(output$R2Y, length(ncomp))
+    } else if (length(output$R2Y) < length(ncomp)) {
+        output$R2Y <- c(
+            output$R2Y,
+            rep(utils::tail(output$R2Y, 1L),
+                length(ncomp) - length(output$R2Y))
+        )
+    } else if (length(output$R2Y) > length(ncomp)) {
+        output$R2Y <- output$R2Y[seq_along(ncomp)]
     }
     output$R2Y <- .fastpls_name_metric_path(output$R2Y, ncomp)
     output
@@ -6476,11 +6482,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     constrain <- as.integer(as.factor(constrain))
     response <- .compiled_cv_response(Ydata, float32)
     ncomp <- as.integer(ncomp)
-    if (identical(method, "plssvd")) {
+    if (!response$classification && identical(method, "plssvd")) {
         ncomp <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata),
             response$responses,
             factor_response = response$classification, warn = TRUE)$ncomp
-    } else if (method %in% c("simpls", "kernelpls")) {
+    } else if (!response$classification &&
+        method %in% c("simpls", "kernelpls")) {
         component_kernel <- if (identical(method, "simpls")) {
             "linear"
         } else {
@@ -11016,11 +11023,16 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   full-data predictor and class moments are calculated once and each fold's
 #'   training moments are obtained by subtracting its held-out contribution.
 #'   The fold-specific centering, scaling, PLS fit, LDA fit, and predictions
-#'   remain independent. For regression, a fold that estimates fewer latent
-#'   components than requested uses its available component prefix. Higher
-#'   requested prefixes repeat the last estimable prediction; if no component is
-#'   estimable, the prediction is the fold-training response mean. The returned
-#'   path still contains one result for every requested component count.
+#'   remain independent. In either task, a fold that estimates fewer latent
+#'   components than requested uses its available component prefix, and higher
+#'   requested prefixes repeat the last estimable prediction and metric. In
+#'   regression, a zero-component fold predicts its training-response mean. In
+#'   LDA classification, a zero-component fold uses the empirical training-class
+#'   priors and finite log-prior discriminant scores; a single-class training
+#'   fold predicts its represented class. The `effective_ncomp` matrix records
+#'   the component count used for every fold and requested prefix, while
+#'   `status` identifies regular, zero-direction, and single-class folds. The
+#'   returned tuning path always retains every requested component count.
 #' @return A list describing the cross-validation run and selected model.
 #'   `metrics$cross_validated` contains complete `evaluate()` results for each
 #'   requested component count and `metrics$fitted` contains the corresponding
@@ -11053,6 +11065,14 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   \item `pred`: decoded cross-validated predictions when predictions are
 #'   stored.
 #'   \item `Ypred`: raw prediction array when score predictions are stored.
+#'   \item `lda_scores`: held-out LDA discriminant-score array when LDA scores
+#'   are stored.
+#'   \item `effective_ncomp`: integer matrix with one row per fold and one
+#'   column per requested component count. Each entry is the estimable prefix
+#'   used in that fold. Zero identifies the class-prior fallback.
+#'   \item `status`: fold status vector. Status 1 is a regular fit, 4 is a
+#'   single-class training-fold fallback, and 5 is a zero-direction class-prior
+#'   fallback.
 #'   \item `metrics`: complete `evaluate()` outputs. `cross_validated` contains
 #'   one result per requested component count from held-out predictions and
 #'   `fitted` contains full-data fit results when `fit = TRUE`. For multivariate
@@ -11311,6 +11331,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             auto = 1L,
             accuracy = 1L,
             balanced_accuracy = 2L,
+            macro_recall = 2L,
             q2y = 3L,
             stop("Unsupported classification selection metric.",
                 call. = FALSE)
@@ -11327,7 +11348,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 
 .double_cv_native_selection_supported <- function(metric, classification) {
     if (classification) {
-        metric %in% c("auto", "accuracy", "balanced_accuracy", "q2y")
+        metric %in% c(
+            "auto", "accuracy", "balanced_accuracy", "macro_recall", "q2y"
+        )
     } else {
         metric %in% c("auto", "q2y", "rmsd")
     }
@@ -11833,6 +11856,12 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     state$best_comp[[index]] <- as.integer(inner$best_ncomp[[1L]])
     state$inner[[index]] <- inner
     state$parameters[[index]] <- inner$best_parameters
+    if (response$classification && !is.null(inner$effective_ncomp) &&
+        all(inner$effective_ncomp == 0L)) {
+        prior <- table(Ytrain)
+        state$prediction[test] <- names(prior)[which.max(prior)]
+        return(state)
+    }
     fit <- .double_cv_outer_fit(context, inner$best_parameters, train, test,
         state$best_comp[[index]],
         run_index, index)
@@ -12217,7 +12246,10 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   \code{metal}. Multiple values are tuned in the inner loop. Metal requires
 #'   float32 input and Apple Metal. R validates the request and constructs a
 #'   reproducible grouped-fold plan. CPU and Metal use the compiled nested-CV
-#'   coordinator for fold loops, fitting, prediction, and metric accumulation.
+#'   coordinator for fold loops, fitting, prediction, and metric accumulation
+#'   when selection uses accuracy, balanced accuracy or macro recall, Q2Y, or
+#'   regression RMSD. Other selection metrics use R-level outer coordination
+#'   around compiled single-CV and fitting kernels.
 #'   CUDA uses the R coordinator around CUDA-native single-CV and outer-fit
 #'   kernels; supported CUDA fits do not substitute a CPU estimator. Metal uses
 #'   the same fixed operation split as `pls()`. When omitted,
@@ -12269,11 +12301,15 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   reported metrics. With CUDA, nested outer/inner orchestration remains in R,
 #'   while each supported single-CV and outer fit uses its native CUDA route.
 #'   Unsupported accelerator requests fail explicitly and never fall back to
-#'   CPU. For regression, a fold that estimates fewer latent components than
-#'   requested uses its available component prefix. Higher requested prefixes
-#'   repeat the last estimable prediction; if no component is estimable, the
-#'   prediction is the fold-training response mean. Inner tuning paths retain
-#'   one result for every requested component count.
+#'   CPU. In either task, a fold that estimates fewer latent components than
+#'   requested uses its available component prefix, and higher requested
+#'   prefixes repeat its last estimable prediction and metric. A zero-component
+#'   regression fold predicts its training-response mean. A zero-component LDA
+#'   fold uses empirical training-class priors and finite log-prior scores; a
+#'   single-class training fold predicts its represented class. Inner tuning
+#'   paths retain every requested component and record fold-level effective
+#'   counts. Ties are resolved in favor of the earliest, and therefore lowest,
+#'   requested component count.
 #' @return A list with the following elements. `metrics$cross_validated`
 #'   contains one complete `evaluate()` result per repeated outer-CV run, and
 #'   `metrics$aggregate` evaluates the final vote-aggregated or averaged
@@ -12285,8 +12321,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   * `results`: list with one element per repeated run. Each run stores
 #'     `Ypred`/`pred`, the outer `fold` assignment, `best_ncomp` selected in
 #'     each outer fold, fold-level `best_parameters`, compact inner-CV metric
-#'     summaries in `inner`, run-level `metric_name` and `metric_value`, and the
-#'     default `backend` and `method`.
+#'     summaries in `inner`, selected outer-fold `effective_ncomp`, run-level
+#'     `metric_name` and `metric_value`, and the default `backend` and `method`.
+#'     Each inner summary contains its fold-by-prefix `effective_ncomp` matrix.
 #'   * `Ypred`: final cross-validated predictions. For classification, repeated
 #'     runs are combined by voting; for regression, numeric predictions are
 #'     averaged across runs.
