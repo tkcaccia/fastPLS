@@ -290,6 +290,25 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_true(is.list(vip_multi))
   expect_equal(length(vip_multi), 2L)
 
+  model_plssvd <- pls(
+    A,
+    matrix(rnorm(nrow(A)), ncol = 1),
+    ncomp = 1:2,
+    method = "plssvd",
+    fit = TRUE
+  )
+  expect_error(ViP(model_plssvd), "not PLS-SVD or OPLS")
+
+  model_kernel <- pls(
+    A,
+    matrix(rnorm(nrow(A)), ncol = 1),
+    ncomp = 1:2,
+    method = "kernelpls",
+    kernel = "rbf",
+    fit = TRUE
+  )
+  expect_error(ViP(model_kernel), "not defined for nonlinear kernel PLS")
+
   model_loadings <- pls(
     A,
     matrix(rnorm(nrow(A) * 2), ncol = 2),

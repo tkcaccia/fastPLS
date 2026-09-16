@@ -45,14 +45,16 @@ contain classes absent from the training data; such classes cannot be
 predicted and count as classification errors.}
 
 \item{ncomp}{Positive integer component count or vector of counts. Repeated
-values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
-at the corresponding numerical rank and report the effective counts.}
+values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
+cap the returned path at the corresponding numerical rank and report the
+effective counts.}
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
 \item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or
 \code{kernelpls}.
-\code{simpls} uses the fastPLS accelerated SIMPLS core.}
+\code{simpls} uses the fastPLS accelerated SIMPLS-family core. Bounded-block
+execution is approximate and is not classical de Jong SIMPLS.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
@@ -208,9 +210,9 @@ resolved classifier backend, are retained internally for prediction and
 plotting but are not shown as public output fields.
 }
 \description{
-Fits PLS-SVD, SIMPLS, OPLS, or kernel PLS models for regression or
-classification using a selected CPU, CUDA, or operation-split Apple Metal
-backend. The fitted
+Fits PLS-SVD, a SIMPLS-family estimator, OPLS, or kernel PLS models for
+regression or classification using a selected CPU, CUDA, or operation-split
+Apple Metal backend. The fitted
 model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
@@ -231,11 +233,14 @@ command buffer and synchronize before the CPU response-centering correction.
 Unsupported backend and precision combinations stop rather than silently
 falling back to CPU.
 
-\code{method} selects PLS-SVD, SIMPLS, OPLS, or kernel PLS. Classification can
-use response-score argmax or LDA on latent scores. PLS-SVD classification
-cannot return more than one fewer component than the number of response
-classes. The requested model family is never silently replaced by another
-family.
+\code{method = "simpls"} selects the fastPLS SIMPLS-family estimator. Its
+component-wise route retains the classical sequential orthogonalization and
+deflation structure. An eligible route may instead consume a bounded block of
+candidates computed from one deflated state; this is an approximate
+SIMPLS-family estimator, not classical de Jong SIMPLS. Classification can use
+response-score argmax or LDA on latent scores. PLS-SVD classification cannot
+return more than one fewer component than the number of response classes. The
+requested model family is never silently replaced by another family.
 
 All public PLS routes use randomized SVD. It is an approximate solver, and
 \code{diagnostics} records the effective controls and structural checks for the

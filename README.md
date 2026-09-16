@@ -4,6 +4,13 @@
 classification. This page covers installation from CRAN and GitHub on macOS,
 Windows, Ubuntu, and Fedora. The package vignette documents models and usage.
 
+The public `method = "simpls"` name covers the fastPLS SIMPLS-family
+estimator. Its one-direction route applies the classical sequential
+orthogonalization and deflation structure. When an eligible workload uses a
+bounded candidate block from one deflated state, the resulting estimator is an
+approximate SIMPLS-family variant and is not described as classical de Jong
+SIMPLS.
+
 After installation, open the complete platform and accelerator guide with
 `vignette("installation", package = "fastPLS")`.
 

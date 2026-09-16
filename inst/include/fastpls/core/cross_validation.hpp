@@ -243,15 +243,31 @@ int accelerator_backend_code(const Backend&, long) {
 
 template<class Backend>
 inline bool fold_opls_moments_enabled(
-    std::size_t samples, std::size_t predictors, std::size_t folds,
-    bool classification, const Backend& backend) {
-  if (samples == 0 || predictors == 0 || folds < 2) return false;
+    std::size_t samples, std::size_t predictors, std::size_t responses,
+    std::size_t components, std::size_t folds, bool classification,
+    const Backend& backend) {
+  if (samples == 0 || predictors == 0 || responses == 0 ||
+      components == 0 || folds < 2) {
+    return false;
+  }
 #if defined(FASTPLS_USE_OPENBLAS)
   // Compact class products make direct OPLS folds cheaper than building a
-  // predictor Gram on OpenBLAS. Regression retains moments because they avoid
-  // repeating the generally much larger predictor-response product.
-  if (classification && accelerator_backend_code(backend, 0) == 0) {
-    return false;
+  // predictor Gram on OpenBLAS for many ordinary matrix shapes. Extremely
+  // tall matrices are different: one full Gram plus held-out corrections can
+  // replace much more repeated fold projection. Compare those leading terms
+  // instead of applying a dataset-specific threshold. Many-response
+  // regression retains moments because it also avoids the dominant repeated
+  // response work. Accelerator backends keep their existing dispatch.
+  if (accelerator_backend_code(backend, 0) == 0 &&
+      (classification || responses <= predictors)) {
+    const long double n = static_cast<long double>(samples);
+    const long double p = static_cast<long double>(predictors);
+    const long double a = static_cast<long double>(components);
+    const long double k = static_cast<long double>(folds);
+    const long double training_rows = n * (k - 1.0L) / k;
+    const long double moments_work = p * (2.0L * n + k * a);
+    const long double direct_work = k * a * training_rows;
+    if (moments_work >= 1.20L * direct_work) return false;
   }
 #endif
   // One full predictor Gram plus fold-heldout Grams replaces repeated
@@ -1144,11 +1160,15 @@ template<class T, class Backend>
 Matrix<T> project_scores(ConstMatrixView<T> predictors,
                          ConstMatrixView<T> weights,
                          std::size_t components, Backend& backend) {
-  if (components < 1 || components > weights.columns() ||
+  if (components > weights.columns() ||
       predictors.columns() != weights.rows()) {
     throw std::invalid_argument(
       "cross-validation score projection dimensions are invalid"
     );
+  }
+  // A constant-response fold has no estimable PLS direction.
+  if (components == 0) {
+    return Matrix<T>(predictors.rows(), 0);
   }
   ConstMatrixView<T> prefix(
     weights.data(), weights.rows(), components, weights.leading_dimension()
@@ -1768,8 +1788,8 @@ ClassificationCvResult<T> cross_validate_classification(
     cv_detail::fold_predictor_gram_enabled<T>(predictors.columns()) &&
     ((family == LinearPlsFamily::opls &&
       cv_detail::fold_opls_moments_enabled(
-        predictors.rows(), predictors.columns(), partitions.size(), true,
-        backend
+        predictors.rows(), predictors.columns(), class_count,
+        maximum_component, partitions.size(), true, backend
       )) || simpls_controls.cache_predictor_crossprod ||
      cv_detail::fold_simpls_moments_enabled(
        predictors.rows(), predictors.columns(), maximum_component
@@ -2323,8 +2343,8 @@ RegressionCvResult<T> cross_validate_regression(
     cv_detail::fold_predictor_gram_enabled<T>(predictors.columns()) &&
     ((family == LinearPlsFamily::opls &&
       cv_detail::fold_opls_moments_enabled(
-        predictors.rows(), predictors.columns(), partitions.size(), false,
-        backend
+        predictors.rows(), predictors.columns(), responses.columns(),
+        maximum_component, partitions.size(), false, backend
       )) || simpls_controls.cache_predictor_crossprod ||
      cv_detail::fold_simpls_moments_enabled(
        predictors.rows(), predictors.columns(), maximum_component
@@ -2669,10 +2689,13 @@ RegressionCvResult<T> cross_validate_regression(
             partition.training_size : 0
         );
       }
+      const std::size_t available_components = std::min(
+        model.completed_components, model.weights.columns()
+      );
       Matrix<T> test_scores = cv_detail::project_scores<T>(
         ConstMatrixView<T>(test.view()),
         ConstMatrixView<T>(model.weights.view()),
-        model.completed_components, backend
+        available_components, backend
       );
       Matrix<T> prediction = cv_detail::initialize_simpls_prediction<T>(
         test_scores.rows(), prepared.response_mean
@@ -2689,11 +2712,17 @@ RegressionCvResult<T> cross_validate_regression(
         const std::size_t requested = static_cast<std::size_t>(
           components[prefix]
         );
-        cv_detail::update_simpls_prediction_from_scores<T>(
-          model, test_scores.view(), previous_component, requested,
-          prediction.view(), prediction_contribution, backend
+        const std::size_t estimable = std::min(
+          requested, available_components
         );
-        previous_component = requested;
+        // Keep the requested path while reusing the last estimable prefix.
+        if (estimable > previous_component) {
+          cv_detail::update_simpls_prediction_from_scores<T>(
+            model, test_scores.view(), previous_component, estimable,
+            prediction.view(), prediction_contribution, backend
+          );
+          previous_component = estimable;
+        }
         Matrix<T>* stored = store_predictions ?
           &result.predictions[prefix] : nullptr;
         result.metrics[prefix] += cv_detail::accumulate_regression_error<T>(
@@ -2702,12 +2731,14 @@ RegressionCvResult<T> cross_validate_regression(
         );
         counts[prefix] += static_cast<double>(prediction.size());
         if (calculate_training_r2) {
-          cv_detail::update_simpls_prediction_from_scores<T>(
-            model, model.scores.view(), previous_training_component,
-            requested, training_prediction.view(),
-            training_prediction_contribution, backend
-          );
-          previous_training_component = requested;
+          if (estimable > previous_training_component) {
+            cv_detail::update_simpls_prediction_from_scores<T>(
+              model, model.scores.view(), previous_training_component,
+              estimable, training_prediction.view(),
+              training_prediction_contribution, backend
+            );
+            previous_training_component = estimable;
+          }
           result.fold_training_r2(fold, prefix) = cv_detail::regression_r2<T>(
             train_response.view(), training_prediction.view()
           );

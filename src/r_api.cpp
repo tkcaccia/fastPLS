@@ -4035,19 +4035,21 @@ extern "C" SEXP _fastPLS_evaluate_class_labels_cpp(
     }
     SEXP output = protect.add(Rf_allocVector(STRSXP, rows));
     for (int row = 0; row < rows; ++row) {
-      int best = 0;
+      int best = -1;
       double best_value = -std::numeric_limits<double>::infinity();
       for (int column = 0; column < columns; ++column) {
         const std::size_t index = row + static_cast<std::size_t>(column) * rows;
         const double value = TYPEOF(values) == REALSXP ? REAL(values)[index] :
           (INTEGER(values)[index] == NA_INTEGER ? NA_REAL :
             static_cast<double>(INTEGER(values)[index]));
-        if (column == 0 || value > best_value) {
+        if (std::isfinite(value) && (best < 0 || value > best_value)) {
           best = column;
           best_value = value;
         }
       }
-      SET_STRING_ELT(output, row, STRING_ELT(labels, best));
+      SET_STRING_ELT(
+        output, row, best < 0 ? NA_STRING : STRING_ELT(labels, best)
+      );
     }
     return output;
   });
@@ -4103,15 +4105,14 @@ extern "C" SEXP _fastPLS_evaluate_classification_core_cpp(
         recall_sum += recall[cls];
         ++recall_count;
       }
-      if (predicted_support[cls] > 0.0) {
-        precision[cls] = tp / predicted_support[cls];
+      if (support[cls] > 0.0) {
+        precision[cls] = predicted_support[cls] > 0.0 ?
+          tp / predicted_support[cls] : 0.0;
         precision_sum += precision[cls];
         ++precision_count;
-      }
-      if (std::isfinite(recall[cls]) && std::isfinite(precision[cls]) &&
-          recall[cls] + precision[cls] > 0.0) {
-        f1[cls] = 2.0 * recall[cls] * precision[cls] /
-          (recall[cls] + precision[cls]);
+        f1[cls] = recall[cls] + precision[cls] > 0.0 ?
+          2.0 * recall[cls] * precision[cls] /
+            (recall[cls] + precision[cls]) : 0.0;
         f1_sum += f1[cls];
         ++f1_count;
       }
@@ -4201,12 +4202,14 @@ extern "C" SEXP _fastPLS_evaluate_classification_core_cpp(
         const double truth_score = REAL(score_real)[
           row + static_cast<std::size_t>(truth_column) * score_rows
         ];
+        if (!std::isfinite(truth_score)) continue;
         int rank = 1;
         for (int column = 0; column < score_columns; ++column) {
           if (column == truth_column) continue;
           const double candidate = REAL(score_real)[
             row + static_cast<std::size_t>(column) * score_rows
           ];
+          if (!std::isfinite(candidate)) continue;
           if (candidate > truth_score ||
               (candidate == truth_score && column < truth_column)) {
             ++rank;

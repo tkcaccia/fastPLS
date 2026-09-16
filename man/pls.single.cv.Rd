@@ -34,8 +34,9 @@ pls.single.cv(
 factor/character class labels for classification.}
 
 \item{ncomp}{Positive integer component count or vector of counts. Repeated
-values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
-at the corresponding numerical rank and report the effective counts.}
+values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
+cap the returned path at the corresponding numerical rank and report the
+effective counts.}
 
 \item{constrain}{Optional grouping vector for grouped cross-validation. It
 must have one value per sample. Samples with the same value are assigned to
@@ -46,7 +47,9 @@ each sample is treated as its own group.}
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
 \item{method}{One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
-\code{kernelpls}. Multiple values are treated as a tuning grid.}
+\code{kernelpls}. Multiple values are treated as a tuning grid.
+\code{simpls} denotes the fastPLS SIMPLS-family estimator; an eligible
+bounded-block route is approximate rather than classical de Jong SIMPLS.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
 \code{metal}. Multiple values are treated as a tuning grid. Metal requires
@@ -190,7 +193,11 @@ component count. For sufficiently tall SIMPLS classification problems,
 full-data predictor and class moments are calculated once and each fold's
 training moments are obtained by subtracting its held-out contribution.
 The fold-specific centering, scaling, PLS fit, LDA fit, and predictions
-remain independent.
+remain independent. For regression, a fold that estimates fewer latent
+components than requested uses its available component prefix. Higher
+requested prefixes repeat the last estimable prediction; if no component is
+estimable, the prediction is the fold-training response mean. The returned
+path still contains one result for every requested component count.
 }
 \examples{
 idx <- c(seq_len(12), 51:62, 101:112)

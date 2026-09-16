@@ -102,8 +102,14 @@ bool portable_qr(core::ConstMatrixView<float> input,
                  core::Matrix<float>& q) {
   const std::size_t rank = std::min(input.rows(), input.columns());
   q.resize(input.rows(), rank);
+  float input_scale = 0.0f;
+  for (std::size_t column = 0; column < input.columns(); ++column) {
+    for (std::size_t row = 0; row < input.rows(); ++row) {
+      input_scale = std::max(input_scale, std::abs(input(row, column)));
+    }
+  }
   const float threshold = std::numeric_limits<float>::epsilon() *
-    static_cast<float>(std::max(input.rows(), input.columns()));
+    static_cast<float>(std::max(input.rows(), input.columns())) * input_scale;
   for (std::size_t column = 0; column < rank; ++column) {
     for (std::size_t row = 0; row < input.rows(); ++row) {
       q(row, column) = input(row, column);
@@ -157,11 +163,14 @@ bool portable_symmetric_eigen(core::Matrix<float>& matrix,
     std::size_t p = 0;
     std::size_t q = 0;
     float maximum = 0.0f;
-    float diagonal_scale = 1.0f;
+    float matrix_scale = 0.0f;
     for (std::size_t column = 0; column < n; ++column) {
-      diagonal_scale = std::max(diagonal_scale, std::abs(matrix(column, column)));
+      matrix_scale = std::max(
+        matrix_scale, std::abs(matrix(column, column))
+      );
       for (std::size_t row = 0; row < column; ++row) {
         const float candidate = std::abs(matrix(row, column));
+        matrix_scale = std::max(matrix_scale, candidate);
         if (candidate > maximum) {
           maximum = candidate;
           p = row;
@@ -170,7 +179,7 @@ bool portable_symmetric_eigen(core::Matrix<float>& matrix,
       }
     }
     const float tolerance = std::numeric_limits<float>::epsilon() *
-      static_cast<float>(std::max<std::size_t>(n, 1)) * diagonal_scale;
+      static_cast<float>(std::max<std::size_t>(n, 1)) * matrix_scale;
     if (maximum <= tolerance) {
       eigenvalues.resize(n);
       for (std::size_t index = 0; index < n; ++index) {
@@ -252,7 +261,7 @@ bool portable_svd(core::ConstMatrixView<float> input,
   }
   const float tolerance = std::numeric_limits<float>::epsilon() *
     static_cast<float>(std::max(input.rows(), input.columns())) *
-    std::max(singular_values.front(), 1.0f);
+    singular_values.front();
 
   if (input.rows() >= input.columns()) {
     core::Matrix<float> right(input.columns(), rank);

@@ -37,8 +37,9 @@ pls.double.cv(
 factor/character class labels for classification.}
 
 \item{ncomp}{Positive integer component count or vector of counts. Repeated
-values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
-at the corresponding numerical rank and report the effective counts.}
+values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
+cap the returned path at the corresponding numerical rank and report the
+effective counts.}
 
 \item{constrain}{Grouping vector for grouped cross-validation. It must have
 one value per sample. Samples with the same value are assigned to the same
@@ -49,7 +50,9 @@ replicate stay together in training or test data. The default
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
 \item{method}{One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
-\code{kernelpls}. Multiple values are tuned in the inner loop.}
+\code{kernelpls}. Multiple values are tuned in the inner loop.
+\code{simpls} denotes the fastPLS SIMPLS-family estimator; an eligible
+bounded-block route is approximate rather than classical de Jong SIMPLS.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
 \code{metal}. Multiple values are tuned in the inner loop. Metal requires
@@ -214,7 +217,11 @@ be predicted in that fold; its held-out observations remain in the
 reported metrics. With CUDA, nested outer/inner orchestration remains in R,
 while each supported single-CV and outer fit uses its native CUDA route.
 Unsupported accelerator requests fail explicitly and never fall back to
-CPU.
+CPU. For regression, a fold that estimates fewer latent components than
+requested uses its available component prefix. Higher requested prefixes
+repeat the last estimable prediction; if no component is estimable, the
+prediction is the fold-training response mean. Inner tuning paths retain
+one result for every requested component count.
 }
 \examples{
 idx <- c(seq_len(10), 51:60, 101:110)

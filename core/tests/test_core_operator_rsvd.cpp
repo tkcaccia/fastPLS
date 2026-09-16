@@ -179,10 +179,38 @@ void check() {
   }
 }
 
+template<class T>
+void check_scaled_dense_finalize() {
+  using fastpls::core::Matrix;
+  using fastpls::core::RsvdControls;
+  ReferenceBackend<T> backend;
+  Matrix<T> matrix(16, 12);
+  for (std::size_t index = 0; index < 12; ++index) {
+    matrix(index, index) = T(1e-3) * static_cast<T>(12 - index);
+  }
+  RsvdControls controls;
+  controls.oversample = 2;
+  controls.power = 2;
+  controls.seed = 31;
+  controls.left_only = true;
+  const auto result = fastpls::core::randomized_svd<T>(
+    matrix.view(), 3, controls, backend
+  );
+  assert(result.U.rows() == matrix.rows());
+  assert(result.U.columns() == 3);
+  assert(result.singular_values.size() == 3);
+  for (const auto value : result.singular_values) {
+    assert(std::isfinite(value));
+    assert(value > T(0));
+  }
+}
+
 }  // namespace
 
 int main() {
   check<float>();
   check<double>();
+  check_scaled_dense_finalize<float>();
+  check_scaled_dense_finalize<double>();
   return 0;
 }

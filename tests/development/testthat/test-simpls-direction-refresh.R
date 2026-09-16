@@ -200,7 +200,7 @@ test_that("massive implicit SIMPLS is reproducible and backend concordant", {
   }
 })
 
-test_that("public diagnostics name componentwise and block randomized SIMPLS", {
+test_that("public diagnostics distinguish the block SIMPLS-family route", {
   set.seed(831)
   ordinary <- pls(
     matrix(rnorm(80 * 12), 80, 12),
@@ -231,7 +231,7 @@ test_that("public diagnostics name componentwise and block randomized SIMPLS", {
       list(method = "simpls"),
       list(kernel = "linear")
     ),
-    "block_randomized_simpls"
+    "block_randomized_simpls_family"
   )
 })
 

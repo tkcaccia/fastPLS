@@ -13,9 +13,11 @@ The package exposes four model families:
 - `opls`
 - `kernelpls`
 
-`simpls` is the optimized fastPLS SIMPLS implementation used in current
-documentation, benchmarks, and plots. Old local script compatibility should stay
-unexported and out of benchmark labels.
+`simpls` is the public method name for the optimized fastPLS SIMPLS-family
+estimator used in current documentation, benchmarks, and plots. A route that
+consumes a bounded candidate block from one deflated state is an approximate
+SIMPLS-family estimator, not unqualified classical de Jong SIMPLS. Old local
+script compatibility should stay unexported and out of benchmark labels.
 
 ## SVD and xprod Policy
 
@@ -84,3 +86,22 @@ or remote run logs. Clean source trees should not contain:
 - `*.o`, `*.so`, `*.dll`, `*.dylib`
 - `*.Rcheck`
 - `.Rproj.user/`
+
+## Test Suites
+
+Routine `R CMD check` runs the compact deterministic suite in
+`tests/testthat`. It covers all four PLS families, regression, argmax and LDA
+classification, float32 prediction, single cross-validation, nested
+cross-validation, and explicit failure of unavailable accelerator backends.
+
+The exhaustive validation suite is retained in
+`tests/development/testthat` and excluded from source archives. After installing
+the current source, run it explicitly from the repository root with:
+
+```r
+source("tests/development/run.R")
+```
+
+Run the exhaustive suite in dedicated continuous-integration jobs rather than
+as part of CRAN checks. Publication-scale benchmarks remain outside the package
+repository.

@@ -14,13 +14,17 @@ Numeric matrix (single response) or list of matrices
 (multi-response).
 }
 \description{
-Computes VIP trajectories from fitted model components.
+Computes VIP trajectories from fitted direct SIMPLS-family components. The
+standard component-wise decomposition is not used for PLS-SVD, OPLS, or
+nonlinear kernel PLS because their stored latent weights have different
+mathematical meanings. Linear-kernel PLS uses the same direct
+SIMPLS-family path and is supported.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y,
-    ncomp = 1, method = "plssvd", backend = "cpu",
+    ncomp = 1, method = "simpls", backend = "cpu",
     fit = TRUE, return_variance = FALSE
 )
 ViP(fit)

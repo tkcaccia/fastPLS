@@ -9,7 +9,7 @@ interface.
 The headers implement:
 
 - randomized SVD for explicit matrices and matrix operators;
-- PLS-SVD and SIMPLS for float32 and float64;
+- PLS-SVD and a SIMPLS-family estimator for float32 and float64;
 - label-aware cross-products for classification;
 - OPLS filtering and predictive-model composition;
 - linear, radial-basis, and polynomial kernel PLS;
@@ -48,12 +48,16 @@ Consumers use `find_package(fastpls_core CONFIG REQUIRED)` and link to
 
 ## Numerical contract
 
-Every randomized sketch starts from its recorded seed. SIMPLS consumes a
-freshly generated candidate block and applies sequential orthogonalization and
-deflation to each accepted component. PLS-SVD computes one randomized dominant
-subspace and reuses its component prefixes. Retention of scores, coefficients,
-and fitted responses is controlled independently so prediction-only workflows
-do not allocate dense output paths.
+Every randomized sketch starts from its recorded seed. The public `simpls`
+method applies sequential SIMPLS orthogonalization and deflation to every
+accepted component. If a refresh returns a bounded block, several candidates
+come from the same deflated state before being consumed sequentially. That
+bounded-block route is an approximate SIMPLS-family estimator, not classical
+de Jong SIMPLS, because it does not recompute the leading direction after every
+component. PLS-SVD computes one randomized dominant subspace and reuses its
+component prefixes. Retention of scores, coefficients, and fitted responses is
+controlled independently so prediction-only workflows do not allocate dense
+output paths.
 
 LDA computes the pooled within-class covariance from score cross-products and
 class means, then solves by Cholesky factorization and triangular substitution.

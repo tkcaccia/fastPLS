@@ -64,8 +64,8 @@ and optional raw classification scores. When \code{Ytest} is supplied,
 requested component count.
 }
 \description{
-Generates predictions for new samples from fitted PLS-SVD, SIMPLS, OPLS, or
-kernel PLS models. Stored centering, scaling, latent projections, and
+Generates predictions for new samples from fitted PLS-SVD, SIMPLS-family,
+OPLS, or kernel PLS models. Stored centering, scaling, latent projections, and
 model-specific filtering are applied before producing numeric response
 predictions or classification labels.
 }

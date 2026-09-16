@@ -54,3 +54,5 @@
 ^[.]fastpls-metal-current-lib(/|$)
 ^cran-comments[.]md$
 ^data-raw(/|$)
+^tests/development(/|$)
+^tests/testthat/_problems(/|$)

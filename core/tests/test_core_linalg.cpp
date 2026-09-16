@@ -62,5 +62,18 @@ int main() {
   ));
   assert(std::abs(solution(0, 0) - 1.0) < 1e-12);
   assert(std::abs(solution(1, 0) - 1.0) < 1e-12);
+
+  const double small = 1e-20;
+  system(0, 0) = 0.0;
+  system(1, 0) = small;
+  system(0, 1) = small;
+  system(1, 1) = small;
+  rhs(0, 0) = small;
+  rhs(1, 0) = 2.0 * small;
+  assert(fastpls::core::solve_symmetric_system(
+    system.view(), rhs.view(), solution
+  ));
+  assert(std::abs(solution(0, 0) - 1.0) < 1e-12);
+  assert(std::abs(solution(1, 0) - 1.0) < 1e-12);
   return 0;
 }

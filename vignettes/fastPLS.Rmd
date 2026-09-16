@@ -54,7 +54,8 @@ coefficients or latent subspaces. Increasing `power` or `oversample` can improve
 an approximation but is not a guarantee of agreement. Native rSVD is the
 only solver exposed by this package.
 PLS-SVD and standalone `fastsvd()` use `oversample = 32`, `power = 5` by
-default. Accelerated SIMPLS, OPLS, and kernel-PLS use 32 oversampling
+default. The accelerated SIMPLS-family, OPLS, and kernel-PLS routes use 32
+oversampling
 directions and five power iterations for ordinary matrix shapes. Numeric
 responses with at least 64 columns and a response-to-sample ratio of at least
 0.2 use 48 directions and six iterations. Classification with at least 32
@@ -94,21 +95,26 @@ a full coefficient array, prediction can be performed through low-rank factors
 based on the latent projection and response-side coefficients. The cached
 score-Gram route forms the score cross-product once and reuses its leading
 blocks for the requested prefixes. If the centred cross-covariance is
-approximated by $S \approx UDV^\top$, scores are $T_a=XU_a$ and the
-response map solves $(T_a^\top T_a)H_a=D_aV_a^\top$. Predictions are
-$X_{\mathrm{new}}U_aH_a$, with the training response mean restored.
+approximated by $S \approx UDV^\top$, scores are $T_a=XU_a$ and the score
+Gram matrix is $G_a=T_a^\top T_a$. The implementation solves
+$G_aL_a=D_a$ and retains the latent response map
+$W_a=L_aV_a^\top$. Predictions are $X_{\mathrm{new}}U_aW_a$, with the
+training response mean restored.
 Singular directions alone are therefore not regression coefficients.
 PLS-SVD can also
 use the matrix-free `xprod` route for randomized SVD when the
 cross-covariance matrix would be large.
 
-`method = "simpls"` is the optimized SIMPLS implementation and is the default
-general-purpose PLS core. The statistical structure follows de Jong's SIMPLS
-algorithm (de Jong, 1993): each component is obtained from the current
-cross-covariance state, converted into a score and loading direction, and
-followed by SIMPLS orthogonalization and deflation. The rSVD
-route generates candidates from a newly randomized sketch at each refresh of
-the current deflated operator; a refresh can supply one or several candidates.
+`method = "simpls"` is the public name of the optimized fastPLS
+SIMPLS-family estimator and is the default general-purpose PLS core. Its
+one-direction route uses de Jong's sequential SIMPLS structure (de Jong,
+1993): a component is obtained from the current cross-covariance state,
+converted into a score and loading direction, and followed by SIMPLS
+orthogonalization and deflation. The rSVD route generates candidates from a
+newly randomized sketch at each refresh of the current deflated operator; a
+refresh can supply one or several candidates. When several candidates are
+computed from the same deflated state, the bounded-block route is an
+approximate SIMPLS-family estimator rather than classical de Jong SIMPLS.
 Like `pls::simpls.fit`, one fit provides the sequential path through all
 components up to `ncomp`; fastPLS does not claim this standard path construction
 as a novelty. Cross-covariance deflation is updated after each accepted
@@ -158,7 +164,8 @@ filter is applied to new samples at prediction time.
 unnecessary kernel materialization. For radial-basis and polynomial kernels,
 the training kernel is centered and the selected PLS core is fitted in kernel
 space. The same user-facing `pls()` function therefore covers linear PLS-SVD,
-SIMPLS, OPLS, and kernel PLS while sharing the accelerated low-rank machinery.
+the SIMPLS-family estimator, OPLS, and kernel PLS while sharing the accelerated
+low-rank machinery.
 
 ### Classification Methods
 
@@ -207,7 +214,7 @@ column alignment. Compiled classification fitting and cross-validation
 products operate on compact labels and class sums, so they do not allocate a
 dense one-hot training-response matrix.
 
-For eligible wide-response SIMPLS cross-validation, the compiled engine forms
+For eligible wide-response SIMPLS-family cross-validation, the compiled engine forms
 the uncentred sample-response Gram matrix once before the fold loop. Each
 training-fold Gram matrix is recovered from its principal submatrix and exactly
 double-centred, avoiding a materialized centred response matrix. CPU execution
@@ -220,7 +227,7 @@ are reused across the cross-validation call.
 CUDA and a compatible NVIDIA runtime is available. After input transfer, CUDA
 paths perform preprocessing, cross-products, randomized direction extraction,
 component updates, low-rank prediction, and LDA scoring on the GPU for PLS-SVD,
-SIMPLS, OPLS, and kernel PLS. OPLS filtering and application of the stored
+the SIMPLS-family estimator, OPLS, and kernel PLS. OPLS filtering and application of the stored
 orthogonal filter remain device-resident. Nonlinear kernel PLS constructs and
 centers both training and test Gram matrices on the GPU. Returned arrays and R
 model-object assembly are host operations. CUDA is most useful when dense
@@ -228,7 +235,8 @@ matrix work offsets transfer and kernel-launch overhead. Nonlinear kernels are
 also subject to an explicit device-memory guard because their Gram matrix uses
 quadratic storage in the training sample count.
 
-`backend = "metal"` provides a float32 route for PLS-SVD, SIMPLS, OPLS, and
+`backend = "metal"` provides a float32 route for PLS-SVD, the SIMPLS-family
+estimator, OPLS, and
 kernel PLS on Apple silicon unified-memory systems. It always enters the same
 operation-split
 algorithm rather than selecting a complete CPU or Metal estimator from the
@@ -289,12 +297,12 @@ explicit host/device hybrid, and U for unavailable.
 | Model or operation | CPU | CUDA | Metal |
 |---|---:|---:|---:|
 | PLS-SVD, float64 | T/A | T/A/N | U |
-| SIMPLS, float64 | T/A | T/A/N | U |
+| SIMPLS family, float64 | T/A | T/A/N | U |
 | OPLS, float64 | T/A | T/A/N | U |
 | Linear kernel PLS, float64 | T/A | T/A/N | U |
 | Nonlinear kernel PLS, float64 | T/A | T/A/N | U |
 | PLS-SVD, float32 | T/A | T/A/N | T/A/H |
-| SIMPLS, float32 | T/A | T/A/N | T/A/H |
+| SIMPLS family, float32 | T/A | T/A/N | T/A/H |
 | OPLS, float32 | T/A | T/A/N | T/A/H |
 | Linear kernel PLS, float32 | T/A | T/A/N | T/A/H |
 | Nonlinear kernel PLS, float32 | T/A | T/A/N | T/A/H |
@@ -357,7 +365,7 @@ fit_example$accuracy
 
 | Goal | Suggested call |
 |---|---|
-| Fast exploratory modelling | SIMPLS with CPU rSVD |
+| Fast exploratory modelling | SIMPLS-family estimator with CPU rSVD |
 | Repeatable CPU analysis | `backend = "cpu", seed = 1` |
 | Direct cross-covariance PLS-SVD | `method = "plssvd"` |
 | Remove response-unrelated structured variation | `method = "opls"` |
@@ -713,7 +721,8 @@ fit_reg$Q2Y
 
 `pls()` also accepts predictor and response matrices from the `float` package.
 Supplying a `float::float32` object requests single-precision execution. CUDA
-keeps PLS-SVD, SIMPLS, OPLS, nonlinear kernel construction, prediction, and LDA
+keeps PLS-SVD, the SIMPLS-family estimator, OPLS, nonlinear kernel construction,
+prediction, and LDA
 on the selected GPU. Metal accepts float32 only and uses the fixed CPU/Metal
 operation split described above; CUDA supports float32 and float64. Nonlinear
 kernel PLS requires an explicit `n` by `n` Gram matrix, so the package checks
@@ -725,7 +734,7 @@ Float64 remains the baseline precision. Float32 approximately halves raw
 matrix storage, but paired tests show that runtime, incremental host RSS, and
 device memory may increase or decrease depending on the route. The package
 therefore warns once for measured-risk regimes. This
-includes precision-sensitive SIMPLS and linear kernel-PLS classification,
+includes precision-sensitive SIMPLS-family and linear kernel-PLS classification,
 nonlinear kernels and multivariate regression
 with at least 10,000 response columns and 50 components. In that last regime,
 runtime, memory, and numerical behavior must be checked against float64 before
@@ -736,7 +745,8 @@ float64.
 On Windows, the standard R toolchain does not expose the single-precision
 BLAS/LAPACK symbols used by the Unix-like compiled kernels. The Windows CPU
 route therefore combines float-package rSVD and Cholesky operations with
-portable C++ float kernels. It supports PLS-SVD, SIMPLS, OPLS, linear and
+portable C++ float kernels. It supports PLS-SVD, the SIMPLS-family estimator,
+OPLS, linear and
 nonlinear kernel PLS, argmax, and latent-space LDA when `backend = "cpu"` and
 rSVD is selected automatically. Model factors, LDA buffers, kernel matrices, and
 predictions remain float32, but this portable route can be slower than the
@@ -869,7 +879,8 @@ fixed-component CV or a vector of candidates when the number of components
 should be selected from a grid. Use `pls.double.cv()` for nested validation,
 where an inner CV chooses the number of components and an outer CV estimates
 predictive performance. Both helpers support regression and classification and
-dispatch to compiled CPU or accelerator routes when available. CUDA SIMPLS CV
+dispatch to compiled CPU or accelerator routes when available. CUDA
+SIMPLS-family CV
 keeps task data and fold workspaces on the device. CUDA library handles are
 created once per CV call and reused across folds rather than reconstructed for
 every fit. CUDA PLS-SVD CV also uses a resident route for large multivariate
@@ -883,7 +894,7 @@ held-out contribution before fold-specific centering and scaling. The large
 cross-covariance remains matrix-free, so this reuse does not introduce a dense
 predictor-by-response cache. When its cost and storage model is favorable, the
 compiled CPU engine can also form a bounded response Gram matrix once for
-wide-response SIMPLS problems and extract an exactly double-centred training
+wide-response SIMPLS-family problems and extract an exactly double-centred training
 submatrix for each fold. The Gram kernel is selected between GEMM and SYRK by
 platform, precision, and matrix shape; a SYRK route retains one triangle until
 a complete fold matrix is required. Fold-specific
@@ -894,7 +905,7 @@ those predictions are formatted for R.
 ### Ordinary k-fold CV
 
 In ordinary k-fold CV, samples are split directly into `kfold` folds. The
-example below validates a fixed two-component SIMPLS classifier with five folds.
+example below validates a fixed two-component SIMPLS-family classifier with five folds.
 
 ```{r chunk-023}
 cv_kfold <- pls.single.cv(
@@ -1393,13 +1404,20 @@ if (has_metal()) {
 ## Helper Functions
 
 `fastcor()` computes fast Pearson-style correlations. `ViP()` returns variable
-importance in projection trajectories for fitted PLS models, following the
+importance in projection trajectories for direct SIMPLS-family fits, following the
 standard VIP interpretation used for PLS variable ranking (Wold, Sjostrom, and
 Eriksson, 2001; Chong and Jun, 2005). VIP is most useful when the columns of
 `X` are interpretable predictors, such as genes, metabolites, spectral bins, or
 clinical variables; larger values indicate stronger contribution to the fitted
-latent predictive model. Their matrix calculations, like the metrics returned
-by `evaluate()`, are implemented in the dependency-free C++ core and are
+latent predictive model. Linear kernel PLS uses the same direct SIMPLS-family
+path and
+is also supported. PLS-SVD scores are not generally orthogonal and its stored
+response singular vectors are not the final latent regression map; OPLS applies
+an additional predictor filter; and nonlinear kernel weights index training
+samples rather than original predictors. `ViP()` therefore stops for these
+three cases instead of returning a quantity with a misleading variable-
+importance interpretation. The supported matrix calculation, like the metrics
+returned by `evaluate()`, is implemented in the dependency-free C++ core and is
 independent of CUDA or Metal availability; the R functions validate inputs and
 format the returned objects.
 
@@ -1436,7 +1454,8 @@ acceleration remains device resident within PLS, while Metal acceleration uses
 the fixed CPU/Metal operation split described below.
 
 The PLS Metal backend, `pls(..., backend = "metal")`, supports float32 PLS-SVD,
-SIMPLS, OPLS, and kernel PLS with Metal Performance Shaders. It returns
+the SIMPLS-family estimator, OPLS, and kernel PLS with Metal Performance
+Shaders. It returns
 host-accessible model factors and always uses a
 fixed mathematical division: Metal performs fitting products involving the
 training sample matrix, including explicit cross-covariance formation, fused
@@ -1472,7 +1491,7 @@ path are compiled. For `pls.double.cv()`, CPU and Metal nested loops are
 compiled after R constructs the fixed fold plan; CUDA retains R-level nested
 coordination around native CUDA kernels. Final R-object assembly remains
 host-side. CUDA
-SIMPLS CV uploads the task once and
+SIMPLS-family CV uploads the task once and
 keeps fold gathering, training-only standardization, fitting, prediction, and
 metric reduction on the device. CUDA PLS-SVD uses the same resident strategy
 for large multivariate regression responses; classification and smaller
@@ -1503,35 +1522,39 @@ route. For large classification tasks, the label-aware PLS-SVD path computes
 class-wise cross-products from the factor labels and avoids dense one-hot `Y`
 unless the legacy dense route is explicitly needed.
 
-### SIMPLS
+### SIMPLS-Family Estimator
 
-`method = "simpls"` is the optimized fastPLS SIMPLS core. Statistically, it
-keeps the de Jong (1993) SIMPLS idea: one supervised latent direction is
-appended at a time, the score and loading vectors are computed, an orthogonal
-loading direction is constructed, and the cross-covariance is deflated before
-the next component.
+`method = "simpls"` is the public API name for the optimized fastPLS
+SIMPLS-family core. It retains the de Jong (1993) sequential structure: one
+supervised latent direction is accepted at a time, the score and loading
+vectors are computed, an orthogonal loading direction is constructed, and the
+cross-covariance is deflated before the next accepted component.
 
 At each refresh, fastPLS extracts fresh candidates from the current deflated
 cross-covariance. Depending on the active compiled route, a refresh produces
 one direction or a small candidate block. Accepted candidates are always
 applied one at a time through the standard SIMPLS orthogonalization and
 deflation equations, and the next refresh uses the resulting deflated
-operator. CUDA keeps the SIMPLS state on the device. PLS-SVD uses 32
-oversampling directions and five power iterations. Accelerated SIMPLS, OPLS,
-and kernel-PLS use 32 directions and five iterations for ordinary matrix shapes;
+operator after the current block is consumed. Because candidates within a
+bounded block were calculated before the intervening deflations, that route is
+an approximate SIMPLS-family estimator and must not be identified as classical
+SIMPLS. CUDA keeps the SIMPLS-family state on the device. PLS-SVD uses 32
+oversampling directions and five power iterations. The accelerated
+SIMPLS-family, OPLS, and kernel-PLS routes use 32 directions and five iterations
+for ordinary matrix shapes;
 when the explicit cross-covariance would exceed 512 MiB, their automatic
 massive-matrix profile requests `oversample = 12` and `power = 1`, while the
 executed controls and refresh width are recorded separately. Explicit controls
 supplied through `...` take precedence.
 
-The accepted direction is normalized, converted into a SIMPLS component,
+Each accepted direction is normalized, converted into a SIMPLS-family
+component,
 orthogonalized, and followed by SIMPLS deflation. A candidate block is consumed
 before the next sketch is generated. The
-innovation is therefore not a claim of exact de Jong estimator preservation:
-it is a
-backend-specialized randomized sequential estimator that trades strict
-component equivalence for lower computational cost while preserving the
-supervised deflation structure.
+innovation is therefore not a claim of exact de Jong estimator preservation.
+It is a backend-specialized randomized SIMPLS-family estimator that trades
+strict component equivalence for lower computational cost while preserving the
+supervised sequential orthogonalization and deflation structure.
 
 The retained optimizations reorganize work without altering this sequence. The
 cached-deflation update computes \(v^T S\) once and applies
@@ -1540,7 +1563,8 @@ cached-deflation update computes \(v^T S\) once and applies
 requested. Cross-products can be cached for suitable matrix shapes, prediction
 can use compact latent factors, and matrix-free products avoid materializing a
 large cross-covariance. PLS-SVD instead uses a one-shot cross-covariance SVD;
-OPLS and kernel PLS reuse the same sequential SIMPLS core where applicable.
+OPLS and kernel PLS reuse the same sequential SIMPLS-family core where
+applicable.
 
 The complete component path is also a standard feature of reference SIMPLS
 software such as `pls::simpls.fit`, which returns coefficient and fitted-value
@@ -1608,7 +1632,8 @@ covariance is computed without materializing class-centered score blocks as
 `(T^T T - sum_c n_c mu_c mu_c^T) / max(1, n - C)`. The class systems are solved
 by Cholesky factorization and triangular solves; fastPLS neither explicitly
 inverts the covariance nor uses Gauss-Jordan elimination. Numerical recovery is
-deterministic. With `s = trace(Sigma) / q` (or one when this scale is invalid),
+deterministic. With `s = trace(Sigma) / a`, where `a` is the retained score
+dimension (or one when this scale is invalid),
 the implementation tries `lambda = rho * s` for `rho = 1e-8, 1e-6, 1e-5,
 1e-4, 1e-3, 1e-2`, increasing the value only when Cholesky fails. Prediction
 uses the standard discriminant

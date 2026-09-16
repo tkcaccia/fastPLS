@@ -3429,10 +3429,11 @@ print.fastPLS <- function(x, ...) {
             control$rsvd_power
         )
         qualification$execution_profile <-
-            "accelerated_randomized_simpls"
+            "accelerated_randomized_simpls_family"
         qualification$estimator_interpretation <- paste(
-            "Approximate high-speed SIMPLS execution; it is not claimed to",
-            "reproduce a deterministic de Jong SIMPLS fit."
+            "Approximate high-speed SIMPLS-family execution. A bounded",
+            "candidate block is not classical de Jong SIMPLS because",
+            "directions are not recomputed after every accepted component."
         )
         control$rsvd_qualification <- qualification
         return(control)
@@ -5212,8 +5213,8 @@ print.fastPLS <- function(x, ...) {
 
 #' Predict from fitted fastPLS models
 #'
-#' Generates predictions for new samples from fitted PLS-SVD, SIMPLS, OPLS, or
-#' kernel PLS models. Stored centering, scaling, latent projections, and
+#' Generates predictions for new samples from fitted PLS-SVD, SIMPLS-family,
+#' OPLS, or kernel PLS models. Stored centering, scaling, latent projections, and
 #' model-specific filtering are applied before producing numeric response
 #' predictions or classification labels.
 #'
@@ -8835,7 +8836,7 @@ plot.permutation <- function(
                 "oversampling directions and one power iteration. Resident",
                 "backends record the executed refresh width separately;",
                 "massive float32 regression uses fresh bounded candidate",
-                "blocks followed by sequential SIMPLS component updates."
+                "blocks followed by sequential SIMPLS-family component updates."
             ),
             model$diagnostics$rsvd$setting_guidance
         )
@@ -8857,9 +8858,9 @@ plot.permutation <- function(
             model$resident_controls$refresh_block_limit %||% 0L
     )
     core <- if (is.finite(block_limit) && block_limit > 0L) {
-        "bounded_block_randomized_simpls"
+        "bounded_block_randomized_simpls_family"
     } else if (is.finite(block) && block > 1L) {
-        "block_randomized_simpls"
+        "block_randomized_simpls_family"
     } else {
         "componentwise_randomized_simpls"
     }
@@ -9044,7 +9045,7 @@ plot.permutation <- function(
                 } else {
                     paste(
                         "Fresh randomized candidate block followed by",
-                        "sequential SIMPLS component updates"
+                        "sequential SIMPLS-family component updates"
                     )
                 }
             } else {
@@ -9592,7 +9593,7 @@ plot.permutation <- function(
     if (identical(context$method, "kernelpls") &&
         identical(config$kernel, "linear")) {
         # A linear kernel is the original predictor space. Reuse the same
-        # accelerated SIMPLS route on every backend.
+        # accelerated SIMPLS-family route on every backend.
         direct_context <- context
         direct_context$method <- "simpls"
         model <- .pls_dispatch(direct_context, config)
@@ -9628,9 +9629,9 @@ plot.permutation <- function(
 
 #' Partial Least Squares with selectable model family and backend
 #'
-#' Fits PLS-SVD, SIMPLS, OPLS, or kernel PLS models for regression or
-#' classification using a selected CPU, CUDA, or operation-split Apple Metal
-#' backend. The fitted
+#' Fits PLS-SVD, a SIMPLS-family estimator, OPLS, or kernel PLS models for
+#' regression or classification using a selected CPU, CUDA, or operation-split
+#' Apple Metal backend. The fitted
 #' model can include predictions for held-out samples, latent scores, fitted
 #' values, variance summaries, and optional classification heads.
 #'
@@ -9648,11 +9649,15 @@ plot.permutation <- function(
 #'   Unsupported backend and precision combinations stop rather than silently
 #'   falling back to CPU.
 #'
-#'   `method` selects PLS-SVD, SIMPLS, OPLS, or kernel PLS. Classification can
-#'   use response-score argmax or LDA on latent scores. PLS-SVD classification
-#'   cannot return more than one fewer component than the number of response
-#'   classes. The requested model family is never silently replaced by another
-#'   family.
+#'   `method = "simpls"` selects the fastPLS SIMPLS-family estimator. Its
+#'   component-wise route retains the classical sequential orthogonalization
+#'   and deflation structure. An eligible route may instead consume a bounded
+#'   block of candidates computed from one deflated state; this is an
+#'   approximate SIMPLS-family estimator, not classical de Jong SIMPLS.
+#'   Classification can use response-score argmax or LDA on latent scores.
+#'   PLS-SVD classification cannot return more than one fewer component than
+#'   the number of response classes. The requested model family is never
+#'   silently replaced by another family.
 #'
 #'   All public PLS routes use randomized SVD. It is an approximate solver, and
 #'   `diagnostics` records the effective controls and structural checks for the
@@ -9675,12 +9680,14 @@ plot.permutation <- function(
 #'   contain classes absent from the training data; such classes cannot be
 #'   predicted and count as classification errors.
 #' @param ncomp Positive integer component count or vector of counts. Repeated
-#'   values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
-#'   at the corresponding numerical rank and report the effective counts.
+#'   values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
+#'   cap the returned path at the corresponding numerical rank and report the
+#'   effective counts.
 #' @param scaling One of \code{centering}, \code{autoscaling}, or \code{none}.
 #' @param method One of \code{simpls}, \code{plssvd}, \code{opls}, or
 #' \code{kernelpls}.
-#'   `simpls` uses the fastPLS accelerated SIMPLS core.
+#'   `simpls` uses the fastPLS accelerated SIMPLS-family core. Bounded-block
+#'   execution is approximate and is not classical de Jong SIMPLS.
 #' @param classifier Classification decision rule. \code{argmax} keeps the
 #'   standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 #'   classifier on the PLS latent scores.
@@ -10956,6 +10963,8 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   leave-one-group-out interpretation.
 #' @param method One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
 #'   \code{kernelpls}. Multiple values are treated as a tuning grid.
+#'   \code{simpls} denotes the fastPLS SIMPLS-family estimator; an eligible
+#'   bounded-block route is approximate rather than classical de Jong SIMPLS.
 #' @param backend Implementation backend: \code{cpu}, \code{cuda}, or
 #'   \code{metal}. Multiple values are treated as a tuning grid. Metal requires
 #'   float32 input and uses fixed CPU/Metal operation splitting with CPU fold
@@ -11007,7 +11016,11 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   full-data predictor and class moments are calculated once and each fold's
 #'   training moments are obtained by subtracting its held-out contribution.
 #'   The fold-specific centering, scaling, PLS fit, LDA fit, and predictions
-#'   remain independent.
+#'   remain independent. For regression, a fold that estimates fewer latent
+#'   components than requested uses its available component prefix. Higher
+#'   requested prefixes repeat the last estimable prediction; if no component is
+#'   estimable, the prediction is the fold-training response mean. The returned
+#'   path still contains one result for every requested component count.
 #' @return A list describing the cross-validation run and selected model.
 #'   `metrics$cross_validated` contains complete `evaluate()` results for each
 #'   requested component count and `metrics$fitted` contains the corresponding
@@ -12198,6 +12211,8 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   has the same leave-one-group-out interpretation.
 #' @param method One or more of \code{simpls}, \code{plssvd}, \code{opls}, or
 #'   \code{kernelpls}. Multiple values are tuned in the inner loop.
+#'   \code{simpls} denotes the fastPLS SIMPLS-family estimator; an eligible
+#'   bounded-block route is approximate rather than classical de Jong SIMPLS.
 #' @param backend Implementation backend: \code{cpu}, \code{cuda}, or
 #'   \code{metal}. Multiple values are tuned in the inner loop. Metal requires
 #'   float32 input and Apple Metal. R validates the request and constructs a
@@ -12254,7 +12269,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   reported metrics. With CUDA, nested outer/inner orchestration remains in R,
 #'   while each supported single-CV and outer fit uses its native CUDA route.
 #'   Unsupported accelerator requests fail explicitly and never fall back to
-#'   CPU.
+#'   CPU. For regression, a fold that estimates fewer latent components than
+#'   requested uses its available component prefix. Higher requested prefixes
+#'   repeat the last estimable prediction; if no component is estimable, the
+#'   prediction is the fold-training response mean. Inner tuning paths retain
+#'   one result for every requested component count.
 #' @return A list with the following elements. `metrics$cross_validated`
 #'   contains one complete `evaluate()` result per repeated outer-CV run, and
 #'   `metrics$aggregate` evaluates the final vote-aggregated or averaged
@@ -12422,6 +12441,13 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     }
     observed_factor <- factor(observed_labels, levels = levels_all)
     predicted_factor <- factor(predicted_labels, levels = levels_all)
+    if (!na.rm &&
+        (anyNA(observed_factor) || anyNA(predicted_factor))) {
+        stop(
+            "Incomplete classification pairs require na.rm = TRUE.",
+            call. = FALSE
+        )
+    }
     keep <- rep(TRUE, length(observed_factor))
     if (na.rm) {
         keep <- !is.na(observed_factor) & !is.na(predicted_factor)
@@ -12488,6 +12514,12 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         ncol(predicted) > 1L) {
         ranked <- predicted
         predicted <- predicted[, 1L]
+    }
+    if (!na.rm && !is.null(score) && any(!is.finite(score))) {
+        stop(
+            "Incomplete classification scores require na.rm = TRUE.",
+            call. = FALSE
+        )
     }
     inputs <- .evaluate_class_inputs(observed, predicted, na.rm)
     classes <- levels(inputs$observed)
@@ -12602,6 +12634,15 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
 .evaluate_regression <- function(observed, predicted, ytrain, bycol,
     relative_epsilon, na.rm) {
     inputs <- .evaluate_regression_inputs(observed, predicted, ytrain)
+    incomplete <- any(!is.finite(inputs$observed)) ||
+        any(!is.finite(inputs$predicted)) ||
+        (!is.null(inputs$training) && any(!is.finite(inputs$training)))
+    if (!na.rm && incomplete) {
+        stop(
+            "Incomplete regression values require na.rm = TRUE.",
+            call. = FALSE
+        )
+    }
     overall <- evaluate_regression_core_cpp(
         inputs$observed,
         inputs$predicted,
@@ -12845,7 +12886,11 @@ evaluate <- function(
 
 #' Variable importance in projection (VIP)
 #'
-#' Computes VIP trajectories from fitted model components.
+#' Computes VIP trajectories from fitted direct SIMPLS-family components. The
+#' standard component-wise decomposition is not used for PLS-SVD, OPLS, or
+#' nonlinear kernel PLS because their stored latent weights have different
+#' mathematical meanings. Linear-kernel PLS uses the same direct
+#' SIMPLS-family path and is supported.
 #'
 #' @param model Fitted `fastPLS` model.
 #' @return Numeric matrix (single response) or list of matrices
@@ -12854,12 +12899,30 @@ evaluate <- function(
 #' X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 #' y <- mtcars$mpg
 #' fit <- pls(X, y,
-#'     ncomp = 1, method = "plssvd", backend = "cpu",
+#'     ncomp = 1, method = "simpls", backend = "cpu",
 #'     fit = TRUE, return_variance = FALSE
 #' )
 #' ViP(fit)
 #' @export
 ViP <- function(model) {
+    internal <- attr(model, "fastPLS_internal")
+    method <- model$pls_method %||% model$inner_model$pls_method %||%
+        internal$pls_method %||% ""
+    if (inherits(model, "fastPLSOpls") || identical(method, "plssvd")) {
+        stop(
+            "ViP() is defined for direct SIMPLS-family fits, not PLS-SVD or OPLS.",
+            call. = FALSE
+        )
+    }
+    if (inherits(model, "fastPLSKernel") &&
+        !isTRUE(model$kernel_linear_direct)) {
+        stop(
+            "ViP() is not defined for nonlinear kernel PLS because its ",
+            "latent weights index training samples rather than original ",
+            "predictors.",
+            call. = FALSE
+        )
+    }
     vip_core_cpp(model)
 }
 

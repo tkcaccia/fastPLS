@@ -208,3 +208,31 @@ test_that("compiled aggregate regression evaluation matches reference formulas",
 
   expect_equal(actual, expected, tolerance = 1e-12)
 })
+
+test_that("evaluate does not silently omit incomplete pairs", {
+  observed <- c(1, NA_real_, 3)
+  predicted <- c(1, 2, 3)
+  expect_error(
+    evaluate(observed, predicted, na.rm = FALSE),
+    "Incomplete regression values"
+  )
+  expect_equal(evaluate(observed, predicted)$metrics$n, 2)
+
+  truth <- factor(c("a", "b", NA), levels = c("a", "b"))
+  estimate <- factor(c("a", "a", "b"), levels = c("a", "b"))
+  expect_error(
+    evaluate(truth, estimate, na.rm = FALSE),
+    "Incomplete classification pairs"
+  )
+  expect_equal(evaluate(truth, estimate)$metrics$n, 2)
+})
+
+test_that("macro metrics retain missed observed classes as zero", {
+  truth <- factor(c("a", "a", "b", "b"))
+  estimate <- factor(rep("a", 4), levels = levels(truth))
+  metrics <- evaluate(truth, estimate)$metrics
+
+  expect_equal(metrics$macro_precision, 0.25)
+  expect_equal(metrics$macro_recall, 0.5)
+  expect_equal(metrics$macro_f1, 1 / 3)
+})

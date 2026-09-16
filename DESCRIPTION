@@ -26,7 +26,8 @@ Authors@R: c(
     )
 Description: Fast implementations of partial least squares models for
     high-dimensional regression and classification. The package provides
-    compiled implementations of PLS-SVD, SIMPLS, OPLS and kernel PLS, together
+    compiled implementations of PLS-SVD, a SIMPLS-family estimator, OPLS and
+    kernel PLS, together
     with truncated singular value decomposition backends, discriminant
     classifiers, cross-validation utilities and optional CUDA or Apple Metal
     acceleration when the required system libraries are available. Compact
