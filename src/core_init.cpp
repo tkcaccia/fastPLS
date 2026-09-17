@@ -25,6 +25,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_has_cuda, 0),
   FASTPLS_CALL(_fastPLS_has_metal, 0),
   FASTPLS_CALL(_fastPLS_blas_backend_cpp, 0),
+  FASTPLS_CALL(_fastPLS_blas_info_cpp, 0),
   FASTPLS_CALL(_fastPLS_simpls_cache_predictor_crossprod, 3),
   FASTPLS_CALL(_fastPLS_set_cpu_threads, 1),
   FASTPLS_CALL(_fastPLS_rsvd_audit_reset_debug, 0),

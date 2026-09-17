@@ -26,6 +26,25 @@ expect_finite_numeric <- function(value) {
     expect_true(all(is.finite(value)))
 }
 
+test_that("the compiled numerical library and available details are reported", {
+    backend <- fastPLS_blas(details = FALSE)
+    information <- fastPLS_blas()
+
+    expect_true(backend %in% c("Accelerate", "OpenBLAS", "R BLAS/LAPACK"))
+    expect_identical(information$backend, backend)
+    expect_named(
+        information,
+        c(
+            "backend", "version", "configuration", "core", "parallel",
+            "threads", "library"
+        )
+    )
+    if (identical(backend, "OpenBLAS")) {
+        expect_match(information$version, "^[0-9]+[.][0-9]+[.][0-9]+")
+        expect_true(nzchar(information$core))
+    }
+})
+
 test_that("all PLS families fit and predict small regression tasks", {
     data <- small_regression_data()
     train <- seq_len(38L)

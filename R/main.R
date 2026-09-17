@@ -262,17 +262,29 @@
     if (is.null(model$R) || length(model$R) == 0L) {
         return(model)
     }
+    effective <- as.integer(model$effective_ncomp %||% model$ncomp)
+    maximum <- if (length(effective)) max(effective, na.rm = TRUE) else 0L
+    if (!is.finite(maximum) || maximum < 1L) {
+        model$Ttrain <- matrix(
+            numeric(0),
+            nrow = nrow(as.matrix(Xtrain)),
+            ncol = 0L
+        )
+        return(model)
+    }
     if (
         !is.null(model$Ttrain) &&
             length(model$Ttrain) > 0L &&
-            all(dim(model$Ttrain) > 0L)
+            all(dim(model$Ttrain) > 0L) &&
+            ncol(model$Ttrain) >= maximum
     ) {
+        model$Ttrain <- model$Ttrain[, seq_len(maximum), drop = FALSE]
         return(model)
     }
     model$Ttrain <- .fastpls_latent_scores(
         model,
         Xtrain,
-        ncomp = max(model$ncomp),
+        ncomp = maximum,
         backend = "cpu"
     )
     model
@@ -301,6 +313,15 @@
                 Xtrain,
                 TRUE)
         }
+        return(model)
+    }
+    effective <- as.integer(model$effective_ncomp %||% model$ncomp)
+    if (length(effective) && all(effective < 1L)) {
+        model$P <- matrix(
+            numeric(0),
+            nrow = ncol(as.matrix(Xtrain)),
+            ncol = 0L
+        )
         return(model)
     }
     R <- as.matrix(model$R); Xtrain <- as.matrix(Xtrain)
@@ -388,6 +409,10 @@
 
 .pls_x_variance_explained <- function(model, Xtrain) {
     if (is.null(model$R) || length(model$R) == 0L || is.null(model$ncomp)) {
+        return(NULL)
+    }
+    effective <- as.integer(model$effective_ncomp %||% model$ncomp)
+    if (length(effective) && all(effective < 1L)) {
         return(NULL)
     }
     k <- min(
@@ -1722,7 +1747,8 @@ print.fastPLS <- function(x, ...) {
 
 .solver_diagnostic_context <- function(model, solver) {
     latent <- if (is.list(model$inner_model)) model$inner_model else model
-    requested <- .fastpls_quiet(max(as.integer(latent$ncomp), na.rm = TRUE))
+    requested_path <- as.integer(latent$ncomp)
+    requested <- .fastpls_quiet(max(requested_path, na.rm = TRUE))
     if (!is.finite(requested)) {
         requested <- NA_integer_
     }
@@ -1738,8 +1764,14 @@ print.fastPLS <- function(x, ...) {
     } else {
         NA
     }
-    effective <- NA_integer_
-    if (!is.null(latent$R) && length(dim(latent$R)) == 2L) {
+    effective_path <- as.integer(latent$effective_ncomp %||% integer())
+    effective <- if (length(effective_path)) {
+        .fastpls_quiet(max(effective_path, na.rm = TRUE))
+    } else {
+        NA_integer_
+    }
+    if (!length(effective_path) && !is.null(latent$R) &&
+        length(dim(latent$R)) == 2L) {
         norms <- tryCatch(
             {
                 rotations <- if (.is_float32(latent$R)) {
@@ -1752,6 +1784,7 @@ print.fastPLS <- function(x, ...) {
             error = function(e) numeric()
         )
         effective <- sum(is.finite(norms) & norms > sqrt(.Machine$double.eps))
+        effective_path <- pmin(requested_path, effective)
     }
     randomized <- solver %in% c("cpu_rsvd", "cuda_rsvd", "metal_rsvd")
     audit <- if (randomized) {
@@ -1763,13 +1796,17 @@ print.fastPLS <- function(x, ...) {
         audit$solves > 0L &&
         audit$certified == audit$solves &&
         identical(audit$failures, 0L)
-    failed <- isFALSE(finite) ||
-        (is.finite(requested) && is.finite(effective) && effective < requested)
+    shortfall <- is.finite(requested) && is.finite(effective) &&
+        effective < requested
+    failed <- isFALSE(finite)
     list(
         latent = latent,
         requested = requested,
+        requested_path = requested_path,
         finite = finite,
         effective = effective,
+        effective_path = effective_path,
+        shortfall = shortfall,
         randomized = randomized,
         audit = audit,
         audited = audited,
@@ -1780,6 +1817,9 @@ print.fastPLS <- function(x, ...) {
 .solver_diagnostic_status <- function(context) {
     if (context$failed) {
         return("failed_structural_check")
+    }
+    if (context$shortfall) {
+        return("structural_checks_passed_truncated_component_path")
     }
     if (!context$randomized) {
         return("deterministic_solver_basic_checks_passed")
@@ -1795,6 +1835,13 @@ print.fastPLS <- function(x, ...) {
 }
 
 .solver_diagnostic_guidance <- function(context) {
+    if (context$shortfall) {
+        return(paste(
+            "The fit estimated fewer response-associated directions than",
+            "requested. Higher prefixes repeat the last estimable model;",
+            "when none are estimable, prediction uses the training mean."
+        ))
+    }
     if (!context$randomized) {
         return("This internal reference uses a dense decomposition.")
     }
@@ -2026,6 +2073,8 @@ print.fastPLS <- function(x, ...) {
         finite_latent_factors = context$finite,
         requested_components = context$requested,
         effective_components = context$effective,
+        requested_component_path = context$requested_path,
+        effective_component_path = context$effective_path,
         approximation_audited = !context$randomized || context$audited,
         guidance = .solver_diagnostic_guidance(context)
     )
@@ -5247,7 +5296,9 @@ print.fastPLS <- function(x, ...) {
 #'   `raw_scores = FALSE`, ranked classification is evaluated in bounded row
 #'   blocks for both float64 and float32 inputs, and only the requested ranks
 #'   are retained.
-#' @param ... Unused.
+#' @param ... Required by the S3 generic. Additional arguments are not
+#'   supported and produce an error, which prevents obsolete or misspelled
+#'   options from being silently ignored.
 #' @return A list containing `Ypred`, optional independent-test `Q2Y`, optional
 #'   `Ttest`, optional `Ypred_top` and `Ypred_top_score` ranked-class outputs,
 #'   and optional raw classification scores. When `Ytest` is supplied,
@@ -9325,22 +9376,28 @@ plot.permutation <- function(
         )
         for (index in seq_along(result$ncomp)) {
             count <- result$ncomp[[index]]
+            effective <- as.integer(
+                result$effective_ncomp[[index]] %||% count
+            )
+            if (!is.finite(effective) || effective < 1L) {
+                next
+            }
             coefficients[, , index] <- if (method_id == 1L) {
                 latent <- if (is.list(result$W_latent)) {
                     result$W_latent[[index]]
                 } else {
                     matrix(
-                        result$W_latent[seq_len(count), , index],
-                        nrow = count,
+                        result$W_latent[seq_len(effective), , index],
+                        nrow = effective,
                         ncol = result$m
                     )
                 }
-                result$R[, seq_len(count), drop = FALSE] %*%
-                    latent
+                result$R[, seq_len(effective), drop = FALSE] %*%
+                    latent[seq_len(effective), , drop = FALSE]
             } else {
                 tcrossprod(
-                    result$R[, seq_len(count), drop = FALSE],
-                    result$Q[, seq_len(count), drop = FALSE]
+                    result$R[, seq_len(effective), drop = FALSE],
+                    result$Q[, seq_len(effective), drop = FALSE]
                 )
             }
         }
@@ -9773,6 +9830,10 @@ plot.permutation <- function(
 #'     otherwise `NA` placeholders may be returned for compatibility. Elements
 #'     are named by component count, for example `"ncomp=2"`. For PLS-DA this
 #'     is a dummy-response quantity, not classification accuracy.
+#'   * `effective_ncomp`: number of estimable response-associated directions
+#'     used for each requested component prefix. If a regression response is
+#'     constant, this is zero; fitted and new-data predictions then equal the
+#'     training-response mean, coefficients are zero, and `R2Y` is `NA`.
 #'   * `Ypred`: predictions for `Xtest`, returned only when `Xtest` is supplied
 #'     to `pls()`. For classification this contains predicted factor labels; for
 #'     regression it contains numeric predictions.

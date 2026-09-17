@@ -23,7 +23,11 @@ cannot be found. Set FASTPLS_USE_OPENBLAS=0 to use the R-supplied libraries.
 For source builds intended for repeated large analyses, use a current OpenBLAS
 release compiled for the target architecture rather than a generic portable
 binary. After installation, use fastPLS::fastPLS_blas() to verify the selected
-CPU library.
+CPU library, its version, and runtime CPU kernel. Use
+fastPLS::fastPLS_blas(details = FALSE) only when a scalar backend name is
+required. Older dynamic-architecture builds can
+identify themselves as OpenBLAS while selecting a generic or legacy kernel on
+a newer processor.
 
 On Windows ARM64, do not point OPENBLAS_ROOT at an x86-64 Rtools or MSYS2
 installation. The configuration rejects a cross-architecture archive. If no

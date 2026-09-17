@@ -15,12 +15,56 @@ run_degenerate_nested_cv <- function(x, y, ncomp, scaling) {
         kfold_inner = 5L,
         scaling = scaling,
         backend = "cpu",
-        oversample = 10L,
-        power = 2L,
         seed = 20260852L,
         perm.test = FALSE
     )
 }
+
+test_that("direct constant-response paths cover scaling and matrix shape", {
+    configurations <- list(
+        wide = c(samples = 41L, predictors = 768L),
+        tall = c(samples = 80L, predictors = 12L)
+    )
+    for (configuration in configurations) {
+        set.seed(sum(configuration))
+        x <- matrix(
+            rnorm(configuration[["samples"]] *
+                configuration[["predictors"]]),
+            nrow = configuration[["samples"]],
+            ncol = configuration[["predictors"]]
+        )
+        for (value in c(0, 4.25)) {
+            for (scaling in c("centering", "autoscaling", "none")) {
+                for (components in list(1L, 1:10)) {
+                    fit <- pls(
+                        x,
+                        rep(value, nrow(x)),
+                        ncomp = components,
+                        scaling = scaling,
+                        fit = TRUE,
+                        return_loadings = TRUE,
+                        backend = "cpu",
+                        seed = 20261542L
+                    )
+                    prediction <- predict(fit, x[seq_len(7L), , drop = FALSE])
+
+                    expect_identical(
+                        fit$effective_ncomp,
+                        rep(0L, length(components))
+                    )
+                    expect_true(all(is.finite(prediction$Ypred)))
+                    expect_true(all(prediction$Ypred == value))
+                    expect_true(all(fit$B == 0))
+                    expect_true(all(is.na(fit$R2Y)))
+                    expect_equal(
+                        dim(fit$Yfit),
+                        c(nrow(x), 1L, length(components))
+                    )
+                }
+            }
+        }
+    }
+})
 
 test_that("nested CV retains every prefix when folds lose effective rank", {
     data <- degenerate_regression_data()
@@ -71,8 +115,6 @@ test_that("a completely constant response uses fold training means", {
         kfold = 5L,
         method = "simpls",
         backend = "cpu",
-        oversample = 10L,
-        power = 2L,
         seed = 20260852L,
         fit = FALSE
     )

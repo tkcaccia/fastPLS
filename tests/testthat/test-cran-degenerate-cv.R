@@ -11,8 +11,6 @@ test_that("nested CV handles a constant-response inner fold", {
         kfold_inner = 5L,
         scaling = "centering",
         backend = "cpu",
-        oversample = 10L,
-        power = 2L,
         seed = 20260852L,
         perm.test = FALSE
     )

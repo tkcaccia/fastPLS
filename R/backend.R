@@ -6,17 +6,42 @@
 #' `"OpenBLAS"` when OpenBLAS was found or explicitly requested, and
 #' `"R BLAS/LAPACK"` when the package used R's portable fallback.
 #'
-#' For reproducible performance benchmarks on Linux or Windows, install with
-#' `FASTPLS_USE_OPENBLAS=1` and verify that this function returns
-#' `"OpenBLAS"` before running the analysis.
+#' With `details = TRUE`, the result additionally reports the library version,
+#' configuration string, selected CPU core, parallel runtime, active thread
+#' count, and resolved library path when these are exposed by the linked
+#' library. OpenBLAS provides all fields except that a statically linked Windows
+#' build may not expose a separate library path. Accelerate and R BLAS/LAPACK
+#' do not expose the same runtime metadata, so unavailable fields are `NA`.
 #'
-#' @return A single character string: `"Accelerate"`, `"OpenBLAS"`, or
-#'   `"R BLAS/LAPACK"`.
+#' For reproducible performance benchmarks on Linux or Windows, install with
+#' `FASTPLS_USE_OPENBLAS=1` and verify both `backend` and the detailed version
+#' and core fields before running the analysis.
+#'
+#' @param details Logical. Return a detailed named list when `TRUE`, or the
+#'   former scalar backend name when `FALSE`.
+#' @return With `details = TRUE`, a named list containing `backend`, `version`,
+#'   `configuration`, `core`, `parallel`, `threads`, and `library`. With
+#'   `details = FALSE`, a single character string: `"Accelerate"`,
+#'   `"OpenBLAS"`, or `"R BLAS/LAPACK"`.
 #' @examples
 #' fastPLS_blas()
+#' fastPLS_blas(details = FALSE)
 #' @export
-fastPLS_blas <- function() {
-    blas_backend_cpp()
+fastPLS_blas <- function(details = TRUE) {
+    if (length(details) != 1L || is.na(details) || !is.logical(details)) {
+        stop("`details` must be TRUE or FALSE.", call. = FALSE)
+    }
+    if (!details) {
+        return(blas_backend_cpp())
+    }
+    information <- blas_info_cpp()
+    if (is.na(information$library)) {
+        session_blas <- unname(extSoftVersion()["BLAS"])
+        if (length(session_blas) == 1L && !is.na(session_blas)) {
+            information$library <- session_blas
+        }
+    }
+    information
 }
 
 .fastpls_validate_backend <- function(backend, label = "backend") {

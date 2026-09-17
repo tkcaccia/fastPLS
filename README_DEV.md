@@ -19,28 +19,22 @@ consumes a bounded candidate block from one deflated state is an approximate
 SIMPLS-family estimator, not unqualified classical de Jong SIMPLS. Old local
 script compatibility should stay unexported and out of benchmark labels.
 
-## SVD and xprod Policy
+## Solver and Cross-Product Policy
 
-Supported CPU SVD choices through `pls()` are:
+The public package uses native randomized SVD. Users can tune only the
+documented randomized controls (`oversample`, `power`, and `seed`); removed
+solver names and legacy cross-product arguments are not compatibility options.
 
-- `irlba`
-- `cpu_rsvd`
-- `exact`
+The implementation chooses automatically between an explicit
+predictor-response cross-product and matrix-free products such as
+`X^T (Y Omega)`. The decision uses matrix dimensions, precision, backend,
+requested rank, and estimated storage. It is an internal execution choice and
+must not change the requested PLS family, preprocessing, component count, or
+prediction head.
 
-The former hybrid `svd.method = "cuda_rsvd"` path is intentionally removed from
-PLS fitting. CUDA fitting is exposed only through `pls(..., backend = "cuda")`.
-
-The default matrix-free `xprod` policy is implemented in `R/main.R`:
-
-- `cpu_rsvd`: use `xprod` when `X^T Y` would exceed 32 MB, or when
-  `q >= 100` and `max(ncomp) <= 10`.
-- `irlba`: use `xprod` only for much larger response spaces, currently when
-  `X^T Y` would exceed 32 MB, `n >= 10000`, and `min(p, q) >= 1000`.
-  This intentionally keeps medium-size synthetic response sweeps such as
-  `n = 5000`, `p = 1000`, and `q > 100` on the explicit cross-product route.
-
-The C++ implementation rejects removed FP32/mixed-precision `xprod_precision`
-values. The remaining implicit paths are double precision.
+Do not reintroduce IRLBA or user-facing `svd.method`, `xprod`, or
+`xprod_precision` arguments in this repository. Historical behavior remains
+documented in `NEWS.md` only.
 
 ## CUDA Paths
 
@@ -55,25 +49,20 @@ to improve prediction time most visibly when `q`, `ncomp`, or the number of
 requested component slices is large. It is not expected to reduce fit peak
 memory unless fit workspaces are changed separately.
 
-## Standard Benchmark Files
+## External Benchmarks
 
-Real datasets:
+Publication-scale analyses do not belong in this package repository. The
+companion `tkcaccia/fastPLS-extra` repository contains the reproducible
+benchmark workflows:
 
-- `scripts/remote_run_dataset_memory_compare.sh`
-- `benchmark/benchmark_dataset_memory_compare.R`
-- `benchmark/helpers_dataset_memory_compare.R`
-- `benchmark/plot_dataset_memory_compare.R`
+- `Phase1/` contains the CMPB analyses, acquisition scripts, formal Lean
+  project, tables, and figure builders.
+- `Phase2/` contains the separate software-interface and portability work for
+  the future JSS article.
 
-Simulated variable sweeps:
-
-- `benchmark/benchmark_synthetic_variable_sweeps.R`
-- `benchmark/plot_synthetic_variable_sweeps.R`
-- `benchmark/workflow_synthetic_variable_sweeps.sh`
-
-These scripts generate the current 4x4 plots and CSV summaries. New benchmark
-work should extend these scripts instead of adding one-off benchmark files.
-The standard simulated families are `reg_n`, `reg_p`, `reg_q`, `class_n`, and
-`class_p`; noise sweeps are intentionally excluded from the default workflow.
+Keep only package examples, unit tests, and small deterministic smoke data in
+this repository. Extend the appropriate companion phase instead of adding a
+new benchmark or generated result directory here.
 
 ## Build Hygiene
 

@@ -1,5 +1,16 @@
 # fastPLS 0.3
 
+* Direct SIMPLS-family regression fits now retain the complete requested
+  component path when fewer response-associated directions are estimable.
+  Constant-response fits return an intercept-only model with zero coefficients,
+  mean predictions, `NA` response-variance metrics, and explicit effective
+  component diagnostics.
+
+* Extended `fastPLS_blas()` to report the numerical-library version,
+  configuration, selected CPU core, parallel runtime, thread count, and
+  resolved library path when available. The former scalar backend name remains
+  available through `fastPLS_blas(details = FALSE)`.
+
 * Reduced single and nested cross-validation overhead without changing their
   public arguments or statistical procedure. Classification folds now reuse
   label sufficient statistics, large LDA score paths use compiled matrix
@@ -16,9 +27,8 @@
   resident compiled workflow used by CUDA SIMPLS, avoiding repeated fold-level
   transfers without changing the requested family or kernel.
 
-* Removed the Biobase and BiocStyle dependencies. The vignettes now use a
-  documented, package-owned synthetic biomedical example and the standard
-  `rmarkdown::html_vignette` format.
+* Removed the Biobase and BiocStyle dependencies. The vignettes use base R
+  example data and the standard `rmarkdown::html_vignette` format.
 
 * Added a dedicated installation vignette with platform-specific source-build
   instructions for macOS, Ubuntu/Debian, Fedora, Windows x86-64, Windows

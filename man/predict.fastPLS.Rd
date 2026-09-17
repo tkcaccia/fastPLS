@@ -54,7 +54,9 @@ This argument is ignored with a warning for regression models.}
 blocks for both float64 and float32 inputs, and only the requested ranks
 are retained.}
 
-\item{...}{Unused.}
+\item{...}{Required by the S3 generic. Additional arguments are not supported
+and produce an error, which prevents obsolete or misspelled options from being
+silently ignored.}
 }
 \value{
 A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional

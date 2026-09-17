@@ -103,6 +103,13 @@ Sys.setenv(FASTPLS_USE_OPENBLAS = "1")
 install.packages("fastPLS", type = "source")
 ```
 
+For performance work, requiring the OpenBLAS family is necessary but not
+sufficient. Record the exact OpenBLAS release and the CPU kernel selected at
+runtime. An older dynamic-architecture build may recognize the library as
+OpenBLAS while selecting a generic or legacy kernel on a newer processor,
+which can substantially change matrix-multiplication timings. Prefer a current
+build compiled for the target architecture.
+
 ## Fedora
 
 Install the corresponding Fedora development packages:
@@ -214,9 +221,22 @@ has_metal()
 packageVersion("fastPLS")
 ```
 
-Expected CPU-library values are `"Accelerate"`, `"OpenBLAS"`, and
-`"R BLAS/LAPACK"`. Performance analyses on Linux or Windows that require
-OpenBLAS should proceed only when `fastPLS_blas()` returns `"OpenBLAS"`.
+The `backend` field is `"Accelerate"`, `"OpenBLAS"`, or `"R BLAS/LAPACK"`.
+For OpenBLAS builds, the report also contains the library version, full
+configuration string, selected CPU core, parallel runtime, active thread count,
+and resolved library path when available. Use `fastPLS_blas(details = FALSE)`
+when a script requires only the former scalar backend name.
+
+Publication benchmarks should verify three items before timing:
+
+1. the shared or static library resolved during installation;
+2. the OpenBLAS version string;
+3. the runtime CPU core selected by OpenBLAS.
+
+The validation utility and campaign wrapper in
+[`fastPLS-extra`](https://github.com/tkcaccia/fastPLS-extra) enforce these
+checks. A timing run made with a different or unverified OpenBLAS build is a
+separate benchmark condition and should not be combined with verified results.
 
 Test the selected runtime backend with a small deterministic fit:
 
@@ -315,7 +335,9 @@ has_cuda()
 has_metal()
 ```
 
-For benchmark reports, also record compiler versions, OpenBLAS or Accelerate,
+For benchmark reports, retain the output of `fastPLS_blas()` and also record
+compiler versions, the resolved OpenBLAS
+library, OpenBLAS release and selected CPU core (or the Accelerate version),
 CUDA toolkit and driver versions, requested CPU thread count, operating system,
 and CPU/GPU hardware.
 

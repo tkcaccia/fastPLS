@@ -4,11 +4,17 @@
 \alias{fastPLS_blas}
 \title{Report the numerical library selected when fastPLS was compiled}
 \usage{
-fastPLS_blas()
+fastPLS_blas(details = TRUE)
+}
+\arguments{
+\item{details}{Logical. Return a detailed named list when \code{TRUE}, or the
+former scalar backend name when \code{FALSE}.}
 }
 \value{
-A single character string: \code{"Accelerate"}, \code{"OpenBLAS"}, or
-\code{"R BLAS/LAPACK"}.
+With \code{details = TRUE}, a named list containing \code{backend}, \code{version},
+\code{configuration}, \code{core}, \code{parallel}, \code{threads}, and \code{library}. With
+\code{details = FALSE}, a single character string: \code{"Accelerate"},
+\code{"OpenBLAS"}, or \code{"R BLAS/LAPACK"}.
 }
 \description{
 This reports the CPU matrix library selected by the package configuration,
@@ -18,10 +24,18 @@ macOS builds normally report \code{"Accelerate"}. Linux and Windows builds repor
 \code{"R BLAS/LAPACK"} when the package used R's portable fallback.
 }
 \details{
+With \code{details = TRUE}, the result additionally reports the library version,
+configuration string, selected CPU core, parallel runtime, active thread
+count, and resolved library path when these are exposed by the linked
+library. OpenBLAS provides all fields except that a statically linked Windows
+build may not expose a separate library path. Accelerate and R BLAS/LAPACK
+do not expose the same runtime metadata, so unavailable fields are \code{NA}.
+
 For reproducible performance benchmarks on Linux or Windows, install with
-\code{FASTPLS_USE_OPENBLAS=1} and verify that this function returns
-\code{"OpenBLAS"} before running the analysis.
+\code{FASTPLS_USE_OPENBLAS=1} and verify both \code{backend} and the detailed version
+and core fields before running the analysis.
 }
 \examples{
 fastPLS_blas()
+fastPLS_blas(details = FALSE)
 }

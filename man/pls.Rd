@@ -151,6 +151,10 @@ when no scaling is applied.
 otherwise \code{NA} placeholders may be returned for compatibility. Elements
 are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
 is a dummy-response quantity, not classification accuracy.
+\item \code{effective_ncomp}: number of estimable response-associated directions
+used for each requested component prefix. If a regression response is
+constant, this is zero; fitted and new-data predictions then equal the
+training-response mean, coefficients are zero, and \code{R2Y} is \code{NA}.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.

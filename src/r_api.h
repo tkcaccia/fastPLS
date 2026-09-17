@@ -48,6 +48,7 @@ SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right);
 SEXP _fastPLS_has_cuda();
 SEXP _fastPLS_has_metal();
 SEXP _fastPLS_blas_backend_cpp();
+SEXP _fastPLS_blas_info_cpp();
 SEXP _fastPLS_simpls_cache_predictor_crossprod(
   SEXP samples, SEXP predictors, SEXP components
 );

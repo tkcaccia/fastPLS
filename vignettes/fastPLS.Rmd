@@ -1,10 +1,10 @@
 ---
-title: "fastPLS: Mathematical Methods, Implementations, and User Guide"
+title: "fastPLS User Guide"
 output: rmarkdown::html_vignette
 header-includes:
     - \usepackage{array}
 vignette: >
-    %\VignetteIndexEntry{fastPLS Mathematical Methods and User Guide}
+    %\VignetteIndexEntry{fastPLS User Guide}
     %\VignetteEngine{knitr::rmarkdown}
     %\VignetteEncoding{UTF-8}
 ---
@@ -17,244 +17,172 @@ library(fastPLS)
 
 ## Overview
 
-`fastPLS` combines partial least squares (PLS) modelling with truncated singular
-value decomposition (SVD), compiled numerical implementations, and optional
-accelerator execution. This vignette first introduces the mathematical methods,
-then explains their CPU, CUDA, and Metal implementations, and finally presents
-the public analysis workflow.
+`fastPLS` combines partial least squares (PLS) modelling with compiled numerical
+implementations and optional accelerator execution. This vignette is a practical
+guide to choosing a model, compiling the package, fitting and evaluating models,
+and running single or nested cross-validation. Detailed derivations and
+pseudocode are reserved for the accompanying software-methods manuscript.
 
-## Mathematical Methods and Implementations
+## Choosing a Model
 
-### Singular Value Decomposition Algorithms
+`fastPLS` provides four related PLS families through one fitting interface. The
+choice should follow the scientific question and the size of the data rather
+than the execution backend.
 
-`fastPLS` separates the PLS model from the singular-vector algorithm used
-inside the fit. fastPLS uses its native randomized SVD (rSVD) implementation
-following the randomized range-finder strategy of Halko, Martinsson, and Tropp
-(2011). In the compiled CPU implementation, a Gaussian test matrix is generated,
-the target matrix is sketched, optional power iterations are applied, the sketch
-is orthonormalized by an economic QR decomposition, and the final singular
-vectors are obtained from a much smaller projected matrix. When the randomized
-sketch dimension reaches the smaller matrix dimension, or when one
-matrix dimension is very small, the code falls back to an exact SVD because a
-truncated randomized approximation would no longer reduce the computation.
+| Method | Use it when | Main consideration |
+|:--|:--|:--|
+| `plssvd` | A direct low-rank model is suitable, especially for multivariate responses. | One decomposition supplies every requested component prefix. |
+| `simpls` | A general linear PLS model is required for regression or classification. | This is the optimized SIMPLS-family estimator used by the package. |
+| `opls` | Response-orthogonal variation in the predictors should be separated before prediction. | The orthogonal filter adds sequential work and must be applied to new observations. |
+| `kernelpls` | A nonlinear relation is plausible and the number of observations is moderate. | Nonlinear kernels require a training Gram matrix with quadratic storage in the sample count. |
 
-Native rSVD is the only public SVD solver. It is approximate: finite factors
-alone do not establish accurate singular directions or predictive agreement.
-Standalone `fastsvd()` reports singular-triplet checks and effective controls.
-If ordinary CPU sketches fail their checks, native rSVD retries with wider
-fresh sketches and additional power iterations. Failed or over-budget recovery
-raises an error. The recovery budget concerns major numerical buffers, not
-complete-process memory.
+Classification can decode PLS scores by the largest dummy-response score
+(`classifier = "argmax"`) or by linear discriminant analysis in the retained
+score space (`classifier = "lda"`). The LDA head can improve discrimination
+when class boundaries are not well represented by the largest raw PLS score.
 
-Sequential PLS fitting reports its seed, effective controls, execution profile,
-finite-factor checks and direction rule. These diagnostics do not establish
-equivalence to an independent PLS implementation. Compare several seeds and,
-when feasible, an independent reference before interpreting sensitive
-coefficients or latent subspaces. Increasing `power` or `oversample` can improve
-an approximation but is not a guarantee of agreement. Native rSVD is the
-only solver exposed by this package.
-PLS-SVD and standalone `fastsvd()` use `oversample = 32`, `power = 5` by
-default. The accelerated SIMPLS-family, OPLS, and kernel-PLS routes use 32
-oversampling
-directions and five power iterations for ordinary matrix shapes. Numeric
-responses with at least 64 columns and a response-to-sample ratio of at least
-0.2 use 48 directions and six iterations. Classification with at least 32
-classes and no more than 20 samples per class uses 64 directions and seven
-iterations. When the explicit predictor-response cross-covariance would exceed
-512 MiB, the massive-matrix profile requests `oversample = 12` and `power = 1`;
-executed controls and refresh width are recorded separately. CPU, Metal, and
-ordinary CUDA SIMPLS-family routes generate a seeded sketch from the current
-deflated cross-covariance. On a massive problem, CPU, Metal, and CUDA float64
-use a rank-one randomized direction at each refresh. CUDA float32 can obtain up
-to eight independently initialized candidates per refresh through component 64
-before returning to rank-one refreshes; CUDA keeps the sequential state on the
-device. For eligible large dummy-coded classification, CPU, CUDA, and Metal can
-instead obtain a candidate block of up to 64 directions. Candidates are
-accepted sequentially through the SIMPLS orthogonalization and deflation
-equations. Because the cross-covariance changes after every accepted component,
-the block route is an approximate sequential estimator and is not claimed to
-equal a fresh dominant-direction solve at every step. The explicit and
-matrix-free routes evaluate the same cross-covariance operator.
+All public methods use the package's native randomized SVD. It is an
+approximation, so the fitted object records the seed and effective numerical
+controls. For sensitive analyses, compare several seeds and inspect the
+reported diagnostics. The detailed equations, storage identities, executable
+pseudocode, and cross-language implementation discussion are presented in the
+separate software-methods manuscript; this vignette focuses on using the R
+package correctly.
 
-For large predictor-response cross-products, `fastPLS` can avoid forming
-`S = X^T Y`. This matrix-free route is called `xprod` in the code. The SVD
-backend evaluates products with `S` and `S^T` only when needed, for example
-`Sv = X^T(Yv)` and `S^Tu = Y^T(Xu)`. This preserves the same mathematical
-operator while reducing memory pressure. For classification, labels can be used
-as PLS-DA responses without explicitly materializing a large dense one-hot
-matrix in the label-aware paths.
+## Installation and Compilation
 
-### Partial Least Squares Algorithms
+Install the released package with:
 
-`method = "plssvd"` implements the direct PLS-SVD formulation, in which the
-dominant singular subspace of the predictor-response cross-covariance matrix is
-computed once and reused for all requested component counts. This makes PLS-SVD
-efficient when the response rank is the limiting dimension. The implementation
-adds compact latent prediction factors: instead of always storing and applying
-a full coefficient array, prediction can be performed through low-rank factors
-based on the latent projection and response-side coefficients. The cached
-score-Gram route forms the score cross-product once and reuses its leading
-blocks for the requested prefixes. If the centred cross-covariance is
-approximated by $S \approx UDV^\top$, scores are $T_a=XU_a$ and the score
-Gram matrix is $G_a=T_a^\top T_a$. The implementation solves
-$G_aL_a=D_a$ and retains the latent response map
-$W_a=L_aV_a^\top$. Predictions are $X_{\mathrm{new}}U_aW_a$, with the
-training response mean restored.
-Singular directions alone are therefore not regression coefficients.
-PLS-SVD can also
-use the matrix-free `xprod` route for randomized SVD when the
-cross-covariance matrix would be large.
+```{r install-cran, eval = FALSE}
+install.packages("fastPLS")
+```
 
-`method = "simpls"` is the public name of the optimized fastPLS
-SIMPLS-family estimator and is the default general-purpose PLS core. Its
-one-direction route uses de Jong's sequential SIMPLS structure (de Jong,
-1993): a component is obtained from the current cross-covariance state,
-converted into a score and loading direction, and followed by SIMPLS
-orthogonalization and deflation. The rSVD route generates candidates from a
-newly randomized sketch at each refresh of the current deflated operator; a
-refresh can supply one or several candidates. When several candidates are
-computed from the same deflated state, the bounded-block route is an
-approximate SIMPLS-family estimator rather than classical de Jong SIMPLS.
-Like `pls::simpls.fit`, one fit provides the sequential path through all
-components up to `ncomp`; fastPLS does not claim this standard path construction
-as a novelty. Cross-covariance deflation is updated after each accepted
-component.
-The component-wise CPU rSVD route derives a reproducible component-specific seed
-and generates a new Gaussian sketch at each refresh. Metal initializes one
-reproducible random sequence per fit and draws a new sketch for each component.
-CUDA generates newly initialized randomized candidates in resident device
-workspaces. Eligible large dummy-coded classification fits can generate up to
-64 directions per CPU, CUDA, or Metal decomposition and consume
-them sequentially.
-The CPU route also evaluates candidate scores and predictor loadings in matrix
-blocks. Eligibility depends on predictor, response and sample dimensions, and
-the requested component count; it is not determined by sample count alone.
-This batched approximate route need not reproduce a fresh dominant-direction
-solve after each deflation. The ordinary CPU regression route remains
-component-wise; CUDA float32 additionally has a bounded massive-response block
-route. The C++ core
-also caches the rank-one
-deflation product, updates coefficient and fitted-value paths incrementally,
-and uses compact prediction factors. For low-dimensional high-sample problems,
-the code
-can cache cross-products such as `X^T X` and `X^T Y`; for large response or
-predictor dimensions, it can instead use matrix-free `xprod` products. These
-routes are selected by matrix shape: they reduce avoidable work or storage in
-their intended regimes but are not asserted to make every SIMPLS problem
-faster.
+To compile the development version from source, install `remotes` and use a
+fresh R session:
 
-When the response dimension is no larger than the predictor dimension and is
-at most 512, the randomized direction calculation can use the smaller
-response-side Gram matrix $S^\top S$. After each accepted component, fastPLS
-updates this matrix with the corresponding rank-one deflation product. This
-avoids repeatedly sketching the full tall cross-covariance while leaving the
-subsequent SIMPLS score, loading, orthogonalization, and deflation steps
-unchanged. The CPU implementation uses BLAS/LAPACK operations, CUDA keeps the
-Gram matrix and its updates in device memory for float32 and float64, and Metal
-uses its native float32 matrix operators.
+```{r install-github, eval = FALSE}
+install.packages("remotes")
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    upgrade = "never",
+    force = TRUE,
+    build_vignettes = TRUE
+)
+```
 
-`method = "opls"` implements orthogonal PLS following the orthogonal signal
-correction idea of Trygg and Wold (2002). It estimates response-orthogonal
-variation in `X`, subtracts this structured variation, stores the orthogonal
-filter, and then fits the optimized PLS core to the filtered matrix. The same
-filter is applied to new samples at prediction time.
+The package always builds a CPU backend. CUDA and Metal are optional and are
+included only when their toolchains are available at compilation time. An
+unavailable accelerator produces an error when requested; it does not silently
+fall back to the CPU.
 
-`method = "kernelpls"` follows kernel PLS as described by Rosipal and Trejo
-(2001). Linear kernel PLS is dispatched to the ordinary linear PLS core to avoid
-unnecessary kernel materialization. For radial-basis and polynomial kernels,
-the training kernel is centered and the selected PLS core is fitted in kernel
-space. The same user-facing `pls()` function therefore covers linear PLS-SVD,
-the SIMPLS-family estimator, OPLS, and kernel PLS while sharing the accelerated
-low-rank machinery.
+### macOS
 
-### Classification Methods
+Install Apple's command-line developer tools before a source build:
 
-Classification is handled as PLS-DA followed by one of two decoding heads.
-`classifier = "argmax"` uses the largest predicted dummy-response score and is
-the standard PLS-DA decoding rule. `classifier = "lda"` fits a regularized
-linear discriminant analysis model in the PLS score space following Fisher's
-discriminant principle (Fisher, 1936).
+```{sh macos-command-line-tools, eval = FALSE}
+xcode-select --install
+```
 
-### Computational Backends
+macOS uses Apple Accelerate for CPU BLAS/LAPACK. OpenBLAS is not required.
+Metal is detected automatically on supported Apple systems. To require Metal
+and stop installation if it cannot be compiled, set the following before the
+source installation:
 
-The `backend` argument selects where the main numerical work is performed.
-`backend = "cpu"` uses the package's compiled, dependency-free C++ core with
-native rSVD. It is usually best for small and moderate
-datasets, low-dimensional problems, and machines without GPU support.
-The CPU kernels use Apple Accelerate by default on macOS. Linux and Windows
-prefer OpenBLAS when configuration finds it through `OPENBLAS_ROOT`,
-`pkg-config`, or Rtools; otherwise the package uses the BLAS/LAPACK supplied by
-R. OpenBLAS must match the target architecture: in particular, a Windows ARM64
-build rejects x86-64 archives and uses R's BLAS/LAPACK when no matching ARM64
-OpenBLAS is available. Set `FASTPLS_USE_OPENBLAS=1` before installation to
-require OpenBLAS.
-`fastPLS_blas()` reports the library selected when the installed package was
-compiled. Linux and Windows performance benchmarks should proceed only when
-this function returns `"OpenBLAS"`.
-Linking against multithreaded OpenBLAS enables eligible
-matrix operations to use multiple CPU cores. For example,
-`options(backend = "cpu", n.cores = 4L)` selects CPU execution and requests four
-threads from the linked BLAS/OpenMP runtime. Explicit `backend` and `n.cores`
-arguments override their respective session options. The same resolved
-`n.cores` value is retained by nested folds, refits, permutations, and
-predictions. The sequential PLS deflation steps remain serial,
-so additional cores do not guarantee a speed improvement for every matrix
-shape.
-Additional BLAS threads help only when the matrix products are sufficiently
-large; sequential updates and thread-management overhead can limit or reverse
-the benefit. Compare timings on the intended workload rather than assuming
-that more threads are always faster.
+```{r require-metal, eval = FALSE}
+Sys.setenv(FASTPLS_USE_METAL = "1")
+```
 
-For CPU self-products, fastPLS selects GEMM or the symmetric rank-k operation
-SYRK from the linked numerical library according to platform, precision, and
-matrix dimensions. SYRK computes one triangle; the other triangle is generated
-only when required by a later operation. Owned workspaces are aligned, and
-wide response matrices gathered for repeated fold computations use 64-byte
-column alignment. Compiled classification fitting and cross-validation
-products operate on compact labels and class sums, so they do not allocate a
-dense one-hot training-response matrix.
+### Ubuntu and Debian
 
-For eligible wide-response SIMPLS-family cross-validation, the compiled engine forms
-the uncentred sample-response Gram matrix once before the fold loop. Each
-training-fold Gram matrix is recovered from its principal submatrix and exactly
-double-centred, avoiding a materialized centred response matrix. CPU execution
-uses direct `SSYRK` or `DSYRK`; float32 CUDA uses `cublasSsyrk`; and the hybrid
-Metal route uses Accelerate SYRK for this host-visible operation. The raw Gram
-matrix retains only its lower triangle, and fold, output, and device workspaces
-are reused across the cross-validation call.
+Install the compiler toolchain and OpenBLAS development files before building
+the package:
 
-`backend = "cuda"` uses CUDA-native routines when the package is compiled with
-CUDA and a compatible NVIDIA runtime is available. After input transfer, CUDA
-paths perform preprocessing, cross-products, randomized direction extraction,
-component updates, low-rank prediction, and LDA scoring on the GPU for PLS-SVD,
-the SIMPLS-family estimator, OPLS, and kernel PLS. OPLS filtering and application of the stored
-orthogonal filter remain device-resident. Nonlinear kernel PLS constructs and
-centers both training and test Gram matrices on the GPU. Returned arrays and R
-model-object assembly are host operations. CUDA is most useful when dense
-matrix work offsets transfer and kernel-launch overhead. Nonlinear kernels are
-also subject to an explicit device-memory guard because their Gram matrix uses
-quadratic storage in the training sample count.
+```{sh ubuntu-openblas, eval = FALSE}
+sudo apt update
+sudo apt install build-essential gfortran pkg-config libopenblas-dev
+```
 
-`backend = "metal"` provides a float32 route for PLS-SVD, the SIMPLS-family
-estimator, OPLS, and
-kernel PLS on Apple silicon unified-memory systems. It always enters the same
-operation-split
-algorithm rather than selecting a complete CPU or Metal estimator from the
-dataset dimensions. The CPU performs preprocessing, QR and reduced
-decompositions, sequential orthogonalization, deflation bookkeeping, model
-assembly, LDA, and prediction. Persistent Metal workspaces perform fitting
-products involving the training sample matrix. These include explicit
-cross-covariance formation,
-fused score/loading products, and randomized range-finder products when the
-cross-covariance is represented implicitly. In the transpose part of that
-implicit operator, consecutive products `X V` and `Y^T (X V)` share one Metal
-command buffer and one final synchronization before the CPU applies the
-response-centering correction. Reusable buffers and Metal matrix objects are
-retained for this sequence during the fit. The smaller cross-covariance and
-component-state operations remain on the CPU. This mathematical assignment is
-fixed and does not switch according to dataset dimensions.
-The route requires Metal support and float32 input and never silently converts
-a float64 request to CPU.
+Then require OpenBLAS during the source build. This prevents an unnoticed
+fallback to the BLAS/LAPACK supplied by R:
+
+```{r require-openblas-linux, eval = FALSE}
+Sys.setenv(FASTPLS_USE_OPENBLAS = "1")
+install.packages("fastPLS", type = "source")
+```
+
+The OpenBLAS release and selected CPU kernel can materially affect large
+matrix products. For reproducible timing, use a current build compiled for the
+target processor and record both values. Detecting the OpenBLAS family alone
+does not establish that an architecture-appropriate kernel is active.
+
+### Fedora
+
+Install the corresponding development packages, then use the same R command
+shown above:
+
+```{sh fedora-openblas, eval = FALSE}
+sudo dnf install gcc gcc-c++ gcc-gfortran make pkgconf-pkg-config \
+    openblas-devel
+```
+
+### Windows x86-64
+
+Install the Rtools release that matches the installed R version. A source build
+can use R's BLAS/LAPACK, but OpenBLAS is recommended for the Linux and Windows
+performance routes evaluated with fastPLS. One option is to install an x86-64
+OpenBLAS archive from an MSYS2 UCRT64 terminal:
+
+```{sh windows-openblas, eval = FALSE}
+pacman -S --needed mingw-w64-ucrt-x86_64-openblas
+```
+
+Point the package configuration to the matching prefix and require OpenBLAS:
+
+```{r require-openblas-windows, eval = FALSE}
+Sys.setenv(
+    FASTPLS_USE_OPENBLAS = "1",
+    OPENBLAS_ROOT = "C:/msys64/ucrt64"
+)
+remotes::install_github(
+    "tkcaccia/fastPLS",
+    upgrade = "never",
+    force = TRUE,
+    build_vignettes = TRUE
+)
+```
+
+The OpenBLAS library must match the target architecture. In particular, a
+Windows ARM64 build must not use an x86-64 Rtools or MSYS2 archive. If a
+compatible ARM64 OpenBLAS development package is unavailable, leave automatic
+detection enabled and allow the build to use R's BLAS/LAPACK instead.
+
+If OpenBLAS is installed in a nonstandard location on Linux or Windows, set
+`OPENBLAS_ROOT` to its installation prefix. Set
+`FASTPLS_USE_OPENBLAS = "0"` only when an R-supplied BLAS build is explicitly
+desired.
+
+### Verify the Compiled Libraries
+
+After installation, restart R and verify the selected CPU library and optional
+accelerators:
+
+```{r verify-compiled-libraries, eval = FALSE}
+library(fastPLS)
+
+fastPLS_blas()
+has_cuda()
+has_metal()
+```
+
+`fastPLS_blas()` reports the backend together with the OpenBLAS version,
+configuration, selected CPU core, parallel runtime, active thread count, and
+resolved library path when available. Linux and Windows benchmarks should
+proceed only when `fastPLS_blas()$backend` is `"OpenBLAS"` and the expected
+`version` and `core` are active. Use `fastPLS_blas(details = FALSE)` when only
+the former scalar backend name is required. The campaign tools in
+`fastPLS-extra` validate the detailed report before running fastPLS timing
+stages. The separate installation vignette contains CUDA toolkit requirements,
+environment variables, and troubleshooting for architecture or linker errors.
 
 ## Backend and CPU Configuration
 
@@ -335,31 +263,9 @@ called directly.
 | `fastsvd()` | Run the stand-alone native CPU randomized SVD. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
-| `fastPLS_blas()` | Report the CPU numerical library selected at compilation. |
+| `fastPLS_blas()` | Report the CPU library, version, configuration, and runtime core. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check for Apple Metal support. |
-
-### Package Example Data
-
-The package includes `fastpls_example`, a deterministic synthetic biomedical
-classification dataset with a fixed training and test split. It is suitable
-for reproducing the complete fit, prediction, evaluation, and plotting
-workflow without downloading external data.
-
-```{r package-example-data}
-data("fastpls_example", package = "fastPLS")
-fit_example <- pls(
-    fastpls_example$X_train,
-    fastpls_example$y_train,
-    fastpls_example$X_test,
-    fastpls_example$y_test,
-    ncomp = 1:2,
-    method = "simpls",
-    backend = "cpu",
-    seed = 42
-)
-fit_example$accuracy
-```
 
 ### Choosing a Starting Model
 
@@ -388,8 +294,7 @@ PLS-DA response encoding internally and returns predicted class labels.
 The `classifier` argument is used only for this type of task and selects the
 classification head: `argmax` or `lda`. These options are not
 regression models and are not used for numeric responses. The examples in this
-section use `iris` for compact multiclass classification and the bundled
-`fastpls_example` data for a biomedical-style two-class score plot.
+section use `iris` for compact multiclass classification.
 
 ```{r chunk-002}
 set.seed(100)
@@ -624,25 +529,10 @@ plot(
 )
 ```
 
-The next example uses the bundled two-class data introduced above. The same
-`plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
-`"kernelpls"`.
-
-```{r package-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
-X_two <- fastpls_example$X_train
-y_two <- fastpls_example$y_train
-fit_two <- pls(
-    X_two, y_two,
-    fastpls_example$X_test, fastpls_example$y_test,
-    ncomp = 1:2, fit = TRUE, proj = TRUE, seed = 200
-)
-
-plot(fit_two, score.set = "train", groups = y_two,
-        ellipse = TRUE, main = "Synthetic biomedical example")
-```
-
-The second score-plot example fits OPLS to the three-class `iris` split defined
-at the beginning of this section, with two orthogonal components (`north = 2`).
+The following example fits OPLS to the three-class `iris` split defined at the
+beginning of this section, with two orthogonal components (`north = 2`). The
+same `plot()` interface is available for PLS-SVD, the SIMPLS-family estimator,
+OPLS, and kernel PLS.
 
 ```{r iris-three-class-opls, fig.width = 7.5, fig.height = 4}
 opls_three <- pls(
@@ -1026,6 +916,13 @@ training-class priors and finite log-prior scores; a training fold containing
 one class predicts that class. These fallbacks are reported through the fold
 `status` field rather than surfacing as a matrix-dimension error.
 
+The same rule applies to a direct regression fit. If fewer directions are
+estimable than requested, `effective_ncomp` records the usable prefix and later
+paths repeat the last estimable prediction and coefficient matrix. If the
+training response is constant, no direction is estimable: predictions equal
+the training-response mean, coefficient paths are zero, and response-variance
+metrics with a zero denominator are `NA`.
+
 ```{r chunk-026}
 cv_opt <- pls.single.cv(
     Xdata = Xreg_train,
@@ -1364,8 +1261,8 @@ Important elements returned by `pls.double.cv()` are:
         selected
     fold-level values are stored in `results[[run]]$best_parameters`.
 - `selection_metric`: the criterion used by the inner CV loop. The default
-    `"auto"` means accuracy for classification and RMSD-style prediction error
-    for multivariate regression. All task-compatible selection criteria listed
+    `"auto"` means accuracy for classification and RMSD for regression. All
+    task-compatible selection criteria listed
     above can also drive the nested permutation test.
 
 ## SVD Utility
@@ -1469,219 +1366,21 @@ vip <- ViP(fit_reg)
 dim(vip)
 ```
 
-## Detailed Algorithmic Notes
+## Methodological Scope
 
-### Singular-vector backends
+This vignette is a practical guide to fitting, validating, and predicting with
+fastPLS. The mathematical derivations and executable pseudocode for native
+rSVD, PLS-SVD, the SIMPLS-family estimator, OPLS, kernel PLS, compact
+prediction, and sufficient-statistics cross-validation are maintained in the
+future Journal of Statistical Software manuscript. Keeping those details in
+the methods article avoids repeating a long technical description in the
+package vignette while preserving a single place in which the equations can be
+checked against the shared C++ core.
 
-The PLS algorithms in `fastPLS` are separated from the inner singular-vector
-backend. The compiled implementation uses native randomized SVD, estimating
-the leading singular triplets needed by the requested PLS components.
-The randomized SVD backend
-follows the randomized range-finder framework described by Halko, Martinsson,
-and Tropp (2011): it draws a Gaussian test matrix, forms a low-dimensional
-sketch of the target matrix, optionally applies power iterations,
-orthonormalizes the sketch, and solves the final SVD in the small projected
-space. In `pls()` and the cross-validation helpers, these controls are supplied
-directly through `...`; in stand-alone SVD calls they are supplied directly to
-`fastsvd()`.
-
-Standalone accelerator `fastsvd()` routes are unavailable because their
-reduced QR and SVD stages are not fully device-native for every matrix shape.
-The function raises an error rather than returning a partial result. CUDA
-acceleration remains device resident within PLS, while Metal acceleration uses
-the fixed CPU/Metal operation split described below.
-
-The PLS Metal backend, `pls(..., backend = "metal")`, supports float32 PLS-SVD,
-the SIMPLS-family estimator, OPLS, and kernel PLS with Metal Performance
-Shaders. It returns
-host-accessible model factors and always uses a
-fixed mathematical division: Metal performs fitting products involving the
-training sample matrix, including explicit cross-covariance formation, fused
-score/loading products, and implicit randomized range-finder products. Where
-the implicit transpose operator requires consecutive `X V` and `Y^T (X V)`
-products, both are encoded in one command buffer and synchronized once before
-the CPU response-centering correction. CPU code performs the reduced
-decomposition, sequential PLS algebra, LDA, prediction, and model assembly.
-Dataset dimensions never select a complete CPU or Metal route. The
-executed path, storage decision, and randomized controls are reported in
-`diagnostics$metal_operation_split`. Ordinary R double matrices produce an
-explicit error rather than silently falling back to the CPU; use `float::fl()`
-to request Metal float32 execution. Repeated fits in one R session reuse
-initialized device and pipeline state, whereas an isolated first call includes
-that setup cost.
-
-For CUDA builds, GPU execution is selected with `backend = "cuda"`, so the
-numerical fitting and prediction stages are performed by resident GPU-native
-PLS routines after input transfer. When the
-cross-covariance \(S = X^T Y\) would be large, selected backends can use the
-matrix-free `xprod` route. In that route, the code avoids explicitly storing
-`S` and evaluates the products required by the SVD through identities such as
-\(Sv = X^T(Yv)\) and \(S^Tu = Y^T(Xu)\). For classification problems with many
-classes, label-aware products can avoid materializing a dense one-hot response
-matrix. Compact prediction instead retains the PLS latent factors and evaluates
-only the requested test-score blocks, avoiding dense coefficient and prediction
-paths when they are unnecessary.
-fastPLS chooses the matrix-free route automatically only when the
-cross-product is large enough to justify it.
-
-For `pls.single.cv()`, seeded grouped fold construction and the numerical CV
-path are compiled. For `pls.double.cv()`, CPU and Metal nested loops are
-compiled after R constructs the fixed fold plan; CUDA retains R-level nested
-coordination around native CUDA kernels. Final R-object assembly remains
-host-side. CUDA
-SIMPLS-family CV uploads the task once and
-keeps fold gathering, training-only standardization, fitting, prediction, and
-metric reduction on the device. CUDA PLS-SVD uses the same resident strategy
-for large multivariate regression responses; classification and smaller
-responses use a fold-local CUDA route because it is faster for those workloads.
-Metal applies the fixed CPU/Metal operation split used by `pls()`. Unsupported
-accelerator combinations stop rather than falling back to a CPU fit.
-
-### PLS-SVD
-
-`method = "plssvd"` implements the direct cross-covariance SVD formulation of
-PLS, within the same broad PLS regression and PLS-DA framework described by
-Wold, Sjostrom, and Eriksson (2001), Barker and Rayens (2003), and Boulesteix
-and Strimmer (2007). After preprocessing, the algorithm computes the dominant
-singular subspace of \(X^T Y\) and reuses that subspace to generate the
-requested component path.
-The maximum meaningful number of PLS-SVD components is capped by
-`min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
-uses the valid internal rank and records the capped component count.
-For an implicit cross-covariance, numerical rank is determined on the same
-singular-value scale as the direct decomposition. When a reduced Gram shortcut
-does not contain the complete requested retained rank, PLS-SVD uses the direct
-reduced decomposition rather than silently returning fewer directions.
-
-The main innovation relative to a simple textbook PLS-SVD implementation is the
-execution strategy. fastPLS combines randomized SVD, compact
-low-rank prediction factors, CUDA-native fitting, and the matrix-free `xprod`
-route. For large classification tasks, the label-aware PLS-SVD path computes
-class-wise cross-products from the factor labels and avoids dense one-hot `Y`
-unless the legacy dense route is explicitly needed.
-
-### SIMPLS-Family Estimator
-
-`method = "simpls"` is the public API name for the optimized fastPLS
-SIMPLS-family core. It retains the de Jong (1993) sequential structure: one
-supervised latent direction is accepted at a time, the score and loading
-vectors are computed, an orthogonal loading direction is constructed, and the
-cross-covariance is deflated before the next accepted component.
-
-At each refresh, fastPLS extracts fresh candidates from the current deflated
-cross-covariance. Depending on the active compiled route, a refresh produces
-one direction or a small candidate block. Accepted candidates are always
-applied one at a time through the standard SIMPLS orthogonalization and
-deflation equations, and the next refresh uses the resulting deflated
-operator after the current block is consumed. Because candidates within a
-bounded block were calculated before the intervening deflations, that route is
-an approximate SIMPLS-family estimator and must not be identified as classical
-SIMPLS. CUDA keeps the SIMPLS-family state on the device. PLS-SVD uses 32
-oversampling directions and five power iterations. The accelerated
-SIMPLS-family, OPLS, and kernel-PLS routes use 32 directions and five iterations
-for ordinary matrix shapes;
-when the explicit cross-covariance would exceed 512 MiB, their automatic
-massive-matrix profile requests `oversample = 12` and `power = 1`, while the
-executed controls and refresh width are recorded separately. Explicit controls
-supplied through `...` take precedence.
-
-Each accepted direction is normalized, converted into a SIMPLS-family
-component,
-orthogonalized, and followed by SIMPLS deflation. A candidate block is consumed
-before the next sketch is generated. The
-innovation is therefore not a claim of exact de Jong estimator preservation.
-It is a backend-specialized randomized SIMPLS-family estimator that trades
-strict component equivalence for lower computational cost while preserving the
-supervised sequential orthogonalization and deflation structure.
-
-The retained optimizations reorganize work without altering this sequence. The
-cached-deflation update computes \(v^T S\) once and applies
-\(S <- S - v(v^T S)\). Coefficients are updated as
-\(B_a = B_{a-1} + r_a q_a^T\), and fitted values are updated similarly when
-requested. Cross-products can be cached for suitable matrix shapes, prediction
-can use compact latent factors, and matrix-free products avoid materializing a
-large cross-covariance. PLS-SVD instead uses a one-shot cross-covariance SVD;
-OPLS and kernel PLS reuse the same sequential SIMPLS-family core where
-applicable.
-
-The complete component path is also a standard feature of reference SIMPLS
-software such as `pls::simpls.fit`, which returns coefficient and fitted-value
-arrays for components 1 through `ncomp`. The fastPLS contribution is therefore
-not the existence of that path, but its compiled incremental execution,
-compact prediction, matrix-free products, and backend-specific storage
-strategy.
-Incremental updates avoid rebuilding \(R_a Q_a^T\) and \(T_a Q_a^T\) from
-scratch at requested prefixes; compact prediction stores latent factors instead
-of all dense coefficient prefixes; conditional \(X^T X\) caching can benefit
-tall matrices; and matrix-free products trade repeated operator applications
-for avoiding an explicit \(p\)-by-\(q\) cross-covariance. Because these
-trade-offs depend on \(n\), \(p\), \(q\), and the requested component set, they
-are memory and execution optimizations rather than a claim of universal
-acceleration.
-
-### OPLS
-
-`method = "opls"` follows the orthogonal PLS idea introduced by Trygg and Wold
-(2002). It first removes response-orthogonal variation from `X` and then fits
-the optimized PLS core to the filtered matrix. The number of orthogonal
-components is controlled by `north`. The filtering step estimates orthogonal
-scores and loadings, subtracts the corresponding variation from `X`, and stores
-the orthogonal filter so the same transformation is applied at prediction time.
-With float32 input, stored OPLS matrices use single precision. CUDA performs
-OPLS in float32 or float64, while Metal performs it in float32. CUDA keeps
-orthogonal filtering, the predictive core, and prediction on device. Metal
-uses GPU sample-matrix products and CPU orthogonal filtering, reduced
-factorizations, sequential PLS updates, and prediction.
-Users select OPLS with `method = "opls"`; the lower-level implementation details
-are handled internally.
-
-### Kernel PLS
-
-`method = "kernelpls"` follows the kernel PLS formulation of Rosipal and Trejo
-(2001). It constructs a kernel representation before applying the selected
-inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
-For nonlinear kernels, the training kernel matrix is centered and the PLS model
-is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
-kernel materialization and uses the ordinary linear PLS path. For RBF and
-polynomial kernels, CUDA constructs, centers, and retains the Gram
-representation on device through fitting and prediction. Metal evaluates Gram
-and sample-matrix products through Metal and completes reduced factorizations,
-sequential updates, and prediction on the CPU. Because this
-representation requires quadratic storage in the number of training
-observations, an explicit memory guard rejects unsafe workloads before device
-allocation.
-
-### Classification heads
-
-For classification, factor responses are treated as PLS-DA targets. The
-following heads are classification-specific decoders and are not used for
-numeric regression responses. The default
-classifier, `classifier = "argmax"`, predicts the class with the largest
-predicted dummy-response score. This is the classical PLS-DA decision rule
-described in chemometric discrimination work such as Barker and Rayens (2003)
-and reviewed by Boulesteix and Strimmer (2007).
-
-The LDA head, `classifier = "lda"`, fits a
-regularized linear discriminant model on the PLS latent scores, following the
-linear discriminant principle of Fisher (1936). For each class, fastPLS
-estimates a score-space mean, an empirical prior, and a common pooled
-within-class covariance matrix. If `T` contains the training scores, the pooled
-covariance is computed without materializing class-centered score blocks as
-`(T^T T - sum_c n_c mu_c mu_c^T) / max(1, n - C)`. The class systems are solved
-by Cholesky factorization and triangular solves; fastPLS neither explicitly
-inverts the covariance nor uses Gauss-Jordan elimination. Numerical recovery is
-deterministic. With `s = trace(Sigma) / a`, where `a` is the retained score
-dimension (or one when this scale is invalid),
-the implementation tries `lambda = rho * s` for `rho = 1e-8, 1e-6, 1e-5,
-1e-4, 1e-3, 1e-2`, increasing the value only when Cholesky fails. Prediction
-uses the standard discriminant
-`t^T w_c - 0.5 mu_c^T w_c + log(n_c / n)`. Float32 inputs keep LDA moments,
-factorization, coefficients, and prediction buffers in float32. CUDA retains
-the score-space covariance, Cholesky factors, triangular-solve workspaces,
-coefficients, and prediction buffers on device across component prefixes. The
-Metal operation split performs LDA on the CPU using the host-accessible latent
-scores returned by the fitting route.
-
+The fitted object still records the information needed to audit an analysis,
+including the executed method, backend, precision, randomized controls,
+effective component count, and route diagnostics. These fields should be saved
+with the analysis whenever numerical reproducibility is important.
 
 ## Method References
 

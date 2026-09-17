@@ -101,6 +101,13 @@ remotes::install_github(
 )
 ```
 
+Use a current OpenBLAS build compiled for the target processor. The OpenBLAS
+release and the CPU kernel selected at runtime can materially affect large
+matrix products even when both installations are reported simply as
+`"OpenBLAS"`. Distribution packages that predate the processor may select a
+generic or older kernel and should not be used for performance measurements
+without verification.
+
 ## Fedora
 
 Install the compiler toolchain and OpenBLAS development files:
@@ -167,10 +174,20 @@ has_cuda()
 has_metal()
 ```
 
-`fastPLS_blas()` returns `"Accelerate"`, `"OpenBLAS"`, or
-`"R BLAS/LAPACK"`. Linux and Windows performance runs should verify that it
-returns `"OpenBLAS"`. If OpenBLAS is not installed, fastPLS remains installable
-and uses the BLAS/LAPACK supplied by R unless `FASTPLS_USE_OPENBLAS=1` was set.
+`fastPLS_blas()` returns a named report containing the backend, library version,
+configuration, selected CPU core, parallel runtime, active thread count, and
+resolved library where available. Linux and Windows performance runs should
+verify that `fastPLS_blas()$backend` is `"OpenBLAS"` and inspect its `version`
+and `core`. Use `fastPLS_blas(details = FALSE)` when only the former scalar
+backend name is needed. If OpenBLAS is not installed, fastPLS remains
+installable and uses the BLAS/LAPACK supplied by R unless
+`FASTPLS_USE_OPENBLAS=1` was set.
+
+Reproducible benchmarks must record the resolved OpenBLAS library, its version,
+and the value returned by OpenBLAS for the active core. The publication scripts in
+[`fastPLS-extra`](https://github.com/tkcaccia/fastPLS-extra) perform this check
+before any fastPLS timing stage. Timings obtained with a different or
+unverified OpenBLAS build must not be pooled with the verified benchmark.
 
 CUDA is optional on Linux and Windows. A CUDA build additionally requires the
 NVIDIA CUDA Toolkit and `CUDA_ROOT`; Metal is available only on macOS. Requests

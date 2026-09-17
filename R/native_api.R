@@ -621,6 +621,10 @@ blas_backend_cpp <- function() {
     .Call("_fastPLS_blas_backend_cpp", PACKAGE = "fastPLS")
 }
 
+blas_info_cpp <- function() {
+    .Call("_fastPLS_blas_info_cpp", PACKAGE = "fastPLS")
+}
+
 rsvd_audit_reset_debug <- function() {
     invisible(.Call("_fastPLS_rsvd_audit_reset_debug", PACKAGE = "fastPLS"))
 }

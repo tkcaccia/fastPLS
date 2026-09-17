@@ -35,6 +35,14 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(FASTPLS_USE_OPENBLAS)
+#include <cblas.h>
+#include <openblas_config.h>
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
+#endif
+
 namespace fastpls_svd {
 bool has_cuda_backend();
 bool has_metal_backend();
@@ -314,6 +322,21 @@ SEXP core_matrix(const fastpls::core::Matrix<float>& values) {
 
 SEXP core_matrix(const fastpls::core::Matrix<double>& values) {
   return numeric_matrix(values);
+}
+
+template<class T>
+SEXP core_matrix_prefix(const fastpls::core::Matrix<T>& values,
+                        std::size_t columns) {
+  columns = std::min(columns, values.columns());
+  fastpls::core::Matrix<T> prefix(values.rows(), columns);
+  for (std::size_t column = 0; column < columns; ++column) {
+    std::copy(
+      values.data() + column * values.rows(),
+      values.data() + (column + 1) * values.rows(),
+      prefix.data() + column * values.rows()
+    );
+  }
+  return core_matrix(prefix);
 }
 
 template<class T>
@@ -1089,9 +1112,10 @@ SEXP serialize_plssvd_core_model(
         scores, model.prediction_weights[index].view(), false, false,
         values.view()
       );
-      r2_values[index] = metric(
+      const double value = metric(
         fastpls::core::ConstMatrixView<T>(values.view())
       );
+      r2_values[index] = std::isfinite(value) ? value : NA_REAL;
       for (std::size_t response = 0;
            response < prepared.response_mean.size(); ++response) {
         for (std::size_t row = 0; row < values.rows(); ++row) {
@@ -1349,6 +1373,15 @@ SEXP serialize_simpls_core_model(
     const fastpls::core::SimplsControls& controls,
     bool array_paths = false) {
   ProtectStack protect;
+  SEXP effective_path = protect.add(Rf_allocVector(
+    INTSXP, XLENGTH(effective_components)
+  ));
+  for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
+    INTEGER(effective_path)[index] = std::min(
+      INTEGER(effective_components)[index],
+      static_cast<int>(model.completed_components)
+    );
+  }
   std::vector<fastpls::core::Matrix<T>> fitted_values;
   std::vector<double> r2_values(
     static_cast<std::size_t>(XLENGTH(effective_components)), NA_REAL
@@ -1357,22 +1390,25 @@ SEXP serialize_simpls_core_model(
     fitted_values.reserve(r2_values.size());
     for (std::size_t index = 0; index < r2_values.size(); ++index) {
       const std::size_t count = static_cast<std::size_t>(
-        INTEGER(effective_components)[index]
-      );
-      const auto scores = fastpls::core::make_const_view(
-        model.scores.data(), model.scores.rows(), count, model.scores.rows()
-      );
-      const auto loadings = fastpls::core::make_const_view(
-        model.response_loadings.data(), model.response_loadings.rows(), count,
-        model.response_loadings.rows()
+        INTEGER(effective_path)[index]
       );
       fastpls::core::Matrix<T> values(
         predictors.rows(), prepared.response_mean.size()
       );
-      backend.gemm(scores, loadings, false, true, values.view());
-      r2_values[index] = metric(
+      if (count > 0) {
+        const auto scores = fastpls::core::make_const_view(
+          model.scores.data(), model.scores.rows(), count, model.scores.rows()
+        );
+        const auto loadings = fastpls::core::make_const_view(
+          model.response_loadings.data(), model.response_loadings.rows(),
+          count, model.response_loadings.rows()
+        );
+        backend.gemm(scores, loadings, false, true, values.view());
+      }
+      const double value = metric(
         fastpls::core::ConstMatrixView<T>(values.view())
       );
+      r2_values[index] = std::isfinite(value) ? value : NA_REAL;
       for (std::size_t response = 0;
            response < prepared.response_mean.size(); ++response) {
         for (std::size_t row = 0; row < values.rows(); ++row) {
@@ -1383,12 +1419,12 @@ SEXP serialize_simpls_core_model(
     }
   }
 
-  const int field_count = controls.phase_timing ? 15 : 14;
+  const int field_count = controls.phase_timing ? 16 : 15;
   SEXP output = protect.add(Rf_allocVector(VECSXP, field_count));
   SEXP names = protect.add(Rf_allocVector(STRSXP, field_count));
-  const char* field_names[15] = {
+  const char* field_names[16] = {
     "P", "R", "Q", "Ttrain", "mX", "vX", "mY", "p", "m",
-    "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode",
+    "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode", "effective_ncomp",
     "benchmark_phase_timing"
   };
   for (int index = 0; index < field_count; ++index) {
@@ -1398,7 +1434,9 @@ SEXP serialize_simpls_core_model(
   SET_VECTOR_ELT(output, 1, core_matrix(model.weights));
   SET_VECTOR_ELT(output, 2, core_matrix(model.response_loadings));
   SET_VECTOR_ELT(
-    output, 3, store_scores ? core_matrix(model.scores) : R_NilValue
+    output, 3, store_scores ? core_matrix_prefix(
+      model.scores, model.completed_components
+    ) : R_NilValue
   );
   SET_VECTOR_ELT(output, 4, core_matrix(row_matrix(
     prepared.predictor_center
@@ -1430,8 +1468,9 @@ SEXP serialize_simpls_core_model(
   SET_VECTOR_ELT(output, 11, r2);
   SET_VECTOR_ELT(output, 12, Rf_mkString("simpls"));
   SET_VECTOR_ELT(output, 13, Rf_mkString(xprod_mode));
+  SET_VECTOR_ELT(output, 14, effective_path);
   if (controls.phase_timing) {
-    SET_VECTOR_ELT(output, 14, simpls_timing(model.timing));
+    SET_VECTOR_ELT(output, 15, simpls_timing(model.timing));
   }
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
@@ -1468,11 +1507,6 @@ SEXP fit_simpls_core_prepared(
   const auto model = fastpls::core::fit_simpls_preprocessed<T>(
     predictors, prepared.crossprod.view(), controls, backend, workspace
   );
-  if (model.completed_components < controls.components) {
-    throw std::runtime_error(
-      "fastPLS core SIMPLS returned fewer components than requested"
-    );
-  }
   SEXP output = protect.add(serialize_simpls_core_model(
     model, predictors, prepared, effective_components, fitted,
     controls.store_scores, xprod_mode, backend, metric, controls, array_paths
@@ -1689,11 +1723,6 @@ SEXP fit_float32_label_moments(
     fastpls::core::ConstMatrixView<float>(), prepared.crossprod.view(),
     controls, backend, workspace, predictors.rows()
   );
-  if (model.completed_components < controls.components) {
-    throw std::runtime_error(
-      "fastPLS core SIMPLS returned fewer components than requested"
-    );
-  }
   if (fitted || store_scores) {
     materialize_standardized_scores<float>(
       predictors, prepared.predictor_center, prepared.predictor_scale,
@@ -1818,6 +1847,30 @@ SEXP fit_dense_simpls_operator(
     controls.rank_one_operator_direction = true;
     controls.reorthogonalize = true;
   }
+  const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
+    return fastpls::core::dense_response_r2(
+      responses, prepared.response_mean.data(),
+      prepared.response_mean.size(), values
+    );
+  };
+  const bool constant_response = !prepared.response_constant.empty() &&
+    std::all_of(
+      prepared.response_constant.begin(), prepared.response_constant.end(),
+      [](unsigned char value) { return value != 0; }
+    );
+  if (constant_response) {
+    fastpls::core::SimplsModel<T> model;
+    model.weights.resize(predictors.columns(), controls.components);
+    model.response_loadings.resize(responses.columns(), controls.components);
+    if (controls.store_scores) {
+      model.scores.resize(predictors.rows(), controls.components);
+    }
+    return serialize_simpls_core_model(
+      model, predictors, prepared, effective, fitted,
+      controls.store_scores, xprod_mode, backend, metric, controls,
+      array_paths
+    );
+  }
   fastpls::core::CenteredCrosscovOperator<T, Backend> initial(
     predictors, responses, prepared.response_mean.data(),
     prepared.response_mean.size(), backend
@@ -1831,17 +1884,6 @@ SEXP fit_dense_simpls_operator(
     predictors, initial, projected, controls, backend, workspace,
     rsvd_workspace
   );
-  if (model.completed_components < controls.components) {
-    throw std::runtime_error(
-      "fastPLS implicit core SIMPLS returned fewer components than requested"
-    );
-  }
-  const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
-    return fastpls::core::dense_response_r2(
-      responses, prepared.response_mean.data(),
-      prepared.response_mean.size(), values
-    );
-  };
   return serialize_simpls_core_model(
     model, predictors, prepared, effective, fitted, controls.store_scores,
     xprod_mode, backend, metric, controls, array_paths
@@ -2792,6 +2834,92 @@ extern "C" SEXP _fastPLS_blas_backend_cpp() {
 #else
   return Rf_mkString("R BLAS/LAPACK");
 #endif
+}
+
+extern "C" SEXP _fastPLS_blas_info_cpp() {
+  const char* backend = "R BLAS/LAPACK";
+  const char* configuration = nullptr;
+  const char* core = nullptr;
+  const char* parallel = nullptr;
+  const char* library = nullptr;
+  std::string version;
+  int threads = NA_INTEGER;
+
+#if defined(FASTPLS_USE_ACCELERATE)
+  backend = "Accelerate";
+#elif defined(FASTPLS_USE_OPENBLAS)
+  backend = "OpenBLAS";
+  configuration = openblas_get_config();
+  core = openblas_get_corename();
+  threads = openblas_get_num_threads();
+  switch (openblas_get_parallel()) {
+    case 0:
+      parallel = "sequential";
+      break;
+    case 1:
+      parallel = "pthreads";
+      break;
+    case 2:
+      parallel = "OpenMP";
+      break;
+    default:
+      parallel = "unknown";
+      break;
+  }
+  if (configuration != nullptr) {
+    const std::string value(configuration);
+    const std::string prefix("OpenBLAS ");
+    const std::size_t start = value.find(prefix);
+    if (start != std::string::npos) {
+      const std::size_t first = start + prefix.size();
+      const std::size_t last = value.find_first_of(" \t", first);
+      version = value.substr(first, last - first);
+    }
+  }
+#if !defined(_WIN32)
+  Dl_info information{};
+  if (dladdr(reinterpret_cast<void*>(openblas_get_config), &information) != 0 &&
+      information.dli_fname != nullptr) {
+    library = information.dli_fname;
+  }
+#endif
+#endif
+
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 7));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 7));
+  const char* labels[] = {
+    "backend", "version", "configuration", "core", "parallel", "threads",
+    "library"
+  };
+  for (int index = 0; index < 7; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  SET_VECTOR_ELT(output, 0, Rf_mkString(backend));
+  SET_VECTOR_ELT(
+    output, 1,
+    version.empty() ? Rf_ScalarString(NA_STRING) : Rf_mkString(version.c_str())
+  );
+  SET_VECTOR_ELT(
+    output, 2,
+    configuration == nullptr ? Rf_ScalarString(NA_STRING) :
+      Rf_mkString(configuration)
+  );
+  SET_VECTOR_ELT(
+    output, 3,
+    core == nullptr ? Rf_ScalarString(NA_STRING) : Rf_mkString(core)
+  );
+  SET_VECTOR_ELT(
+    output, 4,
+    parallel == nullptr ? Rf_ScalarString(NA_STRING) : Rf_mkString(parallel)
+  );
+  SET_VECTOR_ELT(output, 5, Rf_ScalarInteger(threads));
+  SET_VECTOR_ELT(
+    output, 6,
+    library == nullptr ? Rf_ScalarString(NA_STRING) : Rf_mkString(library)
+  );
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
 }
 
 extern "C" SEXP _fastPLS_simpls_cache_predictor_crossprod(
