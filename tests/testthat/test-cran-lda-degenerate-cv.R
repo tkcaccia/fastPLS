@@ -230,3 +230,128 @@ test_that("classification CV preserves paths beyond the full-data rank", {
     expect_false(anyNA(result$class_pred))
     expect_true(all(is.finite(result$lda_scores)))
 })
+
+test_that("AUROC pools finite scores from regular and one-class folds", {
+    set.seed(5L)
+    x <- matrix(rnorm(20L * 6L), nrow = 20L, ncol = 6L)
+    y <- factor(c(rep("negative", 10L), rep("positive", 10L)),
+        levels = c("negative", "positive"))
+    group <- c(rep("negative_group", 10L), rep("positive_a", 5L),
+        rep("positive_b", 5L))
+    run <- function() {
+        suppressWarnings(pls.single.cv(
+            x,
+            y,
+            ncomp = 1:3,
+            constrain = group,
+            kfold = 3L,
+            classifier = "lda",
+            selection = "AUROC",
+            backend = "cpu",
+            seed = 19L,
+            fit = FALSE,
+            return_splits = TRUE
+        ))
+    }
+    first <- run()
+    second <- run()
+
+    expect_identical(first$selection_metric, "AUROC")
+    expect_true(all(is.finite(first$selection_values)))
+    pooled_scores <- vapply(seq_len(3L), function(index) {
+        fastPLS:::.cv_binary_auroc(
+            y,
+            first$lda_scores[, 2L, index] -
+                first$lda_scores[, 1L, index],
+            levels(y)
+        )
+    }, numeric(1L))
+    expect_equal(unname(first$selection_values), pooled_scores, tolerance = 0)
+    expect_identical(first$selection_values, second$selection_values)
+    balanced <- suppressWarnings(pls.single.cv(
+        x,
+        y,
+        ncomp = 1:3,
+        constrain = group,
+        kfold = 3L,
+        classifier = "lda",
+        selection = "balanced_accuracy",
+        backend = "cpu",
+        seed = 19L,
+        fit = FALSE,
+        return_splits = TRUE
+    ))
+    expect_identical(first$split_index, balanced$split_index)
+    expect_length(first$degenerate_inner_folds, 1L)
+    expect_true(first$constant_classifier_fallback)
+    expect_identical(first$minimum_negative_training_count, 0L)
+    expect_identical(first$minimum_positive_training_count, 5L)
+    expect_true(first$component_selection_informative)
+    expect_true(all(is.finite(first$lda_scores)))
+    expect_identical(first$best_ncomp, 1L)
+
+    argmax <- suppressWarnings(pls.single.cv(
+        x,
+        y,
+        ncomp = 1:2,
+        constrain = group,
+        kfold = 3L,
+        classifier = "argmax",
+        selection = "AUROC",
+        backend = "cpu",
+        seed = 19L,
+        fit = FALSE
+    ))
+    expect_true(all(is.finite(argmax$selection_values)))
+    expect_true(argmax$constant_classifier_fallback)
+})
+
+test_that("nested AUROC flags a non-estimable outer discrimination fold", {
+    set.seed(6L)
+    x <- matrix(rnorm(20L * 6L), nrow = 20L, ncol = 6L)
+    y <- factor(c(rep("negative", 10L), rep("positive", 10L)),
+        levels = c("negative", "positive"))
+    group <- c(rep("negative_group", 10L), rep("positive_a", 5L),
+        rep("positive_b", 5L))
+    run <- function() {
+        suppressWarnings(pls.double.cv(
+            x,
+            y,
+            ncomp = 1:2,
+            constrain = group,
+            kfold_outer = 3L,
+            kfold_inner = 2L,
+            classifier = "lda",
+            selection = "AUROC",
+            backend = "cpu",
+            seed = 23L,
+            perm.test = FALSE
+        ))
+    }
+    first <- run()
+    second <- run()
+
+    expect_identical(first$Ypred, second$Ypred)
+    expect_false(anyNA(first$Ypred))
+    expect_true(any(!first$outer_discrimination_estimable))
+    expect_gt(nrow(first$non_estimable_outer_folds), 0L)
+    expect_true(first$constant_classifier_fallback)
+    expect_false(first$component_selection_informative)
+    expect_identical(first$minimum_negative_training_count, 0L)
+    expect_identical(first$minimum_positive_training_count, 0L)
+    expect_true(is.finite(first$AUROC[[1L]]))
+    expect_identical(first$results[[1L]]$metric_name, "AUROC")
+})
+
+test_that("AUROC selection rejects multiclass responses before fitting", {
+    expect_error(
+        pls.single.cv(
+            as.matrix(iris[, 1:4]),
+            iris$Species,
+            ncomp = 1:2,
+            selection = "AUROC",
+            backend = "cpu"
+        ),
+        "exactly two response classes"
+    )
+})

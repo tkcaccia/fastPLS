@@ -35,9 +35,10 @@ pls.single.cv(
 factor/character class labels for classification.}
 
 \item{ncomp}{Positive integer component count or vector of counts. Repeated
-values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
-cap the returned path at the corresponding numerical rank and report the
-effective counts.}
+values are removed. When a direct PLS-LDA fit reaches its numerical rank,
+all requested positions are retained and positions beyond that rank repeat
+the last estimable prediction and discriminant scores. The fitted object
+reports both requested and effective component counts.}
 
 \item{constrain}{Optional grouping vector for grouped cross-validation. It
 must have one value per sample. Samples with the same value are assigned to
@@ -76,9 +77,10 @@ leave-one-group-out interpretation.}
 
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
-after filtering. Requests above this bound raise an error, including
-within cross-validation folds, rather than fitting a numerical null
-direction. Orthogonal components are not counted as predictive components.}
+after filtering. Direct PLS-LDA fits retain larger requested positions by
+repeating the last estimable result; other OPLS routes reject an
+unavailable predictive direction. Orthogonal components are not counted
+as predictive components.}
 
 \item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
 \code{poly}.}
@@ -106,7 +108,7 @@ aggregate metrics.}
 
 \item{selection}{Metric used to select settings. \code{"auto"} uses accuracy for
 classification and RMSD for regression. Classification also supports
-\code{"balanced_accuracy"}, \code{"lift_accuracy"}, \code{"macro_precision"},
+\code{"balanced_accuracy"}, \code{"AUROC"}, \code{"lift_accuracy"}, \code{"macro_precision"},
 \code{"macro_recall"}, \code{"macro_f1"}, \code{"kappa"}, \code{"R2Y"}, and \code{"Q2Y"}.
 Regression also supports \code{"R2Y"}, \code{"Q2Y"}, \code{"RMSD"}, \code{"MAE"},
 \code{"MAPE_percent"}, \code{"RPD"}, \code{"Pearson_r"}, and
@@ -114,7 +116,9 @@ Regression also supports \code{"R2Y"}, \code{"Q2Y"}, \code{"RMSD"}, \code{"MAE"}
 and therefore forces \code{fit = TRUE}; as a training criterion, it is usually
 less suitable for complexity selection than a held-out criterion. Q2Y
 uses out-of-fold predictions and each fold's training-response mean. The
-remaining metrics use the aggregate definitions in \code{\link[=evaluate]{evaluate()}} on the
+AUROC is available for binary responses and pools continuous held-out
+class scores across all folds, using the second factor level as the
+positive class. The remaining metrics use the aggregate definitions in \code{\link[=evaluate]{evaluate()}} on the
 out-of-fold predictions. RMSD, MAE, and MAPE_percent are
 minimized; all other criteria are maximized. Classification R2Y and Q2Y
 operate on dummy-coded responses, not decoded labels. Incompatible
@@ -171,6 +175,15 @@ used in that fold. Zero identifies the class-prior fallback.
 \item \code{status}: fold status vector. Status 1 is a regular fit, 4 is a
 single-class training-fold fallback, and 5 is a zero-direction class-prior
 fallback.
+\item \code{degenerate_inner_folds} and \code{constant_classifier_fallback}:
+identifiers of single-class training folds and whether the constant-class
+prediction rule was used.
+\item \code{minimum_positive_training_count} and
+\code{minimum_negative_training_count}: smallest binary-class counts among
+fold-training partitions. The second factor level is positive.
+\item \code{component_selection_informative}: whether at least one fold could
+estimate discrimination and the selected metric path contained a finite
+value.
 \item \code{metrics}: complete \code{evaluate()} outputs. \code{cross_validated} contains
 one result per requested component count from held-out predictions and
 \code{fitted} contains full-data fit results when \code{fit = TRUE}. For multivariate

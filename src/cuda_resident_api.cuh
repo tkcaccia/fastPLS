@@ -708,9 +708,17 @@ void resident_pls_cv_classification(
                         if(store_scores) {
                             score_output[size_t(prefix)*n*classes+
                                 size_t(fallback-1)*n+row]=T(1);
-                            if(use_lda)
+                            if(use_lda) {
+                                for(int class_index=0;class_index<classes;
+                                    ++class_index) {
+                                    lda_score_output[
+                                        size_t(prefix)*n*classes+
+                                        size_t(class_index)*n+row
+                                    ]=T(-1);
+                                }
                                 lda_score_output[size_t(prefix)*n*classes+
                                     size_t(fallback-1)*n+row]=T(0);
+                            }
                         }
                     }
                 }

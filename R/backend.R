@@ -63,12 +63,9 @@ fastPLS_blas <- function(details = TRUE) {
     backend
 }
 
-.fastpls_resolve_backend <- function(backend = NULL, allow_auto = FALSE) {
+.fastpls_resolve_backend <- function(backend = NULL) {
     if (!is.null(backend)) {
         value <- tolower(as.character(backend))
-        if (length(value) == 1L && allow_auto && identical(value, "auto")) {
-            return("auto")
-        }
         return(.fastpls_validate_backend(value))
     }
     option <- getOption("backend", NULL)
@@ -84,10 +81,8 @@ fastPLS_blas <- function(details = TRUE) {
 
 .fastpls_require_prediction_backend <- function(dots, context) {
     requested <- dots$backend %||% NULL
-    selected <- .fastpls_resolve_backend(requested, allow_auto = TRUE)
-    if (!identical(selected, "auto")) {
-        .fastpls_require_backend_available(selected, context)
-    }
+    selected <- .fastpls_resolve_backend(requested)
+    .fastpls_require_backend_available(selected, context)
     invisible(selected)
 }
 

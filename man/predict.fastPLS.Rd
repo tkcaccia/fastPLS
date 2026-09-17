@@ -32,10 +32,10 @@ training.}
 Operation-split Metal models predict on CPU because their retained
 matrices are host-accessible; Metal is used for fitting sample-matrix
 products.
-When omitted, an explicit session backend setting is used; otherwise the
-backend stored in the fitted model is retained. \code{"auto"} always retains
-the fitted backend. An unavailable CUDA or Metal selection raises an error;
-prediction is never silently moved to CPU.}
+When omitted, an explicit session backend setting is used, followed by the
+\code{FASTPLS_BACKEND} environment variable; otherwise CPU is used. Prediction
+must use the backend that fitted the model. An unavailable CUDA or Metal
+selection raises an error; prediction is never silently moved to CPU.}
 
 \item{n.cores}{Number of CPU cores requested for compiled host operations.
 An explicit value takes precedence over \code{options(n.cores = ...)}.
@@ -54,17 +54,17 @@ This argument is ignored with a warning for regression models.}
 blocks for both float64 and float32 inputs, and only the requested ranks
 are retained.}
 
-\item{...}{Required by the S3 generic. Additional arguments are not supported
-and produce an error, which prevents obsolete or misspelled options from being
-silently ignored.}
+\item{...}{Required by the S3 generic. Additional arguments are not
+supported and produce an error, which prevents obsolete or misspelled
+options from being silently ignored.}
 }
 \value{
 A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
 \code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class outputs,
 and optional raw classification scores. When \code{Ytest} is supplied,
 \code{metrics} contains the complete result returned by \code{evaluate()} for every
-requested component count. For a rank-limited PLS-LDA fit, the prediction path
-retains every requested position and repeats the last estimable class
+requested component count. For a rank-limited PLS-LDA fit, the prediction
+path retains every requested position and repeats the last estimable class
 prediction and discriminant scores.
 }
 \description{

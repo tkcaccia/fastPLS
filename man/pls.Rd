@@ -61,9 +61,9 @@ execution is approximate and is not classical de Jong SIMPLS.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{fit}{Return fitted values, training scores, and \code{R2Y} when
-\code{TRUE}. The default \code{FALSE} keeps only the compact state required for
-prediction and avoids materializing training-only outputs.}
+\item{fit}{Return fitted values, training scores, and \code{R2Y} when \code{TRUE}.
+The default \code{FALSE} keeps only the compact state required for prediction
+and avoids materializing training-only outputs.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in \code{metrics}. The default \code{FALSE} returns only aggregate metrics.}
@@ -104,9 +104,9 @@ their native runtimes; \code{n.cores} applies only to their host-side stages.}
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
 after filtering. Direct PLS-LDA fits retain larger requested positions by
-repeating the last estimable result; other OPLS routes reject an unavailable
-predictive direction. Orthogonal components are not counted as predictive
-components.}
+repeating the last estimable result; other OPLS routes reject an
+unavailable predictive direction. Orthogonal components are not counted
+as predictive components.}
 
 \item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
 \code{poly}.}
@@ -133,10 +133,10 @@ per requested component count. Common fields are:
 \item \code{Q}: response loadings or response-side latent coefficients.
 \item \code{R}: predictor weights/rotations used to project new samples into the PLS
 latent space.
-\item \code{Ttrain}: training latent scores when \code{fit = TRUE}. With
-\code{fit = FALSE}, classification routes retain only the compact state needed
-for prediction or LDA fitting and do not return the full training-score matrix.
-Compiled cross-validation continues to return its documented score outputs.
+\item \code{Ttrain}: training latent scores when \code{fit = TRUE}. With \code{fit = FALSE},
+classification routes retain only the compact state needed for prediction
+or LDA fitting and do not return the full training-score matrix. Compiled
+cross-validation continues to return its documented score outputs.
 \item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by
 PLS-SVD-style compact prediction when a full coefficient array is
 avoided.
@@ -154,13 +154,14 @@ otherwise \code{NA} placeholders may be returned for compatibility. Elements
 are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
 is a dummy-response quantity, not classification accuracy.
 \item \code{requested_ncomp}: component positions requested by the caller. For
-rank-limited PLS-LDA fits, every position is retained in fitted and predicted
-outputs.
+rank-limited PLS-LDA fits, every position is retained in fitted and
+predicted outputs.
 \item \code{effective_ncomp}: number of estimable response-associated directions
-used for each requested component prefix. Rank-limited PLS-LDA paths repeat
-the last estimable prediction and discriminant scores. If a regression
-response is constant, this is zero; fitted and new-data predictions then equal
-the training-response mean, coefficients are zero, and \code{R2Y} is \code{NA}.
+used for each requested component prefix. Rank-limited PLS-LDA paths
+repeat the last estimable prediction and discriminant scores. If a
+regression response is constant, this is zero; fitted and new-data
+predictions then equal the training-response mean, coefficients are
+zero, and \code{R2Y} is \code{NA}.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.
@@ -209,9 +210,11 @@ counts and randomized controls. A route that invokes the case-audited
 CPU decomposition also records its residual audit, strengthened retries,
 and any deterministic recovery; other routes state explicitly that a
 case audit is unavailable. Panel evidence is reported separately and is
-not interpreted as general-use certification. SIMPLS-family fits also record
+not interpreted as general-use certification. SIMPLS-family fits also
+record
 whether the active approximate route uses a component-wise oversampled
-sketch or an eligible CPU/CUDA/Metal candidate block, together with the active execution
+sketch or an eligible CPU/CUDA/Metal candidate block, together with the
+active execution
 optimizations.
 }
 
@@ -237,20 +240,19 @@ fit.
 Base R numeric matrices use float64. Supplying \code{float::float32} predictors
 or numeric responses requests float32 execution without silent promotion.
 CUDA supports float32 and float64. The Apple Metal route requires float32
-and divides work between CPU code and persistent Metal workspaces. Consecutive
-products in the implicit transpose cross-covariance operator share one Metal
-command buffer and synchronize before the CPU response-centering correction.
+and divides work between CPU code and persistent Metal workspaces.
 Unsupported backend and precision combinations stop rather than silently
 falling back to CPU.
 
 \code{method = "simpls"} selects the fastPLS SIMPLS-family estimator. Its
-component-wise route retains the classical sequential orthogonalization and
-deflation structure. An eligible route may instead consume a bounded block of
-candidates computed from one deflated state; this is an approximate
-SIMPLS-family estimator, not classical de Jong SIMPLS. Classification can use
-response-score argmax or LDA on latent scores. PLS-SVD classification cannot
-return more than one fewer component than the number of response classes. The
-requested model family is never silently replaced by another family.
+component-wise route retains the classical sequential orthogonalization
+and deflation structure. An eligible route may instead consume a bounded
+block of candidates computed from one deflated state; this is an
+approximate SIMPLS-family estimator, not classical de Jong SIMPLS.
+Classification can use response-score argmax or LDA on latent scores.
+PLS-SVD classification cannot return more than one fewer component than
+the number of response classes. The requested model family is never
+silently replaced by another family.
 
 All public PLS routes use randomized SVD. It is an approximate solver, and
 \code{diagnostics} records the effective controls and structural checks for the

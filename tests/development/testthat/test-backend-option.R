@@ -331,7 +331,7 @@ test_that("prediction and CV reject unavailable accelerator requests", {
   )
 })
 
-test_that("model-aware prediction does not fall back from an unavailable backend", {
+test_that("prediction rejects the removed auto backend", {
   unavailable <- if (!isTRUE(has_cuda())) {
     "cuda"
   } else if (!isTRUE(has_metal())) {
@@ -349,15 +349,30 @@ test_that("model-aware prediction does not fall back from an unavailable backend
 
   expect_error(
     fastPLS:::.prediction_route(model, matrix(0, 1, 1), "auto"),
-    "No CPU fallback"
+    "must be one of"
   )
 })
 
 test_that("omitted prediction backend follows the session configuration", {
   old_option <- getOption("backend", NULL)
-  on.exit(options(backend = old_option), add = TRUE)
+  old_env <- Sys.getenv("FASTPLS_BACKEND", unset = NA_character_)
+  on.exit({
+    options(backend = old_option)
+    if (is.na(old_env)) {
+      Sys.unsetenv("FASTPLS_BACKEND")
+    } else {
+      Sys.setenv(FASTPLS_BACKEND = old_env)
+    }
+  }, add = TRUE)
   model <- list(predict_backend = "cpu_flash", ncomp = 1L, m = 1L)
   X <- matrix(0, 1L, 1L)
+
+  options(backend = NULL)
+  Sys.unsetenv("FASTPLS_BACKEND")
+  expect_identical(
+    fastPLS:::.prediction_route(model, X, NULL)$selected,
+    "cpu"
+  )
 
   options(backend = "cpu")
   expect_identical(
@@ -365,9 +380,9 @@ test_that("omitted prediction backend follows the session configuration", {
     "cpu"
   )
 
-  expect_identical(
-    fastPLS:::.prediction_route(model, X, "auto")$selected,
-    "cpu"
+  expect_error(
+    fastPLS:::.prediction_route(model, X, "auto"),
+    "must be one of"
   )
 })
 

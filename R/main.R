@@ -5040,21 +5040,13 @@ print.fastPLS <- function(x, ...) {
     )
 }
 
-.resolve_prediction_backend <- function(object, backend) {
-    stored <- .model_public_backend(object)
-    if (identical(backend, "auto")) {
-        return(stored)
-    }
-    if (is.null(backend) && is.null(getOption("backend", NULL)) &&
-        !nzchar(Sys.getenv("FASTPLS_BACKEND", unset = ""))) {
-        return(stored)
-    }
+.resolve_prediction_backend <- function(backend) {
     .fastpls_resolve_backend(backend)
 }
 
 .prediction_route <- function(object, Xtest, backend) {
     stored <- .model_public_backend(object)
-    selected <- .resolve_prediction_backend(object, backend)
+    selected <- .resolve_prediction_backend(backend)
     if (!identical(selected, stored)) {
         stop(
             "Prediction must use the backend that fitted the model ('",
@@ -5415,10 +5407,10 @@ print.fastPLS <- function(x, ...) {
 #'   Operation-split Metal models predict on CPU because their retained
 #'   matrices are host-accessible; Metal is used for fitting sample-matrix
 #'   products.
-#'   When omitted, an explicit session backend setting is used; otherwise the
-#'   backend stored in the fitted model is retained. `"auto"` always retains
-#'   the fitted backend. An unavailable CUDA or Metal selection raises an
-#'   error; prediction is never silently moved to CPU.
+#'   When omitted, an explicit session backend setting is used, followed by the
+#'   `FASTPLS_BACKEND` environment variable; otherwise CPU is used. Prediction
+#'   must use the backend that fitted the model. An unavailable CUDA or Metal
+#'   selection raises an error; prediction is never silently moved to CPU.
 #' @param n.cores Number of CPU cores requested for compiled host operations.
 #'   An explicit value takes precedence over `options(n.cores = ...)`.
 #'   This controls supported BLAS/OpenMP host work and does not set CUDA or
@@ -5494,7 +5486,7 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
                 call. = FALSE
             )
         }
-        selected <- .resolve_prediction_backend(object, backend)
+        selected <- .resolve_prediction_backend(backend)
         compatible <- selected %in% c("cuda", "cuda_flash")
         if (!compatible) {
             stop(
@@ -5967,7 +5959,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
 }
 
 .cv_classification_selection_metrics_available <- c(
-    "accuracy", "balanced_accuracy", "lift_accuracy", "macro_precision",
+    "accuracy", "balanced_accuracy", "auroc", "lift_accuracy", "macro_precision",
     "macro_recall", "macro_f1", "kappa", "r2y", "q2y"
 )
 
@@ -5986,6 +5978,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         mre_percent = "MRE_percent",
         mape_percent = "MAPE_percent",
         rpd = "RPD",
+        auroc = "AUROC",
         pearson_r = "Pearson_r",
         spearman_r = "Spearman_r",
         metric
@@ -6044,6 +6037,9 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         balancedaccuracy = "balanced_accuracy",
         bacc = "balanced_accuracy",
         balanced_accuracy = "balanced_accuracy",
+        auc = "auroc",
+        roc_auc = "auroc",
+        auroc = "auroc",
         lift = "lift_accuracy",
         lift_accuracy = "lift_accuracy",
         macro_precision = "macro_precision",
@@ -6143,6 +6139,102 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     present <- denominators > 0
     recalls[present] <- diag(tab)[present] / denominators[present]
     if (any(is.finite(recalls))) mean(recalls, na.rm = TRUE) else NA_real_
+}
+
+.cv_binary_auroc <- function(observed, score, levels = NULL) {
+    if (is.null(levels)) {
+        levels <- levels(droplevels(factor(observed)))
+    }
+    if (length(levels) != 2L) {
+        stop("AUROC selection requires exactly two response classes.",
+            call. = FALSE)
+    }
+    observed <- factor(observed, levels = levels)
+    score <- as.numeric(score)
+    keep <- !is.na(observed) & is.finite(score)
+    positive <- observed[keep] == levels[[2L]]
+    score <- score[keep]
+    n_positive <- sum(positive)
+    n_negative <- length(positive) - n_positive
+    if (!n_positive || !n_negative) {
+        return(NA_real_)
+    }
+    ranked <- rank(score, ties.method = "average")
+    (sum(ranked[positive]) - n_positive * (n_positive + 1) / 2) /
+        (n_positive * n_negative)
+}
+
+.cv_binary_score_path <- function(cv_res, levels) {
+    scores <- cv_res$lda_scores %||% cv_res$LDA_scores
+    if (is.null(scores)) {
+        scores <- cv_res$Yscore %||% cv_res$Ypred
+    }
+    if (inherits(scores, "float32")) {
+        scores <- float::dbl(scores)
+    }
+    dimensions <- dim(scores)
+    if (length(dimensions) != 3L || dimensions[[2L]] != 2L) {
+        stop(
+            "Binary class-score paths are required for AUROC selection.",
+            call. = FALSE
+        )
+    }
+    output <- matrix(NA_real_, dimensions[[1L]], dimensions[[3L]])
+    for (index in seq_len(dimensions[[3L]])) {
+        output[, index] <- scores[, 2L, index] - scores[, 1L, index]
+    }
+    colnames(output) <- NULL
+    output
+}
+
+.cv_binary_last_score <- function(prediction, levels) {
+    path <- .cv_binary_score_path(prediction, levels)
+    path[, ncol(path)]
+}
+
+.cv_classification_fold_diagnostics <- function(
+    fold,
+    response,
+    selection_metrics = NULL,
+    class_levels = NULL
+) {
+    if (is.null(class_levels)) {
+        class_levels <- levels(droplevels(factor(response)))
+    }
+    response <- factor(response, levels = class_levels)
+    fold_values <- sort(unique(as.integer(fold)))
+    counts <- do.call(rbind, lapply(fold_values, function(value) {
+        tabulate(
+            as.integer(response[as.integer(fold) != value]),
+            nbins = length(class_levels)
+        )
+    }))
+    colnames(counts) <- class_levels
+    rownames(counts) <- as.character(fold_values)
+    represented <- rowSums(counts > 0L)
+    degenerate <- which(represented < 2L)
+    finite_metric <- !is.null(selection_metrics) &&
+        any(is.finite(selection_metrics$metric_value))
+    binary <- length(class_levels) == 2L
+    list(
+        training_class_counts = counts,
+        degenerate_inner_folds = as.integer(degenerate),
+        constant_classifier_fallback = length(degenerate) > 0L,
+        minimum_negative_training_count = if (binary) {
+            min(counts[, 1L])
+        } else {
+            NA_integer_
+        },
+        minimum_positive_training_count = if (binary) {
+            min(counts[, 2L])
+        } else {
+            NA_integer_
+        },
+        negative_class = if (binary) class_levels[[1L]] else NA_character_,
+        positive_class = if (binary) class_levels[[2L]] else NA_character_,
+        component_selection_informative = isTRUE(finite_metric) &&
+            any(represented >= 2L)
+    )
 }
 
 .cv_metric_from_matrix <- function(
@@ -6327,6 +6419,14 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     if (identical(selection_metric, "r2y")) {
         stop("R2Y selection requires the full-data fitted-response path.",
             call. = FALSE)
+    }
+    if (identical(selection_metric, "auroc")) {
+        levels <- levels(droplevels(factor(Ydata)))
+        score_path <- .cv_binary_score_path(cv_res, levels)
+        values <- vapply(seq_len(ncol(score_path)), function(index) {
+            .cv_binary_auroc(Ydata, score_path[, index], levels)
+        }, numeric(1L))
+        return(.cv_metric_frame(values, "AUROC"))
     }
     predictions <- cv_res$pred
     if (is.null(predictions)) {
@@ -7417,6 +7517,13 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     } else {
         NULL
     }
+    lda_score_pred <- if (
+        context$classification && .is_lda_classifier(context$classifier)
+    ) {
+        array(NA_real_, c(n, context$responses, slices))
+    } else {
+        NULL
+    }
     metric_id <- .cv_metric_id(selection_metric, context$classification)
     tss <- if (!context$classification && metric_id %in% c(2L, 3L)) {
         center <- colMeans(context$original, na.rm = TRUE)
@@ -7427,6 +7534,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     list(
         class_pred = class_pred,
         score_pred = score_pred,
+        lda_score_pred = lda_score_pred,
         correct = numeric(slices),
         total = numeric(slices),
         sse = numeric(slices),
@@ -7530,6 +7638,14 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     if (!is.null(state$class_pred)) {
         state$class_pred[test, ] <- index
     }
+    if (!is.null(state$score_pred)) {
+        state$score_pred[test, , ] <- 0
+        state$score_pred[test, index, ] <- 1
+    }
+    if (!is.null(state$lda_score_pred)) {
+        state$lda_score_pred[test, , ] <- -1
+        state$lda_score_pred[test, index, ] <- 0
+    }
     for (slice in seq_along(context$ncomp)) {
         predicted <- rep(label, length(test))
         state$correct[[slice]] <- state$correct[[slice]] +
@@ -7556,8 +7672,13 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
             # Q2 uses dummy-response PLS predictions, not LDA scores.
             score_fit <- internal_fit
             score_fit$classification_rule <- "argmax"
-            classified <- predict(fit, Xtest, backend = prediction_backend,
-                n.cores = context$n.cores)
+            classified <- predict(
+                fit,
+                Xtest,
+                raw_scores = .is_lda_classifier(context$classifier),
+                backend = prediction_backend,
+                n.cores = context$n.cores
+            )
             raw <- predict(
                 score_fit, Xtest, raw_scores = TRUE,
                 backend = prediction_backend, n.cores = context$n.cores
@@ -7608,6 +7729,25 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
             )
             state$score_pred[test, , slice] <- 0
             state$score_pred[test, global_columns, slice] <-
+                local_scores[, seq_along(global_columns), drop = FALSE]
+        }
+    }
+    discriminants <- classified$LDA_scores
+    if (!is.null(state$lda_score_pred) && !is.null(discriminants) &&
+        length(dim(discriminants)) == 3L) {
+        source_indices <- .cv_fitted_component_indices(
+            context$ncomp,
+            fitted_components,
+            dim(discriminants)[3L]
+        )
+        for (slice in seq_along(source_indices)) {
+            local_scores <- matrix(
+                discriminants[, , source_indices[[slice]]],
+                nrow = length(test),
+                ncol = dim(discriminants)[2L]
+            )
+            state$lda_score_pred[test, , slice] <- -1
+            state$lda_score_pred[test, global_columns, slice] <-
                 local_scores[, seq_along(global_columns), drop = FALSE]
         }
     }
@@ -7752,6 +7892,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     }
     result <- list(Ypred = state$score_pred,
         Yscore = if (context$classification) state$score_pred else NULL,
+        lda_scores = if (context$classification) state$lda_score_pred else NULL,
         class_pred = state$class_pred, fold = context$fold,
         ncomp = context$ncomp,
         method = context$method, backend = context$backend,
@@ -11065,6 +11206,14 @@ keep <- c("scaling", "method", "backend", "classifier")
         fit,
         bycol
     )
+    if (context$classification) {
+        diagnostics <- .cv_classification_fold_diagnostics(
+            result$fold,
+            context$Y,
+            result$selection_metrics
+        )
+        result[names(diagnostics)] <- diagnostics
+    }
     output <- result
     if (context$float32) {
         attr(output, "fastPLS_internal") <- list(
@@ -11126,7 +11275,7 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   aggregate metrics.
 #' @param selection Metric used to select settings. `"auto"` uses accuracy for
 #'   classification and RMSD for regression. Classification also supports
-#'   `"balanced_accuracy"`, `"lift_accuracy"`, `"macro_precision"`,
+#'   `"balanced_accuracy"`, `"AUROC"`, `"lift_accuracy"`, `"macro_precision"`,
 #'   `"macro_recall"`, `"macro_f1"`, `"kappa"`, `"R2Y"`, and `"Q2Y"`.
 #'   Regression also supports `"R2Y"`, `"Q2Y"`, `"RMSD"`, `"MAE"`,
 #'   `"MAPE_percent"`, `"RPD"`, `"Pearson_r"`, and
@@ -11134,7 +11283,9 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   and therefore forces `fit = TRUE`; as a training criterion, it is usually
 #'   less suitable for complexity selection than a held-out criterion. Q2Y
 #'   uses out-of-fold predictions and each fold's training-response mean. The
-#'   remaining metrics use the aggregate definitions in [evaluate()] on the
+#'   AUROC is available for binary responses and pools continuous held-out
+#'   class scores across all folds, using the second factor level as the
+#'   positive class. The remaining metrics use the aggregate definitions in [evaluate()] on the
 #'   out-of-fold predictions. RMSD, MAE, and MAPE_percent are
 #'   minimized; all other criteria are maximized. Classification R2Y and Q2Y
 #'   operate on dummy-coded responses, not decoded labels. Incompatible
@@ -11208,6 +11359,15 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   \item `status`: fold status vector. Status 1 is a regular fit, 4 is a
 #'   single-class training-fold fallback, and 5 is a zero-direction class-prior
 #'   fallback.
+#'   \item `degenerate_inner_folds` and `constant_classifier_fallback`:
+#'   identifiers of single-class training folds and whether the constant-class
+#'   prediction rule was used.
+#'   \item `minimum_positive_training_count` and
+#'   `minimum_negative_training_count`: smallest binary-class counts among
+#'   fold-training partitions. The second factor level is positive.
+#'   \item `component_selection_informative`: whether at least one fold could
+#'   estimate discrimination and the selected metric path contained a finite
+#'   value.
 #'   \item `metrics`: complete `evaluate()` outputs. `cross_validated` contains
 #'   one result per requested component count from held-out predictions and
 #'   `fitted` contains full-data fit results when `fit = TRUE`. For multivariate
@@ -11276,6 +11436,10 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         selection$metric,
         is.factor(Ydata)
     )
+    if (identical(selection$metric, "auroc") && nlevels(Ydata) != 2L) {
+        stop("selection = 'AUROC' requires exactly two response classes.",
+            call. = FALSE)
+    }
     if (identical(selection$metric, "r2y")) {
         fit <- TRUE
     }
@@ -11465,6 +11629,143 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         })
     }
     list(outer = outer, inner = inner)
+}
+
+.double_cv_attach_classification_diagnostics <- function(
+    result,
+    context,
+    config,
+    runn
+) {
+    if (!context$response$classification) {
+        return(result)
+    }
+    plan <- .double_cv_fold_plan(
+        context,
+        as.integer(runn),
+        config$kfold_inner,
+        config$kfold_outer
+    )
+    class_levels <- context$response$levels
+    binary <- length(class_levels) == 2L
+    outer_estimable <- matrix(
+        FALSE,
+        nrow = as.integer(runn),
+        ncol = max(plan$outer)
+    )
+    informative <- outer_estimable
+    degenerate_records <- list()
+    outer_records <- list()
+    minimum_negative <- integer(0)
+    minimum_positive <- integer(0)
+    for (run_index in seq_len(as.integer(runn))) {
+        outer <- plan$outer[, run_index]
+        outer_values <- sort(unique(outer))
+        run_result <- result$results[[run_index]]
+        run_degenerate <- vector("list", length(outer_values))
+        for (outer_index in seq_along(outer_values)) {
+            outer_value <- outer_values[[outer_index]]
+            outer_train <- outer != outer_value
+            outer_counts <- tabulate(
+                as.integer(context$response$original[outer_train]),
+                nbins = length(class_levels)
+            )
+            estimable <- sum(outer_counts > 0L) >= 2L
+            outer_estimable[run_index, outer_index] <- estimable
+            if (!estimable) {
+                outer_records[[length(outer_records) + 1L]] <- data.frame(
+                    run = run_index,
+                    outer_fold = outer_index
+                )
+            }
+            inner_full <- plan$inner[[run_index]][[outer_index]]
+            inner_fold <- inner_full[outer_train]
+            inner_response <- context$response$original[outer_train]
+            inner_selection <- run_result$inner[[outer_index]] %||% list()
+            selection_metrics <- if (!is.null(inner_selection$metric_value)) {
+                .cv_metric_frame(
+                    as.numeric(inner_selection$metric_value),
+                    inner_selection$selection_metric[[1L]] %||% "accuracy"
+                )
+            } else {
+                NULL
+            }
+            diagnostics <- .cv_classification_fold_diagnostics(
+                inner_fold,
+                inner_response,
+                selection_metrics,
+                class_levels
+            )
+            run_degenerate[[outer_index]] <- diagnostics$degenerate_inner_folds
+            informative[run_index, outer_index] <- estimable &&
+                diagnostics$component_selection_informative
+            if (binary) {
+                minimum_negative <- c(
+                    minimum_negative,
+                    diagnostics$minimum_negative_training_count
+                )
+                minimum_positive <- c(
+                    minimum_positive,
+                    diagnostics$minimum_positive_training_count
+                )
+            }
+            if (length(diagnostics$degenerate_inner_folds)) {
+                for (inner_value in diagnostics$degenerate_inner_folds) {
+                    degenerate_records[[length(degenerate_records) + 1L]] <-
+                        data.frame(
+                            run = run_index,
+                            outer_fold = outer_index,
+                            inner_fold = inner_value
+                        )
+                }
+            }
+            if (length(inner_selection)) {
+                inner_selection[names(diagnostics)] <- diagnostics
+                run_result$inner[[outer_index]] <- inner_selection
+            }
+        }
+        run_result$degenerate_inner_folds <- run_degenerate
+        run_result$outer_discrimination_estimable <-
+            outer_estimable[run_index, seq_along(outer_values)]
+        run_result$component_selection_informative <-
+            informative[run_index, seq_along(outer_values)]
+        run_result$constant_classifier_fallback <-
+            any(lengths(run_degenerate) > 0L) ||
+            any(!run_result$outer_discrimination_estimable)
+        result$results[[run_index]] <- run_result
+    }
+    result$degenerate_inner_folds <- if (length(degenerate_records)) {
+        do.call(rbind, degenerate_records)
+    } else {
+        data.frame(
+            run = integer(0),
+            outer_fold = integer(0),
+            inner_fold = integer(0)
+        )
+    }
+    result$non_estimable_outer_folds <- if (length(outer_records)) {
+        do.call(rbind, outer_records)
+    } else {
+        data.frame(run = integer(0), outer_fold = integer(0))
+    }
+    result$constant_classifier_fallback <-
+        nrow(result$degenerate_inner_folds) > 0L ||
+        nrow(result$non_estimable_outer_folds) > 0L
+    result$minimum_negative_training_count <- if (binary) {
+        min(minimum_negative)
+    } else {
+        NA_integer_
+    }
+    result$minimum_positive_training_count <- if (binary) {
+        min(minimum_positive)
+    } else {
+        NA_integer_
+    }
+    result$component_selection_informative_by_outer_fold <- informative
+    result$component_selection_informative <-
+        length(informative) > 0L && all(informative)
+    result$outer_discrimination_estimable <- outer_estimable
+    result
 }
 
 .double_cv_split_index <- function(plan) {
@@ -11879,6 +12180,13 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         parameters = vector("list", count),
         train_r2 = rep(NA_real_, count),
         q2 = rep(NA_real_, count),
+        outer_discrimination_estimable = rep(TRUE, count),
+        decision_score = if (response$classification &&
+            identical(context$selection_metric, "auroc")) {
+            rep(NA_real_, nrow(context$X))
+        } else {
+            NULL
+        },
         prediction = if (response$classification) {
             rep(NA_character_, nrow(context$X))
         } else {
@@ -12004,6 +12312,19 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             fit$Ypred
         }
         state$prediction[test] <- as.character(prediction)
+        if (!is.null(state$decision_score)) {
+            scored <- predict(
+                fit,
+                context$X[test, , drop = FALSE],
+                raw_scores = TRUE,
+                backend = .model_public_backend(fit),
+                n.cores = context$n.cores
+            )
+            state$decision_score[test] <- .cv_binary_last_score(
+                scored,
+                context$response$levels
+            )
+        }
     } else {
         prediction <- fit$Ypred
         if (length(dim(prediction)) == 3L) {
@@ -12030,8 +12351,18 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         response$data[train, , drop = FALSE]
     }
     if (response$classification && length(unique(Ytrain)) < 2L) {
-        state$prediction[test] <- names(which.max(table(Ytrain)))
+        represented <- names(which.max(table(Ytrain)))
+        state$prediction[test] <- represented
         state$best_comp[[index]] <- min(context$ncomp)
+        state$parameters[[index]] <- list(ncomp = min(context$ncomp))
+        state$outer_discrimination_estimable[[index]] <- FALSE
+        if (!is.null(state$decision_score)) {
+            positive <- context$response$levels[[2L]]
+            state$decision_score[test] <- if (identical(
+                represented,
+                positive
+            )) 1 else 0
+        }
         return(state)
     }
     inner <- do.call(pls.single.cv, .double_cv_inner_arguments(context, train,
@@ -12045,6 +12376,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         all(inner$effective_ncomp == 0L)) {
         prior <- table(Ytrain)
         state$prediction[test] <- names(prior)[which.max(prior)]
+        if (!is.null(state$decision_score)) {
+            total <- sum(prior)
+            positive <- context$response$levels[[2L]]
+            state$decision_score[test] <- as.numeric(prior[positive]) / total
+        }
         return(state)
     }
     fit <- .double_cv_outer_fit(context, inner$best_parameters, train, test,
@@ -12084,6 +12420,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         metric,
         accuracy = accuracy,
         balanced_accuracy = balanced,
+        auroc = .cv_binary_auroc(
+            response$original,
+            state$decision_score,
+            response$levels
+        ),
         q2y = q2,
         r2y = r2y,
         .cv_evaluate_metric(response$original, prediction, metric)
@@ -12099,9 +12440,12 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         metric_value = metric_value,
         accuracy = accuracy,
         balanced_accuracy = balanced,
+        AUROC = if (identical(metric, "auroc")) metric_value else NA_real_,
         Q2Y = q2,
         R2Y = r2y,
-        RMSD = NA_real_
+        RMSD = NA_real_,
+        outer_discrimination_estimable =
+            state$outer_discrimination_estimable
     )
 }
 
@@ -12231,6 +12575,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     output$Q2Y <- vapply(results, function(x) x$Q2Y, numeric(1L))
     output$R2Y <- vapply(results, function(x) x$R2Y, numeric(1L))
     output$RMSD <- vapply(results, function(x) x$RMSD, numeric(1L))
+    if (context$response$classification) {
+        output$AUROC <- vapply(results, function(x) {
+            as.numeric(x$AUROC %||% NA_real_)
+        }, numeric(1L))
+    }
     output$metric_name <- vapply(
         results,
         function(x) x$metric_name,
@@ -12450,7 +12799,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   aggregate metrics.
 #' @param selection Metric used by inner CV and by the permutation test.
 #'   `"auto"` uses accuracy for classification and RMSD for regression.
-#'   Classification also supports `"balanced_accuracy"`, `"lift_accuracy"`,
+#'   Classification also supports `"balanced_accuracy"`, `"AUROC"`, `"lift_accuracy"`,
 #'   `"macro_precision"`, `"macro_recall"`, `"macro_f1"`, `"kappa"`,
 #'   `"R2Y"`, and `"Q2Y"`. Regression also supports `"R2Y"`, `"Q2Y"`,
 #'   `"RMSD"`, `"MAE"`, `"MAPE_percent"`, `"RPD"`,
@@ -12459,7 +12808,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   reported endpoint; as a training criterion, it can favor more complex
 #'   models. Q2Y and the other predictive criteria use held-out predictions.
 #'   Q2Y uses fold-training response means; the remaining metrics use the
-#'   aggregate definitions in [evaluate()]. RMSD, MAE, and
+#'   aggregate definitions in [evaluate()]. Binary AUROC selection pools the
+#'   continuous inner-fold class scores before calculating the criterion; the
+#'   second factor level is treated as positive. RMSD, MAE, and
 #'   MAPE_percent are minimized; all other criteria are maximized. R2Y and Q2Y
 #'   for classification operate on dummy-coded responses. Incompatible
 #'   task/metric combinations raise an error before fitting. The former names
@@ -12535,6 +12886,17 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #' values
 #'     are stored in `results[[run]]$best_parameters`.
 #'   * `selection_metric`: criterion used by the inner CV loop.
+#'   * `degenerate_inner_folds`, `constant_classifier_fallback`,
+#'     `minimum_positive_training_count`, and
+#'     `minimum_negative_training_count`: audit information for single-class
+#'     inner-training partitions.
+#'   * `component_selection_informative` and
+#'     `component_selection_informative_by_outer_fold`: whether discrimination
+#'     could inform component selection globally and in each outer fold.
+#'   * `outer_discrimination_estimable` and `non_estimable_outer_folds`:
+#'     flags for outer-training partitions containing both classes. A
+#'     single-class outer-training partition returns its constant class rather
+#'     than terminating the run.
 #'   * `acc_tot`: classification-only text summary of correctly classified
 #'     samples and percentage accuracy.
 #'   * `conf`: classification-only confusion matrix printed as counts and
@@ -12612,6 +12974,10 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         selection$metric,
         is.factor(Ydata)
     )
+    if (identical(selection$metric, "auroc") && nlevels(Ydata) != 2L) {
+        stop("selection = 'AUROC' requires exactly two response classes.",
+            call. = FALSE)
+    }
     grid <- .cv_make_prediction_grid(scaling, missing(scaling), method,
         missing(method),
         backend, missing(backend), "cpu_rsvd", TRUE, north,
@@ -12642,6 +13008,12 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         })
         .double_cv_result(results, context, runn)
     }
+    result <- .double_cv_attach_classification_diagnostics(
+        result,
+        context,
+        config,
+        runn
+    )
     if (perm.test) {
         result <- .double_cv_attach_permutation(result, context, config, times,
             runn)

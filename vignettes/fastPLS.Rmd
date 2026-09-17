@@ -27,7 +27,8 @@ pseudocode are reserved for the accompanying software-methods manuscript.
 
 `fastPLS` provides four related PLS families through one fitting interface. The
 choice should follow the scientific question and the size of the data rather
-than the execution backend.
+than the execution backend. The direct PLS-SVD method uses singular value
+decomposition (SVD) to obtain its latent directions.
 
 | Method | Use it when | Main consideration |
 |:--|:--|:--|
@@ -37,17 +38,14 @@ than the execution backend.
 | `kernelpls` | A nonlinear relation is plausible and the number of observations is moderate. | Nonlinear kernels require a training Gram matrix with quadratic storage in the sample count. |
 
 Classification can decode PLS scores by the largest dummy-response score
-(`classifier = "argmax"`) or by linear discriminant analysis in the retained
-score space (`classifier = "lda"`). The LDA head can improve discrimination
-when class boundaries are not well represented by the largest raw PLS score.
+(`classifier = "argmax"`) or by linear discriminant analysis (LDA) in the
+retained score space (`classifier = "lda"`). The LDA head can improve
+discrimination when class boundaries are not well represented by the largest
+raw PLS score.
 
 All public methods use the package's native randomized SVD. It is an
 approximation, so the fitted object records the seed and effective numerical
-controls. For sensitive analyses, compare several seeds and inspect the
-reported diagnostics. The detailed equations, storage identities, executable
-pseudocode, and cross-language implementation discussion are presented in the
-separate software-methods manuscript; this vignette focuses on using the R
-package correctly.
+controls.
 
 ## Installation and Compilation
 
@@ -83,14 +81,18 @@ Install Apple's command-line developer tools before a source build:
 xcode-select --install
 ```
 
-macOS uses Apple Accelerate for CPU BLAS/LAPACK. OpenBLAS is not required.
-Metal is detected automatically on supported Apple systems. To require Metal
-and stop installation if it cannot be compiled, set the following before the
-source installation:
+macOS uses Apple Accelerate for CPU BLAS/LAPACK. Metal is detected automatically
+on supported Apple systems. To require Metal and stop installation if it cannot
+be compiled, set the following before the source installation:
 
 ```{r require-metal, eval = FALSE}
 Sys.setenv(FASTPLS_USE_METAL = "1")
 ```
+
+In the benchmarks conducted on the Apple M3 system used for package testing,
+the Metal backend did not provide a meaningful computational-speed improvement
+over the macOS CPU backend. Performance may differ with the matrix dimensions,
+model configuration, and Apple hardware generation.
 
 ### Ubuntu and Debian
 
@@ -110,10 +112,14 @@ Sys.setenv(FASTPLS_USE_OPENBLAS = "1")
 install.packages("fastPLS", type = "source")
 ```
 
-The OpenBLAS release and selected CPU kernel can materially affect large
-matrix products. For reproducible timing, use a current build compiled for the
-target processor and record both values. Detecting the OpenBLAS family alone
-does not establish that an architecture-appropriate kernel is active.
+Ubuntu and Debian releases may provide different OpenBLAS versions, compilation
+options, threading implementations, and CPU kernels. Consequently, identical
+fastPLS calls can have substantially different runtimes across distributions
+or OpenBLAS installations without indicating a change in the statistical
+model. For reproducible timing, use a current build compiled for the target
+processor and record the version and selected kernel reported by
+`fastPLS_blas()`. Detecting the OpenBLAS family alone does not establish that an
+architecture-appropriate kernel is active.
 
 ### Fedora
 
@@ -155,6 +161,12 @@ The OpenBLAS library must match the target architecture. In particular, a
 Windows ARM64 build must not use an x86-64 Rtools or MSYS2 archive. If a
 compatible ARM64 OpenBLAS development package is unavailable, leave automatic
 detection enabled and allow the build to use R's BLAS/LAPACK instead.
+
+Windows OpenBLAS distributions can also differ in version, compiler options,
+threading implementation, and processor-specific kernel. These differences can
+materially affect runtime even when the fastPLS version and model settings are
+unchanged. For reproducible benchmarks, record the OpenBLAS version, selected
+kernel, thread count, and library path reported by `fastPLS_blas()`.
 
 If OpenBLAS is installed in a nonstandard location on Linux or Windows, set
 `OPENBLAS_ROOT` to its installation prefix. Set
@@ -206,9 +218,9 @@ but sequential PLS deflation remains serial and multicore acceleration depends
 on matrix shape and the installed numerical library. An explicit
 `n.cores =` argument takes precedence over the option. The first operation that
 resolves an unavailable option or environment value raises an error; CPU is
-never substituted. An explicitly requested `backend = "auto"` in
-prediction retains model-aware prediction dispatch and errors if the fitted
-model requires an unavailable accelerator.
+never substituted. Prediction must use the backend that fitted the model;
+therefore, a model fitted with CUDA or Metal requires the same explicit or
+session-level backend selection during prediction.
 
 ## Supported Computational Routes
 
@@ -609,30 +621,51 @@ fit_reg <- pls(
 fit_reg$Q2Y
 ```
 
-### Float32 Input
+### Float64 and Float32
 
-`pls()` also accepts predictor and response matrices from the `float` package.
-Supplying a `float::float32` object requests single-precision execution. CUDA
-keeps PLS-SVD, the SIMPLS-family estimator, OPLS, nonlinear kernel construction,
-prediction, and LDA
-on the selected GPU. Metal accepts float32 only and uses the fixed CPU/Metal
-operation split described above; CUDA supports float32 and float64. Nonlinear
-kernel PLS requires an explicit `n` by `n` Gram matrix, so the package checks
-the estimated live device or unified-memory storage before fitting.
-Extreme-response and nonlinear-kernel routes should be checked against float64
-when the scientific conclusion is sensitive to small numerical differences.
+Standard R numeric matrices use float64, whereas a `float::float32` object
+requests float32 execution. Float64 stores each value in eight bytes and
+retains approximately 15--16 decimal digits of precision. Float32 stores each
+value in four bytes and retains approximately seven decimal digits. Float32 can
+therefore halve the representation size of a matrix and reduce data-transfer
+and memory-bandwidth costs, but it also introduces more rounding error.
 
-Float64 remains the baseline precision. Float32 approximately halves raw
-matrix storage, but paired tests show that runtime, incremental host RSS, and
-device memory may increase or decrease depending on the route. The package
-therefore warns once for measured-risk regimes. This
-includes precision-sensitive SIMPLS-family and linear kernel-PLS classification,
-nonlinear kernels and multivariate regression
-with at least 10,000 response columns and 50 components. In that last regime,
-runtime, memory, and numerical behavior must be checked against float64 before
-the float32 result is used for scientific interpretation. Unsupported
-combinations stop before allocation and are never silently promoted to
-float64.
+| Property | float64 | float32 |
+|:--|:--|:--|
+| R input | Standard numeric matrix | `float::fl()` matrix |
+| Storage per value | 8 bytes | 4 bytes |
+| Approximate decimal precision | 15--16 digits | 7 digits |
+| fastPLS backends | CPU and CUDA | CPU, CUDA, and Metal |
+| Suggested role | Baseline and confirmatory analyses | Reduced-storage or accelerated analyses after numerical comparison |
+
+Reduced representation size does not guarantee a faster fit or lower peak
+process memory. Temporary workspaces, decomposition costs, host-device
+transfers, and backend-specific kernels can dominate the calculation. Runtime,
+incremental host memory, and device memory may therefore increase or decrease
+when float32 replaces float64.
+
+The lower precision can affect nearly tied latent directions, selected
+component counts, predictions, or classifications close to a decision
+boundary. For a new scientific workflow, compare float32 and float64 using the
+same split, seed, component grid, and model settings, and examine prediction
+differences as well as the final performance metric. Float64 remains the
+baseline precision when small numerical differences could alter the scientific
+conclusion.
+
+CUDA keeps PLS-SVD, the SIMPLS-family estimator, OPLS, nonlinear kernel
+construction, prediction, and LDA on the selected GPU. Metal accepts float32
+only and uses the fixed CPU/Metal operation split described above; CUDA supports
+float32 and float64. Nonlinear kernel PLS requires an explicit `n` by `n` Gram
+matrix, so the package checks the estimated live device or unified-memory
+storage before fitting.
+
+The package warns once for measured-risk regimes. These include
+precision-sensitive SIMPLS-family and linear kernel-PLS classification,
+nonlinear kernels, and multivariate regression with at least 10,000 response
+columns and 50 components. In the latter regime, runtime, memory, and numerical
+behavior must be checked against float64 before the float32 result is used for
+scientific interpretation. Unsupported combinations stop before allocation and
+are never silently promoted to float64.
 
 On Windows, the standard R toolchain does not expose the single-precision
 BLAS/LAPACK symbols used by the Unix-like compiled kernels. The Windows CPU
@@ -1056,8 +1089,10 @@ model complexity. The former names `"r2"` and `"q2"` are rejected because they
 did not identify these two different quantities unambiguously.
 
 Classification settings can be selected by `accuracy`, `balanced_accuracy`,
-`lift_accuracy`, `macro_precision`, `macro_recall`, `macro_f1`, `kappa`, R2Y,
-or Q2Y. Use balanced accuracy when unequal class frequencies make
+`AUROC`, `lift_accuracy`, `macro_precision`, `macro_recall`, `macro_f1`,
+`kappa`, R2Y, or Q2Y. Binary AUROC pools continuous held-out class scores
+across folds and treats the second factor level as positive. Use balanced
+accuracy when unequal class frequencies make
 majority-class accuracy misleading. Regression settings can be selected by
 R2Y, Q2Y, `RMSD`, `MAE`, `MAPE_percent`, `RPD`, `Pearson_r`, or
 `Spearman_r`. These additional aggregate metrics are useful for
@@ -1307,6 +1342,14 @@ head(cv_double$split_index)
 ```
 
 Here, all rows from one illustrative patient remain together in both loops.
+If an inner training fold contains one class, fastPLS predicts that class and
+uses a finite constant score for every requested component. These predictions
+remain in the pooled inner metric. If an outer training partition contains one
+class, the same rule supplies its held-out prediction and the fold is marked as
+not estimable for discrimination. The returned
+`degenerate_inner_folds`, `constant_classifier_fallback`, minimum class counts,
+`component_selection_informative`, and `outer_discrimination_estimable` fields
+make these cases explicit.
 
 The same nested workflow accepts a numeric vector for univariate regression or
 a numeric matrix for multivariate regression. The default inner-loop criterion

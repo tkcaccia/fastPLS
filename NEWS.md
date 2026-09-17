@@ -1,5 +1,16 @@
 # fastPLS 0.3
 
+* Added binary AUROC selection to single and nested cross-validation. AUROC is
+  calculated from pooled held-out continuous class scores, including explicit
+  constant scores from single-class training folds. CV results now report
+  degenerate inner folds, constant-class fallback use, minimum positive and
+  negative training counts, component-selection informativeness, and
+  non-estimable outer discrimination folds.
+
+* Removed `backend = "auto"`. Backend resolution now consistently follows an
+  explicit function argument, the session `backend` option, the
+  `FASTPLS_BACKEND` environment variable, and finally the CPU default.
+
 * Direct PLS-LDA fits now retain every requested component position when the
   estimable rank is smaller than the requested path. CPU, float32 CPU/Metal,
   and resident CUDA prediction evaluate each effective prefix once and repeat
@@ -203,7 +214,6 @@
 
 * Made omitted prediction backends follow the same explicit argument, session
   option, environment variable, and CPU precedence as fitting functions.
-  `backend = "auto"` remains the explicit model-aware prediction choice.
 
 * Made OpenBLAS optional at installation so standard Bioconductor Linux and
   Windows builders can use the BLAS/LAPACK supplied by R. Automatic detection
