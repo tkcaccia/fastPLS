@@ -63,7 +63,9 @@ A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
 \code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class outputs,
 and optional raw classification scores. When \code{Ytest} is supplied,
 \code{metrics} contains the complete result returned by \code{evaluate()} for every
-requested component count.
+requested component count. For a rank-limited PLS-LDA fit, the prediction path
+retains every requested position and repeats the last estimable class
+prediction and discriminant scores.
 }
 \description{
 Generates predictions for new samples from fitted PLS-SVD, SIMPLS-family,

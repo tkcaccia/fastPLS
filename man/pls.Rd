@@ -45,9 +45,10 @@ contain classes absent from the training data; such classes cannot be
 predicted and count as classification errors.}
 
 \item{ncomp}{Positive integer component count or vector of counts. Repeated
-values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
-cap the returned path at the corresponding numerical rank and report the
-effective counts.}
+values are removed. When a direct PLS-LDA fit reaches its numerical rank,
+all requested positions are retained and positions beyond that rank repeat
+the last estimable prediction and discriminant scores. The fitted object
+reports both requested and effective component counts.}
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 
@@ -102,9 +103,10 @@ their native runtimes; \code{n.cores} applies only to their host-side stages.}
 
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
-after filtering. Requests above this bound raise an error, including
-within cross-validation folds, rather than fitting a numerical null
-direction. Orthogonal components are not counted as predictive components.}
+after filtering. Direct PLS-LDA fits retain larger requested positions by
+repeating the last estimable result; other OPLS routes reject an unavailable
+predictive direction. Orthogonal components are not counted as predictive
+components.}
 
 \item{kernel}{Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
 \code{poly}.}
@@ -151,10 +153,14 @@ when no scaling is applied.
 otherwise \code{NA} placeholders may be returned for compatibility. Elements
 are named by component count, for example \code{"ncomp=2"}. For PLS-DA this
 is a dummy-response quantity, not classification accuracy.
+\item \code{requested_ncomp}: component positions requested by the caller. For
+rank-limited PLS-LDA fits, every position is retained in fitted and predicted
+outputs.
 \item \code{effective_ncomp}: number of estimable response-associated directions
-used for each requested component prefix. If a regression response is
-constant, this is zero; fitted and new-data predictions then equal the
-training-response mean, coefficients are zero, and \code{R2Y} is \code{NA}.
+used for each requested component prefix. Rank-limited PLS-LDA paths repeat
+the last estimable prediction and discriminant scores. If a regression
+response is constant, this is zero; fitted and new-data predictions then equal
+the training-response mean, coefficients are zero, and \code{R2Y} is \code{NA}.
 \item \code{Ypred}: predictions for \code{Xtest}, returned only when \code{Xtest} is supplied
 to \code{pls()}. For classification this contains predicted factor labels; for
 regression it contains numeric predictions.

@@ -24,8 +24,9 @@
     precision <- object$precision
     x <- .resident_cuda_input(newdata, precision, "newdata")
     ncomp <- as.integer(object$ncomp)
-    effective <- sort(unique(ncomp))
-    path_index <- match(ncomp, effective)
+    aligned_effective <- pmax(1L, .fastpls_effective_prediction_path(object))
+    effective <- sort(unique(aligned_effective))
+    path_index <- match(aligned_effective, effective)
     lda <- as.integer(.is_lda_classifier(object$classification_rule))
     combined <- cuda_resident_classify_response_path_cpp(
         object$resident_state, x, effective, lda, 1L
@@ -64,6 +65,7 @@
     x <- .resident_cuda_input(newdata, precision, "newdata")
     state <- object$resident_state
     ncomp <- as.integer(object$ncomp)
+    aligned_effective <- pmax(1L, .fastpls_effective_prediction_path(object))
     component_names <- paste0("ncomp=", ncomp)
     classification <- isTRUE(object$classification)
     lda <- as.integer(
@@ -75,8 +77,8 @@
         # Rank-limited PLS-SVD folds can map several requested prefixes to the
         # same fitted component. Evaluate each effective prefix once, then
         # restore the requested path without sending duplicates to CUDA.
-        effective_path <- sort(unique(ncomp))
-        path_index <- match(ncomp, effective_path)
+        effective_path <- sort(unique(aligned_effective))
+        path_index <- match(aligned_effective, effective_path)
         ranked_unique <- cuda_resident_classify_path_cpp(
             state, x, effective_path, lda, top
         )
@@ -102,17 +104,22 @@
         }
     }
     if (!classification || raw_scores) {
-        effective_path <- sort(unique(ncomp))
-        path_index <- match(ncomp, effective_path)
+        effective_path <- sort(unique(aligned_effective))
+        path_index <- match(aligned_effective, effective_path)
         path <- cuda_resident_predict_path_cpp(
             state, x, effective_path, lda
         )
         responses_unique <- lapply(seq_along(effective_path), function(index) {
-            .resident_cuda_output(path[, , index, drop = TRUE], precision)
+            value <- path[, , index, drop = TRUE]
+            if (classification) {
+                .resident_cuda_summary(value, precision)
+            } else {
+                .resident_cuda_output(value, precision)
+            }
         })
         responses <- responses_unique[path_index]
         names(responses) <- component_names
-        if (identical(precision, "double")) {
+        if (classification || identical(precision, "double")) {
             responses <- array(unlist(responses, use.names = FALSE),
                 c(nrow(x), object$m, length(ncomp)),
                 dimnames = list(
@@ -133,7 +140,9 @@
     }
     if (proj) {
         result$Ttest <- .resident_cuda_output(
-            cuda_resident_project_cpp(state, x, max(ncomp)), precision)
+            cuda_resident_project_cpp(state, x, max(aligned_effective)),
+            precision
+        )
     }
     if (!is.null(Ytest)) {
         labels <- if (classification) {
@@ -149,7 +158,7 @@
         } else {
             .resident_cuda_input(Ytest, precision, "Ytest")
         }
-        sums <- lapply(ncomp, function(a) {
+        sums <- lapply(aligned_effective, function(a) {
             .resident_cuda_summary(cuda_resident_response_sums_cpp(state, x,
                 response, labels, a), precision)
         })

@@ -1,5 +1,11 @@
 # fastPLS 0.3
 
+* Direct PLS-LDA fits now retain every requested component position when the
+  estimable rank is smaller than the requested path. CPU, float32 CPU/Metal,
+  and resident CUDA prediction evaluate each effective prefix once and repeat
+  the last estimable labels and discriminant scores for capped positions.
+  Fitted objects expose aligned `requested_ncomp` and `effective_ncomp` paths.
+
 * Added optional `return_splits = TRUE` output to `pls.single.cv()` and
   `pls.double.cv()`. The returned `split_index` matrix records sample-level
   training/test membership for every single, outer, and inner fold while the

@@ -178,7 +178,8 @@
     if (isTRUE(over) && isTRUE(warn)) {
         message_format <- paste0(
             "plssvd rank is limited to %d; requested ncomp above this ",
-            "value will be capped at %d internally"
+            "value uses %d internally, and returned prediction paths repeat ",
+            "the last estimable prefix."
         )
         warning(
             sprintf(
@@ -207,8 +208,9 @@
     over <- max(ncomp) > rank_limit
     if (isTRUE(over) && isTRUE(warn)) {
         message_format <- paste0(
-            "The component path is limited to rank %d; requests ",
-            "above this value are capped at %d internally."
+            "The component path is limited to rank %d; requests above this ",
+            "value use %d internally, and returned prediction paths repeat ",
+            "the last estimable prefix."
         )
         warning(
             sprintf(
@@ -226,6 +228,97 @@
     )
 }
 
+.fastpls_effective_prediction_path <- function(object) {
+    requested <- as.integer(object$ncomp)
+    effective <- as.integer(object$effective_ncomp %||% requested)
+    if (length(effective) == length(requested)) {
+        return(effective)
+    }
+    maximum <- suppressWarnings(max(effective, na.rm = TRUE))
+    if (!length(effective) || !is.finite(maximum)) {
+        maximum <- suppressWarnings(max(requested, na.rm = TRUE))
+    }
+    pmin(requested, as.integer(maximum))
+}
+
+.fastpls_expand_path_value <- function(value, path_index, requested) {
+    source_length <- max(path_index)
+    if (is.null(value)) {
+        return(value)
+    }
+    if (is.data.frame(value) && ncol(value) == source_length) {
+        value <- value[, path_index, drop = FALSE]
+        names(value) <- .fastpls_ncomp_names(requested)
+        return(value)
+    }
+    dimensions <- dim(value)
+    if (!is.null(dimensions) && length(dimensions) == 3L &&
+        dimensions[[3L]] == source_length) {
+        value <- value[, , path_index, drop = FALSE]
+        dimnames(value)[[3L]] <- .fastpls_ncomp_names(requested)
+        return(value)
+    }
+    if (!is.null(dimensions) && length(dimensions) == 2L &&
+        dimensions[[2L]] == source_length) {
+        value <- value[, path_index, drop = FALSE]
+        colnames(value) <- .fastpls_ncomp_names(requested)
+        return(value)
+    }
+    if (is.list(value) && length(value) == source_length) {
+        value <- value[path_index]
+        names(value) <- .fastpls_ncomp_names(requested)
+        return(value)
+    }
+    if (is.atomic(value) && is.null(dimensions) &&
+        length(value) == source_length) {
+        value <- value[path_index]
+        names(value) <- .fastpls_ncomp_names(requested)
+    }
+    value
+}
+
+.fastpls_restore_requested_component_path <- function(model, requested) {
+    model <- .fastpls_restore_internal_output_fields(model)
+    requested <- as.integer(requested)
+    fitted <- as.integer(model$ncomp)
+    if (!length(fitted) && is.list(model$inner_model)) {
+        fitted <- as.integer(model$inner_model$ncomp)
+    }
+    if (!length(fitted)) {
+        return(model)
+    }
+    capped <- pmin(requested, max(fitted))
+    path_index <- match(capped, fitted)
+    if (anyNA(path_index)) {
+        stop("Internal component-path restoration failed.", call. = FALSE)
+    }
+    effective <- as.integer(model$effective_ncomp %||% fitted)
+    if (length(effective) != length(fitted)) {
+        effective <- pmin(fitted, max(effective, na.rm = TRUE))
+    }
+    model$requested_ncomp <- requested
+    model$effective_ncomp <- effective[path_index]
+    model$ncomp <- requested
+    path_fields <- c(
+        "Yfit", "Ypred", "B", "R2Y", "Q2Y", "accuracy",
+        "balanced_accuracy", "top_k_accuracy", "Ypred_index",
+        "Ypred_top", "LDA_scores", "Ypred_scores"
+    )
+    for (field in path_fields) {
+        if (!is.null(model[[field]])) {
+            model[[field]] <- .fastpls_expand_path_value(
+                model[[field]], path_index, requested
+            )
+        }
+    }
+    if (is.list(model$inner_model)) {
+        model$inner_model <- .fastpls_restore_requested_component_path(
+            model$inner_model, requested
+        )
+    }
+    model
+}
+
 .opls_require_predictive_rank <- function(ncomp, X, removed, centered) {
     available <- min(nrow(X) - as.integer(centered), ncol(X)) - removed
     requested <- max(as.integer(ncomp))
@@ -238,6 +331,36 @@
             call. = FALSE)
     }
     invisible(available)
+}
+
+.cap_opls_ncomp <- function(ncomp, X, removed, centered, warn = TRUE) {
+    available <- min(nrow(X) - as.integer(centered), ncol(X)) - removed
+    if (available < 1L) {
+        stop(
+            "OPLS has no predictive component after orthogonal filtering.",
+            call. = FALSE
+        )
+    }
+    over <- max(as.integer(ncomp)) > available
+    if (isTRUE(over) && isTRUE(warn)) {
+        warning(
+            sprintf(
+                paste0(
+                    "The OPLS predictive path is limited to rank %d; ",
+                    "larger requests use %d internally, and returned ",
+                    "prediction paths repeat the last estimable prefix."
+                ),
+                available,
+                available
+            ),
+            call. = FALSE
+        )
+    }
+    list(
+        ncomp = unique(pmin(as.integer(ncomp), available)),
+        max_rank = available,
+        capped = isTRUE(over)
+    )
 }
 
 .enable_flash_prediction <- function(
@@ -2261,15 +2384,16 @@ print.fastPLS <- function(x, ...) {
 
 .float32_lda_topk_prediction <- function(object, Xtest, Ytest, top,
     backend = "cpu") {
-    ncomp <- as.integer(object$ncomp)
+    requested <- as.integer(object$ncomp)
+    ncomp <- pmax(1L, .fastpls_effective_prediction_path(object))
     keep <- min(as.integer(top)[1L], length(object$lev))
     top_index <- array(
         NA_integer_,
-        dim = c(nrow(Xtest), keep, length(ncomp))
+        dim = c(nrow(Xtest), keep, length(requested))
     )
     top_score <- array(
         NA_real_,
-        dim = c(nrow(Xtest), keep, length(ncomp))
+        dim = c(nrow(Xtest), keep, length(requested))
     )
     block_size <- .prediction_block_size(object, nrow(Xtest))
     predict_fun <- .float32_lda_predict_fun(object)
@@ -2398,6 +2522,8 @@ print.fastPLS <- function(x, ...) {
 
 .float32_lda_prediction <- function(object, Xtest, Ytest, proj, top,
     raw_scores, backend = "cpu") {
+    requested <- as.integer(object$ncomp)
+    ncomp <- pmax(1L, .fastpls_effective_prediction_path(object))
     if (top > 1L && !raw_scores && !proj) {
         result <- .float32_lda_topk_prediction(
             object, Xtest, Ytest, top, backend
@@ -2405,11 +2531,11 @@ print.fastPLS <- function(x, ...) {
         if (!is.null(Ytest)) {
             all_scores <- .float32_multiply(
                 Xtest,
-                object$R[, seq_len(max(object$ncomp)), drop = FALSE],
+                object$R[, seq_len(max(ncomp)), drop = FALSE],
                 backend
             )
             result$Q2Y <- vapply(
-                as.integer(object$ncomp),
+                ncomp,
                 function(k) {
                     response <- .float32_response_prediction(
                         object, Xtest, k, all_scores, backend
@@ -2419,11 +2545,10 @@ print.fastPLS <- function(x, ...) {
                 numeric(1L)
             )
         }
-        return(.fastpls_name_pls_metric_paths(result, object$ncomp))
+        return(.fastpls_name_pls_metric_paths(result, requested))
     }
-    ncomp <- as.integer(object$ncomp)
     predicted <- as.data.frame(matrix(nrow = nrow(Xtest), ncol = length(ncomp)))
-    names(predicted) <- .fastpls_ncomp_names(ncomp)
+    names(predicted) <- .fastpls_ncomp_names(requested)
     scores <- .float32_score_cube(nrow(Xtest), object$lev, length(ncomp),
         raw_scores ||
             top > 1L)
@@ -2476,7 +2601,7 @@ print.fastPLS <- function(x, ...) {
     if (proj) {
         result$Ttest <- all_scores
     }
-    .fastpls_name_pls_metric_paths(result, ncomp)
+    .fastpls_name_pls_metric_paths(result, requested)
 }
 
 .float32_response_prediction <- function(object, Xtest, k, scores = NULL,
@@ -2659,9 +2784,15 @@ print.fastPLS <- function(x, ...) {
         use_lda <- .is_lda_classifier(
             object$classification_rule %||% "argmax"
         )
-        codes <- pls_float32_class_predict_compact_cpp(
-            object, input, use_lda, block_size
+        effective <- pmax(1L, .fastpls_effective_prediction_path(object))
+        unique_effective <- sort(unique(effective))
+        compact_object <- object
+        compact_object$ncomp <- unique_effective
+        compact_object$effective_ncomp <- unique_effective
+        codes_unique <- pls_float32_class_predict_compact_cpp(
+            compact_object, input, use_lda, block_size
         )
+        codes <- codes_unique[, match(effective, unique_effective), drop = FALSE]
         predicted <- as.data.frame(lapply(
             seq_along(object$ncomp),
             function(index) {
@@ -2839,10 +2970,8 @@ print.fastPLS <- function(x, ...) {
     if (object$classification_rule == "lda_metal") {
         .fastpls_require_backend_available("metal", "This model")
     }
-    components <- pmax(
-        1L,
-        pmin(as.integer(object$ncomp), max(object$lda$ncomp, na.rm = TRUE))
-    )
+    components <- pmax(1L, .fastpls_effective_prediction_path(object))
+    components <- pmin(components, max(object$lda$ncomp, na.rm = TRUE))
     list(
         components = components,
         max = max(components),
@@ -5043,10 +5172,11 @@ print.fastPLS <- function(x, ...) {
     block_size <- .prediction_block_size(object, nrow(scores))
     squared_error <- numeric(length(object$ncomp))
     component_specific <- is.list(object$W_latent)
+    effective_path <- pmax(1L, .fastpls_effective_prediction_path(object))
     for (start in seq.int(1L, nrow(scores), by = block_size)) {
         rows <- start:min(nrow(scores), start + block_size - 1L)
         for (index in seq_along(object$ncomp)) {
-            component <- as.integer(object$ncomp[[index]])
+            component <- effective_path[[index]]
             score_block <- scores[rows, seq_len(component), drop = FALSE]
             prediction <- if (component_specific) {
                 score_block %*% object$W_latent[[
@@ -5104,7 +5234,12 @@ print.fastPLS <- function(x, ...) {
         return(result)
     }
     response <- if (!is.null(Ytest)) {
-        pls_labels_core_predict_cpp(object, Xtest, TRUE)
+        core_object <- object
+        core_object$ncomp <- sort(unique(pmax(
+            1L, .fastpls_effective_prediction_path(object)
+        )))
+        core_object$effective_ncomp <- core_object$ncomp
+        pls_labels_core_predict_cpp(core_object, Xtest, TRUE)
     } else {
         NULL
     }
@@ -5138,7 +5273,9 @@ print.fastPLS <- function(x, ...) {
             Ytest,
             result$Ypred
         )
-        result$Q2Y <- .predict_attach_q2(response, object, Ytest)$Q2Y
+        result$Q2Y <- .double_classification_q2_from_scores(
+            object, response$Ttest, Ytest
+        )
     }
     result
 }
@@ -5303,7 +5440,9 @@ print.fastPLS <- function(x, ...) {
 #'   `Ttest`, optional `Ypred_top` and `Ypred_top_score` ranked-class outputs,
 #'   and optional raw classification scores. When `Ytest` is supplied,
 #'   `metrics` contains the complete result returned by `evaluate()` for every
-#'   requested component count.
+#'   requested component count. For a rank-limited PLS-LDA fit, the prediction
+#'   path retains every requested position and repeats the last estimable class
+#'   prediction and discriminant scores.
 #' @examples
 #' X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 #' y <- mtcars$mpg
@@ -9645,9 +9784,10 @@ plot.permutation <- function(
 #'   contain classes absent from the training data; such classes cannot be
 #'   predicted and count as classification errors.
 #' @param ncomp Positive integer component count or vector of counts. Repeated
-#'   values are removed. PLS-SVD, the SIMPLS-family estimator, and kernel PLS
-#'   cap the returned path at the corresponding numerical rank and report the
-#'   effective counts.
+#'   values are removed. When a direct PLS-LDA fit reaches its numerical rank,
+#'   all requested positions are retained and positions beyond that rank repeat
+#'   the last estimable prediction and discriminant scores. The fitted object
+#'   reports both requested and effective component counts.
 #' @param scaling One of \code{centering}, \code{autoscaling}, or \code{none}.
 #' @param method One of \code{simpls}, \code{plssvd}, \code{opls}, or
 #' \code{kernelpls}.
@@ -9689,9 +9829,10 @@ plot.permutation <- function(
 #'   their native runtimes; `n.cores` applies only to their host-side stages.
 #' @param north Number of orthogonal components removed by OPLS.
 #'   The predictive count `ncomp` must fit within the predictor rank remaining
-#'   after filtering. Requests above this bound raise an error, including
-#'   within cross-validation folds, rather than fitting a numerical null
-#'   direction. Orthogonal components are not counted as predictive components.
+#'   after filtering. Direct PLS-LDA fits retain larger requested positions by
+#'   repeating the last estimable result; other OPLS routes reject an
+#'   unavailable predictive direction. Orthogonal components are not counted
+#'   as predictive components.
 #' @param kernel Kernel type for kernel PLS: \code{linear}, \code{rbf}, or
 #' \code{poly}.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xtrain)`.
@@ -9731,10 +9872,15 @@ plot.permutation <- function(
 #'     otherwise `NA` placeholders may be returned for compatibility. Elements
 #'     are named by component count, for example `"ncomp=2"`. For PLS-DA this
 #'     is a dummy-response quantity, not classification accuracy.
+#'   * `requested_ncomp`: component positions requested by the caller. For
+#'     rank-limited PLS-LDA fits, every position is retained in fitted and
+#'     predicted outputs.
 #'   * `effective_ncomp`: number of estimable response-associated directions
-#'     used for each requested component prefix. If a regression response is
-#'     constant, this is zero; fitted and new-data predictions then equal the
-#'     training-response mean, coefficients are zero, and `R2Y` is `NA`.
+#'     used for each requested component prefix. Rank-limited PLS-LDA paths
+#'     repeat the last estimable prediction and discriminant scores. If a
+#'     regression response is constant, this is zero; fitted and new-data
+#'     predictions then equal the training-response mean, coefficients are
+#'     zero, and `R2Y` is `NA`.
 #'   * `Ypred`: predictions for `Xtest`, returned only when `Xtest` is supplied
 #'     to `pls()`. For classification this contains predicted factor labels; for
 #'     regression it contains numeric predictions.
@@ -9818,6 +9964,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls()")
     ncomp <- .fastpls_validate_ncomp(ncomp)
+    requested_ncomp <- ncomp
     north <- .fastpls_validate_integer_control(north, "north", 0L)
     degree <- .fastpls_validate_integer_control(degree, "degree", 1L)
     times <- .fastpls_validate_integer_control(times, "times", 1L)
@@ -9826,7 +9973,18 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
         .svd_control_from_dots(dots)$dots, backend, classifier, scaling
     )
     kernel <- match.arg(kernel)
-    if (context$method %in% c("simpls", "kernelpls")) {
+    if (identical(context$method, "plssvd") &&
+        isTRUE(context$classification) &&
+        .is_lda_classifier(context$classifier)) {
+        response_classes <- nlevels(droplevels(factor(context$Ytrain)))
+        ncomp <- .cap_plssvd_ncomp(
+            ncomp,
+            nrow(context$Xtrain),
+            ncol(context$Xtrain),
+            response_classes,
+            factor_response = TRUE
+        )$ncomp
+    } else if (context$method %in% c("simpls", "kernelpls")) {
         component_kernel <- if (identical(context$method, "simpls")) {
             "linear"
         } else {
@@ -9838,8 +9996,17 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
             ncol(context$Xtrain),
             kernel = component_kernel
         )$ncomp
+    } else if (identical(context$method, "opls") &&
+        isTRUE(context$classification) &&
+        .is_lda_classifier(context$classifier)) {
+        ncomp <- .cap_opls_ncomp(
+            ncomp,
+            context$Xtrain,
+            north,
+            context$scal != 3L
+        )$ncomp
     }
-    config <- list(ncomp = ncomp,
+    config <- list(ncomp = ncomp, requested_ncomp = requested_ncomp,
         lda_ridge = .fixed_lda_relative_ridge, fit = fit,
         bycol = bycol,
         return_variance = return_variance, return_loadings = return_loadings,
@@ -9848,6 +10015,12 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
         kernel = kernel,
         gamma = gamma, degree = degree, coef0 = coef0)
     model <- .pls_dispatch(context, config)
+    if (isTRUE(context$classification) &&
+        .is_lda_classifier(context$classifier)) {
+        model <- .fastpls_restore_requested_component_path(
+            model, requested_ncomp
+        )
+    }
     .pls_finalize(model, context, config)
 }
 
