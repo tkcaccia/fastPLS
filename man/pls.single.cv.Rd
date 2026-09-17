@@ -24,6 +24,7 @@ pls.single.cv(
   fit = TRUE,
   bycol = FALSE,
   selection = "auto",
+  return_splits = FALSE,
   ...
 )
 }
@@ -120,6 +121,11 @@ operate on dummy-coded responses, not decoded labels. Incompatible
 task/metric combinations raise an error before fitting. The former names
 \code{"r2"} and \code{"q2"} are rejected as ambiguous.}
 
+\item{return_splits}{Return a sample-by-fold character matrix named
+\code{split_index} when \code{TRUE}. Rows use the original sample positions and each
+column represents one fold, with values \code{"training"} or \code{"test"}. The
+default \code{FALSE} avoids allocating this additional matrix.}
+
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
 \code{oversample} and \code{power}. Vector values are included in the tuning grid.}
@@ -179,8 +185,8 @@ Irrelevant classifier- or method-specific defaults are omitted; for
 example, controls belonging to an unselected classifier are omitted.
 \item \code{tuning_summary} and \code{tuning_metrics}: tables for all tested
 configurations when more than one predictive configuration is supplied.
-\item The returned object can be passed as the first argument to \code{\link[=pls]{pls()}} to
-refit the selected model on the full training data and predict new samples.
+\item \code{split_index}: sample-by-fold training/test membership matrix,
+returned only when \code{return_splits = TRUE}.
 }
 }
 \description{

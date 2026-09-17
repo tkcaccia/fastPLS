@@ -95,7 +95,7 @@ test_that("pls.single.cv tuning_config omits irrelevant classifier controls", {
   expect_false(any(c("lda_ridge", "k", "tau", "alpha", "top_m", "cknn_memory") %in% names(lda$tuning_config)))
 })
 
-test_that("pls refits and predicts from a pls.single.cv result", {
+test_that("single CV supports explicit refitting without retaining data", {
   set.seed(2106)
   test_idx <- sample(seq_len(nrow(iris)), 30)
   Xtrain <- as.matrix(iris[-test_idx, 1:4])
@@ -114,18 +114,29 @@ test_that("pls refits and predicts from a pls.single.cv result", {
     seed = 2106
   )
 
-  expect_s3_class(opt, "fastPLSCV")
-  expect_true(all(c("Xdata", "Ydata") %in% names(attr(opt, "fit_data"))))
+  expect_null(attr(opt, "fit_data", exact = TRUE))
+  selected <- utils::modifyList(opt$tuning_config, opt$best_parameters)
+  controls <- selected$svd_dots
+  selected$svd_dots <- NULL
+  fit <- do.call(pls, c(
+    list(
+      Xtrain = Xtrain,
+      Ytrain = Ytrain,
+      Xtest = Xtest,
+      Ytest = Ytest,
+      return_variance = FALSE
+    ),
+    selected,
+    controls
+  ))
 
-  fit_named <- pls(opt, Xtest = Xtest, Ytest = Ytest, return_variance = FALSE)
-  fit_positional <- pls(opt, Xtest, Ytest = Ytest, return_variance = FALSE)
-
-  expect_s3_class(fit_named, "fastPLS")
-  expect_equal(as.integer(attr(fit_named, "fastPLS_internal")$ncomp), as.integer(opt$best_ncomp))
-  expect_equal(fit_named$cv_best_parameters, opt$best_parameters)
-  expect_true(is.data.frame(fit_named$Ypred))
-  expect_equal(nrow(fit_named$Ypred), nrow(Xtest))
-  expect_equal(fit_named$Ypred, fit_positional$Ypred)
+  expect_s3_class(fit, "fastPLS")
+  expect_equal(
+    as.integer(attr(fit, "fastPLS_internal")$ncomp),
+    as.integer(opt$best_ncomp)
+  )
+  expect_true(is.data.frame(fit$Ypred))
+  expect_equal(nrow(fit$Ypred), nrow(Xtest))
 })
 
 test_that("pls refits regression models selected by pls.single.cv", {
@@ -144,12 +155,21 @@ test_that("pls refits regression models selected by pls.single.cv", {
     seed = 2107,
     fit = FALSE
   )
-  fit <- pls(
-    opt,
-    Xtest = X[test_idx, , drop = FALSE],
-    Ytest = y[test_idx],
-    return_variance = FALSE
-  )
+  expect_null(attr(opt, "fit_data", exact = TRUE))
+  selected <- utils::modifyList(opt$tuning_config, opt$best_parameters)
+  controls <- selected$svd_dots
+  selected$svd_dots <- NULL
+  fit <- do.call(pls, c(
+    list(
+      Xtrain = X[-test_idx, , drop = FALSE],
+      Ytrain = y[-test_idx],
+      Xtest = X[test_idx, , drop = FALSE],
+      Ytest = y[test_idx],
+      return_variance = FALSE
+    ),
+    selected,
+    controls
+  ))
 
   expect_s3_class(fit, "fastPLS")
   expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), as.integer(opt$best_ncomp))

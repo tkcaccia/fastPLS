@@ -27,6 +27,7 @@ pls.double.cv(
   classifier = c("argmax", "lda"),
   bycol = FALSE,
   selection = "auto",
+  return_splits = FALSE,
   ...
 )
 }
@@ -143,6 +144,13 @@ for classification operate on dummy-coded responses. Incompatible
 task/metric combinations raise an error before fitting. The former names
 \code{"r2"} and \code{"q2"} are rejected as ambiguous.}
 
+\item{return_splits}{Return a character matrix named \code{split_index} when
+\code{TRUE}. Rows use the original sample positions. Outer columns contain
+\code{"training"} or \code{"test"}; inner columns additionally use \code{"outer_test"}
+for samples excluded by the corresponding outer fold. Column names encode
+the run and outer/inner fold. The default \code{FALSE} avoids allocating this
+additional matrix.}
+
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
 \code{oversample} and \code{power}. Vector values are tuned in the inner loop.}
@@ -205,6 +213,8 @@ permutation metric.
 \code{permutation_solver_seed}, \code{permutation_requested},
 \code{permutation_completed}, \code{permutation_failed}, and \code{permutation_errors}:
 the exchangeability contract and null-fit audit.
+\item \code{split_index}: sample-by-split membership matrix for every outer and
+inner fold, returned only when \code{return_splits = TRUE}.
 }
 }
 \description{

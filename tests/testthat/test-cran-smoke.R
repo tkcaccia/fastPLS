@@ -183,9 +183,15 @@ test_that("single and nested cross-validation return finite predictions", {
 
     expect_true(single$best_ncomp %in% 1:2)
     expect_true(is.finite(single$best_metric_value))
+    expect_null(attr(single, "fit_data", exact = TRUE))
     expect_true(is.factor(nested$Ypred))
     expect_equal(length(nested$Ypred), nrow(data$x))
     expect_true(all(!is.na(nested$Ypred)))
+    expect_null(attr(nested, "fit_data", exact = TRUE))
+    inner <- nested$results[[1L]]$inner
+    expect_true(all(vapply(inner, function(value) {
+        is.null(attr(value, "fit_data", exact = TRUE))
+    }, logical(1L))))
 })
 
 test_that("unavailable accelerators fail without a CPU fallback", {

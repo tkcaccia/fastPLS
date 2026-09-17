@@ -6150,105 +6150,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     .cv_normalize_training_summary(out, ncomp)
 }
 
-.is_single_pls_cv_result <- function(x) {
-    is.list(x) && (
-        inherits(x, "fastPLSCV") ||
-            (!is.null(x$best_ncomp) && !is.null(x$tuning_config))
-    )
-}
-
-.cv_attach_fit_data <- function(res, Xdata, Ydata) {
-    attr(res, "fit_data") <- list(Xdata = Xdata, Ydata = Ydata)
-    class(res) <- unique(c("fastPLSCV", class(res)))
-    res
-}
-
-.cv_drop_fit_data <- function(res) {
-    attr(res, "fit_data") <- NULL
-    class(res) <- setdiff(class(res), "fastPLSCV")
-    res
-}
-
-.pls_cv_refit_args <- function(cv, fit_data, Xtest, Ytest, options) {
-    params <- .cv_config_list(cv$tuning_config)
-    args <- c(
-        list(
-            Xtrain = fit_data$Xdata,
-            Ytrain = fit_data$Ydata,
-            Xtest = Xtest,
-            Ytest = Ytest,
-            ncomp = as.integer(cv$best_ncomp[[1L]]),
-            scaling = params$scaling %||% "centering",
-            method = params$method %||% "simpls",
-            classifier = params$classifier %||% "argmax",
-            fit = options$fit,
-            bycol = options$bycol,
-            return_variance = options$return_variance,
-            return_loadings = options$return_loadings,
-            proj = options$proj,
-            perm.test = options$perm.test,
-            times = options$times,
-            backend = params$backend %||% "cpu",
-            n.cores = options$n.cores,
-            north = params$north %||% 1L,
-            kernel = params$kernel %||% "linear",
-            gamma = params$gamma,
-            degree = params$degree %||% 3L,
-            coef0 = params$coef0 %||% 1
-        ),
-        cv$tuning_config$svd_dots %||% list()
-    )
-    args[!vapply(args, is.null, logical(1L))]
-}
-
-.pls_from_single_cv_result <- function(
-    cv,
-    Xtest = NULL,
-    Ytest = NULL,
-    fit = FALSE,
-    bycol = FALSE,
-    return_variance = TRUE,
-    return_loadings = FALSE,
-    proj = FALSE,
-    perm.test = FALSE,
-    times = 100,
-    n.cores = NULL
-) {
-    fit_data <- attr(cv, "fit_data", exact = TRUE)
-if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
-        stop(
-    "This pls.single.cv() result does not contain the training data needed ",
-    "for automatic refitting. Please rerun pls.single.cv() with the current ",
-            "fastPLS version, or call pls(Xtrain, Ytrain, ...) manually using ",
-            "cv$best_parameters.",
-            call. = FALSE
-        )
-    }
-    cfg <- cv$tuning_config
-    if (is.null(cfg)) {
-        stop(
-            "The pls.single.cv() result does not contain tuning_config.",
-            call. = FALSE
-        )
-    }
-    options <- list(
-        fit = fit,
-        bycol = bycol,
-        return_variance = return_variance,
-        return_loadings = return_loadings,
-        proj = proj,
-        perm.test = perm.test,
-        times = times,
-        n.cores = n.cores
-    )
-    args <- .pls_cv_refit_args(cv, fit_data, Xtest, Ytest, options)
-    model <- do.call(pls, args)
-    model$cv_best_parameters <- cv$best_parameters
-    model$cv_best_metric_name <- cv$best_metric_name
-    model$cv_best_metric_value <- cv$best_metric_value
-    model
-}
-
 .cv_metric_frame <- function(values, name) {
     data.frame(
         ncomp_index = seq_along(values),
@@ -9901,13 +9802,6 @@ plot.permutation <- function(
 #' )
 #' head(predict(fit, X)$Ypred)
 #'
-#' cv <- pls.single.cv(X, y,
-#'     ncomp = seq_len(2), kfold = 3, method = "simpls",
-#'     backend = "cpu", seed = 1
-#' )
-#' fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
-#' cv$best_ncomp
-#' head(fit_cv$Ypred)
 #' @export
 pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     scaling = c("centering",
@@ -9923,23 +9817,6 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     n.cores <- .fastpls_apply_cpu_cores(n.cores)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls()")
-    if (.is_single_pls_cv_result(Xtrain)) {
-        cv_Xtest <- if (!missing(Ytrain) && missing(Xtest)) {
-            Ytrain
-        }
-        else if (missing(Xtest)) {
-            NULL
-        }
-        else {
-            Xtest
-        }
-        return(.pls_from_single_cv_result(cv = Xtrain, Xtest = cv_Xtest,
-            Ytest = if (missing(Ytest)) NULL else Ytest,
-            fit = fit, bycol = bycol, return_variance = return_variance,
-            return_loadings = return_loadings,
-            proj = proj, perm.test = perm.test, times = times,
-            n.cores = n.cores))
-    }
     ncomp <- .fastpls_validate_ncomp(ncomp)
     north <- .fastpls_validate_integer_control(north, "north", 0L)
     degree <- .fastpls_validate_integer_control(degree, "degree", 1L)
@@ -10424,6 +10301,27 @@ keep <- c("scaling", "method", "backend", "classifier")
     )
 }
 
+.cv_validate_return_splits <- function(return_splits) {
+    if (!is.logical(return_splits) || length(return_splits) != 1L ||
+        is.na(return_splits)) {
+        stop("`return_splits` must be TRUE or FALSE.", call. = FALSE)
+    }
+    return_splits
+}
+
+.cv_single_split_index <- function(fold) {
+    values <- sort(unique(as.integer(fold)))
+    output <- vapply(values, function(value) {
+        ifelse(fold == value, "test", "training")
+    }, character(length(fold)))
+    if (is.null(dim(output))) {
+        output <- matrix(output, ncol = 1L)
+    }
+    rownames(output) <- as.character(seq_along(fold))
+    colnames(output) <- paste0("fold_", seq_along(values))
+    output
+}
+
 .single_cv_grid_call <- function(parameters, config, selection_metric) {
     arguments <- c(
         list(
@@ -10466,7 +10364,6 @@ keep <- c("scaling", "method", "backend", "classifier")
         result$cv_status <- result$status
         result$status <- "ok"
     }
-    result <- .cv_drop_fit_data(result)
     result$tuning_config_full <- config[setdiff(names(config), "svd.method")]
     result$tuning_config <- .cv_prune_config_for_output(config)
     ok <- identical(result$status, "ok")
@@ -10717,7 +10614,7 @@ keep <- c("scaling", "method", "backend", "classifier")
         metrics,
         selection_metric
     )
-    .cv_attach_fit_data(best, parameters$Xdata, parameters$Ydata)
+    best
 }
 
 .single_cv_context <- function(Xdata, Ydata, constrain, config, seed,
@@ -10995,7 +10892,7 @@ keep <- c("scaling", "method", "backend", "classifier")
         fit,
         bycol
     )
-    output <- .cv_attach_fit_data(result, context$X, context$Y)
+    output <- result
     if (context$float32) {
         attr(output, "fastPLS_internal") <- list(
             precision = "float32",
@@ -11070,6 +10967,10 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   operate on dummy-coded responses, not decoded labels. Incompatible
 #'   task/metric combinations raise an error before fitting. The former names
 #'   `"r2"` and `"q2"` are rejected as ambiguous.
+#' @param return_splits Return a sample-by-fold character matrix named
+#'   `split_index` when `TRUE`. Rows use the original sample positions and each
+#'   column represents one fold, with values `"training"` or `"test"`. The
+#'   default `FALSE` avoids allocating this additional matrix.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample` and `power`. Vector values are included in the tuning grid.
@@ -11148,8 +11049,8 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   example, controls belonging to an unselected classifier are omitted.
 #'   \item `tuning_summary` and `tuning_metrics`: tables for all tested
 #'   configurations when more than one predictive configuration is supplied.
-#'   \item The returned object can be passed as the first argument to [pls()] to
-#'   refit the selected model on the full training data and predict new samples.
+#'   \item `split_index`: sample-by-fold training/test membership matrix,
+#'   returned only when `return_splits = TRUE`.
 #'   }
 #' @examples
 #' idx <- c(seq_len(12), 51:62, 101:112)
@@ -11176,8 +11077,9 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     north = 1L,
     kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1,
     classifier = c("argmax", "lda"), fit = TRUE, bycol = FALSE,
-    selection = "auto", ...) {
+    selection = "auto", return_splits = FALSE, ...) {
     n.cores <- .fastpls_apply_cpu_cores(n.cores)
+    return_splits <- .cv_validate_return_splits(return_splits)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls.single.cv()")
     if (sum(is.na(Xdata)) > 0) {
@@ -11215,15 +11117,22 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         constrain = constrain,
         seed = seed, kfold = kfold, fit = fit, bycol = bycol,
         n.cores = n.cores)
-    if (length(grid) > 1L) {
-        return(.single_cv_run_grid(grid, parameters, selection$metric))
+    result <- if (length(grid) > 1L) {
+        .single_cv_run_grid(grid, parameters, selection$metric)
+    } else {
+        context <- .single_cv_context(
+            Xdata, Ydata, constrain, grid[[1L]], seed,
+            selection$metric, n.cores
+        )
+        result <- .single_cv_run_engine(context, ncomp, kfold)
+        paths <- .single_cv_metric_paths(result, context)
+        result <- .single_cv_attach_selection(result, context, paths)
+        .single_cv_finish(result, context, grid, fit, bycol)
     }
-    context <- .single_cv_context(Xdata, Ydata, constrain, grid[[1L]], seed,
-        selection$metric, n.cores)
-    result <- .single_cv_run_engine(context, ncomp, kfold)
-    paths <- .single_cv_metric_paths(result, context)
-    result <- .single_cv_attach_selection(result, context, paths)
-    .single_cv_finish(result, context, grid, fit, bycol)
+    if (return_splits) {
+        result$split_index <- .cv_single_split_index(result$fold)
+    }
+    result
 }
 
 
@@ -11383,6 +11292,48 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         })
     }
     list(outer = outer, inner = inner)
+}
+
+.double_cv_split_index <- function(plan) {
+    sample_count <- nrow(plan$outer)
+    columns <- list()
+    column_names <- character(0)
+    for (run_index in seq_len(ncol(plan$outer))) {
+        outer <- plan$outer[, run_index]
+        outer_values <- sort(unique(outer))
+        for (outer_index in seq_along(outer_values)) {
+            outer_value <- outer_values[[outer_index]]
+            membership <- rep("training", sample_count)
+            membership[outer == outer_value] <- "test"
+            columns[[length(columns) + 1L]] <- membership
+            column_names <- c(
+                column_names,
+                sprintf("run_%d_outer_%d", run_index, outer_index)
+            )
+
+            inner <- plan$inner[[run_index]][[outer_index]]
+            inner_values <- sort(unique(inner[inner > 0L]))
+            for (inner_index in seq_along(inner_values)) {
+                membership <- rep("training", sample_count)
+                membership[outer == outer_value] <- "outer_test"
+                membership[inner == inner_values[[inner_index]]] <- "test"
+                columns[[length(columns) + 1L]] <- membership
+                column_names <- c(
+                    column_names,
+                    sprintf(
+                        "run_%d_outer_%d_inner_%d",
+                        run_index,
+                        outer_index,
+                        inner_index
+                    )
+                )
+            }
+        }
+    }
+    output <- do.call(cbind, columns)
+    rownames(output) <- as.character(seq_len(sample_count))
+    colnames(output) <- column_names
+    output
 }
 
 .double_cv_native_selection_code <- function(metric, classification) {
@@ -12340,6 +12291,12 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   for classification operate on dummy-coded responses. Incompatible
 #'   task/metric combinations raise an error before fitting. The former names
 #'   `"r2"` and `"q2"` are rejected as ambiguous.
+#' @param return_splits Return a character matrix named `split_index` when
+#'   `TRUE`. Rows use the original sample positions. Outer columns contain
+#'   `"training"` or `"test"`; inner columns additionally use `"outer_test"`
+#'   for samples excluded by the corresponding outer fold. Column names encode
+#'   the run and outer/inner fold. The default `FALSE` avoids allocating this
+#'   additional matrix.
 #' @param perm.test Run a nested-CV permutation test. Independent rows are
 #'   permuted individually. With repeated `constrain` values, complete blocks
 #'   are exchanged only among groups with the same number of rows, preserving
@@ -12428,6 +12385,8 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'     `permutation_solver_seed`, `permutation_requested`,
 #'     `permutation_completed`, `permutation_failed`, and `permutation_errors`:
 #'     the exchangeability contract and null-fit audit.
+#'   * `split_index`: sample-by-split membership matrix for every outer and
+#'     inner fold, returned only when `return_splits = TRUE`.
 #' @examples
 #' idx <- c(seq_len(10), 51:60, 101:110)
 #' X <- as.matrix(iris[idx, seq_len(4)])
@@ -12447,8 +12406,9 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     kfold_outer = 10,
     north = 1L, kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
     coef0 = 1, classifier = c("argmax", "lda"), bycol = FALSE,
-    selection = "auto", ...) {
+    selection = "auto", return_splits = FALSE, ...) {
     n.cores <- .fastpls_apply_cpu_cores(n.cores)
+    return_splits <- .cv_validate_return_splits(return_splits)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls.double.cv()")
     if (sum(is.na(Xdata)) > 0) {
@@ -12513,7 +12473,21 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         result <- .double_cv_attach_permutation(result, context, config, times,
             runn)
     }
-    .fastpls_attach_double_cv_metrics(result, context$response$original, bycol)
+    result <- .fastpls_attach_double_cv_metrics(
+        result,
+        context$response$original,
+        bycol
+    )
+    if (return_splits) {
+        plan <- .double_cv_fold_plan(
+            context,
+            as.integer(runn),
+            config$kfold_inner,
+            config$kfold_outer
+        )
+        result$split_index <- .double_cv_split_index(plan)
+    }
+    result
 }
 
 

@@ -266,11 +266,4 @@ fit <- pls(X, y,
 )
 head(predict(fit, X)$Ypred)
 
-cv <- pls.single.cv(X, y,
-    ncomp = seq_len(2), kfold = 3, method = "simpls",
-    backend = "cpu", seed = 1
-)
-fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
-cv$best_ncomp
-head(fit_cv$Ypred)
 }

@@ -1,5 +1,15 @@
 # fastPLS 0.3
 
+* Added optional `return_splits = TRUE` output to `pls.single.cv()` and
+  `pls.double.cv()`. The returned `split_index` matrix records sample-level
+  training/test membership for every single, outer, and inner fold while the
+  default avoids the additional allocation.
+
+* Removed the hidden `fit_data` attribute from single and nested
+  cross-validation results. CV outputs no longer retain copies of the training
+  predictors or responses; final models are refitted explicitly with the
+  original data and the returned `tuning_config` and `best_parameters`.
+
 * Direct SIMPLS-family regression fits now retain the complete requested
   component path when fewer response-associated directions are estimable.
   Constant-response fits return an intercept-only model with zero coefficients,
