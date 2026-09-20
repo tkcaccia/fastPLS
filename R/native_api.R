@@ -102,25 +102,25 @@ pls_cv_classification_float32_metal_core_cpp <- function(
 cuda_resident_simpls_cv_classification_cpp <- function(
     predictors, labels, class_count, folds, components, scaling, classifier,
     oversample, power, seed, store_predictions = TRUE, store_scores = TRUE,
-    method = 3L
+    method = 3L, north = 0L
 ) {
     .Call(
         "_fastPLS_cuda_resident_simpls_cv_classification_cpp",
         predictors, labels, class_count, folds, components, scaling,
         classifier, oversample, power, seed, store_predictions, store_scores,
-        method,
+        method, north,
         PACKAGE = "fastPLS"
     )
 }
 
 cuda_resident_simpls_cv_regression_cpp <- function(
     predictors, responses, folds, components, scaling, metric, oversample,
-    power, seed, store_predictions = TRUE, method = 3L
+    power, seed, store_predictions = TRUE, method = 3L, north = 0L
 ) {
     .Call(
         "_fastPLS_cuda_resident_simpls_cv_regression_cpp",
         predictors, responses, folds, components, scaling, metric,
-        oversample, power, seed, store_predictions, method,
+        oversample, power, seed, store_predictions, method, north,
         PACKAGE = "fastPLS"
     )
 }
@@ -148,6 +148,19 @@ pls_cv_opls_classification_float32_core_cpp <- function(
         labels, class_count, folds, components, scaling, classifier, north,
         oversample, power, seed, store_predictions, store_scores,
         PACKAGE = "fastPLS"
+    )
+}
+
+pls_cv_opls_classification_float32_cuda_core_cpp <- function(
+    predictors, labels, class_count, folds, components, scaling, classifier,
+    north, oversample, power, seed, store_predictions = TRUE,
+    store_scores = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_cv_opls_classification_float32_cuda_core_cpp",
+        predictors, labels, class_count, folds, components, scaling,
+        classifier, north, oversample, power, seed, store_predictions,
+        store_scores, PACKAGE = "fastPLS"
     )
 }
 
@@ -232,6 +245,17 @@ pls_cv_opls_regression_float32_core_cpp <- function(
         "_fastPLS_pls_cv_opls_regression_float32_core_cpp", predictors,
         responses, folds, components, scaling, metric, north, oversample,
         power, seed, store_predictions, PACKAGE = "fastPLS"
+    )
+}
+
+pls_cv_opls_regression_float32_cuda_core_cpp <- function(
+    predictors, responses, folds, components, scaling, metric, north,
+    oversample, power, seed, store_predictions = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_cv_opls_regression_float32_cuda_core_cpp",
+        predictors, responses, folds, components, scaling, metric, north,
+        oversample, power, seed, store_predictions, PACKAGE = "fastPLS"
     )
 }
 

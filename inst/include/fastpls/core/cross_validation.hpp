@@ -1780,9 +1780,14 @@ ClassificationCvResult<T> cross_validate_classification(
     result.predictions.resize(predictors.rows(), prefix_count);
   }
   if (store_scores) {
-    result.scores.reserve(prefix_count);
-    for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
-      result.scores.emplace_back(predictors.rows(), class_count);
+    // LDA uses the response scores only while processing each fold to update
+    // Q2. Retaining those scores as well as the discriminant scores duplicates
+    // an n x class_count path and is prohibitive for large class panels.
+    if (head != ClassificationHead::lda) {
+      result.scores.reserve(prefix_count);
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        result.scores.emplace_back(predictors.rows(), class_count);
+      }
     }
     if (head == ClassificationHead::lda) {
       result.lda_discriminant_scores.reserve(prefix_count);
@@ -1898,9 +1903,11 @@ ClassificationCvResult<T> cross_validate_classification(
         }
         if (store_scores) {
           for (const std::size_t row : partition.test) {
-            result.scores[prefix](
-              row, static_cast<std::size_t>(fallback - 1)
-            ) = T(1);
+            if (head != ClassificationHead::lda) {
+              result.scores[prefix](
+                row, static_cast<std::size_t>(fallback - 1)
+              ) = T(1);
+            }
             if (head == ClassificationHead::lda) {
               result.lda_discriminant_scores[prefix](
                 row, static_cast<std::size_t>(fallback - 1)
@@ -2155,10 +2162,6 @@ ClassificationCvResult<T> cross_validate_classification(
             model, test_scores.view(), prefix,
             prepared.response_mean, backend
           );
-          cv_detail::store_active_scores<T>(
-            result.scores[prefix], partition.test,
-            ConstMatrixView<T>(scores.view()), active
-          );
           cv_detail::accumulate_classification_press<T>(
             ConstMatrixView<T>(scores.view()), active, labels,
             partition.test, q2_press[prefix]
@@ -2309,10 +2312,6 @@ ClassificationCvResult<T> cross_validate_classification(
           );
         }
         if (head == ClassificationHead::lda && store_scores) {
-          cv_detail::store_active_scores<T>(
-            result.scores[prefix], partition.test,
-            ConstMatrixView<T>(response_scores.view()), active
-          );
           cv_detail::accumulate_classification_press<T>(
             ConstMatrixView<T>(response_scores.view()), active, labels,
             partition.test, q2_press[prefix]

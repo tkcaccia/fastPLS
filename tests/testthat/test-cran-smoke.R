@@ -134,6 +134,11 @@ test_that("float32 input follows the public fitting and prediction path", {
         )
     }
     if (.Platform$OS.type == "windows") {
+        warning_state <- fastPLS:::.float32_warning_state
+        rm(
+            list = ls(envir = warning_state, all.names = TRUE),
+            envir = warning_state
+        )
         expect_warning(
             fit <- fit_call(),
             "Windows uses portable float-package CPU routes"

@@ -355,3 +355,69 @@ test_that("AUROC selection rejects multiclass responses before fitting", {
         "exactly two response classes"
     )
 })
+
+test_that("compiled LDA CV retains discriminants without duplicate scores", {
+    set.seed(31L)
+    x <- float::fl(matrix(rnorm(72L * 10L), nrow = 72L, ncol = 10L))
+    y <- factor(rep(c("a", "b", "c"), each = 24L))
+
+    result <- pls.single.cv(
+        x,
+        y,
+        ncomp = 1:2,
+        kfold = 3L,
+        method = "opls",
+        classifier = "lda",
+        selection = "accuracy",
+        backend = "cpu",
+        seed = 31L,
+        fit = FALSE
+    )
+
+    expect_identical(dim(result$lda_scores), c(72L, 3L, 2L))
+    expect_true(all(is.finite(result$lda_scores)))
+    expect_null(result$Yscore)
+    expect_null(result$Ypred)
+    expect_true(all(is.finite(result$Q2Y)))
+    expect_true(all(is.finite(result$accuracy)))
+})
+
+test_that("CUDA OPLS CV uses its resident route", {
+    skip_if_not_installed("float")
+    skip_if_not(isTRUE(has_cuda()), "CUDA is unavailable")
+
+    set.seed(32L)
+    x <- float::fl(matrix(rnorm(72L * 10L), nrow = 72L, ncol = 10L))
+    y <- factor(rep(c("a", "b", "c"), each = 24L))
+    cpu <- pls.single.cv(
+        x, y, ncomp = 1:2, kfold = 3L, method = "opls",
+        classifier = "lda", selection = "accuracy", backend = "cpu",
+        seed = 32L, fit = FALSE
+    )
+    cuda <- pls.single.cv(
+        x, y, ncomp = 1:2, kfold = 3L, method = "opls",
+        classifier = "lda", selection = "accuracy", backend = "cuda",
+        seed = 32L, fit = FALSE
+    )
+
+    expect_equal(cuda$accuracy, cpu$accuracy, tolerance = 1e-4)
+    expect_identical(dim(cuda$lda_scores), c(72L, 3L, 2L))
+    expect_true(all(is.finite(cuda$lda_scores)))
+    expect_null(cuda$Yscore)
+    expect_null(cuda$Ypred)
+    expect_identical(
+        attr(cuda, "fastPLS_internal")$execution_route,
+        "resident_cuda_opls_lda_cv"
+    )
+
+    regression_y <- float::fl(matrix(rnorm(72L * 4L), nrow = 72L))
+    regression <- pls.single.cv(
+        x, regression_y, ncomp = 1:2, kfold = 3L, method = "opls",
+        selection = "RMSD", backend = "cuda", seed = 33L, fit = FALSE
+    )
+    expect_true(all(is.finite(regression$RMSD)))
+    expect_identical(
+        attr(regression, "fastPLS_internal")$execution_route,
+        "resident_cuda_opls_regression_cv"
+    )
+})

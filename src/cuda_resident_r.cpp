@@ -485,7 +485,7 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
     SEXP components, SEXP scaling, SEXP classifier, SEXP oversample,
     SEXP power, SEXP seed, SEXP store_predictions, SEXP store_scores,
-    SEXP method_value) {
+    SEXP method_value, SEXP north_value) {
 #ifdef FASTPLS_HAS_CUDA
   const int precision = TYPEOF(predictors) == INTSXP ? 32 : 64;
   MatrixInput x = matrix_input(predictors, precision, "Xdata");
@@ -501,6 +501,7 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   const int extra = scalar_integer(oversample, "oversample");
   const int iterations = scalar_integer(power, "power");
   const int method = scalar_integer(method_value, "method");
+  const int north = scalar_integer(north_value, "north");
   const unsigned long long random_seed =
     static_cast<unsigned int>(scalar_integer(seed, "seed"));
   const bool retain_predictions =
@@ -511,7 +512,8 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
     fold_count = std::max(fold_count, INTEGER(folds)[row]);
   }
   if (classes < 2 || fold_count < 2 || scale < 1 || scale > 3 ||
-      (method != 1 && method != 3) ||
+      (method != 1 && method != 3 && method != 4) || north < 0 ||
+      (method == 4 && north < 1) ||
       (lda != 0 && lda != 1)) {
     Rf_error("invalid resident CUDA classification CV controls");
   }
@@ -537,17 +539,19 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   std::vector<float> float_lda_scores;
   void* lda_score_output = nullptr;
   if (retain_scores) {
-    score_array = PROTECT(allocate_array3(
-      REALSXP, x.rows, classes, prefix_count
-    ));
-    ++protected_count;
-    if (precision == 32) {
-      float_scores.resize(
-        static_cast<std::size_t>(x.rows) * classes * prefix_count
-      );
-      score_output = float_scores.data();
-    } else {
-      score_output = REAL(score_array);
+    if (lda != 1) {
+      score_array = PROTECT(allocate_array3(
+        REALSXP, x.rows, classes, prefix_count
+      ));
+      ++protected_count;
+      if (precision == 32) {
+        float_scores.resize(
+          static_cast<std::size_t>(x.rows) * classes * prefix_count
+        );
+        score_output = float_scores.data();
+      } else {
+        score_output = REAL(score_array);
+      }
     }
     if (lda == 1) {
       lda_score_array = PROTECT(allocate_array3(
@@ -564,26 +568,43 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
       }
     }
   }
+  SEXP q2_values = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
   char error[1024] = {};
-  const auto runner = method == 1 ?
-    fastpls_resident_plssvd_cv_classification :
-    fastpls_resident_simpls_cv_classification;
-  if (runner(
-      x.values, INTEGER(labels), INTEGER(folds), precision, x.rows,
-      x.columns, classes, INTEGER(components), prefix_count, scale, lda,
-      extra, iterations, random_seed, retain_predictions ? 1 : 0,
-      retain_scores ? 1 : 0,
-      retain_predictions ? INTEGER(predictions) : nullptr, score_output,
-      lda_score_output, INTEGER(effective_components), INTEGER(status),
-      REAL(metric), error, sizeof(error))) {
+  int error_code = 0;
+  if (method == 4) {
+    error_code = fastpls_resident_opls_cv_classification(
+        x.values, INTEGER(labels), INTEGER(folds), precision, x.rows,
+        x.columns, classes, INTEGER(components), prefix_count, scale, lda,
+        extra, iterations, random_seed, north,
+        retain_predictions ? 1 : 0, retain_scores ? 1 : 0,
+        retain_predictions ? INTEGER(predictions) : nullptr, score_output,
+        lda_score_output, INTEGER(effective_components), INTEGER(status),
+        REAL(metric), REAL(q2_values), error, sizeof(error));
+  } else {
+    const auto runner = method == 1 ?
+      fastpls_resident_plssvd_cv_classification :
+      fastpls_resident_simpls_cv_classification;
+    error_code = runner(
+        x.values, INTEGER(labels), INTEGER(folds), precision, x.rows,
+        x.columns, classes, INTEGER(components), prefix_count, scale, lda,
+        extra, iterations, random_seed, retain_predictions ? 1 : 0,
+        retain_scores ? 1 : 0,
+        retain_predictions ? INTEGER(predictions) : nullptr, score_output,
+        lda_score_output, INTEGER(effective_components), INTEGER(status),
+        REAL(metric), REAL(q2_values), error, sizeof(error));
+  }
+  if (error_code) {
     UNPROTECT(protected_count);
     Rf_error("%s", error);
   }
   if (retain_scores && precision == 32) {
-    std::transform(
-      float_scores.begin(), float_scores.end(), REAL(score_array),
-      [](float value) { return static_cast<double>(value); }
-    );
+    if (lda != 1) {
+      std::transform(
+        float_scores.begin(), float_scores.end(), REAL(score_array),
+        [](float value) { return static_cast<double>(value); }
+      );
+    }
     if (lda == 1) {
       std::transform(
         float_lda_scores.begin(), float_lda_scores.end(),
@@ -591,13 +612,6 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
         [](float value) { return static_cast<double>(value); }
       );
     }
-  }
-  SEXP q2_values = R_NilValue;
-  if (retain_scores) {
-    q2_values = PROTECT(classification_q2_path(
-      labels, folds, score_array, x.rows, classes, prefix_count
-    ));
-    ++protected_count;
   }
   const int selected = best_metric_index(REAL(metric), prefix_count, false);
   SEXP output = PROTECT(Rf_allocVector(VECSXP, 11));
@@ -631,7 +645,7 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
 #else
   ignore(predictors, labels, class_count, folds, components, scaling,
          classifier, oversample, power, seed, store_predictions,
-         store_scores, method_value);
+         store_scores, method_value, north_value);
   unavailable("resident classification cross-validation");
 #endif
 }
@@ -639,7 +653,7 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
 extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
     SEXP predictors, SEXP responses, SEXP folds, SEXP components,
     SEXP scaling, SEXP metric_code, SEXP oversample, SEXP power, SEXP seed,
-    SEXP store_predictions, SEXP method_value) {
+    SEXP store_predictions, SEXP method_value, SEXP north_value) {
 #ifdef FASTPLS_HAS_CUDA
   const int precision = TYPEOF(predictors) == INTSXP ? 32 : 64;
   MatrixInput x = matrix_input(predictors, precision, "Xdata");
@@ -654,6 +668,7 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
   const int extra = scalar_integer(oversample, "oversample");
   const int iterations = scalar_integer(power, "power");
   const int method = scalar_integer(method_value, "method");
+  const int north = scalar_integer(north_value, "north");
   const unsigned long long random_seed =
     static_cast<unsigned int>(scalar_integer(seed, "seed"));
   const bool retain_predictions =
@@ -663,7 +678,8 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
     fold_count = std::max(fold_count, INTEGER(folds)[row]);
   }
   if (fold_count < 2 || scale < 1 || scale > 3 || metric < 2 || metric > 4 ||
-      (method != 1 && method != 3)) {
+      (method != 1 && method != 3 && method != 4) || north < 0 ||
+      (method == 4 && north < 1)) {
     Rf_error("invalid resident CUDA regression CV controls");
   }
   const int prefix_count = static_cast<int>(XLENGTH(components));
@@ -686,16 +702,28 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
     ++protected_count;
   }
   char error[1024] = {};
-  const auto runner = method == 1 ?
-    fastpls_resident_plssvd_cv_regression :
-    fastpls_resident_simpls_cv_regression;
-  if (runner(
-      x.values, y.values, INTEGER(folds), precision, x.rows, x.columns,
-      y.columns, INTEGER(components), prefix_count, scale, metric, extra,
-      iterations, random_seed, retain_predictions ? 1 : 0,
-      retain_predictions ? REAL(predictions) : nullptr, INTEGER(status),
-      REAL(metric_values), REAL(q2_values), REAL(rmsd_values),
-      REAL(observed_r2_values), error, sizeof(error))) {
+  int error_code = 0;
+  if (method == 4) {
+    error_code = fastpls_resident_opls_cv_regression(
+        x.values, y.values, INTEGER(folds), precision, x.rows, x.columns,
+        y.columns, INTEGER(components), prefix_count, scale, metric, extra,
+        iterations, random_seed, north, retain_predictions ? 1 : 0,
+        retain_predictions ? REAL(predictions) : nullptr, INTEGER(status),
+        REAL(metric_values), REAL(q2_values), REAL(rmsd_values),
+        REAL(observed_r2_values), error, sizeof(error));
+  } else {
+    const auto runner = method == 1 ?
+      fastpls_resident_plssvd_cv_regression :
+      fastpls_resident_simpls_cv_regression;
+    error_code = runner(
+        x.values, y.values, INTEGER(folds), precision, x.rows, x.columns,
+        y.columns, INTEGER(components), prefix_count, scale, metric, extra,
+        iterations, random_seed, retain_predictions ? 1 : 0,
+        retain_predictions ? REAL(predictions) : nullptr, INTEGER(status),
+        REAL(metric_values), REAL(q2_values), REAL(rmsd_values),
+        REAL(observed_r2_values), error, sizeof(error));
+  }
+  if (error_code) {
     UNPROTECT(protected_count);
     Rf_error("%s", error);
   }
@@ -730,7 +758,8 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
   return output;
 #else
   ignore(predictors, responses, folds, components, scaling, metric_code,
-         oversample, power, seed, store_predictions, method_value);
+         oversample, power, seed, store_predictions, method_value,
+         north_value);
   unavailable("resident regression cross-validation");
 #endif
 }

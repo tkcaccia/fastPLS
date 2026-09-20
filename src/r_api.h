@@ -25,12 +25,12 @@ SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
   SEXP components, SEXP scaling, SEXP classifier, SEXP oversample,
   SEXP power, SEXP seed, SEXP store_predictions, SEXP store_scores,
-  SEXP method
+  SEXP method, SEXP north
 );
 SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
   SEXP predictors, SEXP responses, SEXP folds, SEXP components,
   SEXP scaling, SEXP metric, SEXP oversample, SEXP power, SEXP seed,
-  SEXP store_predictions, SEXP method
+  SEXP store_predictions, SEXP method, SEXP north
 );
 SEXP _fastPLS_cuda_resident_export_cpp(SEXP object, SEXP loadings,
                                        SEXP variance, SEXP scores);
@@ -101,6 +101,12 @@ SEXP _fastPLS_pls_cv_opls_classification_float32_core_cpp(
   SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
   SEXP store_scores
 );
+SEXP _fastPLS_pls_cv_opls_classification_float32_cuda_core_cpp(
+  SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+  SEXP components, SEXP scaling, SEXP classifier, SEXP north,
+  SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+  SEXP store_scores
+);
 SEXP _fastPLS_pls_cv_kernel_classification_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
   SEXP components, SEXP scaling, SEXP classifier, SEXP kernel,
@@ -135,6 +141,11 @@ SEXP _fastPLS_pls_cv_opls_regression_core_cpp(
   SEXP seed, SEXP store_predictions
 );
 SEXP _fastPLS_pls_cv_opls_regression_float32_core_cpp(
+  SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+  SEXP scaling, SEXP metric, SEXP north, SEXP oversample, SEXP power,
+  SEXP seed, SEXP store_predictions
+);
+SEXP _fastPLS_pls_cv_opls_regression_float32_cuda_core_cpp(
   SEXP predictors, SEXP responses, SEXP folds, SEXP components,
   SEXP scaling, SEXP metric, SEXP north, SEXP oversample, SEXP power,
   SEXP seed, SEXP store_predictions

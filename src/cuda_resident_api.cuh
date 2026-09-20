@@ -586,7 +586,7 @@ void resident_pls_cv_classification(
     bool use_lda,int oversample,int power,unsigned long long seed,
     bool store_predictions,bool store_scores,int* prediction_output,
     T* score_output,T* lda_score_output,int* effective_components,
-    int* status,double* metrics) {
+    int* status,double* metrics,double* q2_values,int model_north=0) {
     if(!predictors||!labels||!folds||!prefixes||!status||!metrics||n<2||
        p<1||classes<2||prefix_count<1||scaling<1||scaling>3)
         throw std::invalid_argument("invalid resident CUDA CV input");
@@ -604,7 +604,9 @@ void resident_pls_cv_classification(
     }
     if(store_predictions&&!prediction_output)
         throw std::invalid_argument("null CUDA CV prediction output");
-    if(store_scores&&!score_output)
+    if(!q2_values)
+        throw std::invalid_argument("null CUDA CV Q2 output");
+    if(store_scores&&!use_lda&&!score_output)
         throw std::invalid_argument("null CUDA CV score output");
     if(store_scores&&use_lda&&!lda_score_output)
         throw std::invalid_argument("null CUDA CV LDA score output");
@@ -621,6 +623,35 @@ void resident_pls_cv_classification(
     }
     if(maximum_test<1||maximum_train<2)
         throw std::invalid_argument("CUDA CV contains an empty train or test fold");
+
+    std::vector<int> total_class_counts(static_cast<size_t>(classes),0);
+    std::vector<int> fold_sizes(static_cast<size_t>(fold_count),0);
+    std::vector<int> fold_class_counts(
+        static_cast<size_t>(fold_count)*classes,0);
+    for(int row=0;row<n;++row) {
+        const int label=labels[row]-1;
+        const int fold=folds[row]-1;
+        ++total_class_counts[static_cast<size_t>(label)];
+        ++fold_sizes[static_cast<size_t>(fold)];
+        ++fold_class_counts[static_cast<size_t>(fold)*classes+label];
+    }
+    long double q2_tss=0.0L;
+    for(int row=0;row<n;++row) {
+        const int observed=labels[row]-1;
+        const int fold=folds[row]-1;
+        const long double train_n=n-fold_sizes[static_cast<size_t>(fold)];
+        for(int class_index=0;class_index<classes;++class_index) {
+            const long double mean=(
+                total_class_counts[static_cast<size_t>(class_index)]-
+                fold_class_counts[static_cast<size_t>(fold)*classes+
+                                  class_index])/train_n;
+            const long double value=class_index==observed?1.0L:0.0L;
+            const long double centered=value-mean;
+            q2_tss+=centered*centered;
+        }
+    }
+    std::vector<long double> q2_press(
+        static_cast<size_t>(prefix_count),0.0L);
 
     cudaStream_t stream=nullptr;
     cublasHandle_t model_blas=nullptr,component_blas=nullptr;
@@ -669,7 +700,7 @@ void resident_pls_cv_classification(
                                      cudaMemcpyHostToDevice,stream));
         std::fill(metrics,metrics+prefix_count,0.0);
         std::vector<double> metric_counts(static_cast<size_t>(prefix_count),0.0);
-        if(store_scores)
+        if(store_scores&&score_output)
             std::fill(score_output,
                       score_output+size_t(n)*classes*prefix_count,T(0));
         if(store_scores&&use_lda)
@@ -705,9 +736,20 @@ void resident_pls_cv_classification(
                             prediction_output[size_t(prefix)*n+row]=fallback;
                         metrics[prefix]+=labels[row]==fallback?1.0:0.0;
                         metric_counts[static_cast<size_t>(prefix)]+=1.0;
+                        for(int class_index=0;class_index<classes;
+                            ++class_index) {
+                            const long double observed=
+                                labels[row]-1==class_index?1.0L:0.0L;
+                            const long double predicted=
+                                class_index==fallback-1?1.0L:0.0L;
+                            const long double residual=observed-predicted;
+                            q2_press[static_cast<size_t>(prefix)]+=
+                                residual*residual;
+                        }
                         if(store_scores) {
-                            score_output[size_t(prefix)*n*classes+
-                                size_t(fallback-1)*n+row]=T(1);
+                            if(score_output)
+                                score_output[size_t(prefix)*n*classes+
+                                    size_t(fallback-1)*n+row]=T(1);
                             if(use_lda) {
                                 for(int class_index=0;class_index<classes;
                                     ++class_index) {
@@ -753,7 +795,8 @@ void resident_pls_cv_classification(
                      0ULL);
                 Model<T> model(
                     train_n,p,static_cast<int>(active.size()),fold_maximum,
-                    oversample,power,stream,use_lda,true,0,0,T(0),0,T(0),false,
+                    oversample,power,stream,use_lda,true,model_north,0,T(0),
+                    0,T(0),false,
                     model_blas,model_solver,model_rng,component_blas);
                 model.fit_borrowed_device_predictors(
                     train,nullptr,compact_labels.data(),scaling,fold_seed,false);
@@ -778,7 +821,7 @@ void resident_pls_cv_classification(
                 std::vector<int> host_labels(
                     size_t(test_n)*prefix_count);
                 std::vector<T> host_scores;
-                if(store_scores)host_scores.resize(
+                if(store_scores||q2_values)host_scores.resize(
                     size_t(test_n)*active.size()*prefix_count);
                 std::vector<T> host_lda_scores;
                 if(store_scores&&use_lda)host_lda_scores.resize(
@@ -790,7 +833,7 @@ void resident_pls_cv_classification(
                         prefix;
                     model.predict_projected_device(
                         test_scores,test_n,prefix,response_scores);
-                    if(store_scores)
+                    if(store_scores||q2_values)
                         require_cuda(cudaMemcpyAsync(
                             host_scores.data()+size_t(prefix_index)*test_n*active.size(),
                             response_scores,size_t(test_n)*active.size()*sizeof(T),
@@ -827,15 +870,37 @@ void resident_pls_cv_classification(
                         metrics[prefix_index]+=predicted==labels[row]?1.0:0.0;
                         metric_counts[static_cast<size_t>(prefix_index)]+=1.0;
                     }
+                    for(size_t active_index=0;
+                        active_index<active.size();++active_index) {
+                        const int destination_class=active[active_index]-1;
+                        for(int i=0;i<test_n;++i) {
+                            const int row=heldout[static_cast<size_t>(i)];
+                            const long double observed=
+                                labels[row]-1==destination_class?1.0L:0.0L;
+                            const long double predicted=host_scores[
+                                size_t(prefix_index)*test_n*active.size()+
+                                active_index*test_n+i];
+                            const long double residual=observed-predicted;
+                            q2_press[static_cast<size_t>(prefix_index)]+=
+                                residual*residual;
+                        }
+                    }
+                    for(int i=0;i<test_n;++i) {
+                        const int observed=labels[
+                            heldout[static_cast<size_t>(i)]]-1;
+                        if(active_map[static_cast<size_t>(observed)]<0)
+                            q2_press[static_cast<size_t>(prefix_index)]+=1.0L;
+                    }
                     if(store_scores)for(size_t active_index=0;
                         active_index<active.size();++active_index) {
                         const int destination_class=active[active_index]-1;
                         for(int i=0;i<test_n;++i) {
                             const int row=heldout[static_cast<size_t>(i)];
-                            score_output[size_t(prefix_index)*n*classes+
-                                size_t(destination_class)*n+row]=
-                                host_scores[size_t(prefix_index)*test_n*active.size()+
-                                    active_index*test_n+i];
+                            if(score_output)
+                                score_output[size_t(prefix_index)*n*classes+
+                                    size_t(destination_class)*n+row]=
+                                    host_scores[size_t(prefix_index)*test_n*
+                                        active.size()+active_index*test_n+i];
                             if(use_lda)
                                 lda_score_output[size_t(prefix_index)*n*classes+
                                     size_t(destination_class)*n+row]=
@@ -861,12 +926,27 @@ void resident_pls_cv_classification(
                             prediction_output[size_t(prefix)*n+row]=fallback;
                         metrics[prefix]+=labels[row]==fallback?1.0:0.0;
                         metric_counts[static_cast<size_t>(prefix)]+=1.0;
+                        for(int class_index=0;class_index<classes;
+                            ++class_index) {
+                            const int compact=active_map[
+                                static_cast<size_t>(class_index)];
+                            const long double predicted=compact>=0?
+                                static_cast<long double>(counts[
+                                    static_cast<size_t>(class_index)])/
+                                    static_cast<long double>(train_n):0.0L;
+                            const long double observed=
+                                labels[row]-1==class_index?1.0L:0.0L;
+                            const long double residual=observed-predicted;
+                            q2_press[static_cast<size_t>(prefix)]+=
+                                residual*residual;
+                        }
                         if(store_scores)for(const int candidate:active) {
                             const T prior=static_cast<T>(
                                 counts[static_cast<size_t>(candidate-1)])/
                                 static_cast<T>(train_n);
-                            score_output[size_t(prefix)*n*classes+
-                                size_t(candidate-1)*n+row]=prior;
+                            if(score_output)
+                                score_output[size_t(prefix)*n*classes+
+                                    size_t(candidate-1)*n+row]=prior;
                             if(use_lda)
                                 lda_score_output[size_t(prefix)*n*classes+
                                     size_t(candidate-1)*n+row]=std::log(prior);
@@ -878,10 +958,15 @@ void resident_pls_cv_classification(
             }
             status[fold]=1;
         }
-        for(int prefix=0;prefix<prefix_count;++prefix)
+        for(int prefix=0;prefix<prefix_count;++prefix) {
             metrics[prefix]=metric_counts[static_cast<size_t>(prefix)]>0.0?
                 metrics[prefix]/metric_counts[static_cast<size_t>(prefix)]:
                 std::numeric_limits<double>::quiet_NaN();
+            q2_values[prefix]=q2_tss>0.0L?
+                1.0-static_cast<double>(
+                    q2_press[static_cast<size_t>(prefix)]/q2_tss):
+                std::numeric_limits<double>::quiet_NaN();
+        }
         release();
     } catch(...) {release();throw;}
 }
@@ -893,7 +978,7 @@ void resident_pls_cv_regression(
     const int* prefixes,int prefix_count,int scaling,int metric,
     int oversample,int power,unsigned long long seed,bool store_predictions,
     double* prediction_output,int* status,double* metrics,double* q2_values,
-    double* rmsd_values,double* observed_r2_values) {
+    double* rmsd_values,double* observed_r2_values,int model_north=0) {
     if(!predictors||!responses||!folds||!prefixes||!status||!metrics||n<2||
        p<1||q<1||prefix_count<1||scaling<1||scaling>3||metric<2||metric>4)
         throw std::invalid_argument("invalid resident CUDA regression CV input");
@@ -1070,7 +1155,7 @@ void resident_pls_cv_regression(
                      0ULL);
                 Model<T> model(
                     train_n,p,q,maximum_prefix,oversample,power,stream,false,
-                    false,0,0,T(0),0,T(0),false,
+                    false,model_north,0,T(0),0,T(0),false,
                     cv_blas,model_solver,model_rng,component_blas);
                 if constexpr(ReuseCrosscov) {
                     if(share_crosscov) {
@@ -1158,11 +1243,11 @@ extern "C" int fastpls_resident_simpls_cv_classification(
     int lda,int oversample,int power,unsigned long long seed,
     int store_predictions,int store_scores,int* predictions,void* scores,
     void* lda_scores,int* effective_components,int* status,double* metrics,
-    char* error,size_t error_capacity) {
+    double* q2,char* error,size_t error_capacity) {
     using namespace fastpls_device;
     resident_error(error,error_capacity,"");
     try {
-        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||
+        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||!q2||
            (store_predictions!=0&&store_predictions!=1)||
            (store_scores!=0&&store_scores!=1))
             throw std::invalid_argument("invalid resident CUDA CV controls");
@@ -1172,13 +1257,13 @@ extern "C" int fastpls_resident_simpls_cv_classification(
             prefixes,prefix_count,scaling,lda==1,oversample,power,seed,
             store_predictions==1,store_scores==1,predictions,
             static_cast<float*>(scores),static_cast<float*>(lda_scores),
-            effective_components,status,metrics);
+            effective_components,status,metrics,q2);
         else resident_pls_cv_classification<double,ResidentSimpls,false>(
             static_cast<const double*>(predictors),labels,folds,n,p,classes,
             prefixes,prefix_count,scaling,lda==1,oversample,power,seed,
             store_predictions==1,store_scores==1,predictions,
             static_cast<double*>(scores),static_cast<double*>(lda_scores),
-            effective_components,status,metrics);
+            effective_components,status,metrics,q2);
         return 0;
     } catch(const std::exception& exception) {
         resident_error(error,error_capacity,exception.what());return 1;
@@ -1230,11 +1315,11 @@ extern "C" int fastpls_resident_plssvd_cv_classification(
     int lda,int oversample,int power,unsigned long long seed,
     int store_predictions,int store_scores,int* predictions,void* scores,
     void* lda_scores,int* effective_components,int* status,double* metrics,
-    char* error,size_t error_capacity) {
+    double* q2,char* error,size_t error_capacity) {
     using namespace fastpls_device;
     resident_error(error,error_capacity,"");
     try {
-        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||
+        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||!q2||
            (store_predictions!=0&&store_predictions!=1)||
            (store_scores!=0&&store_scores!=1))
             throw std::invalid_argument(
@@ -1245,13 +1330,13 @@ extern "C" int fastpls_resident_plssvd_cv_classification(
                 classes,prefixes,prefix_count,scaling,lda==1,oversample,
                 power,seed,store_predictions==1,store_scores==1,predictions,
                 static_cast<float*>(scores),static_cast<float*>(lda_scores),
-                effective_components,status,metrics);
+                effective_components,status,metrics,q2);
         else resident_pls_cv_classification<double,ResidentPlssvd,true>(
                 static_cast<const double*>(predictors),labels,folds,n,p,
                 classes,prefixes,prefix_count,scaling,lda==1,oversample,
                 power,seed,store_predictions==1,store_scores==1,predictions,
                 static_cast<double*>(scores),static_cast<double*>(lda_scores),
-                effective_components,status,metrics);
+                effective_components,status,metrics,q2);
         return 0;
     } catch(const std::exception& exception) {
         resident_error(error,error_capacity,exception.what());return 1;
@@ -1294,6 +1379,80 @@ extern "C" int fastpls_resident_plssvd_cv_regression(
     } catch(...) {
         resident_error(error,error_capacity,
                        "unknown resident CUDA PLS-SVD regression CV error");
+        return 1;
+    }
+}
+
+extern "C" int fastpls_resident_opls_cv_classification(
+    const void* predictors,const int* labels,const int* folds,int precision,
+    int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
+    int lda,int oversample,int power,unsigned long long seed,int north,
+    int store_predictions,int store_scores,int* predictions,void* scores,
+    void* lda_scores,int* effective_components,int* status,double* metrics,
+    double* q2,char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||north<1||!q2||
+           (store_predictions!=0&&store_predictions!=1)||
+           (store_scores!=0&&store_scores!=1))
+            throw std::invalid_argument(
+                "invalid resident CUDA OPLS CV controls");
+        if(precision==32)
+            resident_pls_cv_classification<float,ResidentOpls,true>(
+                static_cast<const float*>(predictors),labels,folds,n,p,
+                classes,prefixes,prefix_count,scaling,lda==1,oversample,
+                power,seed,store_predictions==1,store_scores==1,predictions,
+                static_cast<float*>(scores),static_cast<float*>(lda_scores),
+                effective_components,status,metrics,q2,north);
+        else resident_pls_cv_classification<double,ResidentOpls,true>(
+                static_cast<const double*>(predictors),labels,folds,n,p,
+                classes,prefixes,prefix_count,scaling,lda==1,oversample,
+                power,seed,store_predictions==1,store_scores==1,predictions,
+                static_cast<double*>(scores),static_cast<double*>(lda_scores),
+                effective_components,status,metrics,q2,north);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA OPLS CV error");return 1;
+    }
+}
+
+extern "C" int fastpls_resident_opls_cv_regression(
+    const void* predictors,const void* responses,const int* folds,
+    int precision,int n,int p,int q,const int* prefixes,int prefix_count,
+    int scaling,int metric,int oversample,int power,unsigned long long seed,
+    int north,int store_predictions,double* predictions,int* status,
+    double* metrics,double* q2,double* rmsd,double* observed_r2,
+    char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||north<1||!q2||!rmsd||
+           !observed_r2||(store_predictions!=0&&store_predictions!=1))
+            throw std::invalid_argument(
+                "invalid resident CUDA OPLS regression CV controls");
+        if(precision==32)
+            resident_pls_cv_regression<float,ResidentOpls,false,true>(
+                static_cast<const float*>(predictors),
+                static_cast<const float*>(responses),folds,n,p,q,prefixes,
+                prefix_count,scaling,metric,oversample,power,seed,
+                store_predictions==1,predictions,status,metrics,q2,rmsd,
+                observed_r2,north);
+        else resident_pls_cv_regression<double,ResidentOpls,false,true>(
+                static_cast<const double*>(predictors),
+                static_cast<const double*>(responses),folds,n,p,q,prefixes,
+                prefix_count,scaling,metric,oversample,power,seed,
+                store_predictions==1,predictions,status,metrics,q2,rmsd,
+                observed_r2,north);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA OPLS regression CV error");
         return 1;
     }
 }

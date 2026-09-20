@@ -15,8 +15,8 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_cuda_resident_project_cpp, 3),
   FASTPLS_CALL(_fastPLS_cuda_resident_response_sums_cpp, 5),
   FASTPLS_CALL(_fastPLS_cuda_resident_simpls_fit_cpp, 17),
-  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_cv_classification_cpp, 13),
-  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_cv_regression_cpp, 11),
+  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_cv_classification_cpp, 14),
+  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_cv_regression_cpp, 12),
   FASTPLS_CALL(_fastPLS_cuda_resident_export_cpp, 4),
   FASTPLS_CALL(_fastPLS_cuda_resident_compact_cpp, 2),
   FASTPLS_CALL(_fastPLS_cuda_resident_classify_path_cpp, 5),
@@ -39,6 +39,9 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_pls_cv_classification_float32_metal_core_cpp, 18),
   FASTPLS_CALL(_fastPLS_pls_cv_opls_classification_core_cpp, 13),
   FASTPLS_CALL(_fastPLS_pls_cv_opls_classification_float32_core_cpp, 13),
+  FASTPLS_CALL(
+    _fastPLS_pls_cv_opls_classification_float32_cuda_core_cpp, 13
+  ),
   FASTPLS_CALL(_fastPLS_pls_cv_kernel_classification_core_cpp, 16),
   FASTPLS_CALL(_fastPLS_pls_cv_kernel_classification_float32_core_cpp, 16),
   FASTPLS_CALL(_fastPLS_pls_cv_regression_core_cpp, 11),
@@ -46,6 +49,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_pls_cv_regression_float32_metal_core_cpp, 16),
   FASTPLS_CALL(_fastPLS_pls_cv_opls_regression_core_cpp, 11),
   FASTPLS_CALL(_fastPLS_pls_cv_opls_regression_float32_core_cpp, 11),
+  FASTPLS_CALL(_fastPLS_pls_cv_opls_regression_float32_cuda_core_cpp, 11),
   FASTPLS_CALL(_fastPLS_pls_cv_kernel_regression_core_cpp, 14),
   FASTPLS_CALL(_fastPLS_pls_cv_kernel_regression_float32_core_cpp, 14),
   FASTPLS_CALL(_fastPLS_lda_train_prefix_cpp, 5),

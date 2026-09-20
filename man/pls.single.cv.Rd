@@ -168,7 +168,8 @@ not on the decoded class labels.
 stored.
 \item \code{Ypred}: raw prediction array when score predictions are stored.
 \item \code{lda_scores}: held-out LDA discriminant-score array when LDA scores
-are stored.
+are stored. For LDA, dummy-response PLS scores are reduced into Q2Y while
+each fold is processed rather than retained as a second full score array.
 \item \code{effective_ncomp}: integer matrix with one row per fold and one
 column per requested component count. Each entry is the estimable prefix
 used in that fold. Zero identifies the class-prior fallback.

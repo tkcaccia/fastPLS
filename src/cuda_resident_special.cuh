@@ -175,7 +175,8 @@ template<class T> class ResidentOpls {
       *invalid=nullptr;
     int prediction_capacity=0;
     T* prediction_score=nullptr;
-    bool classification=false;
+    bool classification=false,owns_filtered=true,owns_handles=true,
+         attempted=false;
     std::unique_ptr<RsvdWorkspace<T>> direction;
     std::unique_ptr<ResidentSimpls<T>> inner;
     template<class U> void allocate(U*& value,size_t count) {
@@ -183,14 +184,18 @@ template<class T> class ResidentOpls {
     }
     void release() noexcept {
         inner.reset();direction.reset();
-        for(T* value:{filtered,response,crosscov,meanX,scaleX,meanY,scaleY,W,P,
+        if(owns_filtered)cudaFree(filtered);
+        filtered=nullptr;
+        for(T* value:{response,crosscov,meanX,scaleX,meanY,scaleY,W,P,
                       candidate,score,loading,orthogonal,scalars,effectiveR,
                       prediction_score})cudaFree(value);
         for(int* value:{labels,keys,rows,offsets,invalid})cudaFree(value);
-        if(rng_handle)curandDestroyGenerator(rng_handle);
-        if(solver_handle)cusolverDnDestroy(solver_handle);
-        if(device_blas)cublasDestroy(device_blas);
-        if(host_blas)cublasDestroy(host_blas);
+        if(owns_handles) {
+            if(rng_handle)curandDestroyGenerator(rng_handle);
+            if(solver_handle)cusolverDnDestroy(solver_handle);
+            if(device_blas)cublasDestroy(device_blas);
+            if(host_blas)cublasDestroy(host_blas);
+        }
     }
     void gemm(cublasOperation_t left,cublasOperation_t right,int output_rows,
               int output_columns,int shared,const T* a,int lda,const T* b,
@@ -229,25 +234,44 @@ public:
     ResidentOpls(int n_,int p_,int q_,int a,int oversample_,int power_,
                  cudaStream_t stream_,bool retain_scores=true,
                  bool classification_=false,int north_=1,int=0,T=T(0),
-                 int=0,T=T(0))
+                 int=0,T=T(0),bool allocate_predictors=true,
+                 cublasHandle_t shared_blas=nullptr,
+                 cusolverDnHandle_t shared_solver=nullptr,
+                 curandGenerator_t shared_rng=nullptr,
+                 cublasHandle_t shared_component_blas=nullptr)
       :n(n_),p(p_),q(q_),components(a),north(std::max(0,north_)),
        oversample(oversample_),power(power_),stream(stream_),
-       classification(classification_) {
+       classification(classification_),
+       owns_filtered(allocate_predictors) {
         if(n<2||p<1||q<1||components<1||components>std::min(n-1,p))
             throw std::invalid_argument("invalid resident CUDA OPLS dimensions");
         try {
-            require_blas(cublasCreate(&host_blas));
-            require_blas(cublasSetStream(host_blas,stream));
-            configure_blas_math<T>(host_blas);
-            require_blas(cublasCreate(&device_blas));
-            require_blas(cublasSetStream(device_blas,stream));
-            require_blas(cublasSetPointerMode(device_blas,CUBLAS_POINTER_MODE_DEVICE));
-            configure_blas_math<T>(device_blas);
-            require_solver(cusolverDnCreate(&solver_handle));
-            require_solver(cusolverDnSetStream(solver_handle,stream));
-            require_random(curandCreateGenerator(&rng_handle,CURAND_RNG_PSEUDO_DEFAULT));
-            require_random(curandSetStream(rng_handle,stream));
-            allocate(filtered,size_t(n)*p);allocate(crosscov,size_t(p)*q);
+            const int shared_count=(shared_blas?1:0)+(shared_solver?1:0)+
+                (shared_rng?1:0)+(shared_component_blas?1:0);
+            if(shared_count!=0&&shared_count!=4)
+                throw std::invalid_argument(
+                    "provide every shared CUDA CV handle or none");
+            if(shared_count==4) {
+                host_blas=shared_blas;device_blas=shared_component_blas;
+                solver_handle=shared_solver;rng_handle=shared_rng;
+                owns_handles=false;
+            } else {
+                require_blas(cublasCreate(&host_blas));
+                require_blas(cublasSetStream(host_blas,stream));
+                configure_blas_math<T>(host_blas);
+                require_blas(cublasCreate(&device_blas));
+                require_blas(cublasSetStream(device_blas,stream));
+                require_blas(cublasSetPointerMode(
+                    device_blas,CUBLAS_POINTER_MODE_DEVICE));
+                configure_blas_math<T>(device_blas);
+                require_solver(cusolverDnCreate(&solver_handle));
+                require_solver(cusolverDnSetStream(solver_handle,stream));
+                require_random(curandCreateGenerator(
+                    &rng_handle,CURAND_RNG_PSEUDO_DEFAULT));
+                require_random(curandSetStream(rng_handle,stream));
+            }
+            if(allocate_predictors)allocate(filtered,size_t(n)*p);
+            allocate(crosscov,size_t(p)*q);
             allocate(meanX,p);allocate(scaleX,p);allocate(meanY,q);allocate(scaleY,q);
             allocate(W,size_t(p)*std::max(1,north));allocate(P,size_t(p)*std::max(1,north));
             allocate(candidate,p);allocate(score,n);allocate(loading,p);
@@ -258,17 +282,22 @@ public:
                 stream,0,0,host_blas,solver_handle,rng_handle));
             inner.reset(new ResidentSimpls<T>(n,p,q,components,oversample,
                 power,stream,retain_scores,classification,0,0,T(0),0,T(0),
-                false));
+                false,host_blas,solver_handle,rng_handle,device_blas));
         } catch(...) {release();throw;}
     }
     ~ResidentOpls(){release();}
-    void fit(const T* hostX,const T* hostY,const int* hostLabels,int scaling,
-             unsigned long long seed) {
+private:
+    void fit_loaded(const T* hostY,const int* hostLabels,T* deviceY,
+                    int scaling,unsigned long long seed,
+                    bool predictors_on_device) {
+        if(attempted)
+            throw std::logic_error("resident OPLS workspace already used");
         if((hostY==nullptr)==(hostLabels==nullptr))
             throw std::invalid_argument("provide responses or labels, not both");
+        if(!filtered)
+            throw std::invalid_argument("resident OPLS predictors are null");
+        attempted=true;
         require_cuda(cudaMemsetAsync(invalid,0,sizeof(int),stream));
-        require_cuda(cudaMemcpyAsync(filtered,hostX,size_t(n)*p*sizeof(T),
-                                     cudaMemcpyHostToDevice,stream));
         require_cuda(preprocess(filtered,n,p,scaling,meanX,scaleX,stream));
         if(hostLabels) {
             allocate(labels,n);allocate(keys,n);allocate(rows,n);allocate(offsets,q+1);
@@ -278,8 +307,11 @@ public:
                                         invalid,stream));
         } else {
             allocate(response,size_t(n)*q);
-            require_cuda(cudaMemcpyAsync(response,hostY,size_t(n)*q*sizeof(T),
-                                         cudaMemcpyHostToDevice,stream));
+            require_cuda(cudaMemcpyAsync(
+                response,deviceY?static_cast<const void*>(deviceY):
+                    static_cast<const void*>(hostY),size_t(n)*q*sizeof(T),
+                deviceY?cudaMemcpyDeviceToDevice:cudaMemcpyHostToDevice,
+                stream));
             require_cuda(preprocess(response,n,q,1,meanY,scaleY,stream));
         }
         for(int component=0;component<north;++component) {
@@ -321,7 +353,18 @@ public:
         cudaFree(response);response=nullptr;
         cudaFree(crosscov);crosscov=nullptr;
         direction.reset();
-        inner->adopt_device_predictors(filtered,hostY,hostLabels,3,seed,true);
+        if(predictors_on_device) {
+            if(hostLabels) {
+                inner->fit_borrowed_device_predictors(
+                    filtered,nullptr,hostLabels,3,seed,true);
+            } else {
+                inner->fit_borrowed_device_regression(
+                    filtered,deviceY,3,seed,true,false);
+            }
+        } else {
+            inner->adopt_device_predictors(
+                filtered,hostY,hostLabels,3,seed,true);
+        }
         require_cuda(cudaMemcpyAsync(effectiveR,inner->weights(),
             size_t(p)*components*sizeof(T),cudaMemcpyDeviceToDevice,stream));
         for(int component=north-1;component>=0;--component) {
@@ -335,6 +378,35 @@ public:
                                                cudaMemcpyDeviceToHost,stream));
         require_cuda(cudaStreamSynchronize(stream));
         if(bad)throw std::runtime_error("resident CUDA OPLS filtering failed");
+    }
+public:
+    void fit(const T* hostX,const T* hostY,const int* hostLabels,int scaling,
+             unsigned long long seed) {
+        if(!owns_filtered||!filtered)
+            throw std::logic_error("resident OPLS host workspace is unavailable");
+        require_cuda(cudaMemcpyAsync(filtered,hostX,size_t(n)*p*sizeof(T),
+                                     cudaMemcpyHostToDevice,stream));
+        fit_loaded(hostY,hostLabels,nullptr,scaling,seed,false);
+    }
+    void fit_borrowed_device_predictors(T* deviceX,const T*,
+                                        const int* hostLabels,int scaling,
+                                        unsigned long long seed,bool=false) {
+        if(!deviceX||!hostLabels)
+            throw std::invalid_argument(
+                "invalid resident borrowed OPLS classification input");
+        if(filtered&&owns_filtered)cudaFree(filtered);
+        filtered=deviceX;owns_filtered=false;
+        fit_loaded(nullptr,hostLabels,nullptr,scaling,seed,true);
+    }
+    void fit_borrowed_device_regression(T* deviceX,T* deviceY,int scaling,
+                                        unsigned long long seed,bool=false,
+                                        bool=false) {
+        if(!deviceX||!deviceY)
+            throw std::invalid_argument(
+                "invalid resident borrowed OPLS regression input");
+        if(filtered&&owns_filtered)cudaFree(filtered);
+        filtered=deviceX;owns_filtered=false;
+        fit_loaded(deviceY,nullptr,deviceY,scaling,seed,true);
     }
     void standardize_device(T* test,int rows_count) {
         standardize<<<256,256,0,stream>>>(test,size_t(rows_count)*p,rows_count,

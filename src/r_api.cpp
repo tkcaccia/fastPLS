@@ -2056,7 +2056,8 @@ SEXP classification_cv_result(
     SET_VECTOR_ELT(output, 4, predictions);
   }
   SET_VECTOR_ELT(
-    output, 5, retain_scores == TRUE ? core_matrix_cube(
+    output, 5,
+    retain_scores == TRUE && !result.scores.empty() ? core_matrix_cube(
       result.scores, predictors.rows(), static_cast<std::size_t>(classes),
       false, false
     ) : R_NilValue
@@ -3384,6 +3385,37 @@ extern "C" SEXP _fastPLS_pls_cv_opls_classification_float32_core_cpp(
   });
 }
 
+extern "C" SEXP
+_fastPLS_pls_cv_opls_classification_float32_cuda_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP classifier, SEXP north,
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+    SEXP store_scores) {
+  return translate_exceptions("CUDA float32 OPLS classification CV", [&] {
+    if (!fastpls_svd::has_cuda_backend()) {
+      throw std::runtime_error(
+        "CUDA is unavailable; no CPU fallback is performed"
+      );
+    }
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    const int classes = Rf_asInteger(class_count);
+    if (orthogonal < 1 || classes < 2) {
+      throw std::invalid_argument("CUDA OPLS classification controls invalid");
+    }
+    const auto x = float_matrix_from_s4(predictors, "Xdata");
+    RoutedLinearAlgebraF32 backend(
+      1, x.rows(), x.columns(), static_cast<std::size_t>(classes)
+    );
+    return classification_cv_result<float>(
+      x.view(), labels, class_count, folds, components, scaling, method,
+      classifier, oversample, power, seed, store_predictions, store_scores,
+      backend, static_cast<std::size_t>(orthogonal)
+    );
+  });
+}
+
 extern "C" SEXP _fastPLS_pls_cv_kernel_classification_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
     SEXP components, SEXP scaling, SEXP classifier, SEXP kernel,
@@ -3529,6 +3561,33 @@ extern "C" SEXP _fastPLS_pls_cv_opls_regression_float32_core_cpp(
     const auto x = float_matrix_from_s4(predictors, "Xdata");
     const auto y = float_matrix_from_s4(responses, "Ydata");
     fastpls::runtime::CpuLinearAlgebraF32 backend;
+    return regression_cv_result<float>(
+      x.view(), y.view(), folds, components, scaling, method, metric,
+      oversample, power, seed, store_predictions, backend,
+      static_cast<std::size_t>(orthogonal)
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_opls_regression_float32_cuda_core_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP metric, SEXP north, SEXP oversample, SEXP power,
+    SEXP seed, SEXP store_predictions) {
+  return translate_exceptions("CUDA float32 OPLS regression CV", [&] {
+    if (!fastpls_svd::has_cuda_backend()) {
+      throw std::runtime_error(
+        "CUDA is unavailable; no CPU fallback is performed"
+      );
+    }
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    if (orthogonal < 1) {
+      throw std::invalid_argument("CUDA OPLS regression controls invalid");
+    }
+    const auto x = float_matrix_from_s4(predictors, "Xdata");
+    const auto y = float_matrix_from_s4(responses, "Ydata");
+    RoutedLinearAlgebraF32 backend(1, x.rows(), x.columns(), y.columns());
     return regression_cv_result<float>(
       x.view(), y.view(), folds, components, scaling, method, metric,
       oversample, power, seed, store_predictions, backend,

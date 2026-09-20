@@ -6405,6 +6405,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         return(cv_res$metrics)
     }
     if (identical(selection_metric, "q2y")) {
+        native_q2 <- cv_res$Q2Y
+        if (!is.null(native_q2) &&
+            length(native_q2) == length(cv_res$ncomp) &&
+            any(is.finite(native_q2))) {
+            return(.cv_metric_frame(as.numeric(native_q2), "Q2Y"))
+        }
         if (is.null(cv_res$Ypred)) {
             stop(
                 "Stored classification scores are required to optimize ",
@@ -6726,7 +6732,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     if (!identical(backend, "cuda")) {
         return(FALSE)
     }
-    if (method %in% c("simpls", "plssvd") ||
+    if (method %in% c("simpls", "plssvd", "opls") ||
         (identical(method, "kernelpls") && identical(kernel, "linear"))) {
         return(TRUE)
     }
@@ -6783,7 +6789,18 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             controls$kfold,
             controls$seed
         ) + 1L
-        method_id <- if (identical(context$method, "plssvd")) 1L else 3L
+        method_id <- if (identical(context$method, "plssvd")) {
+            1L
+        } else if (identical(context$method, "opls")) {
+            4L
+        } else {
+            3L
+        }
+        resident_north <- if (identical(context$method, "opls")) {
+            as.integer(controls$north)
+        } else {
+            0L
+        }
         if (cuda_resident_route) {
             resident_precision <- if (context$float32) "float32" else "double"
             resident_predictors <- .resident_cuda_input(
@@ -6804,7 +6821,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
                     store_predictions = isTRUE(controls$store_predictions),
                     store_scores = isTRUE(controls$store_predictions) &&
                         isTRUE(controls$return_scores),
-                    method = method_id
+                    method = method_id,
+                    north = resident_north
                 )
             } else {
                 result <- cuda_resident_simpls_cv_regression_cpp(
@@ -6825,7 +6843,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
                     power = as.integer(controls$power),
                     seed = as.integer(controls$seed),
                     store_predictions = isTRUE(controls$store_predictions),
-                    method = method_id
+                    method = method_id,
+                    north = resident_north
                 )
             }
         } else if (identical(context$backend, "metal")) {
@@ -11026,7 +11045,10 @@ keep <- c("scaling", "method", "backend", "classifier")
         responses = response_count,
         element_bytes = if (context$float32) 4 else 8
     )
-    if (identical(context$backend, "cuda") && !resident_cuda_cv) {
+    compiled_cuda_opls <- identical(context$backend, "cuda") &&
+        identical(context$config$method, "opls") && isTRUE(context$float32)
+    if (identical(context$backend, "cuda") && !resident_cuda_cv &&
+        !compiled_cuda_opls) {
         arguments$backend <- context$backend
         return(do.call(.pls_cv_via_pls, arguments))
     }
@@ -11220,7 +11242,8 @@ keep <- c("scaling", "method", "backend", "classifier")
             precision = "float32",
             cv_engine = "float32_fold_pls",
             pls_method = context$config$method,
-            backend = context$backend
+            backend = context$backend,
+            execution_route = result$prediction_backend %||% NA_character_
         )
     }
     output
@@ -11352,7 +11375,8 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   stored.
 #'   \item `Ypred`: raw prediction array when score predictions are stored.
 #'   \item `lda_scores`: held-out LDA discriminant-score array when LDA scores
-#'   are stored.
+#'   are stored. For LDA, dummy-response PLS scores are reduced into Q2Y while
+#'   each fold is processed rather than retained as a second full score array.
 #'   \item `effective_ncomp`: integer matrix with one row per fold and one
 #'   column per requested component count. Each entry is the estimable prefix
 #'   used in that fold. Zero identifies the class-prior fallback.
