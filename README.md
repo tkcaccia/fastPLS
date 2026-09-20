@@ -192,3 +192,12 @@ unverified OpenBLAS build must not be pooled with the verified benchmark.
 CUDA is optional on Linux and Windows. A CUDA build additionally requires the
 NVIDIA CUDA Toolkit and `CUDA_ROOT`; Metal is available only on macOS. Requests
 for an unavailable accelerator return an error and never silently use the CPU.
+
+## Related repositories
+
+- [`fastPLS-extra`](https://github.com/tkcaccia/fastPLS-extra): publication
+  benchmarks, validation workflows, figures, and tables.
+- [`fastPLS-py`](https://github.com/tkcaccia/fastPLS-py): Python interface to
+  the same MIT-licensed C++ core.
+- [`fastPLS-matlab`](https://github.com/tkcaccia/fastPLS-matlab): MATLAB
+  interface to the same MIT-licensed C++ core.
