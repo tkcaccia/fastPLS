@@ -119,6 +119,36 @@ test_that("argmax and LDA classification produce valid labels", {
     }
 })
 
+test_that("LDA is the default classification head", {
+    data <- small_classification_data(4104L)
+    train <- seq_len(48L)
+    test <- setdiff(seq_len(nrow(data$x)), train)
+    arguments <- list(
+        Xtrain = data$x[train, , drop = FALSE],
+        Ytrain = data$y[train],
+        ncomp = 2L,
+        method = "simpls",
+        backend = "cpu",
+        return_variance = FALSE,
+        seed = 19L
+    )
+    default_fit <- do.call(pls, arguments)
+    explicit_fit <- do.call(pls, c(arguments, list(classifier = "lda")))
+    default_prediction <- predict(default_fit, data$x[test, , drop = FALSE])
+    explicit_prediction <- predict(explicit_fit, data$x[test, , drop = FALSE])
+
+    expect_identical(eval(formals(pls)$classifier), c("lda", "argmax"))
+    expect_identical(
+        eval(formals(pls.single.cv)$classifier),
+        c("lda", "argmax")
+    )
+    expect_identical(
+        eval(formals(pls.double.cv)$classifier),
+        c("lda", "argmax")
+    )
+    expect_identical(default_prediction$Ypred, explicit_prediction$Ypred)
+})
+
 test_that("float32 input follows the public fitting and prediction path", {
     data <- small_regression_data(4103L)
     x <- float::fl(data$x)

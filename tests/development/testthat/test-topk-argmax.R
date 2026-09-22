@@ -1,4 +1,4 @@
-test_that("top-k classification prediction preserves argmax by default", {
+test_that("top-k classification prediction preserves explicit argmax", {
   set.seed(20260511)
   X <- matrix(rnorm(96 * 10), nrow = 96, ncol = 10)
   y <- factor(sample(paste0("C", seq_len(6)), 96, replace = TRUE))
@@ -9,6 +9,7 @@ test_that("top-k classification prediction preserves argmax by default", {
     y[-idx],
     ncomp = 1:3,
     method = "plssvd",
+    classifier = "argmax",
     seed = 123L
   )
 
@@ -32,7 +33,7 @@ test_that("float64 PLS top-k prediction matches the full score path", {
   for (method in c("simpls", "plssvd")) {
     fit <- pls(
       X[train, , drop = FALSE], y[train], ncomp = c(1L, 3L, 5L),
-      method = method, backend = "cpu", seed = 91L
+      method = method, classifier = "argmax", backend = "cpu", seed = 91L
     )
     model <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
     compact <- fastPLS:::.class_topk_predict(

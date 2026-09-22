@@ -16,6 +16,7 @@
 ^benchmark_results(/|$)
 ^benchmark_results_.*
 ^benchmark_results_local(/|$)
+^build/Testing(/|$)
 ^chiamaka_plot_check_
 ^dummy_benchmark_results$
 ^package_check_artifacts.*$

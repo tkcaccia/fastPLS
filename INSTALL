@@ -37,9 +37,19 @@ its default auto setting to use the BLAS/LAPACK supplied by the ARM64 R build.
 CUDA installation
 -----------------
 
-CUDA support requires an NVIDIA GPU, a compatible NVIDIA driver and the CUDA
-Toolkit. To request a CUDA build from source, set FASTPLS_USE_CUDA=1 and set
-CUDA_ROOT or CUDA_PATH if the toolkit is not installed in a standard location.
+CUDA support requires an NVIDIA GPU, a compatible NVIDIA driver and a separate
+CUDA Toolkit installation. fastPLS never installs, removes, upgrades or
+downgrades the host NVIDIA driver. In particular, do not install Debian's
+`nvidia-cuda-toolkit` package merely to build fastPLS on a machine whose vendor
+driver already works. Install a compatible NVIDIA CUDA Toolkit separately or
+build in a controlled CUDA container that receives the host GPU through the
+NVIDIA container runtime.
+
+To request a CUDA build from source, set FASTPLS_USE_CUDA=1. Set CUDA_ROOT,
+CUDA_HOME or CUDA_PATH when the toolkit is not installed in a standard
+location. The configuration searches include, lib and lib64 directly below the
+toolkit prefix and under targets/*/. It then compiles and links a probe against
+CUDA Runtime, cuBLAS, cuSOLVER and cuRAND; finding nvcc alone is insufficient.
 
 Examples:
 
@@ -50,8 +60,13 @@ On Windows, CUDA_ROOT can point to a toolkit directory such as:
   C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6
 
 If FASTPLS_USE_CUDA is unset, unavailable CUDA software is ignored and the
-package builds in CPU-only mode. Set FASTPLS_REQUIRE_CUDA=1 only when a missing
-CUDA toolkit should be treated as an installation error.
+package builds in CPU-only mode. Set FASTPLS_REQUIRE_CUDA=1 for strict mode; a
+missing header, library, compiler or failed link probe then stops installation.
+FASTPLS_CUDA_HOST_CXX may name an absolute system C++ compiler accepted by nvcc.
+The default prefers /usr/bin/g++ or /usr/bin/clang++ over CUDA or Conda wrappers.
+FASTPLS_CUDA_DIAGNOSTIC_ONLY=1 deliberately builds without CUDA kernels while
+marking the installation as diagnostic-only; it is intended for build-system
+diagnosis and must not be reported as functional CUDA support.
 
 Apple Metal installation
 ------------------------
@@ -71,5 +86,5 @@ CRAN and hosted build services
 Binary packages contain only the capabilities present on the service that built
 them. A CPU-only CRAN build remains fully functional. Users who require CUDA,
 Metal, or a particular OpenBLAS installation should compile the source package
-on the target computer and verify the result with `fastPLS_blas()`, `has_cuda()`
-and `has_metal()`.
+on the target computer and verify the result with `fastPLS_blas()`,
+`cuda_info()`, `has_cuda()` and `has_metal()`.

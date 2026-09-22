@@ -170,6 +170,7 @@ When a matching ARM64 OpenBLAS installation is unavailable, the default
 ```r
 library(fastPLS)
 fastPLS_blas()
+cuda_info()
 has_cuda()
 has_metal()
 ```
@@ -189,9 +190,15 @@ and the value returned by OpenBLAS for the active core. The publication scripts 
 before any fastPLS timing stage. Timings obtained with a different or
 unverified OpenBLAS build must not be pooled with the verified benchmark.
 
-CUDA is optional on Linux and Windows. A CUDA build additionally requires the
-NVIDIA CUDA Toolkit and `CUDA_ROOT`; Metal is available only on macOS. Requests
-for an unavailable accelerator return an error and never silently use the CPU.
+CUDA is optional on Linux and Windows. A CUDA build requires a compatible host
+NVIDIA driver and a separately installed NVIDIA CUDA Toolkit. fastPLS never
+manages the host driver. Set `CUDA_ROOT`, `CUDA_HOME`, or `CUDA_PATH` to the
+toolkit prefix when needed; configuration validates CUDA Runtime, cuBLAS,
+cuSOLVER, and cuRAND with a compile-and-link probe. Use
+`FASTPLS_REQUIRE_CUDA=1` for a strict build that cannot fall back to CPU-only
+installation. `cuda_info()` distinguishes functional, unavailable, and explicit
+diagnostic-only builds. An explicit CUDA runtime request never uses the CPU.
+Metal is available only on macOS.
 
 ## Related repositories
 

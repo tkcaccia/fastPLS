@@ -179,6 +179,11 @@ enabled for Windows ARM64.
 A CUDA-capable NVIDIA driver alone is not sufficient to compile fastPLS. The
 CUDA Toolkit, including `nvcc`, headers, cuBLAS, cuSOLVER, cuRAND, and runtime
 libraries, must be installed before the R package. cuDNN is not required.
+The driver and toolkit are separate. fastPLS never installs, removes, upgrades,
+or downgrades the host NVIDIA driver. Do not install Debian's
+`nvidia-cuda-toolkit` package merely to build fastPLS on a computer with a
+working vendor driver. Use a compatible NVIDIA toolkit installed separately, or
+a controlled NVIDIA CUDA container with host-GPU passthrough.
 
 If CUDA is installed in a standard location, the default `auto` policy detects
 it. For a reproducible source build, provide the toolkit location and require
@@ -188,7 +193,7 @@ CUDA explicitly:
 Sys.setenv(
     FASTPLS_USE_CUDA = "1",
     FASTPLS_REQUIRE_CUDA = "1",
-    CUDA_ROOT = "/usr/local/cuda"
+    CUDA_HOME = "/usr/local/cuda"
 )
 install.packages("fastPLS", type = "source")
 ```
@@ -204,8 +209,15 @@ Sys.setenv(
 )
 ```
 
-Use a toolkit version supported by the installed NVIDIA driver. The package
-configuration reports whether CUDA was compiled or omitted.
+Use a toolkit version supported by the installed NVIDIA driver. `CUDA_ROOT`,
+`CUDA_HOME`, and `CUDA_PATH` are accepted. The configuration searches
+`include`, `lib`, and `lib64` below that prefix as well as
+`targets/*/include`, `targets/*/lib`, and `targets/*/lib64`. It compiles and
+links a minimal program against CUDA Runtime, cuBLAS, cuSOLVER, and cuRAND;
+`nvcc` being present is not sufficient. The default CUDA host compiler is a
+system compiler under `/usr/bin`, ahead of CUDA and Conda wrappers. Set
+`FASTPLS_CUDA_HOST_CXX` to an absolute compatible system compiler only when the
+default is unsuitable.
 
 ## Verify the installed capabilities
 
@@ -216,6 +228,7 @@ library and accelerator capabilities:
 library(fastPLS)
 
 fastPLS_blas()
+cuda_info()
 has_cuda()
 has_metal()
 packageVersion("fastPLS")
@@ -279,8 +292,10 @@ argument or `options(backend=...)` value is present. CPU remains the default.
 | `FASTPLS_USE_OPENBLAS` | `auto`, `0`, `1` | OpenBLAS policy. |
 | `OPENBLAS_ROOT` | directory | OpenBLAS installation prefix. |
 | `FASTPLS_USE_CUDA` | `auto`, `0`, `1` | Detect, disable, or request CUDA. |
-| `FASTPLS_REQUIRE_CUDA` | `0`, `1` | Require CUDA. |
-| `CUDA_ROOT`, `CUDA_PATH` | directory | CUDA Toolkit installation prefix. |
+| `FASTPLS_REQUIRE_CUDA` | `0`, `1` | Require a successful CUDA compile/link probe. |
+| `FASTPLS_CUDA_DIAGNOSTIC_ONLY` | `0`, `1` | Build an explicitly labelled nonfunctional CUDA diagnostic package. |
+| `FASTPLS_CUDA_HOST_CXX` | file | Absolute system host compiler for `nvcc`. |
+| `CUDA_ROOT`, `CUDA_HOME`, `CUDA_PATH` | directory | CUDA Toolkit prefix. |
 | `FASTPLS_USE_METAL` | `auto`, `0`, `1` | Metal policy. |
 
 Set these variables before installing the package. Changing them afterward
@@ -310,10 +325,20 @@ Sys.unsetenv(c(
 
 ### CUDA or Metal is unavailable after installation
 
-`has_cuda()` and `has_metal()` describe the installed package and current
-hardware. Install the required toolkit first and rebuild from source. Use
+`cuda_info()`, `has_cuda()`, and `has_metal()` describe the installed package
+and current hardware. `cuda_info()` distinguishes a CUDA-enabled build with a
+visible device, a build without CUDA, and an explicit diagnostic-only build.
+Install a compatible toolkit without changing a working host driver, then
+rebuild from source. Use
 `FASTPLS_REQUIRE_CUDA=1` or `FASTPLS_USE_METAL=1` when an unavailable
 accelerator should stop installation rather than produce a CPU-capable build.
+
+If configuration reports missing CUDA libraries, confirm that CUDA Runtime,
+cuBLAS, cuSOLVER, and cuRAND are in one discovered toolkit library directory.
+If it reports an unsupported host compiler, point `FASTPLS_CUDA_HOST_CXX` to a
+system compiler supported by that toolkit. A runtime error after a successful
+build usually indicates that the host driver is too old for the toolkit runtime
+or that the container was started without NVIDIA GPU passthrough.
 
 ### The vignette is not found after a GitHub installation
 
@@ -331,6 +356,7 @@ Retain the package installation output and record the resulting environment:
 
 ```{r reproducibility, eval = FALSE}
 fastPLS_blas()
+cuda_info()
 has_cuda()
 has_metal()
 ```

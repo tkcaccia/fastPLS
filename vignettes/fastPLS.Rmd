@@ -39,7 +39,7 @@ decomposition (SVD) to obtain its latent directions.
 
 Classification can decode PLS scores by the largest dummy-response score
 (`classifier = "argmax"`) or by linear discriminant analysis (LDA) in the
-retained score space (`classifier = "lda"`). The LDA head can improve
+retained score space (`classifier = "lda"`). LDA is the default. It can improve
 discrimination when class boundaries are not well represented by the largest
 raw PLS score.
 
@@ -288,8 +288,8 @@ called directly.
 | Direct cross-covariance PLS-SVD | `method = "plssvd"` |
 | Remove response-unrelated structured variation | `method = "opls"` |
 | Nonlinear relationships | Kernel PLS with an RBF or polynomial kernel |
+| Classification: latent-space discriminant analysis (default) | `classifier = "lda"` |
 | Classification: argmax PLS-DA decoding | `classifier = "argmax"` |
-| Classification: latent-space discriminant analysis | `classifier = "lda"` |
 | Small or moderate data | `backend = "cpu"` |
 | Large dense matrices | CUDA when available |
 | Apple Silicon acceleration | Metal when available |
@@ -323,8 +323,9 @@ Ytest_cls <- Y_cls[cls_test_id]
 
 The `method` argument selects the PLS algorithm, `backend` selects the
 implementation, and `classifier` selects the classification head. The default
-classification head is `classifier = "argmax"`, which predicts the class with
-the largest PLS-DA response score.
+classification head is `classifier = "lda"`, which fits linear discriminant
+analysis in the retained PLS score space. Use `classifier = "argmax"`
+explicitly to predict the class with the largest PLS-DA response score.
 
 ```{r chunk-003}
 fit_cls <- pls(

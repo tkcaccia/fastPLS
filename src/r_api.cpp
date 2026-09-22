@@ -45,6 +45,10 @@
 
 namespace fastpls_svd {
 bool has_cuda_backend();
+bool cuda_backend_compiled();
+int cuda_backend_device_count();
+int cuda_backend_runtime_version();
+int cuda_backend_driver_version();
 bool has_metal_backend();
 }
 
@@ -2821,6 +2825,50 @@ SEXP nested_regression_result(
 
 extern "C" SEXP _fastPLS_has_cuda() {
   return Rf_ScalarLogical(fastpls_svd::has_cuda_backend());
+}
+
+extern "C" SEXP _fastPLS_cuda_info_cpp() {
+  const bool compiled = fastpls_svd::cuda_backend_compiled();
+  const bool available = fastpls_svd::has_cuda_backend();
+#if defined(FASTPLS_CUDA_DIAGNOSTIC_ONLY)
+  const bool diagnostic_only = true;
+#else
+  const bool diagnostic_only = false;
+#endif
+  const int device_count = fastpls_svd::cuda_backend_device_count();
+  const int runtime_version = fastpls_svd::cuda_backend_runtime_version();
+  const int driver_version = fastpls_svd::cuda_backend_driver_version();
+  const char* status = diagnostic_only ? "diagnostic-only" :
+    (available ? "available" : "unavailable");
+
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 8));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 8));
+  const char* labels[] = {
+    "status", "compiled", "available", "diagnostic_only", "device_count",
+    "runtime_version", "driver_version", "no_cpu_fallback"
+  };
+  for (int index = 0; index < 8; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  SET_VECTOR_ELT(output, 0, Rf_mkString(status));
+  SET_VECTOR_ELT(output, 1, Rf_ScalarLogical(compiled));
+  SET_VECTOR_ELT(output, 2, Rf_ScalarLogical(available));
+  SET_VECTOR_ELT(output, 3, Rf_ScalarLogical(diagnostic_only));
+  SET_VECTOR_ELT(output, 4, Rf_ScalarInteger(device_count));
+  SET_VECTOR_ELT(
+    output, 5,
+    runtime_version < 0 ? Rf_ScalarInteger(NA_INTEGER) :
+      Rf_ScalarInteger(runtime_version)
+  );
+  SET_VECTOR_ELT(
+    output, 6,
+    driver_version < 0 ? Rf_ScalarInteger(NA_INTEGER) :
+      Rf_ScalarInteger(driver_version)
+  );
+  SET_VECTOR_ELT(output, 7, Rf_ScalarLogical(1));
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
 }
 
 extern "C" SEXP _fastPLS_has_metal() {

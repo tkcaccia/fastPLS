@@ -12,7 +12,7 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  classifier = c("argmax", "lda"),
+  classifier = c("lda", "argmax"),
   fit = FALSE,
   bycol = FALSE,
   return_variance = TRUE,
@@ -57,9 +57,10 @@ reports both requested and effective component counts.}
 \code{simpls} uses the fastPLS accelerated SIMPLS-family core. Bounded-block
 execution is approximate and is not classical de Jong SIMPLS.}
 
-\item{classifier}{Classification decision rule. \code{argmax} keeps the
-standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
-classifier on the PLS latent scores.}
+\item{classifier}{Classification decision rule. The default \code{lda} fits
+a regularized linear discriminant analysis classifier on the PLS latent
+scores. \code{argmax} selects the class with the largest PLS-DA response
+score.}
 
 \item{fit}{Return fitted values, training scores, and \code{R2Y} when \code{TRUE}.
 The default \code{FALSE} keeps only the compact state required for prediction

@@ -23,6 +23,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_cuda_resident_classify_response_path_cpp, 5),
   FASTPLS_CALL(_fastPLS_cuda_resident_predict_path_cpp, 4),
   FASTPLS_CALL(_fastPLS_has_cuda, 0),
+  FASTPLS_CALL(_fastPLS_cuda_info_cpp, 0),
   FASTPLS_CALL(_fastPLS_has_metal, 0),
   FASTPLS_CALL(_fastPLS_blas_backend_cpp, 0),
   FASTPLS_CALL(_fastPLS_blas_info_cpp, 0),

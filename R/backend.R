@@ -44,6 +44,25 @@ fastPLS_blas <- function(details = TRUE) {
     information
 }
 
+#' Report CUDA build and runtime capability
+#'
+#' Distinguishes a functional CUDA build from a package built without CUDA and
+#' from an explicit diagnostic-only build. A functional result requires both
+#' CUDA code compiled into fastPLS and at least one device reported by the CUDA
+#' runtime. fastPLS never substitutes the CPU backend for an explicit CUDA
+#' request.
+#'
+#' @return A named list containing build status, runtime availability, device
+#'   count, CUDA runtime and driver version integers, and the no-fallback
+#'   contract. CUDA version integers use the CUDA Runtime API representation.
+#' @examples
+#' cuda_info()
+#' @seealso [has_cuda()], [pls()]
+#' @export
+cuda_info <- function() {
+    cuda_info_cpp()
+}
+
 .fastpls_validate_backend <- function(backend, label = "backend") {
     backend <- tolower(as.character(backend))
     if (

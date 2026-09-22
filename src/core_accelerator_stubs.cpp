@@ -14,6 +14,22 @@ bool has_cuda_backend() {
   return false;
 }
 
+bool cuda_backend_compiled() {
+  return false;
+}
+
+int cuda_backend_device_count() {
+  return 0;
+}
+
+int cuda_backend_runtime_version() {
+  return -1;
+}
+
+int cuda_backend_driver_version() {
+  return -1;
+}
+
 fastpls::core::Matrix<float> cuda_core_gemm_f32(
     fastpls::core::ConstMatrixView<float>,
     fastpls::core::ConstMatrixView<float>, bool, bool) {

@@ -20,7 +20,7 @@ pls.single.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda"),
+  classifier = c("lda", "argmax"),
   fit = TRUE,
   bycol = FALSE,
   selection = "auto",
@@ -92,8 +92,10 @@ as predictive components.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{classifier}{Classification rule for factor responses: \code{"argmax"} or
-latent-space \code{"lda"}. Multiple values are treated as a tuning grid.}
+\item{classifier}{Classification rule for factor responses. The default
+\code{"lda"} fits linear discriminant analysis in the latent score space;
+\code{"argmax"} selects the largest PLS-DA response score. Multiple values are
+treated as a tuning grid.}
 
 \item{fit}{Fit one additional model on the full dataset and return its
 fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
@@ -193,7 +195,7 @@ regression, response-wise metrics are included only when \code{bycol = TRUE}.
 component selection by the CV backend.
 \item \code{best_parameters}: compact list containing only \code{ncomp} plus the
 arguments that were actually optimized, for example \code{classifier} when
-\code{classifier = c("argmax", "lda")}.
+\code{classifier = c("lda", "argmax")}.
 \item \code{tuning_config}: relevant selected configuration used for the run.
 Irrelevant classifier- or method-specific defaults are omitted; for
 example, controls belonging to an unselected classifier are omitted.

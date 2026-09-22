@@ -376,8 +376,8 @@ test_that("compiled LDA CV retains discriminants without duplicate scores", {
 
     expect_identical(dim(result$lda_scores), c(72L, 3L, 2L))
     expect_true(all(is.finite(result$lda_scores)))
-    expect_null(result$Yscore)
-    expect_null(result$Ypred)
+    expect_null(result[["Yscore", exact = TRUE]])
+    expect_null(result[["Ypred", exact = TRUE]])
     expect_true(all(is.finite(result$Q2Y)))
     expect_true(all(is.finite(result$accuracy)))
 })
@@ -403,8 +403,8 @@ test_that("CUDA OPLS CV uses its resident route", {
     expect_equal(cuda$accuracy, cpu$accuracy, tolerance = 1e-4)
     expect_identical(dim(cuda$lda_scores), c(72L, 3L, 2L))
     expect_true(all(is.finite(cuda$lda_scores)))
-    expect_null(cuda$Yscore)
-    expect_null(cuda$Ypred)
+    expect_null(cuda[["Yscore", exact = TRUE]])
+    expect_null(cuda[["Ypred", exact = TRUE]])
     expect_identical(
         attr(cuda, "fastPLS_internal")$execution_route,
         "resident_cuda_opls_lda_cv"

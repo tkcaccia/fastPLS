@@ -1257,7 +1257,7 @@ if (is.null(trainer) || is.null(model$R_predict) || is.null(model$R_offset)) {
     model,
     Xtrain,
     Ytrain,
-    classifier = "argmax",
+    classifier = "lda",
     lda_ridge = 1e-8
 ) {
     classifier <- .resolve_classifier_for_backend(classifier, "cpu")
@@ -3911,7 +3911,7 @@ print.fastPLS <- function(x, ...) {
 
 .float32_capability_assessment <- function(method, backend, svd_method, q,
     ncomp,
-    classification = FALSE, kernel = "linear", classifier = "argmax",
+    classification = FALSE, kernel = "linear", classifier = "lda",
     os_type = .Platform$OS.type) {
     method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
     backend <- match.arg(
@@ -3969,7 +3969,7 @@ print.fastPLS <- function(x, ...) {
     Ytrain,
     ncomp,
     kernel = "linear",
-    classifier = "argmax",
+    classifier = "lda",
     os_type = .Platform$OS.type
 ) {
     response <- .float32_response_shape(Ytrain)
@@ -5780,7 +5780,7 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
         "poly"), gamma = NULL, degree = 3L, coef0 = 1,
     svd.method = "cpu_rsvd", rsvd_oversample = 32L,
     rsvd_power = 5L, svds_tol = 0,
-    seed = 1L, classifier = c("argmax", "lda"), lda_ridge = 1e-08, fit = FALSE,
+    seed = 1L, classifier = c("lda", "argmax"), lda_ridge = 1e-08, fit = FALSE,
     return_variance = TRUE, proj = FALSE, n.cores = NULL) {
     classifier <- .resolve_classifier_for_backend(classifier, "cpu")
     svd.method <- match.arg(.normalize_svd_method(svd.method), c("cpu_rsvd"))
@@ -5905,7 +5905,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
     north = 1L,
     scaling = c("centering", "autoscaling", "none"), svd.method = "cpu_rsvd",
     rsvd_oversample = 32L, rsvd_power = 5L, svds_tol = 0,
-    seed = 1L, classifier = c("argmax", "lda"), lda_ridge = 1e-08, fit = FALSE,
+    seed = 1L, classifier = c("lda", "argmax"), lda_ridge = 1e-08, fit = FALSE,
     return_variance = TRUE, proj = FALSE, n.cores = NULL) {
     classifier <- .resolve_classifier_for_backend(classifier, "cpu")
     svd.method <- match.arg(.normalize_svd_method(svd.method), c("cpu_rsvd"))
@@ -7226,7 +7226,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     rsvd_power = 5L, svds_tol = 0,
     seed = 1L, xprod = NULL, north = 1L, kernel = "linear", gamma = NULL,
     degree = 3L, coef0 = 1, return_scores = FALSE,
-    classifier = c("argmax", "lda"), lda_ridge = 1e-08,
+    classifier = c("lda", "argmax"), lda_ridge = 1e-08,
     store_predictions = TRUE,
     selection_metric = "auto") {
     .fastpls_apply_cpu_cores(n.cores)
@@ -7964,8 +7964,8 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     svd.method = "rsvd", seed = 1L, xprod = NULL, north = 1L,
     kernel = c("linear",
         "rbf",
-        "poly"), gamma = NULL, degree = 3L, coef0 = 1, classifier = c("argmax",
-        "lda"), lda_ridge = 1e-08, return_scores = TRUE,
+        "poly"), gamma = NULL, degree = 3L, coef0 = 1, classifier = c("lda",
+        "argmax"), lda_ridge = 1e-08, return_scores = TRUE,
     store_predictions = TRUE,
     selection_metric = "auto", ...) {
     context <- .via_pls_context(Xdata, Ydata, constrain, ncomp, kfold, scaling,
@@ -9953,9 +9953,10 @@ plot.permutation <- function(
 #' \code{kernelpls}.
 #'   `simpls` uses the fastPLS accelerated SIMPLS-family core. Bounded-block
 #'   execution is approximate and is not classical de Jong SIMPLS.
-#' @param classifier Classification decision rule. \code{argmax} keeps the
-#'   standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
-#'   classifier on the PLS latent scores.
+#' @param classifier Classification decision rule. The default \code{lda} fits
+#'   a regularized linear discriminant analysis classifier on the PLS latent
+#'   scores. \code{argmax} selects the class with the largest PLS-DA response
+#'   score.
 #' @param fit Return fitted values, training scores, and `R2Y` when `TRUE`.
 #'   The default `FALSE` keeps only the compact state required for prediction
 #'   and avoids materializing training-only outputs.
@@ -10113,7 +10114,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     scaling = c("centering",
         "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
         "kernelpls"),
-    classifier = c("argmax", "lda"),
+    classifier = c("lda", "argmax"),
     fit = FALSE, bycol = FALSE, return_variance = TRUE,
     return_loadings = FALSE,
     proj = FALSE, perm.test = FALSE, times = 100, backend = NULL,
@@ -11235,6 +11236,11 @@ keep <- c("scaling", "method", "backend", "classifier")
             result$selection_metrics
         )
         result[names(diagnostics)] <- diagnostics
+        if (identical(context$config$classifier, "lda") &&
+            !is.null(result$lda_scores)) {
+            result$Yscore <- NULL
+            result$Ypred <- NULL
+        }
     }
     output <- result
     if (context$float32) {
@@ -11285,8 +11291,10 @@ keep <- c("scaling", "method", "backend", "classifier")
 #' @param seed Random seed used for fold assignment and randomized SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
-#' @param classifier Classification rule for factor responses: `"argmax"` or
-#'   latent-space `"lda"`. Multiple values are treated as a tuning grid.
+#' @param classifier Classification rule for factor responses. The default
+#'   `"lda"` fits linear discriminant analysis in the latent score space;
+#'   `"argmax"` selects the largest PLS-DA response score. Multiple values are
+#'   treated as a tuning grid.
 #' @param fit Fit one additional model on the full dataset and return its
 #'   fitted values (`Yfit`) and training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra full-data fit;
@@ -11400,7 +11408,7 @@ keep <- c("scaling", "method", "backend", "classifier")
 #'   component selection by the CV backend.
 #'   \item `best_parameters`: compact list containing only `ncomp` plus the
 #'   arguments that were actually optimized, for example `classifier` when
-#'   `classifier = c("argmax", "lda")`.
+#'   `classifier = c("lda", "argmax")`.
 #'   \item `tuning_config`: relevant selected configuration used for the run.
 #'   Irrelevant classifier- or method-specific defaults are omitted; for
 #'   example, controls belonging to an unselected classifier are omitted.
@@ -11433,7 +11441,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     backend = NULL, n.cores = NULL, seed = 1L, kfold = 10,
     north = 1L,
     kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1,
-    classifier = c("argmax", "lda"), fit = TRUE, bycol = FALSE,
+    classifier = c("lda", "argmax"), fit = TRUE, bycol = FALSE,
     selection = "auto", return_splits = FALSE, ...) {
     n.cores <- .fastpls_apply_cpu_cores(n.cores)
     return_splits <- .cv_validate_return_splits(return_splits)
@@ -12964,7 +12972,7 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     seed = 1L, perm.test = FALSE, times = 100, runn = 1, kfold_inner = 10,
     kfold_outer = 10,
     north = 1L, kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
-    coef0 = 1, classifier = c("argmax", "lda"), bycol = FALSE,
+    coef0 = 1, classifier = c("lda", "argmax"), bycol = FALSE,
     selection = "auto", return_splits = FALSE, ...) {
     n.cores <- .fastpls_apply_cpu_cores(n.cores)
     return_splits <- .cv_validate_return_splits(return_splits)

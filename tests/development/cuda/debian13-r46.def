@@ -1,0 +1,37 @@
+Bootstrap: docker
+From: debian:trixie
+
+%labels
+    Purpose fastPLS strict CUDA build and check
+    R 4.6.0
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential gfortran curl ca-certificates devscripts file git \
+        pkg-config tidy \
+        libblas-dev liblapack-dev libopenblas-dev \
+        libbz2-dev libcairo2-dev libcurl4-openssl-dev libicu-dev libjpeg-dev \
+        liblzma-dev \
+        libpcre2-dev libpng-dev libreadline-dev libssl-dev libtiff-dev libuv1-dev \
+        libx11-dev libxml2-dev libxt-dev pandoc qpdf texinfo \
+        texlive-fonts-recommended texlive-latex-base \
+        texlive-latex-recommended time xz-utils zlib1g-dev
+    curl -fsSLO https://cran.r-project.org/src/base/R-4/R-4.6.0.tar.gz
+    tar -xzf R-4.6.0.tar.gz
+    cd R-4.6.0
+    ./configure --prefix=/opt/R/4.6.0 --enable-R-shlib \
+        --with-blas=-lopenblas --with-lapack
+    make -j"$(nproc)"
+    make install
+    /opt/R/4.6.0/bin/Rscript -e \
+        'p <- c("float", "knitr", "rmarkdown", "testthat"); install.packages(p, repos="https://cloud.r-project.org"); m <- setdiff(p, rownames(installed.packages())); if (length(m)) stop("missing R packages: ", paste(m, collapse=", "))'
+    rm -rf /R-4.6.0 /R-4.6.0.tar.gz /var/lib/apt/lists/*
+
+%environment
+    export PATH=/opt/R/4.6.0/bin:/usr/bin:/bin
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/targets/x86_64-linux/lib
+
+%runscript
+    exec "$@"

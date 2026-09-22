@@ -116,8 +116,26 @@ void mirror_lower_to_upper(fastpls::core::MatrixView<float> matrix) {
 }  // namespace
 
 bool has_cuda_backend() {
+  return cuda_backend_device_count() > 0;
+}
+
+bool cuda_backend_compiled() {
+  return true;
+}
+
+int cuda_backend_device_count() {
   int devices = 0;
-  return cudaGetDeviceCount(&devices) == cudaSuccess && devices > 0;
+  return cudaGetDeviceCount(&devices) == cudaSuccess ? devices : 0;
+}
+
+int cuda_backend_runtime_version() {
+  int version = 0;
+  return cudaRuntimeGetVersion(&version) == cudaSuccess ? version : -1;
+}
+
+int cuda_backend_driver_version() {
+  int version = 0;
+  return cudaDriverGetVersion(&version) == cudaSuccess ? version : -1;
 }
 
 fastpls::core::Matrix<float> cuda_core_gemm_f32(

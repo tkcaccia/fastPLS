@@ -5,8 +5,9 @@ use_openblas="${FASTPLS_USE_OPENBLAS:-auto}"
 openblas_root="${OPENBLAS_ROOT:-}"
 use_accelerate="${FASTPLS_USE_ACCELERATE:-auto}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
-require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
-cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
+require_cuda="${FASTPLS_REQUIRE_CUDA:-${PACKAGE_REQUIRE_CUDA:-0}}"
+diagnostic_cuda="${FASTPLS_CUDA_DIAGNOSTIC_ONLY:-0}"
+cuda_root="${CUDA_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}"
 use_metal="${FASTPLS_USE_METAL:-auto}"
 system_name="$(uname -s)"
 
@@ -98,6 +99,26 @@ if [ "${system_name}" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
   pkg_libs="${pkg_libs} -ldl"
 fi
 
+normalize_switch() {
+  case "$1" in
+    true|TRUE|yes|YES) printf "%s" "1" ;;
+    false|FALSE|no|NO) printf "%s" "0" ;;
+    *) printf "%s" "$1" ;;
+  esac
+}
+
+use_cuda="$(normalize_switch "${use_cuda}")"
+require_cuda="$(normalize_switch "${require_cuda}")"
+diagnostic_cuda="$(normalize_switch "${diagnostic_cuda}")"
+
+if [ "${require_cuda}" = "1" ]; then
+  use_cuda="1"
+fi
+if [ "${diagnostic_cuda}" = "1" ] && [ "${require_cuda}" = "1" ]; then
+  echo "ERROR: strict CUDA and diagnostic-only modes cannot be combined." >&2
+  exit 1
+fi
+
 find_cuda_root() {
   if [ -n "${cuda_root}" ]; then
     printf "%s" "${cuda_root}"
@@ -112,37 +133,144 @@ find_cuda_root() {
   done
 }
 
+find_cuda_include_dir() {
+  root="$1"
+  for directory in "${root}/include" "${root}"/targets/*/include; do
+    if [ -f "${directory}/cuda_runtime.h" ] &&
+       [ -f "${directory}/cublas_v2.h" ] &&
+       [ -f "${directory}/cusolverDn.h" ] &&
+       [ -f "${directory}/curand.h" ]; then
+      printf "%s" "${directory}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+has_cuda_library() {
+  directory="$1"
+  library="$2"
+  for candidate in \
+    "${directory}/lib${library}.so" \
+    "${directory}/lib${library}.so."* \
+    "${directory}/lib${library}.a"; do
+    [ -f "${candidate}" ] && return 0
+  done
+  return 1
+}
+
+find_cuda_library_dir() {
+  root="$1"
+  for directory in \
+    "${root}/lib" \
+    "${root}/lib64" \
+    "${root}"/targets/*/lib \
+    "${root}"/targets/*/lib64; do
+    [ -d "${directory}" ] || continue
+    if has_cuda_library "${directory}" cudart &&
+       has_cuda_library "${directory}" cublas &&
+       has_cuda_library "${directory}" cusolver &&
+       has_cuda_library "${directory}" curand; then
+      printf "%s" "${directory}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_cuda_host_cxx() {
+  if [ -n "${FASTPLS_CUDA_HOST_CXX:-}" ]; then
+    if [ ! -x "${FASTPLS_CUDA_HOST_CXX}" ]; then
+      echo "ERROR: FASTPLS_CUDA_HOST_CXX is not executable." >&2
+      return 1
+    fi
+    printf "%s" "${FASTPLS_CUDA_HOST_CXX}"
+    return 0
+  fi
+  for compiler in /usr/bin/g++ /usr/bin/clang++ /usr/bin/c++; do
+    if [ -x "${compiler}" ]; then
+      printf "%s" "${compiler}"
+      return 0
+    fi
+  done
+  compiler="$(command -v c++ 2>/dev/null || true)"
+  case "${compiler}" in
+    ""|*conda*|*CUDA*|*cuda*) return 1 ;;
+    *) printf "%s" "${compiler}" ;;
+  esac
+}
+
+probe_cuda_toolkit() {
+  probe_directory="${TMPDIR:-/tmp}/fastpls-cuda-probe.$$"
+  probe_source="${probe_directory}/probe.cu"
+  probe_binary="${probe_directory}/probe"
+  probe_log="${probe_directory}/probe.log"
+  mkdir -p "${probe_directory}"
+  cat > "${probe_source}" <<'EOF'
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cusolverDn.h>
+#include <curand.h>
+
+int main() {
+  cublasHandle_t cublas = nullptr;
+  cusolverDnHandle_t cusolver = nullptr;
+  curandGenerator_t curand = nullptr;
+  (void) cudaFree(nullptr);
+  (void) cublasCreate(&cublas);
+  (void) cusolverDnCreate(&cusolver);
+  (void) curandCreateGenerator(&curand, CURAND_RNG_PSEUDO_DEFAULT);
+  return 0;
+}
+EOF
+  if PATH="$(dirname "${cuda_host_cxx}"):/usr/bin:/bin:${PATH}" \
+      "${cuda_nvcc}" -ccbin "${cuda_host_cxx}" -std=c++17 \
+      -I"${cuda_include_dir}" "${probe_source}" \
+      -L"${cuda_lib_dir}" -lcudart -lcublas -lcusolver -lcurand \
+      -Xlinker=-rpath -Xlinker="${cuda_lib_dir}" \
+      -o "${probe_binary}" >"${probe_log}" 2>&1; then
+    rm -rf "${probe_directory}"
+    return 0
+  fi
+  echo "fastPLS configure: CUDA compile/link probe failed:" >&2
+  sed -n '1,120p' "${probe_log}" >&2
+  rm -rf "${probe_directory}"
+  return 1
+}
+
 cuda_root="$(find_cuda_root || true)"
-cuda_header="${cuda_root}/include/cuda_runtime.h"
 cuda_lib_dir=""
 cuda_include_dir=""
-if [ -n "${cuda_root}" ]; then
-  if [ -f "${cuda_root}/include/cuda_runtime.h" ]; then
-    cuda_include_dir="${cuda_root}/include"
-    cuda_header="${cuda_include_dir}/cuda_runtime.h"
-  elif [ -f "${cuda_root}/targets/x86_64-linux/include/cuda_runtime.h" ]; then
-    cuda_include_dir="${cuda_root}/targets/x86_64-linux/include"
-    cuda_header="${cuda_include_dir}/cuda_runtime.h"
-  fi
-  if [ -d "${cuda_root}/lib64" ]; then
-    cuda_lib_dir="${cuda_root}/lib64"
-  elif [ -d "${cuda_root}/lib" ]; then
-    cuda_lib_dir="${cuda_root}/lib"
-  elif [ -d "${cuda_root}/targets/x86_64-linux/lib" ]; then
-    cuda_lib_dir="${cuda_root}/targets/x86_64-linux/lib"
-  fi
-fi
+cuda_nvcc=""
+cuda_host_cxx=""
+cuda_probe_reason="CUDA Toolkit was not found"
 have_cuda=0
 
-if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" != "FALSE" ] &&
-   [ -n "${cuda_root}" ] && [ -f "${cuda_header}" ] &&
-   [ -n "${cuda_lib_dir}" ] && [ -x "${cuda_root}/bin/nvcc" ]; then
-  have_cuda=1
+if [ "${use_cuda}" != "0" ] && [ "${diagnostic_cuda}" != "1" ] &&
+   [ -n "${cuda_root}" ]; then
+  cuda_include_dir="$(find_cuda_include_dir "${cuda_root}" || true)"
+  cuda_lib_dir="$(find_cuda_library_dir "${cuda_root}" || true)"
+  cuda_nvcc="${cuda_root}/bin/nvcc"
+  cuda_host_cxx="$(find_cuda_host_cxx || true)"
+  if [ ! -x "${cuda_nvcc}" ]; then
+    cuda_probe_reason="nvcc was not found under the selected CUDA Toolkit"
+  elif [ -z "${cuda_include_dir}" ]; then
+    cuda_probe_reason="required CUDA headers were not found"
+  elif [ -z "${cuda_lib_dir}" ]; then
+    cuda_probe_reason="required CUDA libraries were not found together"
+  elif [ -z "${cuda_host_cxx}" ]; then
+    cuda_probe_reason="a system CUDA host C++ compiler was not found"
+  elif probe_cuda_toolkit; then
+    have_cuda=1
+    cuda_probe_reason="CUDA compile/link probe succeeded"
+  else
+    cuda_probe_reason="CUDA compile/link probe failed"
+  fi
 fi
 
 if [ "${require_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
-  echo "ERROR: FASTPLS_REQUIRE_CUDA=1 but the CUDA Toolkit was not found or is incomplete." >&2
-  echo "Set CUDA_ROOT to the CUDA Toolkit directory, for example:" >&2
+  echo "ERROR: FASTPLS_REQUIRE_CUDA=1 but CUDA support cannot be built: ${cuda_probe_reason}." >&2
+  echo "Set CUDA_ROOT or CUDA_HOME to the CUDA Toolkit directory, for example:" >&2
   echo "  /usr/local/cuda" >&2
   exit 1
 fi
@@ -154,8 +282,10 @@ fi
 
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure: CUDA Toolkit found at ${cuda_root}"
+  echo "fastPLS configure: CUDA include directory ${cuda_include_dir}"
+  echo "fastPLS configure: CUDA library directory ${cuda_lib_dir}"
+  echo "fastPLS configure: CUDA host compiler ${cuda_host_cxx}"
   cuda_flags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS -I${cuda_include_dir}"
-  cuda_nvcc="${cuda_root}/bin/nvcc"
   cuda_objects=" core_cuda_backend.o"
   if [ -n "${pkg_cppflags}" ]; then
     pkg_cppflags="${pkg_cppflags} ${cuda_flags}"
@@ -163,9 +293,13 @@ if [ "${have_cuda}" = "1" ]; then
     pkg_cppflags="${cuda_flags}"
   fi
   pkg_cxxflags="${cuda_flags}"
-  pkg_libs="-L${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
+  pkg_libs="-L${cuda_lib_dir} -Wl,-rpath,${cuda_lib_dir} -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
+elif [ "${diagnostic_cuda}" = "1" ]; then
+  echo "fastPLS configure: building in explicit CUDA diagnostic-only mode"
+  pkg_cppflags="${pkg_cppflags} -DFASTPLS_CUDA_DIAGNOSTIC_ONLY"
+  pkg_cxxflags="${pkg_cxxflags} -DFASTPLS_CUDA_DIAGNOSTIC_ONLY"
 else
-  echo "fastPLS configure: CUDA Toolkit not found; building without CUDA"
+  echo "fastPLS configure: ${cuda_probe_reason}; building without CUDA"
 fi
 
 have_metal=0
@@ -228,10 +362,11 @@ fi
 if [ -n "${cuda_objects}" ]; then
   cat >> src/Makevars <<EOF
 
-CUDA_NVCC = ${cuda_root}/bin/nvcc
-CUDA_NVCCFLAGS = -std=c++17 --extended-lambda --expt-relaxed-constexpr -I../inst/include/ ${cuda_flags} -Xcompiler -fPIC
+CUDA_NVCC = ${cuda_nvcc}
+CUDA_HOST_CXX = ${cuda_host_cxx}
+CUDA_NVCCFLAGS = -std=c++17 --extended-lambda --expt-relaxed-constexpr -ccbin \$(CUDA_HOST_CXX) -I../inst/include/ ${cuda_flags} -Xcompiler -fPIC
 
 %.o: %.cu
-	\$(CUDA_NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
+	PATH=/usr/bin:/bin:\$\$PATH \$(CUDA_NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
 EOF
 fi

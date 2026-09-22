@@ -6,7 +6,7 @@ The release replaces the former Rcpp/RcppArmadillo implementation with the
 package's compiled C++17 core and expands the public methods, validation,
 float32 support, and optional accelerator routes. The release has no
 Bioconductor package dependency; its examples and vignettes use base R data
-and a package-owned synthetic dataset.
+and small deterministic matrices generated within the examples.
 
 The package license has changed from GPL-3 to MIT. The package authors own the
 new implementation and have agreed to distribute it under the MIT license.
@@ -44,3 +44,8 @@ The source archive was built with R 4.6.0 on macOS arm64.
 * 1 note
 
 The note reports the maintainer-address change disclosed above.
+
+The CRAN test suite completed in 2.94 seconds on this system with 604 passing
+expectations and one expected skip because CUDA hardware was unavailable.
+Long-running backend grids and publication-scale numerical audits are kept in
+the development test suite and are not run during ordinary package checks.

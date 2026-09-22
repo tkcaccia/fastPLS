@@ -24,7 +24,7 @@ pls.double.cv(
   gamma = NULL,
   degree = 3L,
   coef0 = 1,
-  classifier = c("argmax", "lda"),
+  classifier = c("lda", "argmax"),
   bycol = FALSE,
   selection = "auto",
   return_splits = FALSE,
@@ -121,9 +121,10 @@ as predictive components.}
 
 \item{coef0}{Polynomial kernel offset.}
 
-\item{classifier}{Classification decision rule. \code{argmax} keeps the
-standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
-classifier on the PLS latent scores.}
+\item{classifier}{Classification decision rule. The default \code{lda} fits
+a regularized linear discriminant analysis classifier on the PLS latent
+scores. \code{argmax} selects the class with the largest PLS-DA response
+score.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in the returned \code{metrics} list. The default \code{FALSE} returns only

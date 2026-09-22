@@ -46,6 +46,7 @@ SEXP _fastPLS_cuda_resident_predict_path_cpp(
 );
 SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right);
 SEXP _fastPLS_has_cuda();
+SEXP _fastPLS_cuda_info_cpp();
 SEXP _fastPLS_has_metal();
 SEXP _fastPLS_blas_backend_cpp();
 SEXP _fastPLS_blas_info_cpp();

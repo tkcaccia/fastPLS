@@ -1,5 +1,16 @@
 # fastPLS 0.3
 
+* Made Linux CUDA discovery robust to toolkit root and `targets/*` layouts,
+  added compile-and-link validation for CUDA Runtime, cuBLAS, cuSOLVER, and
+  cuRAND, and added strict and diagnostic-only build modes. The new
+  `cuda_info()` function distinguishes functional, unavailable, and
+  diagnostic-only CUDA installations without silently falling back to CPU.
+
+* Made latent-space linear discriminant analysis (`classifier = "lda"`) the
+  default classification head for direct fitting, single cross-validation,
+  and nested cross-validation. Response-score argmax remains available through
+  `classifier = "argmax"`.
+
 * Added binary AUROC selection to single and nested cross-validation. AUROC is
   calculated from pooled held-out continuous class scores, including explicit
   constant scores from single-class training folds. CV results now report

@@ -7,6 +7,16 @@
 
 namespace fastpls_svd {
 
+bool has_cuda_backend();
+
+bool cuda_backend_compiled();
+
+int cuda_backend_device_count();
+
+int cuda_backend_runtime_version();
+
+int cuda_backend_driver_version();
+
 fastpls::core::Matrix<float> cuda_core_gemm_f32(
   fastpls::core::ConstMatrixView<float> left,
   fastpls::core::ConstMatrixView<float> right,

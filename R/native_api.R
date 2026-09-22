@@ -637,6 +637,10 @@ has_cuda <- function() {
     .Call("_fastPLS_has_cuda", PACKAGE = "fastPLS")
 }
 
+cuda_info_cpp <- function() {
+    .Call("_fastPLS_cuda_info_cpp", PACKAGE = "fastPLS")
+}
+
 has_metal <- function() {
     .Call("_fastPLS_has_metal", PACKAGE = "fastPLS")
 }
