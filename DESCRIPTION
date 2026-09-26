@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
-Title: Fast Partial Least Squares for High-Dimensional Data
+Title: 'fastPLS': Fast Partial Least Squares for High-Dimensional Data
 Version: 0.3
-Date: 2026-09-22
+Date: 2026-09-26
 Authors@R: c(
     person(
         "Stefano", "Cacciatore", role = c("aut", "cre"),
@@ -25,11 +25,12 @@ Authors@R: c(
     )
     )
 Description: Fast implementations of partial least squares models for
-    high-dimensional regression and classification. The package provides
+    high-dimensional regression and classification. The 'fastPLS' software
+    provides
     compiled implementations of PLS-SVD, a SIMPLS-family estimator, OPLS and
     kernel PLS, together
     with truncated singular value decomposition backends, discriminant
-    classifiers, cross-validation utilities and optional CUDA or Apple Metal
+    classifiers, cross-validation utilities and optional 'CUDA' or Apple 'Metal'
     acceleration when the required system libraries are available. Compact
     latent prediction and memory-aware numerical routes support analyses with
     large predictor or multivariate-response matrices.
