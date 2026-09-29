@@ -26,6 +26,32 @@ expect_finite_numeric <- function(value) {
     expect_true(all(is.finite(value)))
 }
 
+test_that("CPU core counts reject values outside R's integer range", {
+    validate <- getFromNamespace(".fastpls_validate_cores", "fastPLS")
+    expect_error(
+        validate(as.double(.Machine$integer.max) + 1),
+        "within R's integer range"
+    )
+})
+
+test_that("float32 OPLS filtering accepts an empty orthogonal path", {
+    values <- matrix(seq_len(12L), nrow = 4L, ncol = 3L) / 7
+    center <- matrix(c(0.2, -0.1, 0.4), nrow = 1L)
+    scale <- matrix(c(1.1, 0.8, 1.4), nrow = 1L)
+    empty <- matrix(numeric(), nrow = ncol(values), ncol = 0L)
+
+    filtered <- fastPLS:::opls_apply_filter_float32_cpp(
+        float::fl(values), float::fl(center), float::fl(scale),
+        float::fl(empty), float::fl(empty), 0L
+    )
+
+    expect_equal(
+        float::dbl(fastPLS:::.float32_from_bits(filtered$X)),
+        sweep(sweep(values, 2L, center, "-"), 2L, scale, "/"),
+        tolerance = 1e-5
+    )
+})
+
 test_that("the compiled numerical library and available details are reported", {
     backend <- fastPLS_blas(details = FALSE)
     information <- fastPLS_blas()

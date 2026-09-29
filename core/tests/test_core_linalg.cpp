@@ -3,8 +3,29 @@
 
 #include <cassert>
 #include <cmath>
+#include <limits>
+#include <new>
 
 int main() {
+  bool constructor_overflow = false;
+  try {
+    fastpls::core::Matrix<double> invalid(
+      std::numeric_limits<std::size_t>::max() / 2 + 1, 2
+    );
+  } catch (const std::bad_array_new_length&) {
+    constructor_overflow = true;
+  }
+  assert(constructor_overflow);
+
+  fastpls::core::Matrix<double> resized;
+  bool resize_overflow = false;
+  try {
+    resized.resize(std::numeric_limits<std::size_t>::max() / 2 + 1, 2);
+  } catch (const std::bad_array_new_length&) {
+    resize_overflow = true;
+  }
+  assert(resize_overflow);
+
   fastpls::core::Matrix<double> left(3, 2);
   fastpls::core::Matrix<double> right(2, 4);
   for (std::size_t column = 0; column < left.columns(); ++column) {

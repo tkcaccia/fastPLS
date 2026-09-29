@@ -110,7 +110,9 @@ fastpls::core::Matrix<float> float_matrix_from_s4_impl(
   const int* source = INTEGER(bits);
   static_assert(sizeof(float) == sizeof(int),
                 "float32 bridge requires 32-bit float and int storage");
-  std::memcpy(values.data(), source, values.size() * sizeof(float));
+  if (values.size() > 0) {
+    std::memcpy(values.data(), source, values.size() * sizeof(float));
+  }
   UNPROTECT(1);
   return values;
 }
@@ -217,7 +219,9 @@ fastpls::core::Matrix<double> numeric_matrix_from_sexp_impl(
   }
   fastpls::core::Matrix<double> values(rows, columns);
   if (TYPEOF(object) == REALSXP) {
-    std::copy(REAL(object), REAL(object) + values.size(), values.data());
+    if (values.size() > 0) {
+      std::copy(REAL(object), REAL(object) + values.size(), values.data());
+    }
   } else {
     for (std::size_t index = 0; index < values.size(); ++index) {
       const int value = INTEGER(object)[index];
@@ -263,7 +267,9 @@ std::vector<double> numeric_values(SEXP object, const char* name) {
   }
   std::vector<double> values(static_cast<std::size_t>(XLENGTH(object)));
   if (TYPEOF(object) == REALSXP) {
-    std::copy(REAL(object), REAL(object) + values.size(), values.begin());
+    if (!values.empty()) {
+      std::copy(REAL(object), REAL(object) + values.size(), values.begin());
+    }
   } else {
     for (std::size_t index = 0; index < values.size(); ++index) {
       const int value = INTEGER(object)[index];
@@ -280,7 +286,9 @@ SEXP float_bits_matrix(const fastpls::core::Matrix<float>& values) {
   );
   static_assert(sizeof(float) == sizeof(int),
                 "float32 bridge requires 32-bit float and int storage");
-  std::memcpy(INTEGER(result), values.data(), values.size() * sizeof(float));
+  if (values.size() > 0) {
+    std::memcpy(INTEGER(result), values.data(), values.size() * sizeof(float));
+  }
   return result;
 }
 
@@ -288,7 +296,9 @@ SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
   SEXP result = Rf_allocMatrix(
     REALSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
   );
-  std::copy(values.data(), values.data() + values.size(), REAL(result));
+  if (values.size() > 0) {
+    std::copy(values.data(), values.data() + values.size(), REAL(result));
+  }
   return result;
 }
 
@@ -307,7 +317,9 @@ SEXP integer_matrix(const fastpls::core::Matrix<int>& values) {
   SEXP result = Rf_allocMatrix(
     INTSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
   );
-  std::copy(values.data(), values.data() + values.size(), INTEGER(result));
+  if (values.size() > 0) {
+    std::copy(values.data(), values.data() + values.size(), INTEGER(result));
+  }
   return result;
 }
 
@@ -365,22 +377,45 @@ SEXP core_matrix_cube(
     const std::vector<fastpls::core::Matrix<T>>& values,
     std::size_t rows, std::size_t columns, bool variable_columns = false,
     bool preserve_float = true) {
+  if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      columns > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      values.size() >
+        static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    throw std::overflow_error(
+      "fastPLS core matrix path dimensions exceed R's array range"
+    );
+  }
+  if (columns != 0 &&
+      rows > std::numeric_limits<std::size_t>::max() / columns) {
+    throw std::overflow_error("fastPLS core matrix path size overflow");
+  }
+  const std::size_t slice_size = rows * columns;
+  if (values.size() != 0 &&
+      slice_size > std::numeric_limits<std::size_t>::max() / values.size()) {
+    throw std::overflow_error("fastPLS core matrix path size overflow");
+  }
+  const std::size_t total_size = slice_size * values.size();
+  if (total_size > static_cast<std::size_t>(
+        std::numeric_limits<R_xlen_t>::max())) {
+    throw std::overflow_error(
+      "fastPLS core matrix path exceeds R's vector-length limit"
+    );
+  }
   const SEXPTYPE type = std::is_same<T, float>::value && preserve_float ?
     INTSXP : REALSXP;
   SEXP output = PROTECT(Rf_allocVector(
-    type, static_cast<R_xlen_t>(rows * columns * values.size())
+    type, static_cast<R_xlen_t>(total_size)
   ));
   SEXP dimensions = PROTECT(Rf_allocVector(INTSXP, 3));
   INTEGER(dimensions)[0] = static_cast<int>(rows);
   INTEGER(dimensions)[1] = static_cast<int>(columns);
   INTEGER(dimensions)[2] = static_cast<int>(values.size());
   Rf_setAttrib(output, R_DimSymbol, dimensions);
-  const std::size_t slice_size = rows * columns;
   const bool complete_slices = !variable_columns &&
     std::all_of(values.begin(), values.end(), [=](const auto& value) {
       return value.rows() == rows && value.columns() == columns;
     });
-  if (!complete_slices) {
+  if (!complete_slices && XLENGTH(output) > 0) {
     if (type == INTSXP) {
       std::fill(INTEGER(output), INTEGER(output) + XLENGTH(output), 0);
     } else {
@@ -396,7 +431,7 @@ SEXP core_matrix_cube(
         "fastPLS core matrix path has inconsistent dimensions"
       );
     }
-    if (complete_slices) {
+    if (complete_slices && slice_size > 0) {
       const std::size_t destination = slice * slice_size;
       if (type == INTSXP) {
         std::memcpy(
@@ -793,7 +828,9 @@ class RoutedLinearAlgebraF32 {
 template<class T>
 fastpls::core::Matrix<T> row_matrix(const std::vector<T>& values) {
   fastpls::core::Matrix<T> result(1, values.size());
-  std::copy(values.begin(), values.end(), result.data());
+  if (!values.empty()) {
+    std::copy(values.begin(), values.end(), result.data());
+  }
   return result;
 }
 
@@ -838,13 +875,17 @@ SEXP float_lda_models(
 
 SEXP double_row_matrix(const std::vector<double>& values) {
   SEXP output = Rf_allocMatrix(REALSXP, 1, static_cast<int>(values.size()));
-  std::copy(values.begin(), values.end(), REAL(output));
+  if (!values.empty()) {
+    std::copy(values.begin(), values.end(), REAL(output));
+  }
   return output;
 }
 
 SEXP double_column_matrix(const std::vector<double>& values) {
   SEXP output = Rf_allocMatrix(REALSXP, static_cast<int>(values.size()), 1);
-  std::copy(values.begin(), values.end(), REAL(output));
+  if (!values.empty()) {
+    std::copy(values.begin(), values.end(), REAL(output));
+  }
   return output;
 }
 
@@ -950,7 +991,9 @@ fastpls::core::LdaModel<double> double_lda_model_from_sexp(SEXP object) {
 
 SEXP integer_predictions(const std::vector<int>& predictions) {
   SEXP output = Rf_allocVector(INTSXP, predictions.size());
-  std::copy(predictions.begin(), predictions.end(), INTEGER(output));
+  if (!predictions.empty()) {
+    std::copy(predictions.begin(), predictions.end(), INTEGER(output));
+  }
   return output;
 }
 

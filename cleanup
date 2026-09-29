@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
 set -eu
 
-rm -f src/Makevars src/Makevars.win src/core_metal_backend.mm \
+rm -f src/Makevars src/Makevars.win \
   src/*.o src/*.so src/*.dll src/*.dylib

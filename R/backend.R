@@ -149,9 +149,14 @@ cuda_info <- function() {
             is.na(n.cores) ||
             !is.finite(n.cores) ||
             n.cores < 1 ||
-            n.cores != floor(n.cores)
+            n.cores != floor(n.cores) ||
+            n.cores > .Machine$integer.max
     ) {
-        stop("`", source, "` must contain one positive integer.", call. = FALSE)
+        stop(
+            "`", source, "` must contain one positive integer within R's ",
+            "integer range.",
+            call. = FALSE
+        )
     }
     as.integer(n.cores)
 }
