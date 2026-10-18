@@ -170,9 +170,11 @@ When a matching ARM64 OpenBLAS installation is unavailable, the default
 ```r
 library(fastPLS)
 fastPLS_blas()
-cuda_info()
-has_cuda()
-has_metal()
+fastPLS::cuda_info()
+gpuinfo::has_cuda()
+gpuinfo::has_metal()
+gpuinfo::cpu_info()
+gpuinfo::system_memory_info()
 ```
 
 `fastPLS_blas()` returns a named report containing the backend, library version,
@@ -196,9 +198,16 @@ manages the host driver. Set `CUDA_ROOT`, `CUDA_HOME`, or `CUDA_PATH` to the
 toolkit prefix when needed; configuration validates CUDA Runtime, cuBLAS,
 cuSOLVER, and cuRAND with a compile-and-link probe. Use
 `FASTPLS_REQUIRE_CUDA=1` for a strict build that cannot fall back to CPU-only
-installation. `cuda_info()` distinguishes functional, unavailable, and explicit
-diagnostic-only builds. An explicit CUDA runtime request never uses the CPU.
-Metal is available only on macOS.
+installation. `gpuinfo` 0.2.0 or later reports hardware, CPU resources, and
+system memory. `fastPLS::cuda_info()` reports whether this fastPLS installation
+contains CUDA code and can see a device through its linked runtime. It also
+includes gpuinfo's independent driver result and CUDA library inventory;
+cuFFT and NCCL are optional and do not determine fastPLS availability.
+Use the qualified name because `gpuinfo` also exports `cuda_info()`.
+Hardware discovery alone does not prove that fastPLS was built with a backend.
+Numerical operations use fastPLS's native runtime checks without repeating
+system discovery. An explicit unavailable accelerator request stops with an
+error. Metal is available only on macOS.
 
 ## Related repositories
 

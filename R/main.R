@@ -1091,7 +1091,8 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
 }
 
 .resolve_lda_backend <- function(model, classifier) {
-    if (classifier == "lda_metal" && !isTRUE(has_metal())) {
+    if (classifier == "lda_metal" &&
+        !.fastpls_backend_available("metal")) {
         .fastpls_require_backend_available("metal", "LDA fitting")
     }
     model$classification_rule <- classifier
@@ -3720,7 +3721,7 @@ print.fastPLS <- function(x, ...) {
 
 .cuda_matmul_available <- function() {
     is.loaded("_fastPLS_cuda_matrix_multiply", PACKAGE = "fastPLS") &&
-        isTRUE(has_cuda())
+        .fastpls_backend_available("cuda")
 }
 
 .cuda_matmul <- function(A, B) {
@@ -6698,10 +6699,12 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             warn = TRUE
         )$ncomp
     }
-    if (identical(backend, "cuda") && !has_cuda()) {
+    if (identical(backend, "cuda") &&
+        !.fastpls_backend_available("cuda")) {
         .fastpls_require_backend_available("cuda", "Cross-validation")
     }
-    if (identical(backend, "metal") && !isTRUE(has_metal())) {
+    if (identical(backend, "metal") &&
+        !.fastpls_backend_available("metal")) {
         .fastpls_require_backend_available("metal", "Cross-validation")
     }
     solver <- .compiled_cv_solver(backend, svd.method)
@@ -7453,10 +7456,12 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 }
 
 .via_pls_validate_route <- function(backend, xprod) {
-    if (identical(backend, "cuda") && !isTRUE(has_cuda())) {
+    if (identical(backend, "cuda") &&
+        !.fastpls_backend_available("cuda")) {
         .fastpls_require_backend_available("cuda", "Cross-validation")
     }
-    if (identical(backend, "metal") && !isTRUE(has_metal())) {
+    if (identical(backend, "metal") &&
+        !.fastpls_backend_available("metal")) {
         .fastpls_require_backend_available("metal", "Cross-validation")
     }
     if (!is.null(xprod)) {
@@ -8954,7 +8959,7 @@ plot.permutation <- function(
 }
 
 .metal_mm <- function(A, B) {
-    if (!isTRUE(has_metal())) {
+    if (!.fastpls_backend_available("metal")) {
         .fastpls_require_backend_available(
             "metal",
             "Metal matrix multiplication"
@@ -9385,10 +9390,12 @@ plot.permutation <- function(
     if (!backend %in% c("cpu", "cuda", "metal")) {
         stop("float32 PLS requires a CPU, CUDA, or Metal backend.")
     }
-    if (identical(backend, "metal") && !isTRUE(has_metal())) {
+    if (identical(backend, "metal") &&
+        !.fastpls_backend_available("metal")) {
         .fastpls_require_backend_available("metal", "float32 PLS fitting")
     }
-    if (identical(backend, "cuda") && !isTRUE(has_cuda())) {
+    if (identical(backend, "cuda") &&
+        !.fastpls_backend_available("cuda")) {
         .fastpls_require_backend_available("cuda", "float32 PLS fitting")
     }
     if (!.normalize_svd_method(solver) %in%

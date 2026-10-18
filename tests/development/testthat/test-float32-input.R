@@ -108,7 +108,7 @@ test_that("float32 OPLS filtering uses the standalone matrix boundary", {
     tolerance = 1e-5
   )
   for (backend in c(cuda = 1L, metal = 2L)) {
-    available <- if (backend == 1L) has_cuda() else has_metal()
+    available <- if (backend == 1L) fastPLS:::.fastpls_backend_available("cuda") else fastPLS:::.fastpls_backend_available("metal")
     if (isTRUE(available)) {
       accelerated <- fastPLS:::opls_apply_filter_float32_cpp(
         float::fl(values), float::fl(center), float::fl(scale),
@@ -521,7 +521,7 @@ test_that("float32 input refuses unsupported non-float routes", {
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
-  if (has_cuda()) {
+  if (fastPLS:::.fastpls_backend_available("cuda")) {
     expect_s3_class(
       pls(X, y, ncomp = 2, backend = "cuda", return_variance = FALSE),
       "fastPLS"
@@ -602,7 +602,7 @@ test_that("pls.single.cv preserves float32 input instead of entering the double 
 test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_cuda(), "CUDA backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend not available")
 
   set.seed(1234)
   A <- float::fl(matrix(rnorm(120), nrow = 20))
@@ -638,7 +638,7 @@ test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", 
 test_that("Metal float32 matrix multiply stays float32", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend not available")
 
   set.seed(124)
   A <- float::fl(matrix(rnorm(24), nrow = 6))
@@ -680,7 +680,7 @@ test_that("fastsvd supports public float32 CPU routes", {
 test_that("fastsvd rejects the hybrid float32 Metal rSVD route", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend not available")
   set.seed(128)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
   expect_error(
@@ -692,7 +692,7 @@ test_that("fastsvd rejects the hybrid float32 Metal rSVD route", {
 test_that("float32 standalone accelerator rSVD rejects hybrid execution", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  available <- if (has_cuda()) "cuda" else character()
+  available <- if (fastPLS:::.fastpls_backend_available("cuda")) "cuda" else character()
   skip_if(!length(available), "CUDA backend is not available")
 
   set.seed(129)
@@ -729,8 +729,8 @@ test_that("float32 accelerator SIMPLS retains a nonempty reduced left basis", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   available <- c(
-    if (has_cuda()) "cuda",
-    if (has_metal()) "metal"
+    if (fastPLS:::.fastpls_backend_available("cuda")) "cuda",
+    if (fastPLS:::.fastpls_backend_available("metal")) "metal"
   )
   skip_if(!length(available), "No accelerator backend is available")
 
@@ -767,7 +767,7 @@ test_that("float32 accelerator SIMPLS retains a nonempty reduced left basis", {
 test_that("pls supports float32 Metal backend when available", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend not available")
 
   set.seed(130)
   X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec", "drat")]))
@@ -983,7 +983,7 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
 test_that("Metal operation split supports OPLS and nonlinear kernel PLS", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend not available")
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
@@ -1008,7 +1008,7 @@ test_that("Metal operation split supports OPLS and nonlinear kernel PLS", {
 test_that("CUDA runs native OPLS and nonlinear kernel PLS routes", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  skip_if_not(has_cuda(), "CUDA backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend not available")
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 

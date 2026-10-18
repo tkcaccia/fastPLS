@@ -1,5 +1,5 @@
 test_that("Metal float32 deflation updates the operation-split operator", {
-    skip_if_not(has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
     set.seed(421)
     X <- float::fl(matrix(rnorm(120 * 47), 120, 47))
     Y <- float::fl(matrix(rnorm(120 * 37), 120, 37))
@@ -58,7 +58,7 @@ test_that("float32 diagnostics report each massive backend route", {
 })
 
 test_that("Metal float32 class products reuse no stale labels", {
-    skip_if_not(has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
     set.seed(422)
     X <- float::fl(matrix(rnorm(140 * 49), 140, 49))
     y <- factor(rep(seq_len(7), 20))

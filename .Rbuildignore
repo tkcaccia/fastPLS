@@ -53,6 +53,7 @@
 ^[.]fastpls-openblas-lib(/|$)
 ^[.]fastpls-metal-lib.*(/|$)
 ^[.]fastpls-metal-current-lib(/|$)
+^AGENTS[.]md$
 ^cran-comments[.]md$
 ^data-raw(/|$)
 ^tests/development(/|$)

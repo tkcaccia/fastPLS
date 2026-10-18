@@ -1,5 +1,5 @@
 test_that("standalone Metal rSVD rejects operation-split execution", {
-  skip_if_not(fastPLS::has_metal(), "Metal backend is not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
   set.seed(42)
   A <- matrix(rnorm(80 * 25), 80, 25)

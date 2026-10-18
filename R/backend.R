@@ -35,7 +35,8 @@ fastPLS_blas <- function(details = TRUE) {
         return(blas_backend_cpp())
     }
     information <- blas_info_cpp()
-    if (is.na(information$library)) {
+    if (identical(information$backend, "R BLAS/LAPACK") &&
+        is.na(information$library)) {
         session_blas <- unname(extSoftVersion()["BLAS"])
         if (length(session_blas) == 1L && !is.na(session_blas)) {
             information$library <- session_blas
@@ -52,15 +53,41 @@ fastPLS_blas <- function(details = TRUE) {
 #' runtime. fastPLS never substitutes the CPU backend for an explicit CUDA
 #' request.
 #'
+#' Hardware and shared-library diagnostics come from `gpuinfo`. Its driver
+#' probe is reported separately as `hardware_available`; it does not override
+#' the runtime result from the libraries linked into fastPLS. The `libraries`
+#' table adds `required_by_fastPLS` to identify the CUDA driver, runtime,
+#' cuBLAS, cuSOLVER, and cuRAND. cuFFT and NCCL are not required by fastPLS.
+#' A missing separately discoverable library does not disable a working
+#' fastPLS binary, which can use linked or bundled libraries.
+#'
 #' @return A named list containing build status, runtime availability, device
 #'   count, CUDA runtime and driver version integers, and the no-fallback
-#'   contract. CUDA version integers use the CUDA Runtime API representation.
+#'   contract, plus `hardware_available` and a `libraries` diagnostic table.
+#'   CUDA version integers use the CUDA Runtime API representation.
 #' @examples
-#' cuda_info()
-#' @seealso [has_cuda()], [pls()]
+#' fastPLS::cuda_info()
+#' @seealso [gpuinfo::cuda_info()], [gpuinfo::cuda_libraries()], [pls()]
 #' @export
 cuda_info <- function() {
-    cuda_info_cpp()
+    information <- cuda_info_cpp()
+    hardware <- gpuinfo::cuda_info()
+    information$hardware_available <- isTRUE(hardware$driver_usable)
+    information$libraries <- hardware$libraries
+    information$libraries$required_by_fastPLS <-
+        information$libraries$component %in%
+        c("driver", "runtime", "cublas", "cusolver", "curand")
+    information
+}
+
+.fastpls_native_backend_available <- function(backend) {
+    switch(
+        backend,
+        cpu = TRUE,
+        cuda = isTRUE(.fastpls_native_has_cuda()),
+        metal = isTRUE(.fastpls_native_has_metal()),
+        FALSE
+    )
 }
 
 .fastpls_validate_backend <- function(backend, label = "backend") {
@@ -109,8 +136,8 @@ cuda_info <- function() {
     switch(
         .fastpls_validate_backend(backend),
         cpu = TRUE,
-        cuda = isTRUE(has_cuda()),
-        metal = isTRUE(has_metal())
+        cuda = .fastpls_native_backend_available("cuda"),
+        metal = .fastpls_native_backend_available("metal")
     )
 }
 

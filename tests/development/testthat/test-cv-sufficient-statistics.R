@@ -272,7 +272,7 @@ test_that("sample-Gram centering preserves wide-response SIMPLS CV", {
 })
 
 test_that("CUDA CV honors padded float32 response strides", {
-    skip_if_not(isTRUE(fastPLS:::has_cuda()))
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")))
     set.seed(306)
     observations <- 18L
     predictors <- 8L

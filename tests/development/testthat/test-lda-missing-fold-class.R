@@ -5,8 +5,8 @@ test_that("compiled LDA CV compacts classes absent from a training fold", {
 
     backends <- c(
         "cpu",
-        if (isTRUE(has_cuda())) "cuda",
-        if (isTRUE(has_metal())) "metal"
+        if (isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) "cuda",
+        if (isTRUE(fastPLS:::.fastpls_backend_available("metal"))) "metal"
     )
 
     for (backend in backends) {

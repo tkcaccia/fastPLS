@@ -1,5 +1,5 @@
 test_that("resident CUDA predicts a complete component path consistently", {
-    skip_if_not(fastPLS::has_cuda())
+    skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
     set.seed(721)
     X <- matrix(rnorm(180 * 24), 180, 24)
@@ -41,7 +41,7 @@ test_that("resident CUDA predicts a complete component path consistently", {
 })
 
 test_that("resident CUDA reuses one projection for CV labels and responses", {
-    skip_if_not(fastPLS::has_cuda())
+    skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
     set.seed(724)
     X <- matrix(rnorm(220 * 28), 220, 28)
@@ -83,7 +83,7 @@ test_that("resident CUDA reuses one projection for CV labels and responses", {
 })
 
 test_that("constrained Metal CV retains groups and distinct LDA labels", {
-    skip_if_not(fastPLS::has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
 
     set.seed(723)
     X64 <- matrix(rnorm(240 * 18), 240, 18)
@@ -110,7 +110,7 @@ test_that("constrained Metal CV retains groups and distinct LDA labels", {
 })
 
 test_that("constrained CUDA CV retains groups and distinct LDA labels", {
-    skip_if_not(fastPLS::has_cuda())
+    skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
     set.seed(726)
     X64 <- matrix(rnorm(240 * 18), 240, 18)
@@ -137,7 +137,7 @@ test_that("constrained CUDA CV retains groups and distinct LDA labels", {
 })
 
 test_that("resident CUDA CV is deterministic and reports full residency", {
-    skip_if_not(isTRUE(fastPLS::has_cuda()), "CUDA backend unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA backend unavailable")
     set.seed(812)
     X <- float::fl(matrix(rnorm(180 * 24), 180, 24))
     y <- factor(rep(LETTERS[1:3], each = 60))
@@ -161,7 +161,7 @@ test_that("resident CUDA CV is deterministic and reports full residency", {
 })
 
 test_that("resident CUDA regression CV is deterministic", {
-    skip_if_not(isTRUE(fastPLS::has_cuda()), "CUDA backend unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA backend unavailable")
     set.seed(913)
     X64 <- matrix(rnorm(156 * 27), 156, 27)
     coefficients <- matrix(rnorm(27 * 3), 27, 3)
@@ -197,7 +197,7 @@ test_that("PLS-SVD CUDA CV keeps folds resident for every response shape", {
 })
 
 test_that("resident PLS-SVD CUDA CV kernels are deterministic", {
-    skip_if_not(isTRUE(fastPLS::has_cuda()), "CUDA backend unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA backend unavailable")
     set.seed(914)
     X64 <- matrix(rnorm(192 * 30), 192, 30)
     y <- factor(max.col(

@@ -149,10 +149,10 @@ test_that("empirical-prior direct LDA paths remain finite", {
 test_that("float32 and available accelerators retain direct LDA paths", {
     data <- direct_lda_rank_example(float32 = TRUE)
     backends <- c("cpu")
-    if (isTRUE(has_metal())) {
+    if (fastPLS:::.fastpls_backend_available("metal")) {
         backends <- c(backends, "metal")
     }
-    if (isTRUE(has_cuda())) {
+    if (fastPLS:::.fastpls_backend_available("cuda")) {
         backends <- c(backends, "cuda")
     }
     for (backend in backends) {

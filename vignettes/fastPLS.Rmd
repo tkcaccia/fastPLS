@@ -182,8 +182,9 @@ accelerators:
 library(fastPLS)
 
 fastPLS_blas()
-has_cuda()
-has_metal()
+fastPLS::cuda_info()
+gpuinfo::has_cuda()
+gpuinfo::has_metal()
 ```
 
 `fastPLS_blas()` reports the backend together with the OpenBLAS version,
@@ -276,8 +277,9 @@ called directly.
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `fastPLS_blas()` | Report the CPU library, version, configuration, and runtime core. |
-| `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
-| `has_metal()` | Check for Apple Metal support. |
+| `fastPLS::cuda_info()` | Report fastPLS CUDA capability and library diagnostics. |
+| `gpuinfo::has_cuda()` | Check whether CUDA-capable hardware appears usable. |
+| `gpuinfo::has_metal()` | Check whether Metal-capable hardware appears usable. |
 
 ### Choosing a Starting Model
 
@@ -1490,18 +1492,26 @@ inherits(s32$u, "float32")
 
 ## CUDA and Metal Availability
 
-CUDA and Apple Metal are optional. Use `has_cuda()` before selecting
-`backend = "cuda"` and `has_metal()` before selecting `backend = "metal"`.
-An unavailable accelerator request stops with an informative error and is not
-redirected to CPU.
+CUDA and Apple Metal are optional. The `gpuinfo` package reports hardware and
+driver availability; `fastPLS::cuda_info()` reports whether the installed
+fastPLS binary contains CUDA code and can see a device through its own runtime.
+It also includes gpuinfo's independent driver result and CUDA shared-library
+inventory, with the libraries required by fastPLS marked explicitly. cuFFT and
+NCCL are optional. Use the qualified name because gpuinfo also exports
+`cuda_info()`. An unavailable accelerator request stops with an informative
+error. Fitting and prediction use native backend checks without repeating
+hardware discovery. CPU resources, system memory, and benchmark environment
+records are available through `gpuinfo::cpu_info()`,
+`gpuinfo::system_memory_info()`, and `gpuinfo::hardware_manifest()`.
 
 ```{r chunk-038}
-has_cuda()
-has_metal()
+fastPLS::cuda_info()
+gpuinfo::has_cuda()
+gpuinfo::has_metal()
 ```
 
 ```{r chunk-039, eval = FALSE}
-if (has_cuda()) {
+if (fastPLS::cuda_info()$available) {
     fit_gpu <- pls(
     Xtrain,
     Ytrain_cls,
@@ -1525,7 +1535,7 @@ if (has_cuda()) {
 ```
 
 ```{r chunk-040, eval = FALSE}
-if (has_metal()) {
+if (gpuinfo::has_metal()) {
     Xtrain_metal <- float::fl(as.matrix(Xtrain))
     Xtest_metal <- float::fl(as.matrix(Xtest))
     fit_metal <- pls(

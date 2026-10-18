@@ -1,3 +1,35 @@
+# fastPLS 0.4
+
+* Corrected the shared SIMPLS score Gram matrix used by LDA to include
+  correlations between direction blocks. Assuming these correlations were
+  zero could produce an indefinite pooled covariance and failed Cholesky
+  stabilization, notably for binary classification with many components.
+  PLS directions and rSVD defaults are unchanged.
+
+* Require `gpuinfo` 0.2.0 and include its CUDA shared-library inventory in
+  `fastPLS::cuda_info()`, marking the libraries required by fastPLS. Generic
+  hardware discovery remains independent of this package's native runtime
+  checks. Fitting, prediction, and cross-validation no longer repeat system
+  discovery or reject a working backend on the basis of a separate probe.
+
+* Prevent `fastPLS_blas()` from reporting R's BLAS path as the library used by
+  an independently linked Accelerate or OpenBLAS build.
+
+* Added `gpuinfo` as the shared hardware-capability dependency. Use
+  `gpuinfo::has_cuda()` and `gpuinfo::has_metal()` for hardware discovery;
+  `cuda_info()` continues to report whether this fastPLS build contains
+  functional CUDA code. The duplicate public fastPLS capability functions
+  have been removed.
+
+* Hardened zero-length float32 and numeric matrix serialization, including
+  valid OPLS models with no orthogonal components.
+
+* Added overflow checks for native matrix allocation and R array-path
+  serialization, and reject CPU core counts outside R's integer range.
+
+* Preserved the tracked Metal source when package cleanup runs during
+  `R CMD build`.
+
 # fastPLS 0.3
 
 * Made Linux CUDA discovery robust to toolkit root and `targets/*` layouts,

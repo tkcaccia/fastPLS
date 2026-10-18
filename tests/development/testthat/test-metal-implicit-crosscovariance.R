@@ -1,5 +1,5 @@
 test_that("Metal keeps fixed operation ownership for large regression shapes", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(812)
     n <- 48L
@@ -39,7 +39,7 @@ test_that("Metal keeps fixed operation ownership for large regression shapes", {
 })
 
 test_that("Metal keeps its fixed split for small explicit cross-covariance", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(813)
     x <- matrix(rnorm(120 * 12), 120, 12)

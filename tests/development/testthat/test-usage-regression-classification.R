@@ -205,7 +205,7 @@ test_that("compiled CV reports the prediction backend", {
   expect_identical(cpu_double$backend, "cpu")
   expect_true(is.factor(cpu_double$Ypred))
 
-  skip_if_not(has_cuda(), "CUDA backend unavailable")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend unavailable")
   cuda_cv <- pls.single.cv(
     Xdata = X,
     Ydata = y,

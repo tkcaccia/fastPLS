@@ -32,7 +32,7 @@ test_that("projected C++ LDA agrees with explicit-score C++ LDA", {
 })
 
 test_that("public resident CUDA LDA agrees with the CPU workflow", {
-  skip_if_not(has_cuda())
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
   set.seed(20260503)
   X <- matrix(rnorm(120 * 18), nrow = 120, ncol = 18)
@@ -69,7 +69,7 @@ test_that("public resident CUDA LDA agrees with the CPU workflow", {
 })
 
 test_that("CUDA SIMPLS-LDA retains the requested SIMPLS estimator when dense Y fits", {
-  skip_if_not(has_cuda())
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
   set.seed(20260725)
   X <- matrix(rnorm(150 * 14), nrow = 150, ncol = 14)
@@ -92,7 +92,7 @@ test_that("CUDA SIMPLS-LDA retains the requested SIMPLS estimator when dense Y f
 })
 
 test_that("resident CUDA LDA is the default implementation", {
-  skip_if_not(has_cuda())
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
 
   set.seed(20260503)
   X <- matrix(rnorm(100 * 16), nrow = 100, ncol = 16)

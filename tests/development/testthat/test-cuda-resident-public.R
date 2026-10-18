@@ -1,5 +1,5 @@
 test_that("resident CUDA public fits retain both precisions and prediction semantics", {
-    skip_if_not(isTRUE(has_cuda()), "CUDA runtime is unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA runtime is unavailable")
     set.seed(23)
     X <- matrix(rnorm(64 * 7), 64, 7)
     Y <- matrix(rnorm(64 * 3), 64, 3)
@@ -38,7 +38,7 @@ test_that("resident CUDA public fits retain both precisions and prediction seman
 })
 
 test_that("CUDA never returns a hybrid PLS model", {
-    skip_if_not(isTRUE(has_cuda()), "CUDA runtime is unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA runtime is unavailable")
     set.seed(831)
     X <- matrix(rnorm(80 * 10), 80, 10)
     Y <- matrix(rnorm(80 * 2), 80, 2)
@@ -71,7 +71,7 @@ test_that("CUDA never returns a hybrid PLS model", {
 })
 
 test_that("resident CUDA class paths match independent prefix prediction", {
-    skip_if_not(isTRUE(has_cuda()), "CUDA runtime is unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA runtime is unavailable")
     set.seed(832)
     components <- c(1L, 3L, 5L)
     X <- float::fl(matrix(rnorm(90 * 14), 90, 14))
@@ -104,7 +104,7 @@ test_that("resident CUDA class paths match independent prefix prediction", {
 })
 
 test_that("resident CUDA materializes training scores only for fitted output", {
-    skip_if_not(isTRUE(has_cuda()), "CUDA runtime is unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA runtime is unavailable")
     set.seed(833)
     X <- float::fl(matrix(rnorm(96 * 18), 96, 18))
     labels <- factor(rep(letters[1:3], length.out = 96))
@@ -123,7 +123,7 @@ test_that("resident CUDA materializes training scores only for fitted output", {
 })
 
 test_that("resident CUDA OPLS and nonlinear kernel predictions agree with CPU", {
-    skip_if_not(isTRUE(has_cuda()), "CUDA runtime is unavailable")
+    skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA runtime is unavailable")
     set.seed(901)
     n <- 180L
     p <- 16L

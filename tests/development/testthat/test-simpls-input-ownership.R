@@ -4,7 +4,7 @@ test_that("SIMPLS fitting and prediction leave shared input matrices unchanged",
     Y <- cbind(X[, 1] + 3, X[, 2] - 4, X[, 3] + X[, 4])
     Xtest <- X[1:15, , drop = FALSE]
     original <- serialize(list(X, Y, Xtest), NULL)
-    available <- c(cpu = TRUE, cuda = has_cuda())
+    available <- c(cpu = TRUE, cuda = fastPLS:::.fastpls_backend_available("cuda"))
 
     for (backend in names(available)[available]) {
         for (scaling in c("none", "centering", "autoscaling")) {

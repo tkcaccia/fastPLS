@@ -1,6 +1,6 @@
 library(fastPLS)
 
-information <- cuda_info()
+information <- fastPLS::cuda_info()
 stopifnot(
     identical(information$status, "available"),
     isTRUE(information$compiled),
@@ -8,7 +8,7 @@ stopifnot(
     !isTRUE(information$diagnostic_only),
     information$device_count > 0L,
     isTRUE(information$no_cpu_fallback),
-    isTRUE(has_cuda())
+    fastPLS:::.fastpls_backend_available("cuda")
 )
 
 # This internal primitive has no CPU implementation in a CUDA build. Agreement

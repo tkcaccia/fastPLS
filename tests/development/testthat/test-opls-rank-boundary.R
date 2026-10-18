@@ -19,8 +19,8 @@ for (rank_backend in c("cpu", "cuda", "metal")) {
     local({
         backend <- rank_backend
         test_that(paste("OPLS rejects invalid rank on", backend), {
-            if (backend == "cuda") skip_if_not(has_cuda())
-            if (backend == "metal") skip_if_not(has_metal())
+            if (backend == "cuda") skip_if_not(fastPLS:::.fastpls_backend_available("cuda"))
+            if (backend == "metal") skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
             task <- opls_rank_task()
             solvers <- if (backend == "cpu") "rsvd" else "rsvd"
             for (solver in solvers) {

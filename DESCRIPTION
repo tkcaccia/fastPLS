@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.3
-Date: 2026-09-26
+Version: 0.4
+Date: 2026-10-15
 Authors@R: c(
     person(
         "Stefano", "Cacciatore", role = c("aut", "cre"),
@@ -45,7 +45,7 @@ SystemRequirements: Optional OpenBLAS development libraries for faster CPU
     optional Apple Metal framework on macOS. CPU-only builds do not require GPU
     software.
 Depends: R (>= 4.6.0)
-Imports: methods, float
+Imports: methods, float, gpuinfo (>= 0.2.0)
 Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes

@@ -1,5 +1,5 @@
 test_that("Metal PLS backend fits core method families when available", {
-  skip_if_not(fastPLS::has_metal(), "Metal backend is not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
   set.seed(99)
   n <- 70
@@ -76,7 +76,7 @@ test_that("Metal PLS backend fits core method families when available", {
 })
 
 test_that("Metal backend is available through public CV helpers", {
-  skip_if_not(fastPLS::has_metal(), "Metal backend is not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
   set.seed(101)
   n <- 36

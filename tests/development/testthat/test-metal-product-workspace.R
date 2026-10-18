@@ -1,5 +1,5 @@
 test_that("Metal float32 workspaces preserve transpose and precision dispatch", {
-    skip_if_not(has_metal(), "Metal backend not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend not available")
     set.seed(129)
     for (left in c(FALSE, TRUE)) {
         for (right in c(FALSE, TRUE)) {

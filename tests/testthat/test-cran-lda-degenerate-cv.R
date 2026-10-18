@@ -384,7 +384,10 @@ test_that("compiled LDA CV retains discriminants without duplicate scores", {
 
 test_that("CUDA OPLS CV uses its resident route", {
     skip_if_not_installed("float")
-    skip_if_not(isTRUE(has_cuda()), "CUDA is unavailable")
+    skip_if_not(
+        fastPLS:::.fastpls_backend_available("cuda"),
+        "CUDA is unavailable"
+    )
 
     set.seed(32L)
     x <- float::fl(matrix(rnorm(72L * 10L), nrow = 72L, ncol = 10L))

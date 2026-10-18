@@ -260,8 +260,8 @@ test_that("joint classifier reuse agrees on available float32 backends", {
   X <- float::fl(matrix(rnorm(120 * 12), 120, 12))
   y <- factor(rep(LETTERS[1:3], each = 40))
   backends <- "cpu"
-  if (isTRUE(has_cuda())) backends <- c(backends, "cuda")
-  if (isTRUE(has_metal())) backends <- c(backends, "metal")
+  if (isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) backends <- c(backends, "cuda")
+  if (isTRUE(fastPLS:::.fastpls_backend_available("metal"))) backends <- c(backends, "metal")
 
   for (backend in backends) {
     common <- list(

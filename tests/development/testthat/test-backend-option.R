@@ -154,7 +154,7 @@ test_that("each unavailable accelerator stops public operations", {
   fit <- pls(X, y, ncomp = 1, backend = "cpu", return_variance = FALSE)
 
   for (requested in c("cuda", "metal")) {
-    available <- if (identical(requested, "cuda")) has_cuda() else has_metal()
+    available <- if (identical(requested, "cuda")) fastPLS:::.fastpls_backend_available("cuda") else fastPLS:::.fastpls_backend_available("metal")
     if (isTRUE(available)) {
       next
     }
@@ -194,9 +194,9 @@ test_that("each unavailable accelerator stops public operations", {
 })
 
 test_that("unavailable configured backends stop public operations", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -232,9 +232,9 @@ test_that("unavailable configured backends stop public operations", {
 })
 
 test_that("backend availability is checked before input conversion", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -259,9 +259,9 @@ test_that("backend availability is checked before input conversion", {
 })
 
 test_that("environment-selected unavailable backends stop CV", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -298,9 +298,9 @@ test_that("environment-selected unavailable backends stop CV", {
 })
 
 test_that("prediction and CV reject unavailable accelerator requests", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -332,9 +332,9 @@ test_that("prediction and CV reject unavailable accelerator requests", {
 })
 
 test_that("prediction rejects the removed auto backend", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -387,9 +387,9 @@ test_that("omitted prediction backend follows the session configuration", {
 })
 
 test_that("family prediction wrappers reject unavailable accelerators early", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")
@@ -426,8 +426,8 @@ test_that("family prediction wrappers reject unavailable accelerators early", {
 
 test_that("all public PLS families reject every unavailable accelerator", {
   unavailable <- c(
-    if (!isTRUE(has_cuda())) "cuda",
-    if (!isTRUE(has_metal())) "metal"
+    if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) "cuda",
+    if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) "metal"
   )
   if (!length(unavailable)) {
     skip("Both optional accelerator backends are available")
@@ -495,9 +495,9 @@ test_that("all public PLS families reject every unavailable accelerator", {
 })
 
 test_that("every PLS family and classifier rejects an unavailable backend", {
-  unavailable <- if (!isTRUE(has_cuda())) {
+  unavailable <- if (!isTRUE(fastPLS:::.fastpls_backend_available("cuda"))) {
     "cuda"
-  } else if (!isTRUE(has_metal())) {
+  } else if (!isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     "metal"
   } else {
     skip("Both optional accelerator backends are available")

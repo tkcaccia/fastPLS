@@ -63,7 +63,7 @@ test_that("available accelerator dispatches expose their SIMPLS rule", {
   X <- matrix(rnorm(48 * 10), 48, 10)
   Y <- cbind(X[, 1] + rnorm(48, sd = 0.1), X[, 2] + rnorm(48, sd = 0.1))
 
-  available <- c(cpu = TRUE, cuda = has_cuda(), metal = has_metal())
+  available <- c(cpu = TRUE, cuda = fastPLS:::.fastpls_backend_available("cuda"), metal = fastPLS:::.fastpls_backend_available("metal"))
   for (backend in names(available)[available]) {
     X_backend <- if (backend == "metal") float::fl(X) else X
     Y_backend <- if (backend == "metal") float::fl(Y) else Y
@@ -89,12 +89,15 @@ test_that("available accelerator dispatches expose their SIMPLS rule", {
   }
 })
 
-test_that("Metal source does not reuse a preceding component direction", {
-  source_path <- testthat::test_path("..", "..", "src", "svd_metal_backend.mm.in")
+test_that("the shared SIMPLS core initializes fresh seeded directions", {
+  source_path <- testthat::test_path(
+    "..", "..", "..", "inst", "include", "fastpls", "core", "simpls.hpp"
+  )
   skip_if_not(file.exists(source_path), "source tree unavailable after installation")
   source <- paste(readLines(source_path, warn = FALSE), collapse = "\n")
   expect_false(grepl("has_rr_prev|rr_prev", source))
-  expect_match(source, "A fresh direction avoids propagating approximation")
+  expect_match(source, "std::mt19937 generator(controls.seed);", fixed = TRUE)
+  expect_match(source, "direction(row, 0) = normal(generator);", fixed = TRUE)
 })
 
 test_that("classification diagnostics report bounded batches on every backend", {
@@ -185,7 +188,7 @@ test_that("massive implicit SIMPLS is reproducible and backend concordant", {
     tolerance = 0
   )
 
-  if (isTRUE(has_metal())) {
+  if (isTRUE(fastPLS:::.fastpls_backend_available("metal"))) {
     metal <- fit_once("metal")
     metal_prediction <- predict(metal, Xtest, backend = "metal")$Ypred[[6L]]
     expect_identical(
@@ -336,7 +339,7 @@ test_that("Metal massive SIMPLS diagnostics report rank-one refresh", {
 })
 
 test_that("CUDA rSVD repeats exactly when the seed is fixed", {
-  skip_if_not(isTRUE(has_cuda()), "CUDA backend is unavailable")
+  skip_if_not(isTRUE(fastPLS:::.fastpls_backend_available("cuda")), "CUDA backend is unavailable")
   set.seed(20260902)
   X <- matrix(rnorm(180 * 24), 180, 24)
   Y <- matrix(rnorm(180 * 5), 180, 5)
@@ -379,7 +382,7 @@ test_that("SIMPLS-family backends attach fresh-start diagnostics", {
   X <- matrix(rnorm(54 * 9), 54, 9)
   Y <- cbind(X[, 1] + rnorm(54, sd = 0.1), X[, 2] + rnorm(54, sd = 0.1))
 
-  available <- c(cpu = TRUE, cuda = has_cuda(), metal = has_metal())
+  available <- c(cpu = TRUE, cuda = fastPLS:::.fastpls_backend_available("cuda"), metal = fastPLS:::.fastpls_backend_available("metal"))
   for (backend in names(available)[available]) {
     methods <- if (backend == "cpu") {
       c("simpls", "opls", "kernelpls")

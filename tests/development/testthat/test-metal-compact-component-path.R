@@ -1,5 +1,5 @@
 test_that("operation-split Metal compact factors predict every prefix", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
     set.seed(915)
     X <- float::fl(matrix(rnorm(60 * 12), 60, 12))
     Y <- float::fl(matrix(rnorm(60 * 8), 60, 8))
@@ -28,7 +28,7 @@ test_that("operation-split Metal compact factors predict every prefix", {
 })
 
 test_that("operation-split Metal class paths match independent fits", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
     set.seed(919)
     X <- float::fl(matrix(rnorm(90 * 14), 90, 14))
     labels <- factor(rep(c("a", "b", "c"), each = 30))

@@ -76,9 +76,11 @@ macOS SDK or system frameworks. To require a Metal build explicitly, set:
 
   FASTPLS_USE_METAL=1
 
-After installation, run `fastPLS::has_metal()`. It returns TRUE only when the
-package was compiled with Metal and the current R process can access a Metal
-device. Set FASTPLS_USE_METAL=0 only to disable Metal deliberately.
+After installation, run `gpuinfo::has_metal()` to inspect the operating-system
+and hardware capability, then request `backend = "metal"` in a small fastPLS
+fit to verify this package build. The request fails explicitly when fastPLS was
+not compiled with Metal. Set FASTPLS_USE_METAL=0 only to disable Metal
+deliberately.
 
 CRAN and hosted build services
 ------------------------------
@@ -87,4 +89,14 @@ Binary packages contain only the capabilities present on the service that built
 them. A CPU-only CRAN build remains fully functional. Users who require CUDA,
 Metal, or a particular OpenBLAS installation should compile the source package
 on the target computer and verify the result with `fastPLS_blas()`,
-`cuda_info()`, `has_cuda()` and `has_metal()`.
+`fastPLS::cuda_info()`, `gpuinfo::has_cuda()` and `gpuinfo::has_metal()`.
+
+The R dependency gpuinfo (>= 0.2.0) supplies hardware and shared-library
+diagnostics. fastPLS::cuda_info() includes that library inventory with a
+required_by_fastPLS column. CUDA Runtime, cuBLAS, cuSOLVER and cuRAND are
+required for a CUDA build; cuFFT and NCCL are not. The available and status
+fields come from fastPLS's own linked runtime. Hardware discovery and a
+separate shared-library scan cannot establish package-specific support or
+override a working linked backend. Use qualified names because both packages
+export cuda_info(). CPU resources and system memory can be inspected through
+gpuinfo::cpu_info() and gpuinfo::system_memory_info().

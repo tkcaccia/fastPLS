@@ -81,7 +81,7 @@ test_that("accelerated simpls stays close to legacy baseline on a controlled reg
 })
 
 test_that("pls backend='cuda' for simpls returns valid structure and stays close to accelerated simpls", {
-  skip_if_not(fastPLS::has_cuda(), "CUDA backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend not available")
 
   set.seed(20260419)
   n <- 96

@@ -4,7 +4,7 @@ test_that("pls backend='cuda' requires CUDA or returns fastPLS output", {
   y <- factor(sample(letters[1:6], 90, replace = TRUE))
   idx <- sample(seq_len(90), 20)
 
-  if (!has_cuda()) {
+  if (!fastPLS:::.fastpls_backend_available("cuda")) {
     expect_error(
       pls(
         X[-idx, , drop = FALSE], y[-idx],
@@ -46,7 +46,7 @@ test_that("pls backend='cuda' requires CUDA or returns fastPLS output", {
 })
 
 test_that("the direct CUDA matrix-product ABI matches CPU multiplication", {
-  skip_if_not(has_cuda(), "CUDA backend is unavailable")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend is unavailable")
   left <- matrix(as.double(seq_len(12)), 3, 4)
   right <- matrix(as.double(seq_len(20)), 4, 5)
   multiply <- get(

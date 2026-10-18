@@ -8,7 +8,7 @@ test_that("float32 SIMPLS retains score orthogonality on ill-conditioned paths",
         matrix(rnorm(n * 180L, sd = 1e-4), n, 180L))
     Y <- float::fl(latent %*% matrix(rnorm(40L * 110L), 40L, 110L) +
         matrix(rnorm(n * 110L, sd = 1e-4), n, 110L))
-    backends <- c("cpu", if (has_metal()) "metal", if (has_cuda()) "cuda")
+    backends <- c("cpu", if (fastPLS:::.fastpls_backend_available("metal")) "metal", if (fastPLS:::.fastpls_backend_available("cuda")) "cuda")
     for (backend in backends) {
         solvers <- if (backend == "cuda") "rsvd" else "rsvd"
         for (solver in solvers) {

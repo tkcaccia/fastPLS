@@ -16,7 +16,7 @@ test_that("metal is the fixed operation-split float32 PLS backend", {
 })
 
 test_that("metal refuses float64 and never falls back", {
-    skip_if_not(has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
     set.seed(710)
     X <- matrix(rnorm(60 * 8), 60, 8)
     y <- factor(rep(letters[1:3], each = 20))
@@ -28,7 +28,7 @@ test_that("metal refuses float64 and never falls back", {
 
 test_that("metal fits every PLS family with a fixed operation split", {
     skip_if_not_installed("float")
-    skip_if_not(has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
     set.seed(711)
     X <- float::fl(matrix(rnorm(72 * 10), 72, 10))
     y <- factor(rep(letters[1:3], each = 24))
@@ -41,8 +41,8 @@ test_that("metal fits every PLS family with a fixed operation split", {
             backend = "metal", classifier = "lda",
             return_variance = FALSE
         ))
-        expected_paths <- if (identical(family, "plssvd")) 1L else 2L
-        expect_length(fit$accuracy, expected_paths)
+        expect_length(fit$accuracy, 2L)
+        expect_identical(fit$requested_ncomp, 2:3)
         expect_true(all(is.finite(fit$accuracy)))
         expect_identical(
             fit$diagnostics$metal_operation_split$policy,
@@ -78,7 +78,7 @@ test_that("metal fits every PLS family with a fixed operation split", {
 
 test_that("operation-split metal supports grouped cross-validation", {
     skip_if_not_installed("float")
-    skip_if_not(has_metal())
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"))
     set.seed(712)
     X <- float::fl(matrix(rnorm(60 * 8), 60, 8))
     y <- factor(rep(letters[1:3], each = 20))

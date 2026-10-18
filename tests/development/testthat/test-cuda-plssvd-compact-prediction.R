@@ -1,5 +1,5 @@
 test_that("resident CUDA PLS-SVD stays compact across storage hints", {
-  skip_if_not(has_cuda(), "CUDA backend not available")
+  skip_if_not(fastPLS:::.fastpls_backend_available("cuda"), "CUDA backend not available")
 
   old_store_b <- Sys.getenv("FASTPLS_STORE_B", unset = NA_character_)
   on.exit({

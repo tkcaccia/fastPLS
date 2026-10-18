@@ -1,5 +1,5 @@
 test_that("public float32 SIMPLS uses the explicit Metal operator", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(41)
     x <- matrix(rnorm(180 * 24), 180, 24)
@@ -41,7 +41,7 @@ test_that("public float32 SIMPLS uses the explicit Metal operator", {
 })
 
 test_that("Metal classification preserves labels and top ranks", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(52)
     x <- matrix(rnorm(240 * 20), 240, 20)
@@ -67,7 +67,7 @@ test_that("Metal classification preserves labels and top ranks", {
 })
 
 test_that("Metal score projection and float32 LDA preserve the discriminant", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(702)
     n <- 360L
@@ -121,7 +121,7 @@ test_that("Metal score projection and float32 LDA preserve the discriminant", {
 })
 
 test_that("Metal PLS-SVD reuses its compact prefix factors", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(811)
     x <- matrix(rnorm(220 * 28), 220, 28)
@@ -165,7 +165,7 @@ test_that("Metal PLS-SVD reuses its compact prefix factors", {
 })
 
 test_that("Metal always returns the fixed operation-split PLS model", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
     set.seed(832)
     X <- float::fl(matrix(rnorm(90 * 12), 90, 12))
     Y <- float::fl(matrix(rnorm(90 * 3), 90, 3))
@@ -196,7 +196,7 @@ test_that("Metal always returns the fixed operation-split PLS model", {
 })
 
 test_that("resident Metal OPLS and nonlinear kernel predictions agree with CPU", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
     set.seed(901)
     n <- 180L
     p <- 16L
@@ -234,7 +234,7 @@ test_that("resident Metal OPLS and nonlinear kernel predictions agree with CPU",
 })
 
 test_that("Metal rejects float64 and uses its assigned CPU prediction", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(63)
     x <- matrix(rnorm(60 * 8), 60, 8)
@@ -259,7 +259,7 @@ test_that("Metal rejects float64 and uses its assigned CPU prediction", {
 })
 
 test_that("Metal CV reports its operation split and finite PLS scores", {
-    skip_if_not(has_metal(), "Metal backend is not available")
+    skip_if_not(fastPLS:::.fastpls_backend_available("metal"), "Metal backend is not available")
 
     set.seed(914)
     x <- float::fl(matrix(rnorm(120 * 16), 120, 16))

@@ -258,8 +258,8 @@ test_that("single and nested cross-validation return finite predictions", {
 test_that("unavailable accelerators fail without a CPU fallback", {
     data <- small_classification_data(4105L)
     unavailable <- c(
-        if (!has_cuda()) "cuda",
-        if (!has_metal()) "metal"
+        if (!fastPLS:::.fastpls_backend_available("cuda")) "cuda",
+        if (!fastPLS:::.fastpls_backend_available("metal")) "metal"
     )
     skip_if(length(unavailable) == 0L, "Both accelerators are available")
 

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <random>
 
 namespace {
 
@@ -117,10 +118,67 @@ void check() {
   }
 }
 
+template<class T>
+void check_score_moments(bool cached) {
+  using fastpls::core::Matrix;
+  ReferenceBackend<T> backend;
+  std::mt19937 rng(19);
+  std::normal_distribution<double> normal;
+  Matrix<T> predictors(40, 64);
+  Matrix<T> response(40, 2);
+  for (std::size_t column = 0; column < predictors.columns(); ++column) {
+    T mean = T(0);
+    for (std::size_t row = 0; row < predictors.rows(); ++row) {
+      predictors(row, column) = static_cast<T>(normal(rng));
+      mean += predictors(row, column);
+    }
+    mean /= static_cast<T>(predictors.rows());
+    for (std::size_t row = 0; row < predictors.rows(); ++row) {
+      predictors(row, column) -= mean;
+    }
+  }
+  for (std::size_t row = 0; row < response.rows(); ++row) {
+    response(row, 0) = row % 2 == 0 ? T(-0.5) : T(0.5);
+    response(row, 1) = -response(row, 0);
+  }
+  Matrix<T> crosscov(64, 2);
+  backend.gemm(
+    predictors.view(), response.view(), true, false, crosscov.view()
+  );
+  fastpls::core::SimplsControls controls;
+  controls.components = 24;
+  controls.maximum_block = 1;
+  controls.reorthogonalize = false;
+  controls.cache_predictor_crossprod = cached;
+  controls.store_scores = true;
+  controls.store_score_moments = true;
+  fastpls::core::SimplsWorkspace<T> workspace;
+  const auto model = fastpls::core::fit_simpls_preprocessed<T>(
+    predictors.view(), crosscov.view(), controls, backend, workspace
+  );
+  assert(model.completed_components > 1);
+  const T tolerance = sizeof(T) == sizeof(float) ? T(2e-5) : T(2e-12);
+  for (std::size_t column = 0;
+       column < model.completed_components; ++column) {
+    for (std::size_t row = 0; row < model.completed_components; ++row) {
+      T expected = T(0);
+      for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+        expected += model.scores(sample, row) * model.scores(sample, column);
+      }
+      assert(std::isfinite(model.score_gram(row, column)));
+      assert(std::abs(model.score_gram(row, column) - expected) < tolerance);
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
   check<float>();
   check<double>();
+  check_score_moments<float>(false);
+  check_score_moments<double>(false);
+  check_score_moments<float>(true);
+  check_score_moments<double>(true);
   return 0;
 }

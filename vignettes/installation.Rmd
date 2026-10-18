@@ -228,9 +228,11 @@ library and accelerator capabilities:
 library(fastPLS)
 
 fastPLS_blas()
-cuda_info()
-has_cuda()
-has_metal()
+fastPLS::cuda_info()
+gpuinfo::has_cuda()
+gpuinfo::has_metal()
+gpuinfo::cpu_info()
+gpuinfo::system_memory_info()
 packageVersion("fastPLS")
 ```
 
@@ -260,11 +262,11 @@ y <- iris$Species
 fit <- pls(X, y, ncomp = 1:2, backend = "cpu", seed = 11)
 stopifnot(length(fit$Yfit) == 2L)
 
-if (has_cuda()) {
+if (fastPLS::cuda_info()$available) {
     fit_cuda <- pls(X, y, ncomp = 1:2, backend = "cuda", seed = 11)
 }
 
-if (has_metal()) {
+if (gpuinfo::has_metal()) {
     fit_metal <- pls(X, y, ncomp = 1:2, backend = "metal", seed = 11)
 }
 ```
@@ -325,9 +327,9 @@ Sys.unsetenv(c(
 
 ### CUDA or Metal is unavailable after installation
 
-`cuda_info()`, `has_cuda()`, and `has_metal()` describe the installed package
-and current hardware. `cuda_info()` distinguishes a CUDA-enabled build with a
-visible device, a build without CUDA, and an explicit diagnostic-only build.
+`gpuinfo::has_cuda()` and `gpuinfo::has_metal()` describe hardware and driver
+availability, whereas `fastPLS::cuda_info()` distinguishes a CUDA-enabled build
+with a visible device, a build without CUDA, and a diagnostic-only build.
 Install a compatible toolkit without changing a working host driver, then
 rebuild from source. Use
 `FASTPLS_REQUIRE_CUDA=1` or `FASTPLS_USE_METAL=1` when an unavailable
@@ -339,6 +341,16 @@ If it reports an unsupported host compiler, point `FASTPLS_CUDA_HOST_CXX` to a
 system compiler supported by that toolkit. A runtime error after a successful
 build usually indicates that the host driver is too old for the toolkit runtime
 or that the container was started without NVIDIA GPU passthrough.
+
+The dependency `gpuinfo` 0.2.0 or later supplies a CUDA shared-library
+inventory in `fastPLS::cuda_info()$libraries`. The `required_by_fastPLS` column
+marks the driver, CUDA Runtime, cuBLAS, cuSOLVER, and cuRAND. Missing cuFFT or
+NCCL does not prevent fastPLS calculations. The `available` and `status` fields
+describe fastPLS's own linked runtime; `hardware_available` is an independent
+driver observation from gpuinfo. A separately missing library in the inventory
+does not override a working linked runtime. Use qualified names because both
+packages export `cuda_info()`. Numerical operations check fastPLS's native
+backend directly, without repeating the system inventory for every fit or fold.
 
 ### The vignette is not found after a GitHub installation
 
@@ -356,9 +368,10 @@ Retain the package installation output and record the resulting environment:
 
 ```{r reproducibility, eval = FALSE}
 fastPLS_blas()
-cuda_info()
-has_cuda()
-has_metal()
+fastPLS::cuda_info()
+gpuinfo::has_cuda()
+gpuinfo::has_metal()
+gpuinfo::hardware_manifest(memory = "none")
 ```
 
 For benchmark reports, retain the output of `fastPLS_blas()` and also record

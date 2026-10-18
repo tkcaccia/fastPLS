@@ -246,11 +246,11 @@ test_that("core prediction is stable for compiled PLS", {
 })
 
 test_that("GPU availability helpers return scalar logical values", {
-  flag <- has_cuda()
+  flag <- fastPLS:::.fastpls_backend_available("cuda")
   expect_type(flag, "logical")
   expect_length(flag, 1L)
 
-  metal_flag <- has_metal()
+  metal_flag <- fastPLS:::.fastpls_backend_available("metal")
   expect_type(metal_flag, "logical")
   expect_length(metal_flag, 1L)
 })
