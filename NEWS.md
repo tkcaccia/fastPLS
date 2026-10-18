@@ -1,5 +1,9 @@
 # fastPLS 0.4
 
+* Corrected MKL thread control to call only its C entry point. The lowercase
+  Fortran entry expects a pointer and could crash when `n.cores` was set,
+  including before an unavailable CUDA backend returned its normal error.
+
 * Corrected the shared SIMPLS score Gram matrix used by LDA to include
   correlations between direction blocks. Assuming these correlations were
   zero could produce an indefinite pooled covariance and failed Cholesky

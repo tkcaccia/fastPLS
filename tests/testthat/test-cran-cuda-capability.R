@@ -35,6 +35,7 @@ test_that("CUDA capability metadata is internally consistent", {
 })
 
 test_that("an unavailable CUDA backend never falls back to CPU", {
+    expect_type(fastPLS:::set_cpu_threads_cpp(1L), "character")
     skip_if(
         fastPLS:::.fastpls_backend_available("cuda"),
         "CUDA is available in this check environment"
@@ -43,7 +44,7 @@ test_that("an unavailable CUDA backend never falls back to CPU", {
     X <- matrix(rnorm(24L * 5L), nrow = 24L)
     y <- factor(rep(c("a", "b"), each = 12L))
     expect_error(
-        pls(X, y, ncomp = 1L, backend = "cuda"),
+        pls(X, y, ncomp = 1L, backend = "cuda", n.cores = 1L),
         "No CPU fallback is performed",
         fixed = TRUE
     )

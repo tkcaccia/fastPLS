@@ -269,8 +269,8 @@ std::vector<std::string> set_cpu_threads(const int threads) {
 #if !defined(FASTPLS_USE_OPENBLAS)
   invoke("openblas_set_num_threads", "OpenBLAS");
 #endif
+  // The lowercase MKL symbol is a Fortran entry point with an int* argument.
   invoke("MKL_Set_Num_Threads", "MKL");
-  invoke("mkl_set_num_threads", "MKL");
   invoke("bli_thread_set_num_threads", "BLIS");
   invoke("omp_set_num_threads", "OpenMP");
 #elif !defined(FASTPLS_USE_OPENBLAS)
